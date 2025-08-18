@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+  <!-- Homepage in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/"/>
+  </url>
+
+  <!-- Services page in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services"/>
+  </url>
+
+  <!-- CNC Machining service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/cnc-machining</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/cnc-machining"/>
+  </url>
+
+  <!-- Sheet Metal Fabrication service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/sheet-metal</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/sheet-metal"/>
+  </url>
+
+  <!-- 3D Printing service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/3d-printing</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/3d-printing"/>
+  </url>
+
+  <!-- Injection Molding service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/injection-molding</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/injection-molding"/>
+  </url>
+
+  <!-- Surface Finishes service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/surface-finishes</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/surface-finishes"/>
+  </url>
+
+  <!-- Rapid Prototyping service in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/services/rapid-prototyping</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/rapid-prototyping"/>
+  </url>
+
+  <!-- Industries page in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/industries</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/industries"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/industries"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/industries"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/industries"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/industries"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/industries"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/industries"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/industries"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/industries"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/industries"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/industries"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/industries"/>
+  </url>
+
+  <!-- About page in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/about</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/about"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/about"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/about"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/about"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/about"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/about"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/about"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/about"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/about"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/about"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/about"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/about"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/about"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/about"/>
+  </url>
+
+  <!-- Contact page in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/contact</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/contact"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/contact"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/contact"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/contact"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/contact"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/contact"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/contact"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/contact"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/contact"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/contact"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/contact"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/contact"/>
+  </url>
+
+  <!-- Quote page in all languages -->
+  <url>
+    <loc>https://yourdomain.com/en/quote</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/quote"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/quote"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/quote"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/quote"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/quote"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/quote"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/quote"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/quote"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/quote"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/quote"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/quote"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/quote"/>
+  </url>
+
+  <!-- Cookie Policy page -->
+  <url>
+    <loc>https://yourdomain.com/cookie-policy</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+
+</urlset>
+

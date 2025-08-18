@@ -1,0 +1,72 @@
+User-agent: *
+Allow: /
+
+# Allow all public pages
+Allow: /en/
+Allow: /de/
+Allow: /fr/
+Allow: /es/
+Allow: /it/
+Allow: /nl/
+Allow: /pl/
+Allow: /pt/
+Allow: /sv/
+Allow: /da/
+Allow: /fi/
+Allow: /nb/
+Allow: /hu/
+Allow: /cs/
+
+# Allow service pages
+Allow: */services/
+Allow: */industries/
+Allow: */about
+Allow: */contact
+Allow: */quote
+Allow: */quote-request
+Allow: */quote/success
+
+# Allow specific service pages
+Allow: */services/cnc-machining
+Allow: */services/sheet-metal
+Allow: */services/3d-printing
+Allow: */services/injection-molding
+Allow: */services/surface-finish
+Allow: */services/rapid-prototyping
+
+# Block dashboard and admin areas
+Disallow: /dashboard
+Disallow: /customers
+Disallow: /partners
+Disallow: /calendar
+Disallow: /products
+Disallow: /rfq
+Disallow: /rfq-management
+Disallow: /orders
+Disallow: /login
+
+# Block API and internal routes
+Disallow: /api/
+Disallow: /admin/
+Disallow: /_next/
+Disallow: /static/
+
+# Allow important static files
+Allow: /*.css
+Allow: /*.js
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.jpeg
+Allow: /*.gif
+Allow: /*.svg
+Allow: /*.ico
+Allow: /*.woff
+Allow: /*.woff2
+Allow: /*.ttf
+Allow: /*.eot
+
+# Sitemap location
+Sitemap: https://yourdomain.com/sitemap.xml
+
+# Crawl delay (optional - be respectful to servers)
+Crawl-delay: 1

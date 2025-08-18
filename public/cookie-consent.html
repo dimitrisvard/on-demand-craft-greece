@@ -1,0 +1,150 @@
+<!-- GDPR/ePrivacy Cookie Consent Banner (Self-contained, Vanilla JS) -->
+<style>
+  #cookie-consent-banner {
+    position: fixed;
+    left: 0; right: 0; bottom: 0; z-index: 9999;
+    background: #222;
+    color: #f5f5f5;
+    padding: 24px 16px 20px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 -2px 16px rgba(0,0,0,0.2);
+    font-family: system-ui, sans-serif;
+    font-size: 1rem;
+  }
+  #cookie-consent-banner .cookie-text {
+    flex: 1 1 320px;
+    margin-right: 24px;
+    min-width: 220px;
+    max-width: 600px;
+  }
+  #cookie-consent-banner .cookie-actions {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  #cookie-consent-banner .cookie-btn {
+    padding: 10px 24px;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border 0.2s;
+  }
+  #cookie-consent-banner .cookie-btn.accept {
+    background: #1976d2;
+    color: #fff;
+    border-color: #1976d2;
+  }
+  #cookie-consent-banner .cookie-btn.accept:hover {
+    background: #1256a3;
+    border-color: #1256a3;
+  }
+  #cookie-consent-banner .cookie-btn.decline {
+    background: transparent;
+    color: #fff;
+    border: 2px solid #fff;
+  }
+  #cookie-consent-banner .cookie-btn.decline:hover {
+    background: #333;
+    color: #fff;
+    border-color: #bbb;
+  }
+  #cookie-consent-banner .cookie-policy-link {
+    color: #90caf9;
+    text-decoration: underline;
+    font-weight: 500;
+    margin-left: 8px;
+    transition: color 0.2s;
+  }
+  #cookie-consent-banner .cookie-policy-link:hover {
+    color: #fff;
+  }
+  @media (max-width: 600px) {
+    #cookie-consent-banner {
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 18px 8px 16px 8px;
+    }
+    #cookie-consent-banner .cookie-text {
+      margin-right: 0;
+      margin-bottom: 12px;
+      max-width: 100%;
+    }
+    #cookie-consent-banner .cookie-actions {
+      width: 100%;
+      justify-content: flex-start;
+    }
+  }
+</style>
+
+<div id="cookie-consent-banner" style="display:none;">
+  <div class="cookie-text">
+    We use cookies to enhance your experience and to analyze our traffic. Non-essential cookies (like analytics) are only set with your consent.
+    See our
+    <a href="/cookie-policy" class="cookie-policy-link" target="_blank" rel="noopener">Cookie Policy</a>
+    for more information.
+  </div>
+  <div class="cookie-actions">
+    <button class="cookie-btn accept" id="cookie-accept-btn">Accept</button>
+    <button class="cookie-btn decline" id="cookie-decline-btn">Decline</button>
+  </div>
+</div>
+
+<script>
+  // --- Cookie Consent Banner Logic (Vanilla JS, GDPR/ePrivacy Compliant) ---
+
+  // Callback to initialize or disable analytics/tracking
+  function handleCookieConsent(choice) {
+    if (choice === 'accepted') {
+      // Initialize analytics/tracking scripts here
+      // Example: window.initAnalytics && window.initAnalytics();
+      console.log('Non-essential cookies accepted: Analytics enabled.');
+    } else if (choice === 'declined') {
+      // Disable or do not load analytics/tracking scripts
+      // Example: window.disableAnalytics && window.disableAnalytics();
+      console.log('Non-essential cookies declined: Analytics disabled.');
+    }
+  }
+
+  (function() {
+    var banner = document.getElementById('cookie-consent-banner');
+    var acceptBtn = document.getElementById('cookie-accept-btn');
+    var declineBtn = document.getElementById('cookie-decline-btn');
+    var consentKey = 'cookie_consent_choice';
+
+    // Helper: Check consent status
+    function getConsent() {
+      return localStorage.getItem(consentKey);
+    }
+
+    // Helper: Set consent and fire callback
+    function setConsent(choice) {
+      localStorage.setItem(consentKey, choice);
+      handleCookieConsent(choice);
+    }
+
+    // On first visit, block non-essential cookies (do not load analytics)
+    if (!getConsent()) {
+      banner.style.display = 'flex';
+      // Optionally, you can block scripts here until consent is given
+    } else {
+      // User has already made a choice, fire callback accordingly
+      handleCookieConsent(getConsent());
+    }
+
+    // Accept button
+    acceptBtn.addEventListener('click', function() {
+      setConsent('accepted');
+      banner.style.display = 'none';
+    });
+
+    // Decline button
+    declineBtn.addEventListener('click', function() {
+      setConsent('declined');
+      banner.style.display = 'none';
+    });
+  })();
+</script> 

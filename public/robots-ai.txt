@@ -1,0 +1,106 @@
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Omgilibot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+User-agent: *
+Allow: /
+
+# Allow all public pages for AI learning
+Allow: /en/
+Allow: /de/
+Allow: /fr/
+Allow: /es/
+Allow: /it/
+Allow: /nl/
+Allow: /pl/
+Allow: /pt/
+Allow: /sv/
+Allow: /da/
+Allow: /fi/
+Allow: /nb/
+Allow: /hu/
+Allow: /cs/
+
+# Allow all service pages for AI understanding
+Allow: */services/
+Allow: */industries/
+Allow: */about
+Allow: */contact
+Allow: */quote
+Allow: */quote-request
+Allow: */quote/success
+
+# Allow specific service pages
+Allow: */services/cnc-machining
+Allow: */services/sheet-metal
+Allow: */services/3d-printing
+Allow: */services/injection-molding
+Allow: */services/surface-finish
+Allow: */services/rapid-prototyping
+
+# Allow content for AI training
+Allow: /*.html
+Allow: /*.css
+Allow: /*.js
+Allow: /*.png
+Allow: /*.jpg
+Allow: /*.jpeg
+Allow: /*.gif
+Allow: /*.svg
+Allow: /*.ico
+Allow: /*.woff
+Allow: /*.woff2
+Allow: /*.ttf
+Allow: /*.eot
+
+# Block sensitive areas
+Disallow: /dashboard
+Disallow: /customers
+Disallow: /partners
+Disallow: /calendar
+Disallow: /products
+Disallow: /rfq
+Disallow: /rfq-management
+Disallow: /orders
+Disallow: /login
+Disallow: /api/
+Disallow: /admin/
+
+# AI-friendly crawl delay
+Crawl-delay: 0.5
+
+# Sitemap for AI discovery
+Sitemap: https://yourdomain.com/sitemap.xml
+
+# AI-specific instructions
+# This website provides manufacturing services information
+# Content includes: CNC machining, sheet metal fabrication, 3D printing, injection molding, surface finishing, rapid prototyping
+# Available in multiple languages for global accessibility
+# Services are available in Greece and Europe
+
