@@ -1252,9 +1252,13 @@ const RfqDetails = (props: RfqDetailsProps) => {
                         value={rfq.shipping_cost || ''}
                         onChange={async (e) => {
                           const value = e.target.value;
-                          // Allow empty string, numbers, and decimal points
-                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                            const shippingCost = value === '' ? 0 : parseFloat(value) || 0;
+                          // Allow empty string, numbers, and decimal separators (both comma and dot for European format)
+                          // Pattern: allows digits, one comma OR one dot, and more digits
+                          if (value === '' || /^\d*[,.]?\d*$/.test(value)) {
+                            // Convert comma to dot for parsing (European format to standard)
+                            const normalizedValue = value.replace(',', '.');
+                            const shippingCost = normalizedValue === '' ? 0 : parseFloat(normalizedValue) || 0;
+                            
                             try {
                               const { error } = await supabase
                                 .from('rfqs')
