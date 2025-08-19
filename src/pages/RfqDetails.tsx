@@ -850,7 +850,16 @@ const RfqDetails = (props: RfqDetailsProps) => {
         email: customer.email,
       },
       items: rfqItems.map((item) => {
-        const filesForPartArr = (partFiles[item.id] || []).map(f => f.file_name);
+        const filesForPartArr = (partFiles[item.id] || []).map(f => {
+          // Show the full filename as it appears on AWS server
+          // If file_path contains the full path, extract just the filename
+          if (f.file_path) {
+            // Extract filename from path (e.g., "RFQ-123/part-1/filename.stl" -> "filename.stl")
+            const pathParts = f.file_path.split('/');
+            return pathParts[pathParts.length - 1] || f.file_name;
+          }
+          return f.file_name;
+        });
         return {
           product_name: item.product_name, // e.g. Part 1 RFQ-08052025-1-1
           files: filesForPartArr,
@@ -944,6 +953,26 @@ const RfqDetails = (props: RfqDetailsProps) => {
       <div style="margin-top:8px;font-size:10px;color:#666;">
         ${data.items.filter(i => i.notes).map(i => `<div>Note: ${i.notes}</div>`).join('')}
       </div>
+      
+      ${generalFiles && generalFiles.length > 0 ? `
+        <div style="margin-top:24px;">
+          <h3 style="color:#1a237e;margin-bottom:12px;">General Files</h3>
+          <div style="background:#f8f9fa;padding:12px;border-radius:6px;border-left:4px solid #1976d2;">
+            <div style="font-weight:500;margin-bottom:8px;">Files uploaded for this RFQ:</div>
+            <div style="font-family:monospace;font-size:11px;color:#1976d2;">
+              ${generalFiles.map(f => {
+                // Show the full filename as it appears on AWS server
+                if (f.file_path) {
+                  const pathParts = f.file_path.split('/');
+                  return pathParts[pathParts.length - 1] || f.file_name;
+                }
+                return f.file_name;
+              }).join('<br/>')}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+      
       <div style="margin-top:24px;float:right;width:320px;">
         <table style="width:100%;font-size:13px;background:#f5f7fa;border-radius:8px;box-shadow:0 1px 4px #e0e0e0;">
           <tr><td style="color:#333;">Shipping Cost:</td><td style="text-align:right;color:#333;">${data.shipping_cost.toFixed(2)}</td></tr>

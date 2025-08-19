@@ -323,12 +323,13 @@ export default function OrderDetailsPage() {
     // Check if user is a partner
     const isPartner = user?.role === 'partner_seller';
 
-    // Generate screenshots for all items with 3D models
-    const itemsWithScreenshots = await Promise.all(
+    // Generate screenshots for all items with 3D models and get files
+    const itemsWithScreenshotsAndFiles = await Promise.all(
       orderItems.map(async (item) => {
         // Find the part that corresponds to this order item
         const part = parts.find(p => p.name === item.product_name);
         let screenshot = null;
+        let filesForItem = [];
         
         if (part) {
           // Try to get 3D files for this part
@@ -339,11 +340,22 @@ export default function OrderDetailsPage() {
             // Use the first 3D model file to generate screenshot
             screenshot = await capture3DViewerScreenshot(modelFiles[0]);
           }
+          
+          // Get all files for this part
+          filesForItem = files.map(f => {
+            // Show the full filename as it appears on AWS server
+            if (f.file_path) {
+              const pathParts = f.file_path.split('/');
+              return pathParts[pathParts.length - 1] || f.file_name;
+            }
+            return f.file_name;
+          });
         }
         
         return {
           ...item,
-          screenshot
+          screenshot,
+          files: filesForItem
         };
       })
     );
@@ -378,11 +390,12 @@ export default function OrderDetailsPage() {
       delivery_date: order.delivery_date,
       status: order.status,
       partner: partners.find(p => p.id === order.partner_id)?.company_name || '',
-      items: itemsWithScreenshots.map((item) => ({
+      items: itemsWithScreenshotsAndFiles.map((item) => ({
         product_name: item.product_name,
         description: item.description || '',
         quantity: item.quantity,
         screenshot: item.screenshot,
+        files: item.files,
         // Hide prices for partners
         unit_price: isPartner ? null : item.unit_price,
         total_price: isPartner ? null : item.total_price,
@@ -445,6 +458,7 @@ export default function OrderDetailsPage() {
         <thead>
           <tr style="background:#f3f4f6;">
             <th style="border:1px solid #ccc;padding:6px;">Item</th>
+            <th style="border:1px solid #ccc;padding:6px;">Files</th>
             <th style="border:1px solid #ccc;padding:6px;">Model</th>
             <th style="border:1px solid #ccc;padding:6px;">Description</th>
             <th style="border:1px solid #ccc;padding:6px;">Quantity</th>
@@ -455,6 +469,9 @@ export default function OrderDetailsPage() {
           ${data.items.map(item => `
             <tr>
               <td style="border:1px solid #ccc;padding:6px;">${item.product_name}</td>
+              <td style="border:1px solid #ccc;padding:6px;white-space:pre-line;color:#1976d2;font-size:10px;">
+                ${item.files && item.files.length > 0 ? item.files.join('<br/>') : '—'}
+              </td>
               <td style="border:1px solid #ccc;padding:6px;text-align:center;">
                 ${item.screenshot ? `<img src="${item.screenshot}" style="width:80px;height:60px;object-fit:contain;border-radius:4px;" />` : '—'}
               </td>
