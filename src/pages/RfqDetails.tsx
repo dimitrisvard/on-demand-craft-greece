@@ -1256,12 +1256,25 @@ const RfqDetails = (props: RfqDetailsProps) => {
                           if (value === '' || /^\d*\.?\d*$/.test(value)) {
                             const shippingCost = value === '' ? 0 : parseFloat(value) || 0;
                             try {
+                              // Temporary workaround: Check if shipping_cost column exists
+                              // If not, just update the local state and total without database update
                               const { error } = await supabase
                                 .from('rfqs')
                                 .update({ shipping_cost: shippingCost })
                                 .eq('id', rfq.id);
                               
-                              if (error) throw error;
+                              if (error) {
+                                // If column doesn't exist, show helpful message
+                                if (error.code === 'PGRST204' && error.message.includes('shipping_cost')) {
+                                  toast({
+                                    title: "Database Setup Required",
+                                    description: "Please add shipping_cost column to rfqs table in Supabase dashboard",
+                                    variant: "destructive",
+                                  });
+                                  return;
+                                }
+                                throw error;
+                              }
                               
                               // Update local state
                               setRfq({
