@@ -27,6 +27,7 @@ import { downloadAndSaveRfqFile, deleteRfqFile, getRfqFiles, downloadAllRfqFiles
 import { deleteFolderFromS3 } from '@/utils/awsS3Storage';
 import { RFQ, RfqItem } from '@/types/customer';
 import { Database } from '@/integrations/supabase/types';
+import ThreeDViewerModal from '@/components/ThreeDViewerModal';
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [isDeletionError, setIsDeletionError] = useState(false);
   const [deletionErrorMessage, setDeletionErrorMessage] = useState('');
   const [rfqNumber, setRfqNumber] = useState<string>("");
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState<any>(null);
   const [isCheckingReferences, setIsCheckingReferences] = useState(false);
   const [newOrderTitle, setNewOrderTitle] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
@@ -192,7 +195,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
                   }
                 }
                 
-                // If no match by ID, try matching by name
+                // If no match by ID, try matching with our name mapping
                 if (!matchedPartId) {
                   // Try matching with our name mapping
                   for (const [name, id] of Object.entries(partNameToId)) {
@@ -1036,50 +1039,6 @@ const RfqDetails = (props: RfqDetailsProps) => {
     setFileDrawerOpen(true);
   };
 
-  const handleDownloadFile = async (file: QuoteFile) => {
-    try {
-      await downloadAndSaveRfqFile(file.file_path, file.file_name);
-      toast({
-        title: "Success",
-        description: `Downloaded ${file.file_name}`,
-      });
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      toast({
-        title: "Error",
-        description: "Failed to download file",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDeleteFile = async (file: QuoteFile) => {
-    if (!confirm(`Are you sure you want to delete ${file.file_name}?`)) {
-      return;
-    }
-
-    try {
-      const success = await deleteRfqFile(file.file_path, file.id);
-      if (success) {
-        toast({
-          title: "Success",
-          description: `Deleted ${file.file_name}`,
-        });
-        // Refresh the files list
-        fetchQuoteFiles();
-      } else {
-        throw new Error('Failed to delete file');
-      }
-    } catch (error) {
-      console.error('Error deleting file:', error);
-      toast({
-        title: "Error",
-        description: "Failed to delete file",
-        variant: "destructive",
-      });
-    }
-  };
-
   // Handle downloading all files as a zip
   const handleDownloadAllFiles = async () => {
     if (!id || !rfqNumber) {
@@ -1407,36 +1366,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 {/* General Files (not associated with any part) */}
                 {generalFiles && generalFiles.length > 0 && (
                   <div className="mb-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {generalFiles.map((file) => (
-                        <div key={file.id} className="flex items-center justify-between p-3 bg-white rounded border">
-                          <div className="flex items-center space-x-2">
-                            <FileText className="h-4 w-4 text-gray-500" />
-                            <span className="text-sm truncate max-w-[200px]" title={file.file_name}>
-                              {file.file_name}
-                            </span>
-                          </div>
-                          <div className="flex items-center space-x-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDownloadFile(file)}
-                              className="h-8 w-8 p-0"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteFile(file)}
-                              className="h-8 w-8 p-0 text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                    <h4 className="font-medium text-gray-700 mb-3">General Files</h4>
+                    <RfqFileList 
+                      rfqId={rfq.id}
+                      key={`general-files-${filesRefreshTrigger}`}
+                      onRefreshRequest={refreshFiles}
+                    />
                   </div>
                 )}
                 
@@ -1460,36 +1395,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
                         </div>
                         
                         {filesForThisPart.length > 0 ? (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filesForThisPart.map((file) => (
-                              <div key={file.id} className="flex items-center justify-between p-3 bg-white rounded border">
-                                <div className="flex items-center space-x-2">
-                                  <FileText className="h-4 w-4 text-gray-500" />
-                                  <span className="text-sm truncate max-w-[200px]" title={file.file_name}>
-                                    {file.file_name}
-                                  </span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDownloadFile(file)}
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDeleteFile(file)}
-                                    className="h-8 w-8 p-0 text-destructive"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                          <RfqFileList 
+                            rfqId={rfq.id}
+                            partId={item.id}
+                            key={`part-files-${item.id}-${filesRefreshTrigger}`}
+                            onRefreshRequest={refreshFiles}
+                          />
                         ) : (
                           <div className="text-center py-3 text-gray-500 text-sm">
                             No files uploaded for this part yet
@@ -1917,6 +1828,17 @@ const RfqDetails = (props: RfqDetailsProps) => {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* 3D Viewer Modal */}
+      {viewerFile && (
+        <ThreeDViewerModal
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          fileUrl={`https://cfjrtmtaitwzggzpkhxi.supabase.co/storage/v1/object/public/rfq-files/${viewerFile.file_path}`}
+          fileType={viewerFile.file_type}
+          fileName={viewerFile.file_name}
+        />
+      )}
     </ErrorBoundary>
   );
 };
