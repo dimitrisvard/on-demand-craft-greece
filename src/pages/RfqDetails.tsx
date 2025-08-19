@@ -123,6 +123,13 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   }, [id]);
 
+  // Fetch files when rfqItems are loaded
+  useEffect(() => {
+    if (id && rfqItems.length > 0) {
+      fetchQuoteFiles();
+    }
+  }, [id, rfqItems]);
+
   // Fetch files associated with this RFQ
   const fetchQuoteFiles = async () => {
     if (!id) return;
@@ -954,25 +961,6 @@ const RfqDetails = (props: RfqDetailsProps) => {
         ${data.items.filter(i => i.notes).map(i => `<div>Note: ${i.notes}</div>`).join('')}
       </div>
       
-      ${generalFiles && generalFiles.length > 0 ? `
-        <div style="margin-top:24px;">
-          <h3 style="color:#1a237e;margin-bottom:12px;">General Files</h3>
-          <div style="background:#f8f9fa;padding:12px;border-radius:6px;border-left:4px solid #1976d2;">
-            <div style="font-weight:500;margin-bottom:8px;">Files uploaded for this RFQ:</div>
-            <div style="font-family:monospace;font-size:11px;color:#1976d2;">
-              ${generalFiles.map(f => {
-                // Show the full filename as it appears on AWS server
-                if (f.file_path) {
-                  const pathParts = f.file_path.split('/');
-                  return pathParts[pathParts.length - 1] || f.file_name;
-                }
-                return f.file_name;
-              }).join('<br/>')}
-            </div>
-          </div>
-        </div>
-      ` : ''}
-      
       <div style="margin-top:24px;float:right;width:320px;">
         <table style="width:100%;font-size:13px;background:#f5f7fa;border-radius:8px;box-shadow:0 1px 4px #e0e0e0;">
           <tr><td style="color:#333;">Shipping Cost:</td><td style="text-align:right;color:#333;">${data.shipping_cost.toFixed(2)}</td></tr>
@@ -1391,18 +1379,6 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     </Button>
                   </div>
                 </div>
-                
-                {/* General Files (not associated with any part) */}
-                {generalFiles && generalFiles.length > 0 && (
-                  <div className="mb-6">
-                    <h4 className="font-medium text-gray-700 mb-3">General Files</h4>
-                    <RfqFileList 
-                      rfqId={rfq.id}
-                      key={`general-files-${filesRefreshTrigger}`}
-                      onRefreshRequest={refreshFiles}
-                    />
-                  </div>
-                )}
                 
                 {/* Files grouped by part */}
                 <div className="space-y-6">
