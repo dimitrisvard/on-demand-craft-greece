@@ -978,6 +978,42 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <li><b>Offer Validity:</b> ${data.conditions.validity_days}</li>
         </ul>
       </div>
+      
+      <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
+        <strong>This offer is made as an intra-community supply (tax rate 0%) under the condition that the required VAT identification<br/>
+        number of the invoice recipient is subsequently submitted.</strong><br/><br/>
+        The listed prices are net prices. Should you have any questions, please do not hesitate to call us at <strong>+30-210-444-7830</strong>
+      </div>
+      
+      <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">
+        <div style="text-align:left;">
+          <div style="font-weight:bold;margin-bottom:4px;">Microns Hub</div>
+          <div>Kosti Fragkouli 3</div>
+          <div>Heraklion Greece</div>
+          <div>71414</div>
+        </div>
+        
+        <div style="text-align:center;">
+          <div style="font-weight:bold;margin-bottom:4px;">Trade Register</div>
+          <div>Greece</div>
+          <div style="margin-top:8px;font-weight:bold;">VAT ID</div>
+          <div>EL137232320</div>
+        </div>
+        
+        <div style="text-align:center;">
+          <div style="font-weight:bold;margin-bottom:4px;">Managing Directors</div>
+          <div>Dimitris Vardalachakis</div>
+        </div>
+        
+        <div style="text-align:right;">
+          <div style="font-weight:bold;margin-bottom:4px;">Bank Account</div>
+          <div>National Bank of Greece</div>
+          <div style="margin-top:4px;">SWIFT Code: ETHNGRAA</div>
+          <div style="margin-top:4px;">GR4901102040000020400891170</div>
+          <div style="margin-top:4px;">SWIFT/BIC: ETHNGRAA</div>
+        </div>
+      </div>
+      
       <div style="margin-top:32px;font-size:10px;color:#444;">
         ${data.footer_notes.map(note => `<div>${note}</div>`).join('')}
         <div style="margin-top:8px;"><a href='${data.terms_url}' style='color:#1976d2;text-decoration:underline;'>General Sale and Delivery Terms and Conditions</a></div>
@@ -1250,48 +1286,46 @@ const RfqDetails = (props: RfqDetailsProps) => {
                       <Input
                         type="text"
                         value={rfq.shipping_cost || ''}
-                        onChange={async (e) => {
+                        onChange={(e) => {
                           const value = e.target.value;
-                          // Allow empty string, numbers, and decimal separators (both comma and dot for European format)
-                          // Pattern: allows digits, one comma OR one dot, and more digits
-                          if (value === '' || /^\d*[,.]?\d*$/.test(value)) {
-                            // Convert comma to dot for parsing (European format to standard)
-                            const normalizedValue = value.replace(',', '.');
-                            const shippingCost = normalizedValue === '' ? 0 : parseFloat(normalizedValue) || 0;
+                          // Allow any input for better user experience
+                          // We'll validate and save when user finishes typing
+                          setRfq({
+                            ...rfq,
+                            shipping_cost: value === '' ? 0 : parseFloat(value.replace(',', '.')) || 0
+                          });
+                        }}
+                        onBlur={async () => {
+                          // Save to database when user finishes editing
+                          const value = rfq.shipping_cost || '';
+                          const shippingCost = value === '' ? 0 : parseFloat(value.toString().replace(',', '.')) || 0;
+                          
+                          try {
+                            const { error } = await supabase
+                              .from('rfqs')
+                              .update({ shipping_cost: shippingCost })
+                              .eq('id', rfq.id);
                             
-                            try {
-                              const { error } = await supabase
-                                .from('rfqs')
-                                .update({ shipping_cost: shippingCost })
-                                .eq('id', rfq.id);
-                              
-                              if (error) throw error;
-                              
-                              // Update local state
-                              setRfq({
-                                ...rfq,
-                                shipping_cost: shippingCost
-                              });
-                              
-                              // Recalculate total amount
-                              const itemsTotal = rfqItems.reduce((sum, item) => sum + item.total_price, 0);
-                              const newTotal = itemsTotal + shippingCost;
-                              
-                              // Update RFQ total
-                              await updateRfqTotal(newTotal);
-                              
-                              toast({
-                                title: "Success",
-                                description: "Shipping cost updated successfully",
-                              });
-                            } catch (error) {
-                              console.error('Error updating shipping cost:', error);
-                              toast({
-                                title: "Error",
-                                description: "Failed to update shipping cost",
-                                variant: "destructive",
-                              });
-                            }
+                            if (error) throw error;
+                            
+                            // Recalculate total amount
+                            const itemsTotal = rfqItems.reduce((sum, item) => sum + item.total_price, 0);
+                            const newTotal = itemsTotal + shippingCost;
+                            
+                            // Update RFQ total
+                            await updateRfqTotal(newTotal);
+                            
+                            toast({
+                              title: "Success",
+                              description: "Shipping cost updated successfully",
+                            });
+                          } catch (error) {
+                            console.error('Error updating shipping cost:', error);
+                            toast({
+                              title: "Error",
+                              description: "Failed to update shipping cost",
+                              variant: "destructive",
+                            });
                           }
                         }}
                         className="w-24"
