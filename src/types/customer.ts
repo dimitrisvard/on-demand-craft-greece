@@ -47,6 +47,7 @@ export type RFQ = {
   due_date: string;
   version: number;
   rfq_number?: string;
+  shipping_cost?: number;
   customer_details?: {
     vat_tax_id?: string;
     phone?: string;

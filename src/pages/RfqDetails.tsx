@@ -1245,6 +1245,56 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     <p className="text-xl font-bold">{formatCurrency(rfq.total_amount, rfq.currency)}</p>
                   </div>
                   <div>
+                    <h3 className="text-sm font-medium text-gray-500">Shipping Cost</h3>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={rfq.shipping_cost || 0}
+                        onChange={async (e) => {
+                          const shippingCost = parseFloat(e.target.value) || 0;
+                          try {
+                            const { error } = await supabase
+                              .from('rfqs')
+                              .update({ shipping_cost: shippingCost })
+                              .eq('id', rfq.id);
+                            
+                            if (error) throw error;
+                            
+                            // Update local state
+                            setRfq({
+                              ...rfq,
+                              shipping_cost: shippingCost
+                            });
+                            
+                            // Recalculate total amount
+                            const itemsTotal = rfqItems.reduce((sum, item) => sum + item.total_price, 0);
+                            const newTotal = itemsTotal + shippingCost;
+                            
+                            // Update RFQ total
+                            await updateRfqTotal(newTotal);
+                            
+                            toast({
+                              title: "Success",
+                              description: "Shipping cost updated successfully",
+                            });
+                          } catch (error) {
+                            console.error('Error updating shipping cost:', error);
+                            toast({
+                              title: "Error",
+                              description: "Failed to update shipping cost",
+                              variant: "destructive",
+                            });
+                          }
+                        }}
+                        className="w-24"
+                        placeholder="0.00"
+                      />
+                      <span className="text-sm text-gray-500">EUR</span>
+                    </div>
+                  </div>
+                  <div>
                     <h3 className="text-sm font-medium text-gray-500">Version</h3>
                     <p>v{rfq.version}</p>
                   </div>
@@ -1326,6 +1376,17 @@ const RfqDetails = (props: RfqDetailsProps) => {
                             <TableCell colSpan={6} className="h-24 text-center">
                               No items added yet.
                             </TableCell>
+                          </TableRow>
+                        )}
+                        {rfq.shipping_cost && rfq.shipping_cost > 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4} className="text-right font-medium text-gray-600">
+                              Shipping Cost:
+                            </TableCell>
+                            <TableCell className="text-right font-medium text-gray-600">
+                              {formatCurrency(rfq.shipping_cost, rfq.currency)}
+                            </TableCell>
+                            <TableCell></TableCell>
                           </TableRow>
                         )}
                         <TableRow>
