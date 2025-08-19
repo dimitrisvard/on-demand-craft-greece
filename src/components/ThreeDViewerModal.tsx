@@ -2,7 +2,7 @@ import React, { Suspense, useEffect, useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, useGLTF } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute } from 'three';
+import { BufferGeometry, Float32BufferAttribute, ShaderMaterial, Vector3, Color, NoToneMapping } from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for STLLoader
@@ -21,6 +21,73 @@ const isOBJ = (name: string) => name.toLowerCase().endsWith('.obj');
 const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
+
+// Toon material color palette (darkest to lightest)
+const TOON_COLORS = [
+  new Color('#1E1E1E'), // Darkest
+  new Color('#3A3A3A'), // Dark
+  new Color('#6E6E6E'), // Medium
+  new Color('#B0B0B0'), // Light
+  new Color('#FFFFFF')  // Lightest
+];
+
+// Toon material vertex shader
+const toonVertexShader = `
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vPosition = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+// Toon material fragment shader
+const toonFragmentShader = `
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  
+  uniform vec3 uColors[5];
+  uniform float uThresholds[4];
+  
+  void main() {
+    // Calculate lighting based on normal direction (object-space)
+    float intensity = dot(normalize(vNormal), vec3(0.0, 1.0, 0.0));
+    
+    // Quantize to discrete bands
+    vec3 color;
+    if (intensity < uThresholds[0]) {
+      color = uColors[0]; // Darkest
+    } else if (intensity < uThresholds[1]) {
+      color = uColors[1]; // Dark
+    } else if (intensity < uThresholds[2]) {
+      color = uColors[2]; // Medium
+    } else if (intensity < uThresholds[3]) {
+      color = uColors[3]; // Light
+    } else {
+      color = uColors[4]; // Lightest
+    }
+    
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+// Create toon material
+function createToonMaterial() {
+  const material = new ShaderMaterial({
+    vertexShader: toonVertexShader,
+    fragmentShader: toonFragmentShader,
+    uniforms: {
+      uColors: { value: TOON_COLORS },
+      uThresholds: { value: [-0.5, -0.1, 0.1, 0.5] }
+    },
+    transparent: false,
+    side: 2, // DoubleSide
+  });
+  
+  return material;
+}
 
 // Helper to load occt-import-js WASM only once
 let occtPromise: Promise<any> | null = null;
@@ -81,12 +148,7 @@ function STLModel({ url }: { url: string }) {
     const geometry = useLoader(STLLoader, url);
     return (
       <mesh geometry={geometry} castShadow receiveShadow>
-        <meshStandardMaterial 
-          color="#4682B4" 
-          roughness={0.9}
-          metalness={0.0}
-          envMapIntensity={0.0}
-        />
+        <primitive object={createToonMaterial()} attach="material" />
       </mesh>
     );
   } catch (error) {
@@ -94,12 +156,7 @@ function STLModel({ url }: { url: string }) {
     return (
       <mesh castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial 
-          color="#4682B4" 
-          roughness={0.9}
-          metalness={0.0}
-          envMapIntensity={0.0}
-        />
+        <primitive object={createToonMaterial()} attach="material" />
       </mesh>
     );
   }
@@ -108,16 +165,13 @@ function STLModel({ url }: { url: string }) {
 function OBJModel({ url }: { url: string }) {
   try {
     const obj = useLoader(OBJLoader, url);
-    // Apply materials to all meshes in the OBJ
+    // Apply toon materials to all meshes in the OBJ
     obj.traverse((child: any) => {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
         if (child.material) {
-          child.material.color.setHex(0x4682B4);
-          child.material.roughness = 0.9;
-          child.material.metalness = 0.0;
-          child.material.envMapIntensity = 0.0;
+          child.material = createToonMaterial();
         }
       }
     });
@@ -127,12 +181,7 @@ function OBJModel({ url }: { url: string }) {
     return (
       <mesh castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial 
-          color="#4682B4" 
-          roughness={0.9}
-          metalness={0.0}
-          envMapIntensity={0.0}
-        />
+        <primitive object={createToonMaterial()} attach="material" />
       </mesh>
     );
   }
@@ -141,16 +190,13 @@ function OBJModel({ url }: { url: string }) {
 function GLTFModel({ url }: { url: string }) {
   try {
     const { scene } = useGLTF(url);
-    // Apply materials to all meshes in the GLTF
+    // Apply toon materials to all meshes in the GLTF
     scene.traverse((child: any) => {
       if (child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
         if (child.material) {
-          child.material.color.setHex(0x4682B4);
-          child.material.roughness = 0.9;
-          child.material.metalness = 0.0;
-          child.material.envMapIntensity = 0.0;
+          child.material = createToonMaterial();
         }
       }
     });
@@ -160,12 +206,7 @@ function GLTFModel({ url }: { url: string }) {
     return (
       <mesh castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial 
-          color="#4682B4" 
-          roughness={0.9}
-          metalness={0.0}
-          envMapIntensity={0.0}
-        />
+        <primitive object={createToonMaterial()} attach="material" />
       </mesh>
     );
   }
@@ -279,12 +320,7 @@ function StepModel({ url }: { url: string }) {
       
       <Suspense fallback={null}>
         {geometry && <mesh geometry={geometry} castShadow receiveShadow>
-          <meshStandardMaterial 
-            color="#4682B4" 
-            roughness={0.9}
-            metalness={0.0}
-            envMapIntensity={0.0}
-          />
+          <primitive object={createToonMaterial()} attach="material" />
         </mesh>}
       </Suspense>
       
@@ -359,7 +395,9 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           gl={{ 
             antialias: true, 
             alpha: false,
-            powerPreference: "high-performance"
+            powerPreference: "high-performance",
+            toneMapping: NoToneMapping,
+            outputColorSpace: 'srgb'
           }}
           onError={(error) => {
             console.error('Canvas error:', error);
@@ -367,14 +405,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Flat, uniform lighting for matte finish */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.3} 
-            castShadow={false}
-          />
-          
+          {/* No lighting needed for unlit toon material */}
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
@@ -406,7 +437,9 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           gl={{ 
             antialias: true, 
             alpha: false,
-            powerPreference: "high-performance"
+            powerPreference: "high-performance",
+            toneMapping: NoToneMapping,
+            outputColorSpace: 'srgb'
           }}
           onError={(error) => {
             console.error('Canvas error:', error);
@@ -414,14 +447,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Flat, uniform lighting for matte finish */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.3} 
-            castShadow={false}
-          />
-          
+          {/* No lighting needed for unlit toon material */}
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
@@ -453,7 +479,9 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           gl={{ 
             antialias: true, 
             alpha: false,
-            powerPreference: "high-performance"
+            powerPreference: "high-performance",
+            toneMapping: NoToneMapping,
+            outputColorSpace: 'srgb'
           }}
           onError={(error) => {
             console.error('Canvas error:', error);
@@ -461,14 +489,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Flat, uniform lighting for matte finish */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.3} 
-            castShadow={false}
-          />
-          
+          {/* No lighting needed for unlit toon material */}
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
