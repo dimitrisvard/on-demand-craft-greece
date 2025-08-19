@@ -31,59 +31,29 @@ const TOON_COLORS = [
   new Color('#FFFFFF')  // Lightest
 ];
 
-// Toon material vertex shader
-const toonVertexShader = `
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-  
-  void main() {
-    vNormal = normalize(normalMatrix * normal);
-    vPosition = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-// Toon material fragment shader
-const toonFragmentShader = `
-  varying vec3 vNormal;
-  varying vec3 vPosition;
-  
-  uniform vec3 uColors[5];
-  uniform float uThresholds[4];
-  
-  void main() {
-    // Calculate lighting based on normal direction (object-space)
-    float intensity = dot(normalize(vNormal), vec3(0.0, 1.0, 0.0));
-    
-    // Quantize to discrete bands
-    vec3 color;
-    if (intensity < uThresholds[0]) {
-      color = uColors[0]; // Darkest
-    } else if (intensity < uThresholds[1]) {
-      color = uColors[1]; // Dark
-    } else if (intensity < uThresholds[2]) {
-      color = uColors[2]; // Medium
-    } else if (intensity < uThresholds[3]) {
-      color = uColors[3]; // Light
-    } else {
-      color = uColors[4]; // Lightest
-    }
-    
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-// Create toon material
+// Create toon material using built-in Three.js materials
 function createToonMaterial() {
-  const material = new ShaderMaterial({
-    vertexShader: toonVertexShader,
-    fragmentShader: toonFragmentShader,
-    uniforms: {
-      uColors: { value: TOON_COLORS },
-      uThresholds: { value: [-0.5, -0.1, 0.1, 0.5] }
-    },
+  // Use MeshBasicMaterial for unlit appearance with toon-like colors
+  const material = new (require('three').MeshBasicMaterial)({
+    color: TOON_COLORS[2], // Use medium gray as base color
     transparent: false,
     side: 2, // DoubleSide
+    depthTest: true,
+    depthWrite: true,
+  });
+  
+  return material;
+}
+
+// Alternative: Create a simple toon material with custom colors
+function createSimpleToonMaterial() {
+  // Use MeshLambertMaterial for simple lighting with toon effect
+  const material = new (require('three').MeshLambertMaterial)({
+    color: TOON_COLORS[2], // Medium gray
+    transparent: false,
+    side: 2, // DoubleSide
+    depthTest: true,
+    depthWrite: true,
   });
   
   return material;
@@ -302,29 +272,34 @@ function StepModel({ url }: { url: string }) {
     <Canvas 
       camera={{ position: [0, 0, 100], fov: 50 }} 
       style={{ height: 400, background: '#ffffff' }}
-      shadows
+      shadows={false}
       gl={{ 
         antialias: true, 
         alpha: false,
-        powerPreference: "high-performance"
+        powerPreference: "high-performance",
+        toneMapping: NoToneMapping,
+        outputColorSpace: 'srgb'
       }}
     >
       <BackgroundColor />
-      {/* Flat, uniform lighting for matte finish */}
-      <ambientLight intensity={0.8} />
+      {/* Add lighting for toon material */}
+      <ambientLight intensity={0.6} />
       <directionalLight 
-        position={[0, 1, 0]} 
-        intensity={0.3} 
+        position={[1, 1, 1]} 
+        intensity={0.8} 
+        castShadow={false}
+      />
+      <directionalLight 
+        position={[-1, -1, -1]} 
+        intensity={0.4} 
         castShadow={false}
       />
       
       <Suspense fallback={null}>
-        {geometry && <mesh geometry={geometry} castShadow receiveShadow>
+        {geometry && <mesh geometry={geometry} castShadow={false} receiveShadow={false}>
           <primitive object={createToonMaterial()} attach="material" />
         </mesh>}
       </Suspense>
-      
-
       
       <OrbitControls 
         enablePan={true}
@@ -405,7 +380,19 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* No lighting needed for unlit toon material */}
+          {/* Add lighting for toon material */}
+          <ambientLight intensity={0.6} />
+          <directionalLight 
+            position={[1, 1, 1]} 
+            intensity={0.8} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[-1, -1, -1]} 
+            intensity={0.4} 
+            castShadow={false}
+          />
+          
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
@@ -447,7 +434,19 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* No lighting needed for unlit toon material */}
+          {/* Add lighting for toon material */}
+          <ambientLight intensity={0.6} />
+          <directionalLight 
+            position={[1, 1, 1]} 
+            intensity={0.8} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[-1, -1, -1]} 
+            intensity={0.4} 
+            castShadow={false}
+          />
+          
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
@@ -489,7 +488,19 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* No lighting needed for unlit toon material */}
+          {/* Add lighting for toon material */}
+          <ambientLight intensity={0.6} />
+          <directionalLight 
+            position={[1, 1, 1]} 
+            intensity={0.8} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[-1, -1, -1]} 
+            intensity={0.4} 
+            castShadow={false}
+          />
+          
           <Suspense fallback={
             <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
           }>
