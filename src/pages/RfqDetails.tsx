@@ -59,6 +59,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { BackToDashboardButton } from '@/components/dashboard/BackToDashboardButton';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -108,6 +109,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [fileDrawerOpen, setFileDrawerOpen] = useState(false);
   const [selectedPartIdForFiles, setSelectedPartIdForFiles] = useState<string | null>(null);
   const [animationParent] = useAutoAnimate();
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>('');
+  const [productionPartners, setProductionPartners] = useState<any[]>([]);
+  const [isLoadingPartners, setIsLoadingPartners] = useState(false);
 
   const [newItem, setNewItem] = useState<Partial<RfqItem>>({
     product_name: "",
@@ -397,6 +401,29 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
+  // Fetch production partners for order creation
+  const fetchProductionPartners = async () => {
+    setIsLoadingPartners(true);
+    try {
+      const { data: partners, error } = await supabase
+        .from('production_partners')
+        .select('id, company_name, contact_name, email, specializations')
+        .eq('active', true);
+      
+      if (error) throw error;
+      setProductionPartners(partners || []);
+    } catch (error) {
+      console.error('Error fetching production partners:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load production partners",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingPartners(false);
+    }
+  };
+
   const handleCreateOrder = async () => {
     if (!rfq || !customer) return;
     
@@ -415,6 +442,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
             title: newOrderTitle,
             customer_id: rfq.customer_id,
             rfq_id: rfq.id,
+            partner_id: selectedPartnerId || null,
             currency: 'EUR',
             status: 'new',
             total_amount: rfq.total_amount,
@@ -1893,7 +1921,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
         </AlertDialog>
 
         {/* Create Order Dialog */}
-        <Dialog open={isCreateOrderDialogOpen} onOpenChange={setIsCreateOrderDialogOpen}>
+        <Dialog open={isCreateOrderDialogOpen} onOpenChange={(open) => {
+          setIsCreateOrderDialogOpen(open);
+          if (open) {
+            fetchProductionPartners();
+          }
+        }}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create Order</DialogTitle>
@@ -1909,7 +1942,32 @@ const RfqDetails = (props: RfqDetailsProps) => {
                   id="order_title"
                   value={newOrderTitle}
                   onChange={(e) => setNewOrderTitle(e.target.value)}
+                  placeholder="Enter order title"
                 />
+              </div>
+              
+              <div className="grid gap-2">
+                <label htmlFor="production_partner">Production Partner (Optional)</label>
+                <Select value={selectedPartnerId} onValueChange={setSelectedPartnerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a production partner" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No partner assigned</SelectItem>
+                    {isLoadingPartners ? (
+                      <SelectItem value="" disabled>Loading partners...</SelectItem>
+                    ) : (
+                      productionPartners.map((partner) => (
+                        <SelectItem key={partner.id} value={partner.id}>
+                          {partner.company_name} - {partner.specializations?.join(', ') || 'No specializations'}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Assigning a production partner will give them access to view and manage this order.
+                </p>
               </div>
             </div>
             
