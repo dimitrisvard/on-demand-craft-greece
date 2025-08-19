@@ -246,6 +246,21 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('contact.phone')}</p>
             )}
           </div>
+
+          <div>
+            <Label htmlFor="contact.mobile">
+              {t('quote_form_mobile')}
+            </Label>
+            <Input
+              id="contact.mobile"
+              name="contact.mobile"
+              type="tel"
+              value={values.contact?.mobile || ''}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              placeholder={t('quote_form_mobile_placeholder')}
+            />
+          </div>
         </div>
       </div>
 
@@ -258,7 +273,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
           <div className="ml-3">
             <p className="text-sm text-blue-700">
-              This contact information will be used to send your quote and for any follow-up communication.
+              {t('quote_form_contact_info_message')}
             </p>
           </div>
         </div>

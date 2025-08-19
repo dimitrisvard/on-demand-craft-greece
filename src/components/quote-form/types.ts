@@ -17,6 +17,7 @@ export interface FormValues {
     position: string;
     email: string;
     phone: string;
+    mobile: string;
   };
 
   // Step 2: Part Details & Files

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { getRfqFiles, deleteRfqFile, downloadAndSaveRfqFile } from '@/utils/rfqFileStorage';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import ThreeDViewerModal from '@/components/ThreeDViewerModal';
 
 interface FileItem {
   id: string;
@@ -31,7 +32,21 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
   const [loading, setLoading] = useState(true);
   const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState<FileItem | null>(null);
   const { toast } = useToast();
+
+  // Helper: Check if file is a 3D model
+  const is3DFile = (name: string) => {
+    const ext = name.toLowerCase();
+    return ext.endsWith('.stl') || ext.endsWith('.obj') || ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.step') || ext.endsWith('.stp');
+  };
+
+  // Helper: Open 3D viewer modal for a file
+  const handleOpen3DViewer = async (file: FileItem) => {
+    setViewerFile(file);
+    setViewerOpen(true);
+  };
 
   useEffect(() => {
     fetchFiles();
@@ -175,6 +190,19 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
                     <Download className="h-4 w-4" />
                   )}
                 </Button>
+
+                {/* 3D Viewer Button */}
+                {is3DFile(file.file_name) && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    title="View 3D"
+                    onClick={() => handleOpen3DViewer(file)}
+                    className="h-8 w-8 ml-1"
+                  >
+                    <span role="img" aria-label="3D">🧊</span>
+                  </Button>
+                )}
                 
                 <Button
                   variant="ghost"
@@ -194,6 +222,17 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
           ))}
         </ul>
       </div>
+
+      {/* 3D Viewer Modal */}
+      {viewerFile && (
+        <ThreeDViewerModal
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          fileUrl={`https://cfjrtmtaitwzggzpkhxi.supabase.co/storage/v1/object/public/rfq-files/${viewerFile.file_path}`}
+          fileType={viewerFile.file_type}
+          fileName={viewerFile.file_name}
+        />
+      )}
     </ErrorBoundary>
   );
 };

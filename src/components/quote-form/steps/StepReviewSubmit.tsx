@@ -84,6 +84,12 @@ const StepReviewSubmit: React.FC<StepComponentProps> = ({ formikProps }) => {
               <p className="text-sm text-gray-500">{t('quote_form_phone')}</p>
               <p className="font-medium">{values.contact?.phone}</p>
             </div>
+            {values.contact?.mobile && (
+              <div>
+                <p className="text-sm text-gray-500">{t('quote_form_mobile')}</p>
+                <p className="font-medium">{values.contact?.mobile}</p>
+              </div>
+            )}
           </div>
         </div>
         

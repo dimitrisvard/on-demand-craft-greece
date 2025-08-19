@@ -34,6 +34,7 @@ const validationSchemas = [
       position: Yup.string(),
       email: Yup.string().email('Invalid email').required('Email is required'),
       phone: Yup.string().required('Phone number is required'),
+      mobile: Yup.string(),
     }),
   }),
 
@@ -81,6 +82,7 @@ const initialValues: FormValues = {
     position: '',
     email: '',
     phone: '',
+    mobile: '',
   },
 
   // Step 2: Part Details & Files
