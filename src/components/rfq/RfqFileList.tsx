@@ -3,6 +3,7 @@ import { FileText, Trash2, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { getRfqFiles, deleteRfqFile, downloadAndSaveRfqFile } from '@/utils/rfqFileStorage';
+import { getSignedUrl } from '@/utils/awsS3Storage';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import ThreeDViewerModal from '@/components/ThreeDViewerModal';
 
@@ -15,6 +16,7 @@ interface FileItem {
   rfq_id: string;
   part_id: string | null;
   created_at: string;
+  signedUrl?: string;
 }
 
 interface RfqFileListProps {
@@ -44,8 +46,27 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
 
   // Helper: Open 3D viewer modal for a file
   const handleOpen3DViewer = async (file: FileItem) => {
-    setViewerFile(file);
-    setViewerOpen(true);
+    try {
+      const url = await getSignedUrl(file.file_path);
+      if (url) {
+        const fileWithSignedUrl = { ...file, signedUrl: url };
+        setViewerFile(fileWithSignedUrl);
+        setViewerOpen(true);
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to generate file URL for 3D viewer",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('Error opening 3D viewer:', error);
+      toast({
+        title: "Error",
+        description: "Failed to open 3D viewer",
+        variant: "destructive",
+      });
+    }
   };
 
   useEffect(() => {
@@ -228,7 +249,7 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
         <ThreeDViewerModal
           open={viewerOpen}
           onClose={() => setViewerOpen(false)}
-          fileUrl={`https://cfjrtmtaitwzggzpkhxi.supabase.co/storage/v1/object/public/rfq-files/${viewerFile.file_path}`}
+          fileUrl={viewerFile.signedUrl || ''}
           fileType={viewerFile.file_type}
           fileName={viewerFile.file_name}
         />
