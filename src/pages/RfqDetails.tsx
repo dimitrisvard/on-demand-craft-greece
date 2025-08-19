@@ -1248,44 +1248,46 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     <h3 className="text-sm font-medium text-gray-500">Shipping Cost</h3>
                     <div className="flex items-center gap-2">
                       <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={rfq.shipping_cost || 0}
+                        type="text"
+                        value={rfq.shipping_cost || ''}
                         onChange={async (e) => {
-                          const shippingCost = parseFloat(e.target.value) || 0;
-                          try {
-                            const { error } = await supabase
-                              .from('rfqs')
-                              .update({ shipping_cost: shippingCost })
-                              .eq('id', rfq.id);
-                            
-                            if (error) throw error;
-                            
-                            // Update local state
-                            setRfq({
-                              ...rfq,
-                              shipping_cost: shippingCost
-                            });
-                            
-                            // Recalculate total amount
-                            const itemsTotal = rfqItems.reduce((sum, item) => sum + item.total_price, 0);
-                            const newTotal = itemsTotal + shippingCost;
-                            
-                            // Update RFQ total
-                            await updateRfqTotal(newTotal);
-                            
-                            toast({
-                              title: "Success",
-                              description: "Shipping cost updated successfully",
-                            });
-                          } catch (error) {
-                            console.error('Error updating shipping cost:', error);
-                            toast({
-                              title: "Error",
-                              description: "Failed to update shipping cost",
-                              variant: "destructive",
-                            });
+                          const value = e.target.value;
+                          // Allow empty string, numbers, and decimal points
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            const shippingCost = value === '' ? 0 : parseFloat(value) || 0;
+                            try {
+                              const { error } = await supabase
+                                .from('rfqs')
+                                .update({ shipping_cost: shippingCost })
+                                .eq('id', rfq.id);
+                              
+                              if (error) throw error;
+                              
+                              // Update local state
+                              setRfq({
+                                ...rfq,
+                                shipping_cost: shippingCost
+                              });
+                              
+                              // Recalculate total amount
+                              const itemsTotal = rfqItems.reduce((sum, item) => sum + item.total_price, 0);
+                              const newTotal = itemsTotal + shippingCost;
+                              
+                              // Update RFQ total
+                              await updateRfqTotal(newTotal);
+                              
+                              toast({
+                                title: "Success",
+                                description: "Shipping cost updated successfully",
+                              });
+                            } catch (error) {
+                              console.error('Error updating shipping cost:', error);
+                              toast({
+                                title: "Error",
+                                description: "Failed to update shipping cost",
+                                variant: "destructive",
+                              });
+                            }
                           }
                         }}
                         className="w-24"
