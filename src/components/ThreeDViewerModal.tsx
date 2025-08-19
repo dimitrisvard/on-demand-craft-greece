@@ -2,7 +2,7 @@ import React, { Suspense, useEffect, useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, useGLTF } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, ShaderMaterial, Vector3, Color, NoToneMapping } from 'three';
+import { BufferGeometry, Float32BufferAttribute, ShaderMaterial, Vector3, Color, NoToneMapping, MeshBasicMaterial, MeshLambertMaterial } from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for STLLoader
@@ -34,7 +34,7 @@ const TOON_COLORS = [
 // Create toon material using built-in Three.js materials
 function createToonMaterial() {
   // Use MeshBasicMaterial for unlit appearance with toon-like colors
-  const material = new (require('three').MeshBasicMaterial)({
+  const material = new MeshBasicMaterial({
     color: TOON_COLORS[2], // Use medium gray as base color
     transparent: false,
     side: 2, // DoubleSide
@@ -48,7 +48,7 @@ function createToonMaterial() {
 // Alternative: Create a simple toon material with custom colors
 function createSimpleToonMaterial() {
   // Use MeshLambertMaterial for simple lighting with toon effect
-  const material = new (require('three').MeshLambertMaterial)({
+  const material = new MeshLambertMaterial({
     color: TOON_COLORS[2], // Medium gray
     transparent: false,
     side: 2, // DoubleSide
