@@ -22,24 +22,26 @@ const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
 
-// Toon material color palette (darkest to lightest)
+// Toon material color palette (darkest to lightest) - improved for better visibility
 const TOON_COLORS = [
-  new Color('#1E1E1E'), // Darkest
-  new Color('#3A3A3A'), // Dark
-  new Color('#6E6E6E'), // Medium
-  new Color('#B0B0B0'), // Light
-  new Color('#FFFFFF')  // Lightest
+  new Color('#2A4A6B'), // Dark blue-gray (darker areas)
+  new Color('#4A7B9B'), // Medium blue-gray (shadows)
+  new Color('#6BA3C7'), // Light blue-gray (mid-tones)
+  new Color('#9BC7E3'), // Very light blue-gray (highlights)
+  new Color('#E8F4F8')  // Almost white (brightest areas)
 ];
 
-// Create toon material using built-in Three.js materials
+// Create toon material using built-in Three.js materials - improved version
 function createToonMaterial() {
-  // Use MeshBasicMaterial for unlit appearance with toon-like colors
-  const material = new MeshBasicMaterial({
-    color: TOON_COLORS[2], // Use medium gray as base color
+  // Use MeshLambertMaterial for better lighting response and visibility
+  const material = new MeshLambertMaterial({
+    color: TOON_COLORS[2], // Use light blue-gray as base color for better visibility
     transparent: false,
     side: 2, // DoubleSide
     depthTest: true,
     depthWrite: true,
+    emissive: new Color('#1A2A3A'), // Add subtle emissive for better visibility
+    emissiveIntensity: 0.1,
   });
   
   return material;
@@ -49,11 +51,13 @@ function createToonMaterial() {
 function createSimpleToonMaterial() {
   // Use MeshLambertMaterial for simple lighting with toon effect
   const material = new MeshLambertMaterial({
-    color: TOON_COLORS[2], // Medium gray
+    color: TOON_COLORS[2], // Light blue-gray
     transparent: false,
     side: 2, // DoubleSide
     depthTest: true,
     depthWrite: true,
+    emissive: new Color('#1A2A3A'), // Add subtle emissive
+    emissiveIntensity: 0.1,
   });
   
   return material;
@@ -282,15 +286,20 @@ function StepModel({ url }: { url: string }) {
       }}
     >
       <BackgroundColor />
-      {/* Add lighting for toon material */}
-      <ambientLight intensity={0.6} />
+      {/* Enhanced lighting for better toon material visibility */}
+      <ambientLight intensity={0.8} />
       <directionalLight 
         position={[1, 1, 1]} 
-        intensity={0.8} 
+        intensity={1.2} 
         castShadow={false}
       />
       <directionalLight 
         position={[-1, -1, -1]} 
+        intensity={0.6} 
+        castShadow={false}
+      />
+      <directionalLight 
+        position={[0, 1, 0]} 
         intensity={0.4} 
         castShadow={false}
       />
@@ -380,15 +389,20 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Add lighting for toon material */}
-          <ambientLight intensity={0.6} />
+          {/* Enhanced lighting for better toon material visibility */}
+          <ambientLight intensity={0.8} />
           <directionalLight 
             position={[1, 1, 1]} 
-            intensity={0.8} 
+            intensity={1.2} 
             castShadow={false}
           />
           <directionalLight 
             position={[-1, -1, -1]} 
+            intensity={0.6} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[0, 1, 0]} 
             intensity={0.4} 
             castShadow={false}
           />
@@ -434,15 +448,20 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Add lighting for toon material */}
-          <ambientLight intensity={0.6} />
+          {/* Enhanced lighting for better toon material visibility */}
+          <ambientLight intensity={0.8} />
           <directionalLight 
             position={[1, 1, 1]} 
-            intensity={0.8} 
+            intensity={1.2} 
             castShadow={false}
           />
           <directionalLight 
             position={[-1, -1, -1]} 
+            intensity={0.6} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[0, 1, 0]} 
             intensity={0.4} 
             castShadow={false}
           />
@@ -488,15 +507,20 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
           }}
         >
           <BackgroundColor />
-          {/* Add lighting for toon material */}
-          <ambientLight intensity={0.6} />
+          {/* Enhanced lighting for better toon material visibility */}
+          <ambientLight intensity={0.8} />
           <directionalLight 
             position={[1, 1, 1]} 
-            intensity={0.8} 
+            intensity={1.2} 
             castShadow={false}
           />
           <directionalLight 
             position={[-1, -1, -1]} 
+            intensity={0.6} 
+            castShadow={false}
+          />
+          <directionalLight 
+            position={[0, 1, 0]} 
             intensity={0.4} 
             castShadow={false}
           />
