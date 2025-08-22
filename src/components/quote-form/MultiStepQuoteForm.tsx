@@ -16,6 +16,7 @@ import { materialOptions, surfaceRoughnessOptions, toleranceOptions, surfaceTrea
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getOrCreateCustomer } from '@/utils/customerUtils';
+import { trackQuoteRequest, trackFormSubmission } from '@/utils/analytics';
 
 const validationSchemas = [
   // Step 1: Company & Contact Information
@@ -418,6 +419,17 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         }
       }
 
+      // Track the quote request submission
+      trackQuoteRequest({
+        value: 0, // No value available at this stage
+        currency: 'EUR',
+        partCount: values.parts.length,
+        industry: 'general' // Could be enhanced to track actual industry
+      });
+
+      // Track form submission success
+      trackFormSubmission('quote_request_form', true);
+
       // Show success message
       toast({
         title: "Success",
@@ -430,6 +442,9 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
 
     } catch (error) {
       console.error('Submission error:', error);
+      
+      // Track form submission error
+      trackFormSubmission('quote_request_form', false);
       
       if (error instanceof Yup.ValidationError) {
         console.log('Validation error details:', error.inner);

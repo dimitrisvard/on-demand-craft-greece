@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
+import { usePageTracking } from './hooks/usePageTracking';
 import AuthProvider from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import Dashboard from './pages/Dashboard';
@@ -38,14 +39,15 @@ import CookiePolicy from './pages/CookiePolicy';
 // It requires specific props that need to be passed when used
 import QuotesPage from './pages/dashboard/QuotesPage';
 
-function App() {
-  console.log('App rendered');
+// Component to handle Google Analytics tracking
+function AppContent() {
+  usePageTracking(); // This hook must be used inside BrowserRouter
+  
   return (
-    <HelmetProvider>
-      <BrowserRouter>
-        <ScrollToTop />
-        <LanguageProvider>
-          <AuthProvider>
+    <>
+      <ScrollToTop />
+      <LanguageProvider>
+        <AuthProvider>
             <Navbar />
             <Routes>
               {/* Root redirect - will be handled by LanguageProvider */}
@@ -104,10 +106,20 @@ function App() {
               <Route path="/dashboard/quotes" element={<QuotesPage />} />
               <Route path="/cookie-policy" element={<CookiePolicy />} />
             </Routes>
-            <CookieConsentBanner />
-            <Footer />
-          </AuthProvider>
-        </LanguageProvider>
+          <CookieConsentBanner />
+          <Footer />
+        </AuthProvider>
+      </LanguageProvider>
+    </>
+  );
+}
+
+function App() {
+  console.log('App rendered');
+  return (
+    <HelmetProvider>
+      <BrowserRouter>
+        <AppContent />
       </BrowserRouter>
     </HelmetProvider>
   );

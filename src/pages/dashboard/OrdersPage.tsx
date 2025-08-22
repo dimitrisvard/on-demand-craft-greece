@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { PencilIcon, PlusCircle, Calendar, Package, Search } from "lucide-react"
+import { PlusCircle, Calendar, Package, Search, Download } from "lucide-react"
 import { supabase } from "@/integrations/supabase/client"
 import { useToast } from "@/components/ui/use-toast"
 import { useNavigate } from "react-router-dom"
@@ -27,12 +27,12 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { Order, OrderStatus } from "@/types/customer"
 import { useAuth } from '@/contexts/AuthContext'
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [customers, setCustomers] = useState<{id: string, company_name: string}[]>([])
   const [rfqs, setRfqs] = useState<{id: string, title: string}[]>([])
@@ -186,11 +186,6 @@ export default function OrdersPage() {
     return `PO-${day}${month}${year}-${shortId}`;
   };
 
-  const handleEditClick = (order: Order) => {
-    setSelectedOrder(order)
-    setIsEditDialogOpen(true)
-  }
-
   const handleAddClick = () => {
     setIsAddDialogOpen(true)
     setNewOrder({
@@ -203,39 +198,6 @@ export default function OrdersPage() {
       start_date: new Date().toISOString().split('T')[0],
       delivery_date: new Date(Date.now() + (14 * 24 * 60 * 60 * 1000)).toISOString().split('T')[0]
     })
-  }
-
-  const handleSaveChanges = async () => {
-    if (!selectedOrder) return;
-    
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          title: selectedOrder.title,
-          status: selectedOrder.status,
-          start_date: selectedOrder.start_date,
-          delivery_date: selectedOrder.delivery_date,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedOrder.id)
-
-      if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "Order updated successfully",
-      });
-      
-      fetchOrders();
-      setIsEditDialogOpen(false);
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update order",
-        variant: "destructive",
-      });
-    }
   }
 
   const handleAddOrder = async () => {
@@ -292,17 +254,6 @@ export default function OrdersPage() {
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    
-    if (selectedOrder) {
-      setSelectedOrder({
-        ...selectedOrder,
-        [name]: value
-      });
-    }
-  }
-
   const handleNewOrderInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     
@@ -344,6 +295,203 @@ export default function OrdersPage() {
 
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+  };
+
+  // PDF Generation function for orders list
+  const downloadOrderPdf = async (order: Order) => {
+    try {
+      // Fetch customer details for this order
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('id', order.customer_id)
+        .single();
+
+      if (customerError) throw customerError;
+
+      const customer = customerData;
+
+      // Prepare the data structure for PDF
+      const data = {
+        seller: {
+          company_name: 'Microns Hub',
+          address_lines: [
+            'Kosti Fragkouli 3',
+            'Heraklion Greece 71414',
+            '+30-210-444-7830',
+            'info@micronshub.eu',
+            'VAT ID EL137232320'
+          ],
+        },
+        buyer: {
+          name: customer.first_name + ' ' + customer.last_name,
+          company: customer.company_name,
+          address_lines: [customer.street_address, customer.city + ', ' + customer.zip_code],
+          country: customer.country,
+        },
+        order_id: generateOrderId(order),
+        title: order.title,
+        date: order.created_at,
+        start_date: order.start_date,
+        delivery_date: order.delivery_date,
+        status: order.status,
+        conditions: {
+          delivery_time: '21 working days',
+          shipping_terms: 'CIP',
+          payment_terms: '14 days net',
+          validity_days: '14 days',
+        },
+        footer_notes: [
+          'This order is subject to our general terms and conditions.',
+          'All prices are net, plus VAT where applicable.'
+        ],
+        terms_url: 'https://microns-hub.com/terms',
+      };
+
+      // Create a container for html2canvas rendering
+      const container = document.createElement('div');
+      container.style.width = '800px';
+      container.style.fontFamily = 'Helvetica, Arial, sans-serif';
+      container.style.fontSize = '12px';
+      container.style.color = '#222';
+      container.style.background = '#fff';
+      container.style.padding = '32px';
+
+      // Use an absolute path for the logo and set width for reliability
+      const logoHtml = `<img src='/logo.png' style="width:180px;height:auto;display:block;" />`;
+
+      // Build the HTML for the PDF (header, info, simplified table without prices)
+      container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          ${logoHtml}
+          <div style="text-align:right;">
+            <div style="font-size:20px;font-weight:bold;">${data.seller.company_name}</div>
+            <div style="font-size:12px;">${data.seller.address_lines.join('<br/>')}</div>
+          </div>
+        </div>
+        <hr style="margin:16px 0; border: 1px solid #e0e0e0;" />
+        <div style="display:flex;justify-content:space-between;">
+          <div>
+            <b>Buyer:</b><br/>
+            ${data.buyer.name}<br/>
+            ${data.buyer.company}<br/>
+            ${data.buyer.address_lines.join('<br/>')}<br/>
+            ${data.buyer.country}
+          </div>
+          <div style="text-align:right;">
+            <b>Order ID:</b> ${data.order_id}<br/>
+            <b>Order Title:</b> ${data.title}<br/>
+            <b>Order Date:</b> ${format(new Date(data.date), 'yyyy-MM-dd')}<br/>
+            <b>Start Date:</b> ${data.start_date ? format(new Date(data.start_date), 'yyyy-MM-dd') : 'Not set'}<br/>
+            <b>Delivery Date:</b> ${data.delivery_date ? format(new Date(data.delivery_date), 'yyyy-MM-dd') : 'Not set'}<br/>
+            <b>Status:</b> ${data.status.toUpperCase()}
+          </div>
+        </div>
+        <h2 style="text-align:center;margin:24px 0 8px 0; color:#1a237e;">PURCHASE ORDER</h2>
+        <table style="width:100%;border-collapse:collapse;margin-top:24px;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th style="border:1px solid #ccc;padding:6px;">Item</th>
+              <th style="border:1px solid #ccc;padding:6px;">Files</th>
+              <th style="border:1px solid #ccc;padding:6px;">Description</th>
+              <th style="border:1px solid #ccc;padding:6px;">Quantity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="border:1px solid #ccc;padding:6px;text-align:center;color:#666;font-style:italic;" colspan="4">
+                Order details and specifications will be provided separately.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div style="margin-top:24px;float:right;width:320px;">
+          <table style="width:100%;font-size:13px;background:#f5f7fa;border-radius:8px;box-shadow:0 1px 4px #e0e0e0;">
+            <tr><td style="color:#333;">Total Amount:</td><td style="text-align:right;color:#333;">—</td></tr>
+            <tr><td style="color:#333;">Currency:</td><td style="text-align:right;color:#333;">—</td></tr>
+            <tr style="font-weight:bold;"><td style="padding:8px 0 8px 8px;">Shipping Cost:</td><td style="text-align:right;padding:8px 8px 8px 0;">—</td></tr>
+          </table>
+        </div>
+        <div style="clear:both;"></div>
+        <div style="margin-top:32px;">
+          <b style="color:#1a237e;">Conditions:</b><br/>
+          <ul style="margin:0 0 0 16px;padding:0;font-size:13px;color:#333;background:#f5f7fa;border-radius:8px;padding:12px 16px;box-shadow:0 1px 4px #e0e0e0;">
+            <li><b>Delivery Time:</b> ${data.conditions.delivery_time}</li>
+            <li><b>Shipping Terms:</b> ${data.conditions.shipping_terms}</li>
+            <li><b>Payment Terms:</b> ${data.conditions.payment_terms}</li>
+            <li><b>Offer Validity:</b> ${data.conditions.validity_days}</li>
+          </ul>
+        </div>
+        
+        <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
+          <strong>This order is subject to our general terms and conditions.</strong><br/><br/>
+          All prices and shipping costs will be provided separately. Should you have any questions, please do not hesitate to call us at <strong>+30-210-444-7830</strong>
+        </div>
+        
+        <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">
+          <div style="text-align:left;">
+            <div style="font-weight:bold;margin-bottom:4px;">Microns Hub</div>
+            <div>Kosti Fragkouli 3</div>
+            <div>Heraklion Greece</div>
+            <div>71414</div>
+          </div>
+          
+          <div style="text-align:center;">
+            <div style="font-weight:bold;margin-bottom:4px;">Trade Register</div>
+            <div>Greece</div>
+            <div style="margin-top:8px;font-weight:bold;">VAT ID</div>
+            <div>EL137232320</div>
+          </div>
+          
+          <div style="text-align:center;">
+            <div style="font-weight:bold;margin-bottom:4px;">Managing Directors</div>
+            <div>Dimitris Vardalachakis</div>
+          </div>
+          
+          <div style="text-align:right;">
+            <div style="font-weight:bold;margin-bottom:4px;">Bank Account</div>
+            <div>National Bank of Greece</div>
+            <div style="margin-top:4px;">SWIFT Code: ETHNGRAA</div>
+            <div style="margin-top:4px;">GR4901102040000020400891170</div>
+            <div style="margin-top:4px;">SWIFT/BIC: ETHNGRAA</div>
+          </div>
+        </div>
+        
+        <div style="margin-top:32px;font-size:10px;color:#444;">
+          ${data.footer_notes.map(note => `<div>${note}</div>`).join('')}
+          <div style="margin-top:8px;"><a href='${data.terms_url}' style='color:#1976d2;text-decoration:underline;'>General Sale and Delivery Terms and Conditions</a></div>
+        </div>
+      `;
+
+      document.body.appendChild(container);
+      await new Promise(resolve => setTimeout(resolve, 100)); // Wait for DOM
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', putOnlyUsedFonts: true });
+      const canvas = await html2canvas(container, { scale: 4, useCORS: true });
+      const imgData = canvas.toDataURL('image/png');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const pdfWidth = pageWidth - 20; // 10mm margin each side
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      pdf.addImage(imgData, 'PNG', 10, 10, pdfWidth, pdfHeight);
+      pdf.setFontSize(9);
+      pdf.text(`Page 1`, pageWidth - 30, pageHeight - 10);
+
+      pdf.save(`order_${data.order_id}.pdf`);
+      document.body.removeChild(container);
+      toast({
+        title: 'Success',
+        description: 'PDF downloaded successfully',
+      });
+    } catch (error: any) {
+      console.error('Error generating PDF:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to generate PDF',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (
@@ -449,18 +597,8 @@ export default function OrdersPage() {
                         size="sm"
                         onClick={() => handleViewDetails(order.id)}
                       >
-                        View
+                        Edit/View
                       </Button>
-                      {!isProductionPartner && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleEditClick(order)}
-                        >
-                          <PencilIcon className="h-4 w-4 mr-1" />
-                          Edit
-                        </Button>
-                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -469,88 +607,6 @@ export default function OrdersPage() {
           </TableBody>
         </Table>
       </Card>
-
-      {/* Edit Order Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>Edit Order</DialogTitle>
-            <DialogDescription>
-              Make changes to the order details below.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedOrder && (
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <label htmlFor="title" className="text-sm font-medium">
-                  Order Title
-                </label>
-                <input
-                  id="title"
-                  name="title"
-                  value={selectedOrder.title}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <label htmlFor="status" className="text-sm font-medium">
-                  Status
-                </label>
-                <select
-                  id="status"
-                  name="status"
-                  value={selectedOrder.status}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                >
-                  <option value="new">New</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-              
-              <div className="grid gap-2">
-                <label htmlFor="start_date" className="text-sm font-medium">
-                  Start Date
-                </label>
-                <input
-                  id="start_date"
-                  name="start_date"
-                  type="date"
-                  value={selectedOrder.start_date ? new Date(selectedOrder.start_date).toISOString().split('T')[0] : ''}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <label htmlFor="delivery_date" className="text-sm font-medium">
-                  Delivery Date
-                </label>
-                <input
-                  id="delivery_date"
-                  name="delivery_date"
-                  type="date"
-                  value={selectedOrder.delivery_date ? new Date(selectedOrder.delivery_date).toISOString().split('T')[0] : ''}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSaveChanges}>
-              Save Changes
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       
       {/* Add Order Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>

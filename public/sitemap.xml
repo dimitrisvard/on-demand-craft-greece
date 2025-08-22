@@ -2,273 +2,603 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
-  <!-- Homepage in all languages -->
+  <!-- Homepage - English -->
   <url>
-    <loc>https://yourdomain.com/en/</loc>
+    <loc>https://www.micronshub.eu/en/</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/"/>
   </url>
 
-  <!-- Services page in all languages -->
+  <!-- Homepage - German -->
   <url>
-    <loc>https://yourdomain.com/en/services</loc>
+    <loc>https://www.micronshub.eu/de/</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/"/>
+  </url>
+
+  <!-- Homepage - French -->
+  <url>
+    <loc>https://www.micronshub.eu/fr/</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/"/>
+  </url>
+
+  <!-- Services - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/services</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.9</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services"/>
   </url>
 
-  <!-- CNC Machining service in all languages -->
+  <!-- Services - German -->
   <url>
-    <loc>https://yourdomain.com/en/services/cnc-machining</loc>
+    <loc>https://www.micronshub.eu/de/services</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services"/>
+  </url>
+
+  <!-- CNC Machining - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/services/cnc-machining</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/cnc-machining"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/cnc-machining"/>
   </url>
 
-  <!-- Sheet Metal Fabrication service in all languages -->
+  <!-- CNC Machining - German -->
   <url>
-    <loc>https://yourdomain.com/en/services/sheet-metal</loc>
+    <loc>https://www.micronshub.eu/de/services/cnc-machining</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/sheet-metal"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/cnc-machining"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/cnc-machining"/>
   </url>
 
-  <!-- 3D Printing service in all languages -->
+  <!-- Sheet Metal Fabrication - English -->
   <url>
-    <loc>https://yourdomain.com/en/services/3d-printing</loc>
+    <loc>https://www.micronshub.eu/en/services/sheet-metal</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/3d-printing"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/sheet-metal"/>
   </url>
 
-  <!-- Injection Molding service in all languages -->
+  <!-- Sheet Metal Fabrication - German -->
   <url>
-    <loc>https://yourdomain.com/en/services/injection-molding</loc>
+    <loc>https://www.micronshub.eu/de/services/sheet-metal</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/injection-molding"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/sheet-metal"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/sheet-metal"/>
   </url>
 
-  <!-- Surface Finishes service in all languages -->
+  <!-- 3D Printing - English -->
   <url>
-    <loc>https://yourdomain.com/en/services/surface-finishes</loc>
+    <loc>https://www.micronshub.eu/en/services/3d-printing</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/surface-finishes"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/3d-printing"/>
   </url>
 
-  <!-- Rapid Prototyping service in all languages -->
+  <!-- 3D Printing - German -->
   <url>
-    <loc>https://yourdomain.com/en/services/rapid-prototyping</loc>
+    <loc>https://www.micronshub.eu/de/services/3d-printing</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/services/rapid-prototyping"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/3d-printing"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/3d-printing"/>
   </url>
 
-  <!-- Industries page in all languages -->
+  <!-- Injection Molding - English -->
   <url>
-    <loc>https://yourdomain.com/en/industries</loc>
+    <loc>https://www.micronshub.eu/en/services/injection-molding</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/injection-molding"/>
+  </url>
+
+  <!-- Injection Molding - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/services/injection-molding</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/injection-molding"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/injection-molding"/>
+  </url>
+
+  <!-- Surface Finishes - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/services/surface-finishes</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/surface-finishes"/>
+  </url>
+
+  <!-- Surface Finishes - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/services/surface-finishes</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/surface-finishes"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/surface-finishes"/>
+  </url>
+
+  <!-- Rapid Prototyping - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/services/rapid-prototyping</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/rapid-prototyping"/>
+  </url>
+
+  <!-- Rapid Prototyping - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/services/rapid-prototyping</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/services/rapid-prototyping"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/services/rapid-prototyping"/>
+  </url>
+
+  <!-- Industries - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/industries</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/industries"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/industries"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/industries"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/industries"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/industries"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/industries"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/industries"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/industries"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/industries"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/industries"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/industries"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/industries"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/industries"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/industries"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/industries"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/industries"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/industries"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/industries"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/industries"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/industries"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/industries"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/industries"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/industries"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/industries"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/industries"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/industries"/>
   </url>
 
-  <!-- About page in all languages -->
+  <!-- Industries - German -->
   <url>
-    <loc>https://yourdomain.com/en/about</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/about"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/about"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/about"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/about"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/about"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/about"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/about"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/about"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/about"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/about"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/about"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/about"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/about"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/about"/>
-  </url>
-
-  <!-- Contact page in all languages -->
-  <url>
-    <loc>https://yourdomain.com/en/contact</loc>
-    <lastmod>2024-01-01</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/contact"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/contact"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/contact"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/contact"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/contact"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/contact"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/contact"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/contact"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/contact"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/contact"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/contact"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/contact"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/contact"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/contact"/>
-  </url>
-
-  <!-- Quote page in all languages -->
-  <url>
-    <loc>https://yourdomain.com/en/quote</loc>
+    <loc>https://www.micronshub.eu/de/industries</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="en" href="https://yourdomain.com/en/quote"/>
-    <xhtml:link rel="alternate" hreflang="de" href="https://yourdomain.com/de/quote"/>
-    <xhtml:link rel="alternate" hreflang="fr" href="https://yourdomain.com/fr/quote"/>
-    <xhtml:link rel="alternate" hreflang="es" href="https://yourdomain.com/es/quote"/>
-    <xhtml:link rel="alternate" hreflang="it" href="https://yourdomain.com/it/quote"/>
-    <xhtml:link rel="alternate" hreflang="nl" href="https://yourdomain.com/nl/quote"/>
-    <xhtml:link rel="alternate" hreflang="pl" href="https://yourdomain.com/pl/quote"/>
-    <xhtml:link rel="alternate" hreflang="pt" href="https://yourdomain.com/pt/quote"/>
-    <xhtml:link rel="alternate" hreflang="sv" href="https://yourdomain.com/sv/quote"/>
-    <xhtml:link rel="alternate" hreflang="da" href="https://yourdomain.com/da/quote"/>
-    <xhtml:link rel="alternate" hreflang="fi" href="https://yourdomain.com/fi/quote"/>
-    <xhtml:link rel="alternate" hreflang="nb" href="https://yourdomain.com/nb/quote"/>
-    <xhtml:link rel="alternate" hreflang="hu" href="https://yourdomain.com/hu/quote"/>
-    <xhtml:link rel="alternate" hreflang="cs" href="https://yourdomain.com/cs/quote"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/industries"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/industries"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/industries"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/industries"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/industries"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/industries"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/industries"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/industries"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/industries"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/industries"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/industries"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/industries"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/industries"/>
   </url>
 
-  <!-- Cookie Policy page -->
+  <!-- About - English -->
   <url>
-    <loc>https://yourdomain.com/cookie-policy</loc>
+    <loc>https://www.micronshub.eu/en/about</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/about"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/about"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/about"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/about"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/about"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/about"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/about"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/about"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/about"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/about"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/about"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/about"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/about"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/about"/>
+  </url>
+
+  <!-- About - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/about</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/about"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/about"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/about"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/about"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/about"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/about"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/about"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/about"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/about"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/about"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/about"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/about"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/about"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/about"/>
+  </url>
+
+  <!-- Contact - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/contact</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/contact"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/contact"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/contact"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/contact"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/contact"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/contact"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/contact"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/contact"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/contact"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/contact"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/contact"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/contact"/>
+  </url>
+
+  <!-- Contact - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/contact</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/contact"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/contact"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/contact"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/contact"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/contact"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/contact"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/contact"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/contact"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/contact"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/contact"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/contact"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/contact"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/contact"/>
+  </url>
+
+  <!-- Quote - English -->
+  <url>
+    <loc>https://www.micronshub.eu/en/quote</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/quote"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/quote"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/quote"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/quote"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/quote"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/quote"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/quote"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/quote"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/quote"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/quote"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/quote"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/quote"/>
+  </url>
+
+  <!-- Quote - German -->
+  <url>
+    <loc>https://www.micronshub.eu/de/quote</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/quote"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/quote"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/quote"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/quote"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/quote"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/quote"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/quote"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/quote"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/quote"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/quote"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/quote"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/quote"/>
+  </url>
+
+  <!-- Quote - French -->
+  <url>
+    <loc>https://www.micronshub.eu/fr/quote</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/quote"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/quote"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/quote"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/quote"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/quote"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/quote"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/quote"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/quote"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/quote"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/quote"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/quote"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/quote"/>
+  </url>
+
+  <!-- Quote - Spanish -->
+  <url>
+    <loc>https://www.micronshub.eu/es/quote</loc>
+    <lastmod>2024-01-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="https://www.micronshub.eu/en/quote"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://www.micronshub.eu/de/quote"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://www.micronshub.eu/fr/quote"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://www.micronshub.eu/es/quote"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://www.micronshub.eu/it/quote"/>
+    <xhtml:link rel="alternate" hreflang="nl" href="https://www.micronshub.eu/nl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pl" href="https://www.micronshub.eu/pl/quote"/>
+    <xhtml:link rel="alternate" hreflang="pt" href="https://www.micronshub.eu/pt/quote"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://www.micronshub.eu/sv/quote"/>
+    <xhtml:link rel="alternate" hreflang="da" href="https://www.micronshub.eu/da/quote"/>
+    <xhtml:link rel="alternate" hreflang="fi" href="https://www.micronshub.eu/fi/quote"/>
+    <xhtml:link rel="alternate" hreflang="nb" href="https://www.micronshub.eu/nb/quote"/>
+    <xhtml:link rel="alternate" hreflang="hu" href="https://www.micronshub.eu/hu/quote"/>
+    <xhtml:link rel="alternate" hreflang="cs" href="https://www.micronshub.eu/cs/quote"/>
+  </url>
+
+  <!-- Cookie Policy (language-agnostic) -->
+  <url>
+    <loc>https://www.micronshub.eu/cookie-policy</loc>
     <lastmod>2024-01-01</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>

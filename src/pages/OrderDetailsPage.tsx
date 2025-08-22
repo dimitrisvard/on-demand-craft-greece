@@ -13,7 +13,10 @@ import {
   Download, 
   Trash2, 
   Factory,
-  FileText 
+  FileText,
+  Edit3,
+  Save,
+  X
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -33,6 +36,7 @@ import ThreeDViewerModal from '@/components/ThreeDViewerModal';
 import { downloadAllRfqFiles, getRfqFiles } from '@/utils/rfqFileStorage';
 import { getSignedUrl } from '@/utils/awsS3Storage';
 import { useAuth } from '@/contexts/AuthContext';
+import { trackFileDownload, trackUserInteraction } from '@/utils/analytics';
 
 interface QuoteFile {
   id: string;
@@ -67,10 +71,12 @@ export default function OrderDetailsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState("");
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
   const [assignLoading, setAssignLoading] = useState(false);
   const [quoteFiles, setQuoteFiles] = useState<QuoteFile[]>([]);
   const [parts, setParts] = useState<QuoteRequestPart[]>([]);
+  const [partFiles, setPartFiles] = useState<Record<string, QuoteFile[]>>({});
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const { toast } = useToast();
   const pdfContentRef = useRef<HTMLDivElement>(null);
   // 3D Viewer modal state
@@ -80,6 +86,13 @@ export default function OrderDetailsPage() {
   const [viewerFileName, setViewerFileName] = useState<string | null>(null);
   const [rfq, setRfq] = useState<any>(null);
   const { user } = useAuth();
+
+  // Helper function to check if a file is a 3D model
+  const is3DFile = (fileName: string): boolean => {
+    const threeDExtensions = ['.stl', '.obj', '.fbx', '.dae', '.3ds', '.blend', '.max', '.ma', '.mb', '.c4d'];
+    const extension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+    return threeDExtensions.includes(extension);
+  };
 
   useEffect(() => {
     fetchOrderDetails();
@@ -118,9 +131,8 @@ export default function OrderDetailsPage() {
         // Defensive: parts_details may be undefined or not an array
         const partsDetails = (rfqData as any).parts_details;
         setParts(Array.isArray(partsDetails) ? partsDetails : []);
-        // Fetch files from rfq_files
-        const files = await getRfqFiles(orderData.rfq_id);
-        setQuoteFiles(files as QuoteFile[]);
+        // Fetch files from rfq_files and organize them by parts
+        await fetchQuoteFiles(orderData.rfq_id, partsDetails);
       }
       if (orderData.partner_id) {
         setSelectedPartnerId(orderData.partner_id);
@@ -134,6 +146,159 @@ export default function OrderDetailsPage() {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Fetch and organize files by parts like in RFQ page
+  const fetchQuoteFiles = async (rfqId: string, partsDetails: any[]) => {
+    try {
+      setIsProcessingFiles(true);
+      console.log('Fetching quote files for RFQ:', rfqId);
+      const files = await getRfqFiles(rfqId);
+      console.log('Files retrieved:', files);
+      setQuoteFiles(files as QuoteFile[]);
+      
+      // Organize files by parts
+      const general: QuoteFile[] = [];
+      const byPart: Record<string, QuoteFile[]> = {};
+      
+      // Get the list of part IDs from partsDetails
+      const partIds = partsDetails.map(item => item.id);
+      
+      // Create mapping of part name to part ID for matching by name
+      const partNameToId: Record<string, string> = {};
+      partsDetails.forEach(item => {
+        // Clean part name for matching
+        const cleanName = item.name.replace(/\s+/g, '-').toLowerCase();
+        partNameToId[cleanName] = item.id;
+        
+        // Also add simplified versions
+        if (cleanName.includes('part-')) {
+          const simpleName = cleanName.replace('part-', '');
+          partNameToId[simpleName] = item.id;
+        }
+        
+        // Add the original name as well
+        partNameToId[item.name.toLowerCase()] = item.id;
+      });
+      
+      console.log('Part name to ID mapping:', partNameToId);
+      
+      files.forEach(file => {
+        // First try using part_id if it exists
+        if (file.part_id && partIds.includes(file.part_id)) {
+          if (!byPart[file.part_id]) {
+            byPart[file.part_id] = [];
+          }
+          byPart[file.part_id].push(file);
+          console.log(`File ${file.file_name} associated with part_id: ${file.part_id}`);
+        } 
+        // Otherwise, try to match based on file path (looking for part-(name) pattern)
+        else {
+          let matchedPartId = null;
+          
+          // Try to extract part name from file path
+          if (file.file_path) {
+            console.log(`Analyzing file path for ${file.file_name}: ${file.file_path}`);
+            
+            // Extract folder names from path
+            const pathParts = file.file_path.split('/');
+            
+            // Look for parts that match the expected pattern
+            for (const pathPart of pathParts) {
+              // Check for part-* pattern
+              if (pathPart.toLowerCase().startsWith('part-')) {
+                const partNameRaw = pathPart.substring(5); // Remove "part-" prefix
+                const partNameClean = partNameRaw.toLowerCase();
+                
+                console.log(`Found part folder in path: ${pathPart}, extracted name: ${partNameRaw}`);
+                
+                // Try direct match with part IDs first
+                for (const item of partsDetails) {
+                  // Try with exact match
+                  if (partNameClean === item.id.toLowerCase()) {
+                    matchedPartId = item.id;
+                    console.log(`Matched part by ID: ${matchedPartId}`);
+                    break;
+                  }
+                }
+                
+                // If no match by ID, try matching with our name mapping
+                if (!matchedPartId) {
+                  // Try matching with our name mapping
+                  for (const [name, id] of Object.entries(partNameToId)) {
+                    if (partNameClean.includes(name) || name.includes(partNameClean)) {
+                      matchedPartId = id;
+                      console.log(`Matched part by name pattern: ${name} -> ${matchedPartId}`);
+                      break;
+                    }
+                  }
+                  
+                  // Try matching directly with partsDetails
+                  if (!matchedPartId) {
+                    for (const item of partsDetails) {
+                      const itemNameClean = item.name.toLowerCase().replace(/\s+/g, '-');
+                      if (partNameClean.includes(itemNameClean) || 
+                          itemNameClean.includes(partNameClean) ||
+                          // Also try with numeric patterns like "part-1" matching "Part 1"
+                          (partNameClean.match(/^\d+$/) && itemNameClean.includes(partNameClean))) {
+                        matchedPartId = item.id;
+                        console.log(`Matched part by name comparison: ${itemNameClean} -> ${matchedPartId}`);
+                        break;
+                      }
+                    }
+                  }
+                }
+                
+                if (matchedPartId) break;
+              }
+            }
+          }
+          
+          // If we found a matching part, add the file to that part
+          if (matchedPartId) {
+            if (!byPart[matchedPartId]) {
+              byPart[matchedPartId] = [];
+            }
+            byPart[matchedPartId].push(file);
+            
+            // Attempt to update the database with the part_id if it's not set
+            if (!file.part_id) {
+              console.log(`Updating file ${file.id} with part_id ${matchedPartId}`);
+              supabase
+                .from('rfq_files')
+                .update({ part_id: matchedPartId })
+                .eq('id', file.id)
+                .then(({ error }) => {
+                  if (error) {
+                    console.error(`Error updating part_id for file ${file.id}:`, error);
+                  } else {
+                    console.log(`Successfully updated part_id for file ${file.id}`);
+                  }
+                });
+            }
+          } else {
+            // If no match found, add to general files
+            general.push(file);
+          }
+        }
+      });
+      
+      console.log('General files:', general.length);
+      console.log('Files by part:', Object.keys(byPart).map(k => `${k}: ${byPart[k].length}`));
+      
+      // Store the organized files in state for PDF generation
+      setPartFiles(byPart);
+      
+      // Debug: Log the final state
+      console.log('Final partFiles state set to:', byPart);
+      console.log('Parts details:', partsDetails);
+      console.log('Quote files:', files);
+      
+    } catch (error) {
+      console.error('Error fetching quote files:', error);
+    } finally {
+      setIsProcessingFiles(false);
     }
   };
 
@@ -320,47 +485,96 @@ export default function OrderDetailsPage() {
   const downloadPdf = async () => {
     if (!order || !customer) return;
 
+    // Check if files are still being loaded
+    if (isProcessingFiles) {
+      toast({
+        title: 'Please wait',
+        description: 'Files are still being organized. Please try again in a moment.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // Check if user is a partner
     const isPartner = user?.role === 'partner_seller';
 
-    // Generate screenshots for all items with 3D models and get files
-    const itemsWithScreenshotsAndFiles = await Promise.all(
-      orderItems.map(async (item) => {
-        // Find the part that corresponds to this order item
-        const part = parts.find(p => p.name === item.product_name);
-        let screenshot = null;
-        let filesForItem = [];
+    // Use the organized partFiles state instead of creating a local variable
+    // The partFiles state is populated by fetchQuoteFiles function
+
+    // Generate file list for all items using organized files
+    const itemsWithFiles = orderItems.map((item) => {
+      let filesForItem = [];
+      
+      // Find the corresponding RFQ part for this order item
+      const correspondingPart = parts.find(part => part.name === item.product_name);
+      
+      console.log(`Processing item: ${item.product_name}`);
+      console.log(`Corresponding RFQ part:`, correspondingPart);
+      console.log(`Available partFiles keys:`, Object.keys(partFiles));
+      
+      if (correspondingPart && partFiles[correspondingPart.id]) {
+        // Use the same logic as RFQ section: partFiles[part.id]
+        console.log(`Files for part ${correspondingPart.id}:`, partFiles[correspondingPart.id]);
+        filesForItem = partFiles[correspondingPart.id].map(f => {
+          if (f.file_path) {
+            const pathParts = f.file_path.split('/');
+            return pathParts[pathParts.length - 1] || f.file_name;
+          }
+          return f.file_name;
+        });
+        console.log(`Processed files for item:`, filesForItem);
+      } else {
+        // WORKAROUND: If no part found, try to find files by searching through all files
+        console.log(`No corresponding part found, trying workaround...`);
         
-        if (part) {
-          // Try to get 3D files for this part
-          const files = await getRfqFiles(order.rfq_id!, part.id);
-          const modelFiles = files.filter(file => is3DFile(file.file_name));
+        // Search through all quoteFiles to find files that might belong to this item
+        const potentialFiles = quoteFiles.filter(file => {
+          const productNameLower = item.product_name.toLowerCase();
+          const fileNameLower = file.file_name.toLowerCase();
+          const filePathLower = file.file_path.toLowerCase();
           
-          if (modelFiles.length > 0) {
-            // Use the first 3D model file to generate screenshot
-            screenshot = await capture3DViewerScreenshot(modelFiles[0]);
+          // Try to match by file name containing product name
+          if (fileNameLower.includes(productNameLower) || productNameLower.includes(fileNameLower)) {
+            return true;
           }
           
-          // Get all files for this part
-          filesForItem = files.map(f => {
-            // Show the full filename as it appears on AWS server
-            if (f.file_path) {
-              const pathParts = f.file_path.split('/');
-              return pathParts[pathParts.length - 1] || f.file_name;
+          // Try to match by file path containing product name
+          if (filePathLower.includes(productNameLower)) {
+            return true;
+          }
+          
+          // Try to match by part number patterns (e.g., "Part 1" matching "part-1")
+          const partNumberMatch = productNameLower.match(/part\s*(\d+)/i);
+          if (partNumberMatch) {
+            const partNum = partNumberMatch[1];
+            if (filePathLower.includes(`part-${partNum}`) || filePathLower.includes(`part_${partNum}`)) {
+              return true;
             }
-            return f.file_name;
-          });
-        }
+          }
+          
+          return false;
+        });
         
-        return {
-          ...item,
-          screenshot,
-          files: filesForItem
-        };
-      })
-    );
+        console.log(`Found ${potentialFiles.length} potential files for item ${item.product_name}:`, potentialFiles);
+        
+        filesForItem = potentialFiles.map(f => {
+          if (f.file_path) {
+            const pathParts = f.file_path.split('/');
+            return pathParts[pathParts.length - 1] || f.file_name;
+          }
+          return f.file_name;
+        });
+      }
+      
+      return {
+        ...item,
+        files: filesForItem
+      };
+    });
+    
+    console.log('Final itemsWithFiles:', itemsWithFiles);
 
-    // Prepare the data structure as per requirements
+    // Prepare the data structure for PDF
     const data = {
       seller: {
         company_name: 'Microns Hub',
@@ -390,15 +604,14 @@ export default function OrderDetailsPage() {
       delivery_date: order.delivery_date,
       status: order.status,
       partner: partners.find(p => p.id === order.partner_id)?.company_name || '',
-      items: itemsWithScreenshotsAndFiles.map((item) => ({
+      items: itemsWithFiles.map((item) => ({
         product_name: item.product_name,
         description: item.description || '',
         quantity: item.quantity,
-        screenshot: item.screenshot,
         files: item.files,
-        // Hide prices for partners
-        unit_price: isPartner ? null : item.unit_price,
-        total_price: isPartner ? null : item.total_price,
+        // Hide prices for partners and make them blank as requested
+        unit_price: null,
+        total_price: null,
       })),
       conditions: {
         delivery_time: '21 working days',
@@ -459,10 +672,8 @@ export default function OrderDetailsPage() {
           <tr style="background:#f3f4f6;">
             <th style="border:1px solid #ccc;padding:6px;">Item</th>
             <th style="border:1px solid #ccc;padding:6px;">Files</th>
-            <th style="border:1px solid #ccc;padding:6px;">Model</th>
             <th style="border:1px solid #ccc;padding:6px;">Description</th>
             <th style="border:1px solid #ccc;padding:6px;">Quantity</th>
-            ${!isPartner ? '<th style="border:1px solid #ccc;padding:6px;">Unit Price</th><th style="border:1px solid #ccc;padding:6px;">Total Price</th>' : ''}
           </tr>
         </thead>
         <tbody>
@@ -472,20 +683,19 @@ export default function OrderDetailsPage() {
               <td style="border:1px solid #ccc;padding:6px;white-space:pre-line;color:#1976d2;font-size:10px;">
                 ${item.files && item.files.length > 0 ? item.files.join('<br/>') : '—'}
               </td>
-              <td style="border:1px solid #ccc;padding:6px;text-align:center;">
-                ${item.screenshot ? `<img src="${item.screenshot}" style="width:80px;height:60px;object-fit:contain;border-radius:4px;" />` : '—'}
-              </td>
               <td style="border:1px solid #ccc;padding:6px;white-space:pre-line;">${item.description}</td>
               <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.quantity}</td>
-              ${!isPartner ? `
-                <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.unit_price ? formatCurrency(item.unit_price, order.currency) : '—'}</td>
-                <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.total_price ? formatCurrency(item.total_price, order.currency) : '—'}</td>
-              ` : ''}
             </tr>
           `).join('')}
         </tbody>
       </table>
-      <div style="margin-top:24px;float:right;width:320px;"></div>
+      <div style="margin-top:24px;float:right;width:320px;">
+        <table style="width:100%;font-size:13px;background:#f5f7fa;border-radius:8px;box-shadow:0 1px 4px #e0e0e0;">
+          <tr><td style="color:#333;">Total Amount:</td><td style="text-align:right;color:#333;">—</td></tr>
+          <tr><td style="color:#333;">Currency:</td><td style="text-align:right;color:#333;">—</td></tr>
+          <tr style="font-weight:bold;"><td style="padding:8px 0 8px 8px;">Shipping Cost:</td><td style="text-align:right;padding:8px 8px 8px 0;">—</td></tr>
+        </table>
+      </div>
       <div style="clear:both;"></div>
       <div style="margin-top:32px;">
         <b style="color:#1a237e;">Conditions:</b><br/>
@@ -496,6 +706,41 @@ export default function OrderDetailsPage() {
           <li><b>Offer Validity:</b> ${data.conditions.validity_days}</li>
         </ul>
       </div>
+      
+      <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
+        <strong>This order is subject to our general terms and conditions.</strong><br/><br/>
+        All prices and shipping costs will be provided separately. Should you have any questions, please do not hesitate to call us at <strong>+30-210-444-7830</strong>
+      </div>
+      
+      <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">
+        <div style="text-align:left;">
+          <div style="font-weight:bold;margin-bottom:4px;">Microns Hub</div>
+          <div>Kosti Fragkouli 3</div>
+          <div>Heraklion Greece</div>
+          <div>71414</div>
+        </div>
+        
+        <div style="text-align:center;">
+          <div style="font-weight:bold;margin-bottom:4px;">Trade Register</div>
+          <div>Greece</div>
+          <div style="margin-top:8px;font-weight:bold;">VAT ID</div>
+          <div>EL137232320</div>
+        </div>
+        
+        <div style="text-align:center;">
+          <div style="font-weight:bold;margin-bottom:4px;">Managing Directors</div>
+          <div>Dimitris Vardalachakis</div>
+        </div>
+        
+        <div style="text-align:right;">
+          <div style="font-weight:bold;margin-bottom:4px;">Bank Account</div>
+          <div>National Bank of Greece</div>
+          <div style="margin-top:4px;">SWIFT Code: ETHNGRAA</div>
+          <div style="margin-top:4px;">GR4901102040000020400891170</div>
+          <div style="margin-top:4px;">SWIFT/BIC: ETHNGRAA</div>
+        </div>
+      </div>
+      
       <div style="margin-top:32px;font-size:10px;color:#444;">
         ${data.footer_notes.map(note => `<div>${note}</div>`).join('')}
         <div style="margin-top:8px;"><a href='${data.terms_url}' style='color:#1976d2;text-decoration:underline;'>General Sale and Delivery Terms and Conditions</a></div>
@@ -519,6 +764,11 @@ export default function OrderDetailsPage() {
 
     pdf.save(`order_${data.order_id}.pdf`);
     document.body.removeChild(container);
+    
+    // Track PDF download
+    trackFileDownload(`order_${data.order_id}.pdf`, 'pdf');
+    trackUserInteraction('download', 'order_pdf');
+    
     toast({
       title: 'Success',
       description: 'PDF downloaded successfully',
@@ -544,11 +794,11 @@ export default function OrderDetailsPage() {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
   };
 
-  const handleEdit = () => {
+  const handleEditToggle = () => {
     if (order?.partner_id) {
       setSelectedPartnerId(order.partner_id);
     }
-    setIsEditDialogOpen(true);
+    setIsEditMode(!isEditMode);
   };
 
   const handleSaveChanges = async () => {
@@ -575,7 +825,7 @@ export default function OrderDetailsPage() {
         description: "Order updated successfully",
       });
       
-      setIsEditDialogOpen(false);
+      setIsEditMode(false);
       fetchOrderDetails();
     } catch (error: any) {
       console.error('Error updating order:', error);
@@ -585,6 +835,12 @@ export default function OrderDetailsPage() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+    // Reset to original values
+    fetchOrderDetails();
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -615,6 +871,12 @@ export default function OrderDetailsPage() {
   const handleDownloadFile = async (filePath: string, fileName?: string) => {
     try {
       await downloadAndSaveFile(filePath, fileName);
+      
+      // Track file download
+      if (fileName) {
+        const fileExtension = fileName.split('.').pop() || 'unknown';
+        trackFileDownload(fileName, fileExtension);
+      }
       
       toast({
         title: "Download started",
@@ -688,12 +950,6 @@ export default function OrderDetailsPage() {
     setViewerOpen(true);
   };
 
-  // Helper: Check if file is a 3D model
-  const is3DFile = (name: string) => {
-    const ext = name.toLowerCase();
-    return ext.endsWith('.stl') || ext.endsWith('.obj') || ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.step') || ext.endsWith('.stp');
-  };
-
   if (loading) {
     return (
       <div className="p-6">
@@ -729,14 +985,32 @@ export default function OrderDetailsPage() {
           <Button variant="outline" onClick={() => navigate('/orders')}>
             Back to Orders
           </Button>
-          <Button variant="outline" onClick={downloadPdf}>
+          <Button 
+            variant="outline" 
+            onClick={downloadPdf}
+            disabled={isProcessingFiles}
+            title={isProcessingFiles ? "Files are being organized..." : "Download PDF"}
+          >
             <Download className="h-4 w-4 mr-2" />
-            Download PDF
+            {isProcessingFiles ? "Processing..." : "Download PDF"}
           </Button>
-          <Button variant="outline" onClick={handleEdit}>
-            <Factory className="h-4 w-4 mr-2" />
-            Edit Order
-          </Button>
+          {!isEditMode ? (
+            <Button variant="outline" onClick={handleEditToggle}>
+              <Edit3 className="h-4 w-4 mr-2" />
+              Edit Order
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button onClick={handleSaveChanges}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
+              </Button>
+              <Button variant="outline" onClick={handleCancelEdit}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          )}
           <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
             <Trash2 className="h-4 w-4 mr-2" />
             Delete
@@ -749,17 +1023,67 @@ export default function OrderDetailsPage() {
           <CardHeader>
             <div className="flex justify-between items-start">
               <div>
-                <CardTitle>{order.title}</CardTitle>
-                <div className="flex items-center space-x-2 mt-1">
-                  <p className="text-sm text-muted-foreground">
-                    Order ID: <span className="font-mono">{generateOrderId()}</span>
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    | Order for {user?.role === 'partner_seller' ? '' : order?.customer_name}
-                  </p>
-                </div>
+                {isEditMode ? (
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="edit_title" className="text-sm font-medium">Order Title</Label>
+                      <input
+                        id="edit_title"
+                        name="title"
+                        value={order.title}
+                        onChange={handleInputChange}
+                        className="w-full p-2 border rounded mt-1"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="edit_status" className="text-sm font-medium">Status</Label>
+                        <select
+                          id="edit_status"
+                          name="status"
+                          value={order.status}
+                          onChange={handleStatusChange}
+                          className="w-full p-2 border rounded mt-1"
+                        >
+                          <option value="new">New</option>
+                          <option value="in_progress">In Progress</option>
+                          <option value="completed">Completed</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
+                      </div>
+                      <div>
+                        <Label htmlFor="edit_partner" className="text-sm font-medium">Production Partner</Label>
+                        <select
+                          id="edit_partner"
+                          value={selectedPartnerId}
+                          onChange={(e) => setSelectedPartnerId(e.target.value)}
+                          className="w-full p-2 border rounded mt-1"
+                        >
+                          <option value="">Select a partner...</option>
+                          {partners.map((partner) => (
+                            <option key={partner.id} value={partner.id}>
+                              {partner.company_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <CardTitle>{order.title}</CardTitle>
+                    <div className="flex items-center space-x-2 mt-1">
+                      <p className="text-sm text-muted-foreground">
+                        Order ID: <span className="font-mono">{generateOrderId()}</span>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        | Order for {user?.role === 'partner_seller' ? '' : order?.customer_name}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
-              {getStatusBadge(order.status)}
+              {!isEditMode && getStatusBadge(order.status)}
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -767,10 +1091,25 @@ export default function OrderDetailsPage() {
               <div>
                 <h3 className="font-medium mb-2">Order Details</h3>
                 <div className="space-y-2">
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Total Amount:</span>{' '}
-                    {user?.role === 'partner_seller' ? '' : formatCurrency(order.total_amount, order.currency)}
-                  </p>
+                  {isEditMode ? (
+                    <div>
+                      <Label htmlFor="edit_total_amount" className="text-sm font-medium">Total Amount</Label>
+                      <input
+                        id="edit_total_amount"
+                        name="total_amount"
+                        type="number"
+                        value={order.total_amount}
+                        onChange={handleInputChange}
+                        className="w-full p-2 border rounded mt-1"
+                        disabled={user?.role === 'partner_seller'}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-sm">
+                      <span className="text-muted-foreground">Total Amount:</span>{' '}
+                      {user?.role === 'partner_seller' ? '' : formatCurrency(order.total_amount, order.currency)}
+                    </p>
+                  )}
                   <p className="text-sm">
                     <span className="text-muted-foreground">Created:</span>{' '}
                     {format(new Date(order.created_at), 'PPP')}
@@ -786,19 +1125,57 @@ export default function OrderDetailsPage() {
               <div>
                 <h3 className="font-medium mb-2">Production Schedule</h3>
                 <div className="space-y-2">
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Start Date:</span>{' '}
-                    {order.start_date ? format(new Date(order.start_date), 'PPP') : 'Not set'}
-                  </p>
-                  <p className="text-sm">
-                    <span className="text-muted-foreground">Delivery Date:</span>{' '}
-                    {order.delivery_date ? format(new Date(order.delivery_date), 'PPP') : 'Not set'}
-                  </p>
+                  {isEditMode ? (
+                    <div className="space-y-2">
+                      <div>
+                        <Label htmlFor="edit_start_date" className="text-sm font-medium">Start Date</Label>
+                        <input
+                          id="edit_start_date"
+                          name="start_date"
+                          type="date"
+                          value={order.start_date ? new Date(order.start_date).toISOString().split('T')[0] : ''}
+                          onChange={handleInputChange}
+                          className="w-full p-2 border rounded mt-1"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit_delivery_date" className="text-sm font-medium">Delivery Date</Label>
+                        <input
+                          id="edit_delivery_date"
+                          name="delivery_date"
+                          type="date"
+                          value={order.delivery_date ? new Date(order.delivery_date).toISOString().split('T')[0] : ''}
+                          onChange={handleInputChange}
+                          className="w-full p-2 border rounded mt-1"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Start Date:</span>{' '}
+                        {order.start_date ? format(new Date(order.start_date), 'PPP') : 'Not set'}
+                      </p>
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Delivery Date:</span>{' '}
+                        {order.delivery_date ? format(new Date(order.delivery_date), 'PPP') : 'Not set'}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* General files */}
+            {isProcessingFiles && (
+              <div className="border-t pt-4 mt-4">
+                <div className="flex items-center gap-2 text-blue-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <span className="text-sm">Organizing files...</span>
+                </div>
+              </div>
+            )}
+            
             {getGeneralFiles().length > 0 && (
               <div className="border-t pt-4 mt-4">
                 <h3 className="font-medium mb-2">Quote Files</h3>
@@ -827,6 +1204,47 @@ export default function OrderDetailsPage() {
                   <Download className="h-4 w-4 mr-2" />
                   Download All Files (Zip)
                 </Button>
+              </div>
+            )}
+
+            {/* Files Summary */}
+            {!isProcessingFiles && quoteFiles.length > 0 && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                <div className="text-sm text-gray-600">
+                  <strong>Files Summary:</strong> {quoteFiles.length} total files
+                  {Object.keys(partFiles).length > 0 && (
+                    <span>, {Object.keys(partFiles).length} parts have organized files</span>
+                  )}
+                </div>
+                {Object.keys(partFiles).length > 0 && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    {Object.entries(partFiles).map(([partId, files]) => {
+                      const part = parts.find(p => p.id === partId);
+                      return (
+                        <div key={partId}>
+                          • {part?.name || partId}: {files.length} files
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {/* Debug Information */}
+                <details className="mt-3">
+                  <summary className="text-xs text-blue-600 cursor-pointer">Debug Info</summary>
+                  <div className="mt-2 text-xs text-gray-600 space-y-1">
+                    <div><strong>Parts:</strong> {parts.length} parts loaded</div>
+                    <div><strong>Order Items:</strong> {orderItems.length} items</div>
+                    <div><strong>Part Files Keys:</strong> {Object.keys(partFiles).join(', ') || 'None'}</div>
+                    <div><strong>Quote Files:</strong> {quoteFiles.length} files</div>
+                    {parts.length > 0 && (
+                      <div><strong>Part Names:</strong> {parts.map(p => p.name).join(', ')}</div>
+                    )}
+                    {orderItems.length > 0 && (
+                      <div><strong>Order Item Names:</strong> {orderItems.map(i => i.product_name).join(', ')}</div>
+                    )}
+                  </div>
+                </details>
               </div>
             )}
 
@@ -950,157 +1368,6 @@ export default function OrderDetailsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDelete}>Delete</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Edit Order</DialogTitle>
-            <DialogDescription>
-              Make changes to your order information below.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-            <div className="grid gap-2">
-              <Label htmlFor="orderID">Order ID</Label>
-              <div className="font-mono p-2 bg-muted rounded">{generateOrderId()}</div>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label htmlFor="title">Order Title</Label>
-              <input
-                id="title"
-                name="title"
-                value={order.title}
-                onChange={handleInputChange}
-                className="w-full p-2 border rounded"
-              />
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="customer">Customer</Label>
-                <div className="p-2 bg-muted rounded">{user?.role === 'partner_seller' ? '' : order?.customer_name}</div>
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="status">Status</Label>
-                <select
-                  id="status"
-                  name="status"
-                  value={order.status}
-                  onChange={handleStatusChange}
-                  className="w-full p-2 border rounded"
-                >
-                  <option value="new">New</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-            </div>
-            
-            <div className="grid gap-2">
-              <Label htmlFor="partner">Production Partner</Label>
-              <select
-                id="partner"
-                value={selectedPartnerId}
-                onChange={(e) => setSelectedPartnerId(e.target.value)}
-                className="w-full p-2 border rounded"
-              >
-                <option value="">Select a partner...</option>
-                {partners.map((partner) => (
-                  <option key={partner.id} value={partner.id}>
-                    {partner.company_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="start_date">Start Date</Label>
-                <input
-                  id="start_date"
-                  name="start_date"
-                  type="date"
-                  value={order.start_date ? new Date(order.start_date).toISOString().split('T')[0] : ''}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                />
-              </div>
-              
-              <div className="grid gap-2">
-                <Label htmlFor="delivery_date">Delivery Date</Label>
-                <input
-                  id="delivery_date"
-                  name="delivery_date"
-                  type="date"
-                  value={order.delivery_date ? new Date(order.delivery_date).toISOString().split('T')[0] : ''}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded"
-                />
-              </div>
-            </div>
-            
-            {user?.role !== 'partner_seller' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="total_amount">Order Value</Label>
-                  <input
-                    id="total_amount"
-                    name="total_amount"
-                    type="number"
-                    value={order.total_amount}
-                    onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
-                  />
-                </div>
-                
-                <div className="grid gap-2">
-                  <Label htmlFor="currency">Currency</Label>
-                  <select
-                    id="currency"
-                    name="currency"
-                    value={order.currency}
-                    onChange={handleInputChange}
-                    className="w-full p-2 border rounded"
-                  >
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
-                    <option value="GBP">GBP</option>
-                    <option value="JPY">JPY</option>
-                  </select>
-                </div>
-              </div>
-            )}
-            
-            <div className="grid gap-2">
-              <Label>Order Items</Label>
-              <div className="border rounded-lg divide-y">
-                {orderItems.map((item) => (
-                  <div key={item.id} className="p-3 flex justify-between items-center">
-                    <div>
-                      <div className="font-medium">{item.product_name}</div>
-                      <div className="text-sm text-muted-foreground">{item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}</div>
-                    </div>
-                    <div className="font-medium">{user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleSaveChanges}
-            >
-              Save Changes
-            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
