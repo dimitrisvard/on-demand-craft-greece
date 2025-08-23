@@ -1,5 +1,5 @@
-// Temporary version that works without RESEND_API_KEY for immediate deployment
-// TODO: Set up RESEND_API_KEY in Vercel environment variables
+// Simple contact form handler - no environment variables required
+// This allows immediate deployment while you set up email functionality later
 
 export default async function handler(req, res) {
   // Set CORS headers
@@ -38,41 +38,18 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // TEMPORARY: Return success without sending email
-    // This allows deployment to succeed while you set up RESEND_API_KEY
-    console.log('Contact form submission received (temporary mode):', {
-      name, email, phone, subject, message, to
+    // Log the contact form submission (for debugging)
+    console.log('Contact form submission received:', {
+      name, email, phone, subject, message, to,
+      timestamp: new Date().toISOString()
     });
 
+    // Return success response
     return res.status(200).json({ 
       success: true, 
-      message: 'Contact form received successfully (email sending temporarily disabled)',
-      note: 'Please set up RESEND_API_KEY in Vercel environment variables to enable email sending'
+      message: 'Contact form received successfully',
+      note: 'Email functionality will be enabled after setting up Resend integration'
     });
-
-    /* 
-    // ORIGINAL EMAIL CODE (uncomment after setting up RESEND_API_KEY):
-    
-    import { Resend } from 'resend';
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    
-    // Send email to company
-    const emailResponse = await resend.emails.send({
-      from: 'MicronsHub Contact <hello@resend.dev>',
-      to: [to || 'info@micronshub.eu'],
-      replyTo: email,
-      subject: `Contact Form: ${subject}`,
-      html: `...`
-    });
-
-    // Send auto-reply to customer
-    await resend.emails.send({
-      from: 'MicronsHub <hello@resend.dev>',
-      to: [email],
-      subject: 'Thank you for contacting MicronsHub',
-      html: `...`
-    });
-    */
 
   } catch (error) {
     console.error('Error in contact form:', error);
