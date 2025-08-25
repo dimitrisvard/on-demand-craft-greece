@@ -28,16 +28,12 @@ const Contact = () => {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch('/api/contact', {
+      const response = await fetch('/api/email', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          to: 'info@micronshub.eu',
-          subject: `New Contact Form Submission: ${formState.subject}`,
-          ...formState
-        }),
+        body: JSON.stringify(formState),
       });
 
       if (!response.ok) {

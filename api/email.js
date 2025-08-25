@@ -1,4 +1,3 @@
-// Contact form handler using Resend email service
 import { Resend } from 'resend';
 
 // Initialize Resend with your API key
@@ -112,26 +111,17 @@ export default async function handler(req, res) {
       `
     });
 
-    // Log the contact form submission (for debugging)
-    console.log('Contact form submission received:', {
-      name,
-      email,
-      subject,
-      companyEmailId: companyEmail.data?.id,
-      customerEmailId: customerEmail.data?.id
-    });
-
     return res.status(200).json({
       success: true,
-      message: 'Contact form received successfully',
+      message: 'Email sent successfully',
       companyEmailId: companyEmail.data?.id,
       customerEmailId: customerEmail.data?.id
     });
 
   } catch (error) {
-    console.error('Error in contact form:', error);
+    console.error('Email sending error:', error);
     return res.status(500).json({
-      error: 'Failed to process contact form',
+      error: 'Failed to send email',
       details: error.message
     });
   }
