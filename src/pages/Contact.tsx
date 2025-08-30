@@ -126,7 +126,7 @@ const Contact = () => {
                   </div>
                   <div>
                     <h3 className="font-bold text-lg">{t('contact_call_us', 'Call Us')}</h3>
-                    <p className="text-gray-600">{t('contact_phone', '+30-210-444-7830')}</p>
+                    <p className="text-gray-600">{t('contact_phone')}</p>
                   </div>
                 </div>
                 

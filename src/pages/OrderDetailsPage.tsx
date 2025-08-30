@@ -581,7 +581,7 @@ export default function OrderDetailsPage() {
         address_lines: [
           'Kosti Fragkouli 3',
           'Heraklion Greece 71414',
-          '+30-210-444-7830',
+          '+30-697-00-77-401',
           'info@micronshub.eu',
           'VAT ID EL137232320'
         ],
@@ -709,7 +709,7 @@ export default function OrderDetailsPage() {
       
       <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
         <strong>This order is subject to our general terms and conditions.</strong><br/><br/>
-        All prices and shipping costs will be provided separately. Should you have any questions, please do not hesitate to call us at <strong>+30-210-444-7830</strong>
+        All prices and shipping costs will be provided separately. Should you have any questions, please do not hesitate to call us at <strong>+30-697-00-77-401</strong>
       </div>
       
       <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">

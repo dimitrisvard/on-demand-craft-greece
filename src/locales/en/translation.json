@@ -443,5 +443,14 @@
   "quote_form_contact_person": "Contact Person",
   "quote_form_name": "Name",
   "quote_form_files": "Files",
-  "quote_form_files_uploaded_count": "files uploaded"
+  "quote_form_files_uploaded_count": "files uploaded",
+  "contact_hero_title": "Contact Us",
+  "contact_hero_subtitle": "Get in touch with our team. We're here to help with your manufacturing needs.",
+  "contact_call_us": "Call Us",
+  "contact_phone": "+30-697-00-77-401",
+  "contact_business_hours": "Business Hours",
+  "contact_hours_weekdays": "Monday - Friday: 9:00 AM - 6:00 PM",
+  "contact_hours_weekend": "Saturday - Sunday: Closed",
+  "contact_send_message": "Send Us a Message",
+  "contact_form_success_message": "We'll get back to you as soon as possible."
 }
