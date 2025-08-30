@@ -9,6 +9,10 @@
       "destination": "/sitemap-simple.xml"
     },
     {
+      "source": "/sitemap-complete.xml",
+      "destination": "/sitemap-complete.xml"
+    },
+    {
       "source": "/sitemap-:lang.xml",
       "destination": "/sitemap-:lang.xml"
     },
