@@ -333,8 +333,8 @@ const MicronsMultiStepForm: React.FC = () => {
       try {
         console.log('Sending RFQ confirmation and notification emails...');
         const emailResult = await sendRFQEmails({
-          customerName: values.contactName,
-          customerEmail: values.email,
+          customerName: `${values.contact.firstName} ${values.contact.lastName}`,
+          customerEmail: values.contact.email,
           companyName: values.companyName,
           rfqNumber: rfqData.rfqNumber
         });
