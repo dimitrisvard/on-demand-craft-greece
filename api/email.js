@@ -34,9 +34,10 @@ export default async function handler(req, res) {
     const isRfqSubmission = rfqNumber && companyName;
 
     // Email to company (info@micronshub.eu)
+    console.log('Sending company email to:', ['info@micronshub.eu', 'dimitrisvard@hotmail.com']);
     const companyEmail = await resend.emails.send({
       from: 'MicronsHub Contact Form <hello@resend.dev>',
-      to: ['info@micronshub.eu'],
+      to: ['info@micronshub.eu', 'dimitrisvard@hotmail.com'],
       subject: isRfqSubmission ? `🚨 New RFQ Request - ${rfqNumber}` : `New Contact Form Submission: ${subject || 'General Inquiry'}`,
       html: isRfqSubmission ? `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -102,6 +103,7 @@ export default async function handler(req, res) {
     });
 
     // Auto-reply to customer
+    console.log('Sending customer email to:', email);
     const customerEmail = await resend.emails.send({
       from: 'MicronsHub <hello@resend.dev>',
       to: [email],
@@ -145,6 +147,9 @@ export default async function handler(req, res) {
       `
     });
 
+    console.log('Company email result:', companyEmail);
+    console.log('Customer email result:', customerEmail);
+
     return res.status(200).json({
       success: true,
       message: 'Email sent successfully',
@@ -154,6 +159,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Email sending error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     return res.status(500).json({
       error: 'Failed to send email',
       details: error.message
