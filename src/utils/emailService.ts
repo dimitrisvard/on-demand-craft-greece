@@ -18,6 +18,18 @@ interface InternalNotificationEmailData {
 export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ confirmationSent: boolean; notificationSent: boolean }> => {
   try {
     console.log('Sending RFQ emails via Vercel API...');
+    console.log('RFQ data:', data);
+    
+    const emailData = {
+      name: data.customerName,
+      email: data.customerEmail,
+      subject: `RFQ Request - ${data.rfqNumber}`,
+      message: `RFQ Number: ${data.rfqNumber}\nCompany: ${data.companyName}\n\nThis is an automated RFQ submission notification.`,
+      rfqNumber: data.rfqNumber,
+      companyName: data.companyName
+    };
+    
+    console.log('Sending email data:', emailData);
     
     // Use the existing /api/email.js endpoint with RFQ data
     const response = await fetch('/api/email', {
@@ -25,14 +37,7 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        name: data.customerName,
-        email: data.customerEmail,
-        subject: `RFQ Request - ${data.rfqNumber}`,
-        message: `RFQ Number: ${data.rfqNumber}\nCompany: ${data.companyName}\n\nThis is an automated RFQ submission notification.`,
-        rfqNumber: data.rfqNumber,
-        companyName: data.companyName
-      })
+      body: JSON.stringify(emailData)
     });
 
     if (!response.ok) {

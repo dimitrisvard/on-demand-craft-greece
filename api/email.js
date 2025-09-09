@@ -21,10 +21,12 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log('API received body:', req.body);
     const { name, email, phone, subject, message, rfqNumber, companyName } = req.body;
 
     // Validate required fields
     if (!name || !email || !message) {
+      console.log('Validation failed - missing fields:', { name: !!name, email: !!email, message: !!message });
       return res.status(400).json({ 
         error: 'Missing required fields: name, email, and message are required' 
       });
