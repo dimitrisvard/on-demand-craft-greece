@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { name, email, phone, subject, message } = req.body;
+    const { name, email, phone, subject, message, rfqNumber, companyName } = req.body;
 
     // Validate required fields
     if (!name || !email || !message) {
@@ -30,12 +30,46 @@ export default async function handler(req, res) {
       });
     }
 
+    // Check if this is an RFQ submission
+    const isRfqSubmission = rfqNumber && companyName;
+
     // Email to company (info@micronshub.eu)
     const companyEmail = await resend.emails.send({
       from: 'MicronsHub Contact Form <hello@resend.dev>',
       to: ['info@micronshub.eu'],
-      subject: `New Contact Form Submission: ${subject || 'General Inquiry'}`,
-      html: `
+      subject: isRfqSubmission ? `🚨 New RFQ Request - ${rfqNumber}` : `New Contact Form Submission: ${subject || 'General Inquiry'}`,
+      html: isRfqSubmission ? `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #dc2626;">🚨 New RFQ Request Received</h2>
+          
+          <div style="background: #fef2f2; border: 2px solid #fecaca; padding: 25px; border-radius: 12px; margin: 20px 0;">
+            <h3 style="color: #dc2626; margin-top: 0;">RFQ Details</h3>
+            <p><strong>RFQ Number:</strong> ${rfqNumber}</p>
+            <p><strong>Company:</strong> ${companyName}</p>
+            <p><strong>Contact Person:</strong> ${name}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
+          </div>
+          
+          <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
+            <p style="color: #1e40af; font-size: 14px; margin: 0; font-weight: bold;">📋 Action Required:</p>
+            <p style="color: #1e40af; font-size: 14px; margin: 5px 0 0 0;">
+              Please review the quote request in the admin dashboard and prepare a response within 24 hours.
+            </p>
+          </div>
+          
+          <div style="margin-top: 30px; padding: 20px; background: #ecfdf5; border-radius: 8px;">
+            <p style="margin: 0; color: #065f46;">
+              <strong>Reply directly to:</strong> ${email}
+            </p>
+          </div>
+          
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+          <p style="color: #64748b; font-size: 14px;">
+            This email was sent from the MicronsHub RFQ system at ${new Date().toLocaleString()}
+          </p>
+        </div>
+      ` : `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #2563eb;">New Contact Form Submission</h2>
           
@@ -71,7 +105,7 @@ export default async function handler(req, res) {
     const customerEmail = await resend.emails.send({
       from: 'MicronsHub <hello@resend.dev>',
       to: [email],
-      subject: 'Thank you for contacting MicronsHub',
+      subject: isRfqSubmission ? 'Thank You for Your Quotation – Microns Hubs' : 'Thank you for contacting MicronsHub',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="text-align: center; margin-bottom: 30px;">

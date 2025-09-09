@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getOrCreateCustomer } from '@/utils/customerUtils';
 import { trackQuoteRequest, trackFormSubmission } from '@/utils/analytics';
+import { sendRFQEmails } from '@/utils/emailService';
 
 const validationSchemas = [
   // Step 1: Company & Contact Information
@@ -417,6 +418,32 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             }
           }
         }
+      }
+
+      // Send confirmation and notification emails
+      try {
+        console.log('Sending RFQ confirmation and notification emails...');
+        const emailResult = await sendRFQEmails({
+          customerName: values.contactName,
+          customerEmail: values.email,
+          companyName: values.companyName,
+          rfqNumber: rfqNumber
+        });
+        
+        if (emailResult.confirmationSent) {
+          console.log('Confirmation email sent successfully');
+        } else {
+          console.warn('Failed to send confirmation email');
+        }
+        
+        if (emailResult.notificationSent) {
+          console.log('Notification email sent successfully');
+        } else {
+          console.warn('Failed to send notification email');
+        }
+      } catch (emailError) {
+        console.error('Error sending emails:', emailError);
+        // Don't throw error here - we don't want email failures to break the form submission
       }
 
       // Track the quote request submission

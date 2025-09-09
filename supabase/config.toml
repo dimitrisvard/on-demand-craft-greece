@@ -4,3 +4,18 @@ verify_jwt = false
 
 [functions.send-notification-email]
 verify_jwt = false
+
+[functions.send-rfq-confirmation-email]
+verify_jwt = false
+
+[functions.send-internal-rfq-notification-email]
+verify_jwt = false
+
+[functions.send-rfq-confirmation-email-no-jwt]
+verify_jwt = false
+
+[functions.send-internal-rfq-notification-email-no-jwt]
+verify_jwt = false
+
+[functions.debug-test]
+verify_jwt = false

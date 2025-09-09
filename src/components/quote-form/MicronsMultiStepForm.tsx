@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadFile } from '@/utils/fileStorage';
 import { getOrCreateCustomer } from '@/utils/customerUtils';
+import { sendRFQEmails } from '@/utils/emailService';
 
 const steps = [
   { name: 'Company Info', component: StepCompanyInfo },
@@ -160,6 +161,42 @@ const MicronsMultiStepForm: React.FC = () => {
 
   const createRfqFromQuote = async (values: FormValues) => {
     try {
+      // Generate RFQ number
+      const today = new Date();
+      const formattedDate = today.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      }).split('/').join('');
+      
+      // Check existing RFQ numbers for today to get the next sequence number
+      const { data: existingRfqs, error: rfqsError } = await supabase
+        .from('rfqs')
+        .select('rfq_number')
+        .like('rfq_number', `RFQ-${formattedDate}-%`)
+        .order('rfq_number', { ascending: false });
+        
+      if (rfqsError) {
+        console.error('Error getting existing RFQs:', rfqsError);
+        throw rfqsError;
+      }
+      
+      let sequenceNumber = 1;
+      if (existingRfqs && existingRfqs.length > 0) {
+        // Extract the highest sequence number and increment by 1
+        const latestRfq = existingRfqs[0];
+        if (latestRfq && 'rfq_number' in latestRfq) {
+          const rfqNumber = latestRfq.rfq_number as string;
+          const match = rfqNumber.match(/RFQ-\d{8}-(\d+)/);
+          if (match && match[1]) {
+            sequenceNumber = parseInt(match[1], 10) + 1;
+          }
+        }
+      }
+      
+      const rfqNumber = `RFQ-${formattedDate}-${sequenceNumber}`;
+      console.log('Generated RFQ number:', rfqNumber);
+
       // Get or create customer based on email address
       const customerData = await getOrCreateCustomer(values);
       const customerId = customerData.id;
@@ -186,7 +223,7 @@ const MicronsMultiStepForm: React.FC = () => {
         .from('rfqs')
         .insert([
           {
-            title: `Quote - ${values.companyName} - ${new Date().toLocaleDateString()}`,
+            title: `${rfqNumber} - ${values.companyName}`,
             company_name: values.companyName,
             customer_id: customerId,
             status: 'draft',
@@ -194,7 +231,8 @@ const MicronsMultiStepForm: React.FC = () => {
             due_date: dueDate.toISOString(),
             version: 1,
             description: values.generalNotes,
-            parts_details: partsDetails
+            parts_details: partsDetails,
+            rfq_number: rfqNumber
           }
         ])
         .select()
@@ -273,7 +311,7 @@ const MicronsMultiStepForm: React.FC = () => {
       // Wait for all file uploads to complete
       await Promise.all(uploadPromises);
 
-      return rfqData;
+      return { ...rfqData, rfqNumber };
     } catch (error) {
       console.error('Error in createRfqFromQuote:', error);
       throw error;
@@ -289,6 +327,32 @@ const MicronsMultiStepForm: React.FC = () => {
       
       if (!rfqData) {
         throw new Error('Failed to create RFQ');
+      }
+      
+      // Send confirmation and notification emails
+      try {
+        console.log('Sending RFQ confirmation and notification emails...');
+        const emailResult = await sendRFQEmails({
+          customerName: values.contactName,
+          customerEmail: values.email,
+          companyName: values.companyName,
+          rfqNumber: rfqData.rfqNumber
+        });
+        
+        if (emailResult.confirmationSent) {
+          console.log('Confirmation email sent successfully');
+        } else {
+          console.warn('Failed to send confirmation email');
+        }
+        
+        if (emailResult.notificationSent) {
+          console.log('Notification email sent successfully');
+        } else {
+          console.warn('Failed to send notification email');
+        }
+      } catch (emailError) {
+        console.error('Error sending emails:', emailError);
+        // Don't throw error here - we don't want email failures to break the form submission
       }
       
       // Show success message
