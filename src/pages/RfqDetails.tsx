@@ -469,6 +469,26 @@ const RfqDetails = (props: RfqDetailsProps) => {
         
       if (itemsError) throw itemsError;
       
+      // Send partner notification if a partner is assigned
+      if (selectedPartnerId) {
+        try {
+          const { notifyPartnerOfOrderAssignment } = await import('../utils/partnerNotificationUtils');
+          const startDate = new Date().toISOString();
+          await notifyPartnerOfOrderAssignment(
+            orderData[0].id,
+            selectedPartnerId,
+            newOrderTitle,
+            startDate,
+            dueDate.toISOString(),
+            rfq.total_amount,
+            'EUR'
+          );
+        } catch (notificationError) {
+          console.error('Failed to send partner notification:', notificationError);
+          // Don't fail the order creation if notification fails
+        }
+      }
+      
       toast({
         title: "Success",
         description: "Order created successfully",

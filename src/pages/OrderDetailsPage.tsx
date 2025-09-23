@@ -805,12 +805,15 @@ export default function OrderDetailsPage() {
     if (!order || !id) return;
     
     try {
+      const previousPartnerId = order.partner_id;
+      const newPartnerId = selectedPartnerId || order.partner_id;
+      
       const { error } = await supabase
         .from('orders')
         .update({
           title: order.title,
           status: order.status,
-          partner_id: selectedPartnerId || order.partner_id,
+          partner_id: newPartnerId,
           start_date: order.start_date,
           delivery_date: order.delivery_date,
           total_amount: order.total_amount,
@@ -819,6 +822,25 @@ export default function OrderDetailsPage() {
         .eq('id', id);
         
       if (error) throw error;
+      
+      // Send partner notification if a new partner is assigned
+      if (newPartnerId && newPartnerId !== previousPartnerId) {
+        try {
+          const { notifyPartnerOfOrderAssignment } = await import('../utils/partnerNotificationUtils');
+          await notifyPartnerOfOrderAssignment(
+            id,
+            newPartnerId,
+            order.title,
+            order.start_date || new Date().toISOString(),
+            order.delivery_date || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+            order.total_amount,
+            order.currency || 'EUR'
+          );
+        } catch (notificationError) {
+          console.error('Failed to send partner notification:', notificationError);
+          // Don't fail the order update if notification fails
+        }
+      }
       
       toast({
         title: "Success",

@@ -396,6 +396,9 @@ export default function RfqManagement() {
           .insert(orderItems);
 
         if (orderItemsError) throw orderItemsError;
+
+        // Note: This order creation doesn't assign a partner, so no notification needed
+        // If partner assignment is added later, notification should be implemented here
       }
 
       toast({
