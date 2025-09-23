@@ -78,8 +78,7 @@ export default function PartnerManagement() {
     phone: "",
     country: "",
     specializations: [],
-    active: true,
-    partner_id: ""
+    active: true
   });
 
   const { toast } = useToast();
@@ -89,12 +88,6 @@ export default function PartnerManagement() {
     fetchPartners();
   }, []);
 
-  const generatePartnerId = () => {
-    const prefix = "PART";
-    const timestamp = Date.now().toString().slice(-6); // Use last 6 digits of timestamp
-    const randomDigits = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    return `${prefix}-${timestamp}-${randomDigits}`;
-  };
 
   async function fetchPartners() {
     try {
@@ -206,7 +199,6 @@ export default function PartnerManagement() {
           country: formData.country,
           specializations: formData.specializations,
           active: formData.active,
-          partner_id: formData.partner_id,
           updated_at: new Date().toISOString(),
         })
         .eq('id', selectedPartner.id);
@@ -243,7 +235,6 @@ export default function PartnerManagement() {
       }
 
       // 1. Insert into production_partners (no auth user creation needed)
-      const partner_id = formData.partner_id || generatePartnerId();
       const { data, error } = await supabase
         .from('production_partners')
         .insert([{
@@ -253,8 +244,7 @@ export default function PartnerManagement() {
           phone: formData.phone || null,
           country: formData.country || null,
           specializations: formData.specializations || [],
-          active: formData.active !== undefined ? formData.active : true,
-          partner_id: partner_id
+          active: formData.active !== undefined ? formData.active : true
         }])
         .select();
 
@@ -274,8 +264,7 @@ export default function PartnerManagement() {
         phone: "",
         country: "",
         specializations: [],
-        active: true,
-        partner_id: ""
+        active: true
       });
     } catch (error: any) {
       toast({
@@ -364,8 +353,7 @@ export default function PartnerManagement() {
             phone: "",
             country: "",
             specializations: [],
-            active: true,
-            partner_id: generatePartnerId()
+            active: true
           });
           setIsAddDialogOpen(true);
         }}>
@@ -503,17 +491,6 @@ export default function PartnerManagement() {
               <TabsContent value="details">
                 <form onSubmit={handleSubmit}>
                   <div className="space-y-4 mb-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="partner_id">Partner ID</Label>
-                      <Input
-                        id="partner_id"
-                        name="partner_id"
-                        value={formData.partner_id || ""}
-                        onChange={handleFormChange}
-                        readOnly
-                        className="bg-slate-50"
-                      />
-                    </div>
                   
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -691,17 +668,6 @@ export default function PartnerManagement() {
 
           <form onSubmit={handleCreatePartner}>
             <div className="space-y-4 mb-4">
-              <div className="space-y-2">
-                <Label htmlFor="new_partner_id">Partner ID</Label>
-                <Input
-                  id="new_partner_id"
-                  name="partner_id"
-                  value={formData.partner_id || ""}
-                  onChange={handleFormChange}
-                  readOnly
-                  className="bg-slate-50"
-                />
-              </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
