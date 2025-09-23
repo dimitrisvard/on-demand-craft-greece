@@ -51,14 +51,9 @@ export default async function handler(req, res) {
     const partnerEmailResult = await resend.emails.send({
       from: 'MicronsHub Production <info@micronshub.eu>',
       to: [partnerEmail],
-      subject: `[TEST] New Production Order Received - TEST-ORDER-001`,
+      subject: `[TEST] New Production Order Received - Test Production Order`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; padding: 20px;">
-          <div style="text-align: center; margin-bottom: 30px;">
-            <img src="https://micronshub.eu/logo.png" alt="MicronsHub Logo" style="height: 60px; margin-bottom: 20px;">
-            <h1 style="color: #2563eb; font-size: 28px; margin: 0;">Microns Hubs</h1>
-            <p style="color: #64748b; font-size: 16px; margin: 5px 0 0 0;">Precision Manufacturing Solutions</p>
-          </div>
           
           <div style="background: #f0f9ff; border: 2px solid #0ea5e9; padding: 25px; border-radius: 12px; margin: 20px 0;">
             <h2 style="color: #0c4a6e; font-size: 24px; margin: 0 0 20px 0;">🏭 New Production Order Received</h2>
@@ -75,15 +70,9 @@ export default async function handler(req, res) {
           <div style="background: #f8fafc; padding: 25px; border-radius: 12px; margin: 20px 0;">
             <h3 style="color: #1e293b; font-size: 20px; margin: 0 0 20px 0;">Order Information</h3>
             
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-              <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <p style="color: #374151; font-size: 14px; margin: 0 0 5px 0; font-weight: bold;">Order ID</p>
-                <p style="color: #1f2937; font-size: 18px; margin: 0; font-family: monospace;">TEST-ORDER-001</p>
-              </div>
-              <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <p style="color: #374151; font-size: 14px; margin: 0 0 5px 0; font-weight: bold;">Order Title</p>
-                <p style="color: #1f2937; font-size: 16px; margin: 0;">Test Production Order</p>
-              </div>
+            <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+              <p style="color: #374151; font-size: 14px; margin: 0 0 5px 0; font-weight: bold;">Order Title</p>
+              <p style="color: #1f2937; font-size: 16px; margin: 0;">Test Production Order</p>
             </div>
             
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
@@ -95,11 +84,6 @@ export default async function handler(req, res) {
                 <p style="color: #92400e; font-size: 14px; margin: 0 0 5px 0; font-weight: bold;">🚚 Delivery Date</p>
                 <p style="color: #b45309; font-size: 16px; margin: 0; font-weight: 500;">${formatDate(deliveryDate)}</p>
               </div>
-            </div>
-            
-            <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
-              <p style="color: #374151; font-size: 14px; margin: 0 0 5px 0; font-weight: bold;">Total Order Value</p>
-              <p style="color: #1f2937; font-size: 20px; margin: 0; font-weight: bold;">EUR 1,500.00</p>
             </div>
           </div>
           
