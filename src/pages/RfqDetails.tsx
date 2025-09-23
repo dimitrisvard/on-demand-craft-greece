@@ -442,7 +442,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
             title: newOrderTitle,
             customer_id: rfq.customer_id,
             rfq_id: rfq.id,
-            partner_id: selectedPartnerId || null,
+            partner_id: selectedPartnerId && selectedPartnerId !== 'none' ? selectedPartnerId : null,
             currency: 'EUR',
             status: 'new',
             total_amount: rfq.total_amount,
@@ -470,7 +470,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
       if (itemsError) throw itemsError;
       
       // Send partner notification if a partner is assigned
-      if (selectedPartnerId) {
+      if (selectedPartnerId && selectedPartnerId !== 'none') {
         try {
           const { notifyPartnerOfOrderAssignment } = await import('../utils/partnerNotificationUtils');
           const startDate = new Date().toISOString();
@@ -1973,9 +1973,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     <SelectValue placeholder="Select a production partner" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No partner assigned</SelectItem>
+                    <SelectItem value="none">No partner assigned</SelectItem>
                     {isLoadingPartners ? (
-                      <SelectItem value="" disabled>Loading partners...</SelectItem>
+                      <SelectItem value="loading" disabled>Loading partners...</SelectItem>
                     ) : (
                       productionPartners.map((partner) => (
                         <SelectItem key={partner.id} value={partner.id}>

@@ -382,7 +382,7 @@ const StepPartDetails: React.FC<StepPartDetailsProps> = ({ formikProps }) => {
                           <SelectValue placeholder="No surface treatment" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No surface treatment</SelectItem>
+                          <SelectItem value="none">No surface treatment</SelectItem>
                           <SelectItem value="anodizing">Anodizing</SelectItem>
                           <SelectItem value="powder-coating">Powder Coating</SelectItem>
                           <SelectItem value="painting">Painting</SelectItem>
