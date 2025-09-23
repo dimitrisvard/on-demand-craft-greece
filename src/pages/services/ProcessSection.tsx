@@ -47,12 +47,6 @@ const ProcessSection = () => {
             </div>
           ))}
         </div>
-        
-        <div className="text-center mt-12">
-          <Link to={getLocalizedPath('/how-it-works')} className="btn-primary inline-flex items-center">
-            {t('services_process_view_detailed', 'View Detailed Process')} <ArrowRight size={16} className="ml-2" />
-          </Link>
-        </div>
       </div>
     </section>
   );

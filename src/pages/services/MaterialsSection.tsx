@@ -60,12 +60,6 @@ const MaterialsSection = () => {
             </ul>
           </div>
         </div>
-        
-        <div className="text-center mt-12">
-          <Link to={getLocalizedPath('/materials')} className="text-brand-teal hover:underline inline-flex items-center font-medium">
-            {t('services_materials_view_guide', 'View Complete Materials Guide')} <ArrowRight size={16} className="ml-2" />
-          </Link>
-        </div>
       </div>
     </section>
   );

@@ -34,16 +34,6 @@ const QuoteSuccess = () => {
   return (
     <div className="min-h-screen pt-20 pb-10">
       <div className="container-custom max-w-2xl">
-        {/* Logo Section */}
-        <div className="text-center mb-8">
-          <img 
-            src="/logo.png" 
-            alt="MicronsHub Logo" 
-            className="h-16 mx-auto mb-4"
-          />
-          <h1 className="text-3xl font-bold text-gray-900">MicronsHub</h1>
-          <p className="text-gray-600">Precision Manufacturing Solutions</p>
-        </div>
 
         {/* Success Message Box */}
         <div className="bg-white rounded-lg shadow-lg p-8 text-center">
