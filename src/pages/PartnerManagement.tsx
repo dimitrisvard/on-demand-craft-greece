@@ -79,8 +79,7 @@ export default function PartnerManagement() {
     country: "",
     specializations: [],
     active: true,
-    partner_id: "",
-    password: ""
+    partner_id: ""
   });
 
   const { toast } = useToast();
@@ -158,7 +157,7 @@ export default function PartnerManagement() {
 
   async function handlePartnerSelect(partner: Partner) {
     setSelectedPartner(partner);
-    setFormData({ ...partner, password: "" });
+    setFormData({ ...partner });
     await fetchPartnerRatings(partner.id);
     await fetchPartnerOrders(partner.id);
     setIsDialogOpen(true);
@@ -214,47 +213,6 @@ export default function PartnerManagement() {
 
       if (error) throw error;
 
-      // 2. If password is set, update it via Edge Function
-      if (formData.password && formData.password.length > 0) {
-        // Find the user id from user_roles by partner id
-        const { data: userRole, error: userRoleError } = await supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('user_id', selectedPartner.id)
-          .maybeSingle();
-        if (userRoleError) throw userRoleError;
-        const userId = userRole?.user_id;
-        if (userId) {
-          // Call Edge Function
-          const resp = await fetch(ADMIN_PASSWORD_UPDATE_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${ADMIN_PASSWORD_UPDATE_SECRET}`
-            },
-            body: JSON.stringify({ userId, newPassword: formData.password })
-          });
-          const result = await resp.json();
-          if (!resp.ok) {
-            toast({
-              title: 'Password update failed',
-              description: result.error || 'Unknown error',
-              variant: 'destructive',
-            });
-          } else {
-            toast({
-              title: 'Password updated',
-              description: 'Partner password updated successfully',
-            });
-          }
-        } else {
-          toast({
-            title: 'User not found',
-            description: 'Could not find user for password update',
-            variant: 'destructive',
-          });
-        }
-      }
 
       toast({
         title: "Success",
@@ -275,37 +233,16 @@ export default function PartnerManagement() {
   async function handleCreatePartner(e: React.FormEvent) {
     e.preventDefault();
     try {
-      if (!formData.company_name || !formData.contact_name || !formData.email || !formData.password) {
+      if (!formData.company_name || !formData.contact_name || !formData.email) {
         toast({
           title: "Error",
-          description: "Company name, contact name, email, and password are required",
+          description: "Company name, contact name, and email are required",
           variant: "destructive",
         });
         return;
       }
 
-      // 1. Create Supabase auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            first_name: formData.contact_name,
-            last_name: formData.company_name
-          }
-        }
-      });
-      if (authError) throw authError;
-      const userId = authData.user?.id;
-      if (!userId) throw new Error('Failed to create user');
-
-      // 2. Assign role in user_roles
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert([{ user_id: userId, role: 'partner_seller' }]);
-      if (roleError) throw roleError;
-
-      // 3. Insert into production_partners
+      // 1. Insert into production_partners (no auth user creation needed)
       const partner_id = formData.partner_id || generatePartnerId();
       const { data, error } = await supabase
         .from('production_partners')
@@ -316,7 +253,7 @@ export default function PartnerManagement() {
           phone: formData.phone || null,
           country: formData.country || null,
           specializations: formData.specializations || [],
-          active: formData.active,
+          active: formData.active !== undefined ? formData.active : true,
           partner_id: partner_id
         }])
         .select();
@@ -338,8 +275,7 @@ export default function PartnerManagement() {
         country: "",
         specializations: [],
         active: true,
-        partner_id: "",
-        password: ""
+        partner_id: ""
       });
     } catch (error: any) {
       toast({
@@ -429,8 +365,7 @@ export default function PartnerManagement() {
             country: "",
             specializations: [],
             active: true,
-            partner_id: generatePartnerId(),
-            password: ""
+            partner_id: generatePartnerId()
           });
           setIsAddDialogOpen(true);
         }}>
@@ -645,18 +580,6 @@ export default function PartnerManagement() {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="password">Password</Label>
-                      <Input
-                        id="password"
-                        name="password"
-                        type="password"
-                        value={formData.password ?? ""}
-                        onChange={handleFormChange}
-                        autoComplete="new-password"
-                        placeholder="Change password (leave blank to keep current)"
-                      />
-                    </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="country">Country</Label>
@@ -866,18 +789,6 @@ export default function PartnerManagement() {
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="new_password">Password</Label>
-                <Input
-                  id="new_password"
-                  name="password"
-                  type="password"
-                  value={formData.password || ""}
-                  onChange={handleFormChange}
-                  placeholder="Password"
-                  required
-                />
-              </div>
             </div>
 
             <DialogFooter>
