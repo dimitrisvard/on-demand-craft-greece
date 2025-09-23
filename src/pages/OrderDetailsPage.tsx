@@ -154,6 +154,18 @@ export default function OrderDetailsPage() {
     try {
       setIsProcessingFiles(true);
       console.log('Fetching quote files for RFQ:', rfqId);
+      
+      // Validate inputs
+      if (!rfqId) {
+        console.warn('No RFQ ID provided to fetchQuoteFiles');
+        return;
+      }
+      
+      if (!Array.isArray(partsDetails)) {
+        console.warn('partsDetails is not an array:', partsDetails);
+        return;
+      }
+      
       const files = await getRfqFiles(rfqId);
       console.log('Files retrieved:', files);
       setQuoteFiles(files as QuoteFile[]);
@@ -163,13 +175,20 @@ export default function OrderDetailsPage() {
       const byPart: Record<string, QuoteFile[]> = {};
       
       // Get the list of part IDs from partsDetails
-      const partIds = partsDetails.map(item => item.id);
+      const partIds = partsDetails.map(item => item.id).filter(Boolean);
       
       // Create mapping of part name to part ID for matching by name
       const partNameToId: Record<string, string> = {};
       partsDetails.forEach(item => {
+        // Get the name property (could be 'name' or 'product_name')
+        const itemName = item.name || item.product_name;
+        if (!itemName) {
+          console.warn('Item missing name property:', item);
+          return;
+        }
+        
         // Clean part name for matching
-        const cleanName = item.name.replace(/\s+/g, '-').toLowerCase();
+        const cleanName = itemName.replace(/\s+/g, '-').toLowerCase();
         partNameToId[cleanName] = item.id;
         
         // Also add simplified versions
@@ -179,22 +198,23 @@ export default function OrderDetailsPage() {
         }
         
         // Add the original name as well
-        partNameToId[item.name.toLowerCase()] = item.id;
+        partNameToId[itemName.toLowerCase()] = item.id;
       });
       
       console.log('Part name to ID mapping:', partNameToId);
       
       files.forEach(file => {
-        // First try using part_id if it exists
-        if (file.part_id && partIds.includes(file.part_id)) {
-          if (!byPart[file.part_id]) {
-            byPart[file.part_id] = [];
-          }
-          byPart[file.part_id].push(file);
-          console.log(`File ${file.file_name} associated with part_id: ${file.part_id}`);
-        } 
-        // Otherwise, try to match based on file path (looking for part-(name) pattern)
-        else {
+        try {
+          // First try using part_id if it exists
+          if (file.part_id && partIds.includes(file.part_id)) {
+            if (!byPart[file.part_id]) {
+              byPart[file.part_id] = [];
+            }
+            byPart[file.part_id].push(file);
+            console.log(`File ${file.file_name} associated with part_id: ${file.part_id}`);
+          } 
+          // Otherwise, try to match based on file path (looking for part-(name) pattern)
+          else {
           let matchedPartId = null;
           
           // Try to extract part name from file path
@@ -237,7 +257,10 @@ export default function OrderDetailsPage() {
                   // Try matching directly with partsDetails
                   if (!matchedPartId) {
                     for (const item of partsDetails) {
-                      const itemNameClean = item.name.toLowerCase().replace(/\s+/g, '-');
+                      const itemName = item.name || item.product_name;
+                      if (!itemName) continue;
+                      
+                      const itemNameClean = itemName.toLowerCase().replace(/\s+/g, '-');
                       if (partNameClean.includes(itemNameClean) || 
                           itemNameClean.includes(partNameClean) ||
                           // Also try with numeric patterns like "part-1" matching "Part 1"
@@ -281,6 +304,10 @@ export default function OrderDetailsPage() {
             // If no match found, add to general files
             general.push(file);
           }
+        } catch (fileError) {
+          console.error('Error processing file:', file, fileError);
+          // Add to general files as fallback
+          general.push(file);
         }
       });
       
