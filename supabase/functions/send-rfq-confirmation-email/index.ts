@@ -28,7 +28,7 @@ serve(async (req) => {
     }
 
     const emailResponse = await resend.emails.send({
-      from: "Microns Hubs <info@micronshub.eu>",
+      from: "MicronsHub <info@micronshub.eu>",
       to: [to],
       subject: "Thank You for Your Quotation – Microns Hubs",
       html: `

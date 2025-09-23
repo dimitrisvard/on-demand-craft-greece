@@ -39,7 +39,7 @@ export default async function handler(req, res) {
 
     // Send confirmation email to customer
     const confirmationEmail = await resend.emails.send({
-      from: 'Microns Hubs <info@micronshub.eu>',
+      from: 'MicronsHub <info@micronshub.eu>',
       to: [customerEmail],
       subject: 'Thank You for Your Quotation – Microns Hubs',
       html: `
@@ -93,7 +93,7 @@ export default async function handler(req, res) {
 
     // Send internal notification email
     const notificationEmail = await resend.emails.send({
-      from: 'Microns Hubs System <info@micronshub.eu>',
+      from: 'MicronsHub System <info@micronshub.eu>',
       to: ['dimitrisvard@hotmail.com', 'info@micronshub.eu'],
       subject: `🚨 New Quote Request Received - ${rfqNumber}`,
       html: `

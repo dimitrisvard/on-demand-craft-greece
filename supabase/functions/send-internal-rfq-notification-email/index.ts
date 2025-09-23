@@ -29,7 +29,7 @@ serve(async (req) => {
 
     // Send to both internal emails
     const emailResponse = await resend.emails.send({
-      from: "Microns Hubs System <info@micronshub.eu>",
+      from: "MicronsHub System <info@micronshub.eu>",
       to: ["dimitrisvard@hotmail.com", "info@micronshub.eu"],
       subject: `🚨 New Quote Request Received - ${rfqNumber}`,
       html: `

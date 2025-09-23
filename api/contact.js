@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 
     // Email to company (info@micronshub.eu)
     const companyEmail = await resend.emails.send({
-      from: 'MicronsHub Contact Form <hello@resend.dev>',
+      from: 'MicronsHub Contact Form <info@micronshub.eu>',
       to: ['info@micronshub.eu'],
       subject: `New Contact Form Submission: ${subject || 'General Inquiry'}`,
       html: `
@@ -70,7 +70,7 @@ export default async function handler(req, res) {
 
     // Auto-reply to customer
     const customerEmail = await resend.emails.send({
-      from: 'MicronsHub <hello@resend.dev>',
+      from: 'MicronsHub <info@micronshub.eu>',
       to: [email],
       subject: 'Thank you for contacting MicronsHub',
       html: `

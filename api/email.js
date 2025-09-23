@@ -20,7 +20,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  console.log('[API] Request received:', {
+    method: req.method,
+    headers: req.headers,
+    body: req.body
+  });
+
   try {
+    console.log('[API] RESEND_API_KEY present:', !!process.env.RESEND_API_KEY);
+    console.log('[API] RESEND_API_KEY length:', process.env.RESEND_API_KEY?.length || 0);
+    
     const { name, email, phone, subject, message, rfqNumber, companyName } = req.body;
 
     // Validate required fields
@@ -36,7 +45,7 @@ export default async function handler(req, res) {
     // Email to company (info@micronshub.eu)
     console.log('Sending company email to:', ['info@micronshub.eu', 'dimitrisvard@hotmail.com']);
     const companyEmail = await resend.emails.send({
-      from: 'MicronsHub Contact Form <hello@resend.dev>',
+      from: 'MicronsHub Contact Form <info@micronshub.eu>',
       to: ['info@micronshub.eu', 'dimitrisvard@hotmail.com'],
       subject: isRfqSubmission ? `🚨 New RFQ Request - ${rfqNumber}` : `New Contact Form Submission: ${subject || 'General Inquiry'}`,
       html: isRfqSubmission ? `
@@ -105,7 +114,7 @@ export default async function handler(req, res) {
     // Auto-reply to customer
     console.log('Sending customer email to:', email);
     const customerEmail = await resend.emails.send({
-      from: 'MicronsHub <hello@resend.dev>',
+      from: 'MicronsHub <info@micronshub.eu>',
       to: [email],
       subject: isRfqSubmission ? 'Thank You for Your Quotation – Microns Hubs' : 'Thank you for contacting MicronsHub',
       html: `
@@ -164,9 +173,17 @@ export default async function handler(req, res) {
       stack: error.stack,
       name: error.name
     });
-    return res.status(500).json({
-      error: 'Failed to send email',
-      details: error.message
-    });
+    
+    // Ensure we always return a proper JSON response
+    try {
+      return res.status(500).json({
+        error: 'Failed to send email',
+        details: error.message,
+        success: false
+      });
+    } catch (jsonError) {
+      console.error('Failed to send JSON error response:', jsonError);
+      return res.status(500).end('Internal Server Error');
+    }
   }
 }

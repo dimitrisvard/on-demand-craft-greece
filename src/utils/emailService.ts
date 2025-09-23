@@ -18,6 +18,7 @@ interface InternalNotificationEmailData {
 export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ confirmationSent: boolean; notificationSent: boolean }> => {
   try {
     console.log('Sending RFQ emails via Vercel API...');
+    console.log('Email data:', data);
     
     const emailData = {
       name: data.customerName,
@@ -28,6 +29,8 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
       companyName: data.companyName
     };
     
+    console.log('Prepared email data:', emailData);
+    
     // Use the existing /api/email.js endpoint with RFQ data
     const response = await fetch('/api/email', {
       method: 'POST',
@@ -36,14 +39,31 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
       },
       body: JSON.stringify(emailData)
     });
+    
+    console.log('Response status:', response.status);
+    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
-      const errorData = await response.json();
+      let errorData;
+      try {
+        const responseText = await response.text();
+        errorData = responseText ? JSON.parse(responseText) : { error: 'Empty response' };
+      } catch (parseError) {
+        errorData = { error: 'Failed to parse error response', status: response.status };
+      }
       console.error('API error:', errorData);
       return { confirmationSent: false, notificationSent: false };
     }
 
-    const result = await response.json();
+    let result;
+    try {
+      const responseText = await response.text();
+      result = responseText ? JSON.parse(responseText) : { success: true };
+    } catch (parseError) {
+      console.error('Failed to parse response:', parseError);
+      return { confirmationSent: false, notificationSent: false };
+    }
+    
     console.log('Emails sent successfully:', result);
     
     return { confirmationSent: true, notificationSent: true };
