@@ -427,7 +427,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
           customerName: `${values.contact.firstName} ${values.contact.lastName}`,
           customerEmail: values.contact.email,
           companyName: values.companyName,
-          rfqNumber: rfqNumber
+          rfqNumber: rfqNumber,
+          phone: values.contact.phone
         });
         
         if (emailResult.confirmationSent) {

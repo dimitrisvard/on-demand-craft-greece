@@ -120,6 +120,7 @@ export default async function handler(req, res) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <div style="text-align: center; margin-bottom: 30px;">
+            <img src="https://micronshub.eu/logo.png" alt="MicronsHub Logo" style="height: 60px; margin-bottom: 20px;">
             <h1 style="color: #2563eb; margin-bottom: 10px;">Thank You!</h1>
             <p style="color: #64748b; font-size: 18px;">We've received your message</p>
           </div>
@@ -139,13 +140,8 @@ export default async function handler(req, res) {
             <ul style="color: #374151; padding-left: 20px;">
               <li>Our team will review your inquiry</li>
               <li>We'll respond within 24 hours</li>
-              <li>If urgent, call us directly</li>
+              <li>If urgent, call us directly at +30 210 123 4567</li>
             </ul>
-          </div>
-          
-          <div style="text-align: center; margin: 30px 0;">
-            <p style="color: #64748b;">Need immediate assistance?</p>
-            <p style="color: #2563eb; font-weight: bold;">Contact us directly</p>
           </div>
           
           <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">

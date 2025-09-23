@@ -3,6 +3,7 @@ interface RFQConfirmationEmailData {
   customerEmail: string;
   companyName: string;
   rfqNumber: string;
+  phone?: string;
 }
 
 interface InternalNotificationEmailData {
@@ -26,7 +27,8 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
       subject: `RFQ Request - ${data.rfqNumber}`,
       message: `RFQ Number: ${data.rfqNumber}\nCompany: ${data.companyName}\n\nThis is an automated RFQ submission notification.`,
       rfqNumber: data.rfqNumber,
-      companyName: data.companyName
+      companyName: data.companyName,
+      phone: data.phone || 'Not provided'
     };
     
     console.log('Prepared email data:', emailData);

@@ -336,7 +336,8 @@ const MicronsMultiStepForm: React.FC = () => {
           customerName: `${values.contact.firstName} ${values.contact.lastName}`,
           customerEmail: values.contact.email,
           companyName: values.companyName,
-          rfqNumber: rfqData.rfqNumber
+          rfqNumber: rfqData.rfqNumber,
+          phone: values.contact.phone
         });
         
         if (emailResult.confirmationSent) {

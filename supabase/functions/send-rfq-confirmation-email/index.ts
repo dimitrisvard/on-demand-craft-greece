@@ -34,6 +34,7 @@ serve(async (req) => {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
+            <img src="https://micronshub.eu/logo.png" alt="MicronsHub Logo" style="height: 60px; margin-bottom: 20px;">
             <h1 style="color: #2563eb; font-size: 28px; margin: 0;">Microns Hubs</h1>
             <p style="color: #64748b; font-size: 16px; margin: 5px 0 0 0;">Precision Manufacturing Solutions</p>
           </div>
