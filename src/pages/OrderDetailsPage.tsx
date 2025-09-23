@@ -304,6 +304,7 @@ export default function OrderDetailsPage() {
             // If no match found, add to general files
             general.push(file);
           }
+        }
         } catch (fileError) {
           console.error('Error processing file:', file, fileError);
           // Add to general files as fallback
