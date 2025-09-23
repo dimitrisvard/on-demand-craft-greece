@@ -140,7 +140,7 @@ export default async function handler(req, res) {
             <ul style="color: #374151; padding-left: 20px;">
               <li>Our team will review your inquiry</li>
               <li>We'll respond within 24 hours</li>
-              <li>If urgent, call us directly at +30 210 123 4567</li>
+              <li>If urgent, call us directly at +30-697-00-77-401</li>
             </ul>
           </div>
           
