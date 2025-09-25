@@ -100,7 +100,10 @@ export default function OrdersPage() {
         }
         
         if (partnerData) {
+          console.log('Partner data found:', partnerData);
           query = query.eq('partner_id', partnerData.id);
+        } else {
+          console.log('No partner data found for email:', user.email);
         }
       }
       

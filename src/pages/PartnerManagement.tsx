@@ -55,6 +55,7 @@ import {
   PackageOpen
 } from "lucide-react";
 import { Partner, PartnerRating } from "@/types/customer";
+import { createAuthUserForPartner } from "@/utils/partnerAuthUtils";
 
 const ADMIN_PASSWORD_UPDATE_ENDPOINT = '/functions/v1/admin-update-partner-password';
 const ADMIN_PASSWORD_UPDATE_SECRET = import.meta.env.VITE_ADMIN_PASSWORD_UPDATE_SECRET;
@@ -78,7 +79,8 @@ export default function PartnerManagement() {
     phone: "",
     country: "",
     specializations: [],
-    active: true
+    active: true,
+    password: ""
   });
 
   const { toast } = useToast();
@@ -205,6 +207,23 @@ export default function PartnerManagement() {
 
       if (error) throw error;
 
+      // 2. Update password if provided
+      if (formData.password && formData.password.length >= 6) {
+        // Find the auth user by email
+        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+        if (authError) throw authError;
+
+        const authUser = authUsers.users.find(user => user.email === formData.email);
+        if (authUser) {
+          const { error: passwordError } = await supabase.auth.admin.updateUserById(authUser.id, {
+            password: formData.password
+          });
+          if (passwordError) {
+            console.error('Error updating password:', passwordError);
+            // Don't throw here as the partner info was updated successfully
+          }
+        }
+      }
 
       toast({
         title: "Success",
@@ -234,7 +253,29 @@ export default function PartnerManagement() {
         return;
       }
 
-      // 1. Insert into production_partners (no auth user creation needed)
+      if (!formData.password || formData.password.length < 6) {
+        toast({
+          title: "Error",
+          description: "Password is required and must be at least 6 characters",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 1. Create auth user first
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email: formData.email,
+        password: formData.password,
+        email_confirm: true,
+        user_metadata: {
+          first_name: formData.contact_name,
+          company_name: formData.company_name
+        }
+      });
+
+      if (authError) throw authError;
+
+      // 2. Insert into production_partners
       const { data, error } = await supabase
         .from('production_partners')
         .insert([{
@@ -250,9 +291,24 @@ export default function PartnerManagement() {
 
       if (error) throw error;
 
+      // 3. Create user role entry
+      if (authData.user) {
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .insert([{
+            user_id: authData.user.id,
+            role: 'partner_seller'
+          }]);
+
+        if (roleError) {
+          console.error('Error creating user role:', roleError);
+          // Don't throw here as the partner was created successfully
+        }
+      }
+
       toast({
         title: "Success",
-        description: "Partner created successfully",
+        description: "Partner created successfully with login credentials",
       });
 
       fetchPartners();
@@ -264,7 +320,8 @@ export default function PartnerManagement() {
         phone: "",
         country: "",
         specializations: [],
-        active: true
+        active: true,
+        password: ""
       });
     } catch (error: any) {
       toast({
@@ -309,6 +366,41 @@ export default function PartnerManagement() {
       toast({
         title: "Error",
         description: error.message || "Failed to add rating",
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function createAuthUserForExistingPartner() {
+    if (!selectedPartner || !formData.password) {
+      toast({
+        title: "Error",
+        description: "Please enter a password for the partner",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const success = await createAuthUserForPartner(selectedPartner.id, formData.password);
+      
+      if (success) {
+        toast({
+          title: "Success",
+          description: "Auth user created successfully for partner",
+        });
+        setFormData({ ...formData, password: "" });
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to create auth user for partner",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create auth user for partner",
         variant: "destructive",
       });
     }
@@ -557,6 +649,27 @@ export default function PartnerManagement() {
                       </div>
                     </div>
 
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password (leave blank to keep current)</Label>
+                      <Input
+                        id="password"
+                        name="password"
+                        type="password"
+                        value={formData.password || ""}
+                        onChange={handleFormChange}
+                        placeholder="Enter new password (minimum 6 characters)"
+                      />
+                      <Button 
+                        type="button"
+                        variant="outline" 
+                        size="sm"
+                        onClick={createAuthUserForExistingPartner}
+                        className="mt-2"
+                      >
+                        Create Auth User for Existing Partner
+                      </Button>
+                    </div>
+
 
                     <div className="space-y-2">
                       <Label htmlFor="country">Country</Label>
@@ -732,6 +845,19 @@ export default function PartnerManagement() {
                     onChange={handleFormChange}
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="new_password">Password *</Label>
+                <Input
+                  id="new_password"
+                  name="password"
+                  type="password"
+                  value={formData.password || ""}
+                  onChange={handleFormChange}
+                  placeholder="Minimum 6 characters"
+                  required
+                />
               </div>
 
               <div className="space-y-2">

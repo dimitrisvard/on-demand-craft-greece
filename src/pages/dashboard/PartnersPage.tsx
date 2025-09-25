@@ -49,7 +49,8 @@ export default function PartnersPage() {
     phone: "",
     country: "",
     specializations: [],
-    active: true
+    active: true,
+    password: ""
   })
   const { toast } = useToast()
 
@@ -99,6 +100,29 @@ export default function PartnersPage() {
         return;
       }
 
+      if (!newPartner.password || newPartner.password.length < 6) {
+        toast({
+          title: "Error",
+          description: "Password is required and must be at least 6 characters",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // 1. Create auth user first
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email: newPartner.email,
+        password: newPartner.password,
+        email_confirm: true,
+        user_metadata: {
+          first_name: newPartner.contact_name,
+          company_name: newPartner.company_name
+        }
+      });
+
+      if (authError) throw authError;
+
+      // 2. Insert into production_partners
       const { data, error } = await supabase
         .from('production_partners')
         .insert([
@@ -116,9 +140,24 @@ export default function PartnersPage() {
 
       if (error) throw error;
 
+      // 3. Create user role entry
+      if (authData.user) {
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .insert([{
+            user_id: authData.user.id,
+            role: 'partner_seller'
+          }]);
+
+        if (roleError) {
+          console.error('Error creating user role:', roleError);
+          // Don't throw here as the partner was created successfully
+        }
+      }
+
       toast({
         title: "Success",
-        description: "Production partner added successfully",
+        description: "Production partner added successfully with login credentials",
       });
 
       fetchPartners();
@@ -130,7 +169,8 @@ export default function PartnersPage() {
         phone: "",
         country: "",
         specializations: [],
-        active: true
+        active: true,
+        password: ""
       });
     } catch (error: any) {
       toast({
@@ -511,6 +551,22 @@ export default function PartnersPage() {
                       className="w-full p-2 border rounded"
                     />
                   </div>
+                </div>
+                
+                <div>
+                  <label htmlFor="new_password" className="block text-sm font-medium mb-1">
+                    Password <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="new_password"
+                    name="password"
+                    type="password"
+                    value={newPartner.password || ''}
+                    onChange={handleNewPartnerInputChange}
+                    placeholder="Minimum 6 characters"
+                    className="w-full p-2 border rounded"
+                    required
+                  />
                 </div>
               </div>
             </div>

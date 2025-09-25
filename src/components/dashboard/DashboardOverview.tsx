@@ -68,6 +68,7 @@ const DashboardOverview = () => {
         }
         
         if (!partnerData) {
+          console.log('No partner data found for email:', user?.email);
           setStats({
             orders: { total: 0, new: 0, trend: '', positive: null }
           });
@@ -76,6 +77,7 @@ const DashboardOverview = () => {
           return;
         }
         
+        console.log('Partner data found:', partnerData);
         const ordersRes = await supabase
           .from('orders')
           .select('id,total_amount,created_at')
