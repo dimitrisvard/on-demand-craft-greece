@@ -497,7 +497,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
       setIsCreateOrderDialogOpen(false);
       
       // Navigate to the order page
-      navigate(`/order/${orderData[0].id}`);
+      navigate(`/orders/${orderData[0].id}`);
       
     } catch (error: any) {
       console.error("Error creating order:", error);

@@ -100,7 +100,10 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                     className="border rounded-lg overflow-hidden"
                   >
                     <AccordionItem value={`part-${index}`} className="border-0">
-                      <AccordionTrigger className="px-6 py-4 bg-gray-50 hover:bg-gray-100 hover:no-underline">
+                      <AccordionTrigger 
+                        className="px-6 py-4 bg-gray-50 hover:bg-gray-100 hover:no-underline"
+                        data-part-index={index}
+                      >
                         <div className="flex items-center justify-between w-full">
                           <div className="flex items-center">
                             <span className="text-lg font-medium">
@@ -445,22 +448,32 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => push({
-                  name: `${t('quote_form_part')} ${values.parts.length + 1}`,
-                  quantity: 1,
-                  multiplier: 1,
-                  files: [],
-                  process: '',
-                  material: '',
-                  materialSubtype: '',
-                  surfaceTreatment: '',
-                  surfaceRoughness: '',
-                  documentation: 'none',
-                  comments: '',
-                  userModifiedName: false,
-                  tolerance: '',
-                  surfaceTreatmentOther: '',
-                })}
+                onClick={() => {
+                  const newPartIndex = values.parts.length;
+                  push({
+                    name: `${t('quote_form_part')} ${values.parts.length + 1}`,
+                    quantity: 1,
+                    multiplier: 1,
+                    files: [],
+                    process: '',
+                    material: '',
+                    materialSubtype: '',
+                    surfaceTreatment: '',
+                    surfaceRoughness: '',
+                    documentation: 'none',
+                    comments: '',
+                    userModifiedName: false,
+                    tolerance: '',
+                    surfaceTreatmentOther: '',
+                  });
+                  // Auto-open the new part accordion
+                  setTimeout(() => {
+                    const accordionTrigger = document.querySelector(`[data-part-index="${newPartIndex}"]`);
+                    if (accordionTrigger) {
+                      (accordionTrigger as HTMLElement).click();
+                    }
+                  }, 100);
+                }}
                 className="flex items-center"
               >
                 <Plus className="h-4 w-4 mr-2" />

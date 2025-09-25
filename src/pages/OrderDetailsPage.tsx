@@ -1044,27 +1044,31 @@ export default function OrderDetailsPage() {
             <Download className="h-4 w-4 mr-2" />
             {isProcessingFiles ? "Processing..." : "Download PDF"}
           </Button>
-          {!isEditMode ? (
-            <Button variant="outline" onClick={handleEditToggle}>
-              <Edit3 className="h-4 w-4 mr-2" />
-              Edit Order
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <Button onClick={handleSaveChanges}>
-                <Save className="h-4 w-4 mr-2" />
-                Save Changes
+          {user?.role !== 'partner_seller' && (
+            <>
+              {!isEditMode ? (
+                <Button variant="outline" onClick={handleEditToggle}>
+                  <Edit3 className="h-4 w-4 mr-2" />
+                  Edit Order
+                </Button>
+              ) : (
+                <div className="flex gap-2">
+                  <Button onClick={handleSaveChanges}>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </Button>
+                  <Button variant="outline" onClick={handleCancelEdit}>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                </div>
+              )}
+              <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
               </Button>
-              <Button variant="outline" onClick={handleCancelEdit}>
-                <X className="h-4 w-4 mr-2" />
-                Cancel
-              </Button>
-            </div>
+            </>
           )}
-          <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-            <Trash2 className="h-4 w-4 mr-2" />
-            Delete
-          </Button>
         </div>
       </div>
 
@@ -1257,145 +1261,70 @@ export default function OrderDetailsPage() {
               </div>
             )}
 
-            {/* Files Summary */}
-            {!isProcessingFiles && quoteFiles.length > 0 && (
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600">
-                  <strong>Files Summary:</strong> {quoteFiles.length} total files
-                  {Object.keys(partFiles).length > 0 && (
-                    <span>, {Object.keys(partFiles).length} parts have organized files</span>
-                  )}
-                </div>
-                {Object.keys(partFiles).length > 0 && (
-                  <div className="mt-2 text-xs text-gray-500">
-                    {Object.entries(partFiles).map(([partId, files]) => {
-                      const part = parts.find(p => p.id === partId);
-                      return (
-                        <div key={partId}>
-                          • {part?.name || partId}: {files.length} files
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {/* Debug Information */}
-                <details className="mt-3">
-                  <summary className="text-xs text-blue-600 cursor-pointer">Debug Info</summary>
-                  <div className="mt-2 text-xs text-gray-600 space-y-1">
-                    <div><strong>Parts:</strong> {parts.length} parts loaded</div>
-                    <div><strong>Order Items:</strong> {orderItems.length} items</div>
-                    <div><strong>Part Files Keys:</strong> {Object.keys(partFiles).join(', ') || 'None'}</div>
-                    <div><strong>Quote Files:</strong> {quoteFiles.length} files</div>
-                    {parts.length > 0 && (
-                      <div><strong>Part Names:</strong> {parts.map(p => p.name).join(', ')}</div>
-                    )}
-                    {orderItems.length > 0 && (
-                      <div><strong>Order Item Names:</strong> {orderItems.map(i => i.product_name).join(', ')}</div>
-                    )}
-                  </div>
-                </details>
-              </div>
-            )}
 
-            {/* Parts from RFQ */}
-            {parts.length > 0 && (
-              <div className="border-t pt-4">
-                <h3 className="font-medium mb-4">Parts Information</h3>
-                <div className="space-y-4">
-                  {parts.map((part, idx) => (
-                    <div key={part.id} className="border rounded p-3">
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-medium">{part.name}</h4>
-                        <Badge variant="outline">{part.quantity} units</Badge>
-                      </div>
-                      <div className="flex gap-2 mb-2">
-                        {/* Download Part Files button */}
-                        {getFilesForPart(part.id).length > 0 && (
-                          <Button variant="outline" size="sm" onClick={() => handleDownloadPartFiles(part.id, part.name)}>
-                            <Download className="h-4 w-4 mr-1" />
-                            Download Part Files (Zip)
-                          </Button>
-                        )}
-                      </div>
-                      {/* Add label above files section */}
-                      {getFilesForPart(part.id).length > 0 && (
-                        <div className="mt-2 pt-2 border-t">
-                          <div className="font-semibold mb-2 text-sm text-gray-700">
-                            Files for Part {idx + 1} {rfq?.rfq_number}-{idx + 1}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {getFilesForPart(part.id).map((file) => (
-                              <div key={file.id} className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={async () => {
-                                    try {
-                                      await handleDownloadFile(file.file_path, file.file_name);
-                                    } catch (err) {
-                                      toast({
-                                        title: 'File not found',
-                                        description: `File not found in storage: ${file.file_path}`,
-                                        variant: 'destructive',
-                                      });
-                                      console.error('File not found in storage:', file.file_path);
-                                    }
-                                  }}
-                                  className="h-7 text-xs flex items-center"
-                                >
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  <span className="truncate max-w-[100px]">{file.file_name}</span>
-                                  <Download className="h-3 w-3 ml-1" />
-                                </Button>
-                                {/* 3D Viewer Button */}
-                                {is3DFile(file.file_name) && (
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    title="View 3D"
-                                    onClick={() => handleOpen3DViewer(file)}
-                                    className="h-7 w-7 ml-1"
-                                  >
-                                    <span role="img" aria-label="3D">🧊</span>
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div>
               <h3 className="font-medium mb-4">Order Items</h3>
               <div className="border rounded-lg divide-y">
-                {orderItems.map((item) => (
-                  <div key={item.id} className="p-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="font-medium">{item.product_name}</h4>
-                        {item.description && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            {item.description}
+                {orderItems.map((item, idx) => {
+                  // Find files associated with this order item
+                  const itemFiles = quoteFiles.filter(file => {
+                    // Try to match by part name or index
+                    return file.part_name === item.product_name || 
+                           file.part_id === parts[idx]?.id ||
+                           (parts[idx] && file.part_name === parts[idx].name);
+                  });
+                  
+                  return (
+                    <div key={item.id} className="p-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h4 className="font-medium">{item.product_name}</h4>
+                          {item.description && (
+                            <p className="text-sm text-muted-foreground mt-1">
+                              {item.description}
+                            </p>
+                          )}
+                          {/* Add part details */}
+                          {parts[idx] && (
+                            <div className="mt-2 text-sm text-gray-600">
+                              <p><strong>Process:</strong> {parts[idx].process || 'Not specified'}</p>
+                              <p><strong>Material:</strong> {parts[idx].material || 'Not specified'}</p>
+                              {parts[idx].surface_roughness && (
+                                <p><strong>Surface Roughness:</strong> {parts[idx].surface_roughness}</p>
+                              )}
+                              {parts[idx].surface_treatment && (
+                                <p><strong>Surface Treatment:</strong> {parts[idx].surface_treatment}</p>
+                              )}
+                              <p><strong>Documentation:</strong> {parts[idx].documentation || 'none'}</p>
+                            </div>
+                          )}
+                          {/* Add files information */}
+                          {itemFiles.length > 0 && (
+                            <div className="mt-2">
+                              <p className="text-sm font-medium text-gray-700">Files:</p>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {itemFiles.map((file) => (
+                                  <span key={file.id} className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                    {file.file_name}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <p className="font-medium">
+                            {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
                           </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium">
-                          {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}
-                        </p>
+                          <p className="text-sm text-muted-foreground">
+                            {item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </CardContent>
