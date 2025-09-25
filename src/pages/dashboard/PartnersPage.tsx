@@ -109,20 +109,7 @@ export default function PartnersPage() {
         return;
       }
 
-      // 1. Create auth user first
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: newPartner.email,
-        password: newPartner.password,
-        email_confirm: true,
-        user_metadata: {
-          first_name: newPartner.contact_name,
-          company_name: newPartner.company_name
-        }
-      });
-
-      if (authError) throw authError;
-
-      // 2. Insert into production_partners
+      // 1. Insert into production_partners first
       const { data, error } = await supabase
         .from('production_partners')
         .insert([
@@ -140,18 +127,14 @@ export default function PartnersPage() {
 
       if (error) throw error;
 
-      // 3. Create user role entry
-      if (authData.user) {
-        const { error: roleError } = await supabase
-          .from('user_roles')
-          .insert([{
-            user_id: authData.user.id,
-            role: 'partner_seller'
-          }]);
-
-        if (roleError) {
-          console.error('Error creating user role:', roleError);
-          // Don't throw here as the partner was created successfully
+      // 2. Create auth user using Edge Function
+      if (data && data[0]) {
+        const { createAuthUserForPartner } = await import('@/utils/partnerAuthUtils');
+        const authSuccess = await createAuthUserForPartner(data[0].id, newPartner.password!);
+        if (!authSuccess) {
+          // If auth user creation fails, we should clean up the partner record
+          await supabase.from('production_partners').delete().eq('id', data[0].id);
+          throw new Error('Failed to create auth user for partner');
         }
       }
 

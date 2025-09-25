@@ -55,7 +55,7 @@ import {
   PackageOpen
 } from "lucide-react";
 import { Partner, PartnerRating } from "@/types/customer";
-import { createAuthUserForPartner } from "@/utils/partnerAuthUtils";
+import { createAuthUserForPartner, updatePartnerPassword } from "@/utils/partnerAuthUtils";
 
 const ADMIN_PASSWORD_UPDATE_ENDPOINT = '/functions/v1/admin-update-partner-password';
 const ADMIN_PASSWORD_UPDATE_SECRET = import.meta.env.VITE_ADMIN_PASSWORD_UPDATE_SECRET;
@@ -209,19 +209,10 @@ export default function PartnerManagement() {
 
       // 2. Update password if provided
       if (formData.password && formData.password.length >= 6) {
-        // Find the auth user by email
-        const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
-        if (authError) throw authError;
-
-        const authUser = authUsers.users.find(user => user.email === formData.email);
-        if (authUser) {
-          const { error: passwordError } = await supabase.auth.admin.updateUserById(authUser.id, {
-            password: formData.password
-          });
-          if (passwordError) {
-            console.error('Error updating password:', passwordError);
-            // Don't throw here as the partner info was updated successfully
-          }
+        const passwordSuccess = await updatePartnerPassword(selectedPartner.id, formData.password);
+        if (!passwordSuccess) {
+          console.error('Error updating password');
+          // Don't throw here as the partner info was updated successfully
         }
       }
 
@@ -262,20 +253,7 @@ export default function PartnerManagement() {
         return;
       }
 
-      // 1. Create auth user first
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-        email: formData.email,
-        password: formData.password,
-        email_confirm: true,
-        user_metadata: {
-          first_name: formData.contact_name,
-          company_name: formData.company_name
-        }
-      });
-
-      if (authError) throw authError;
-
-      // 2. Insert into production_partners
+      // 1. Insert into production_partners first
       const { data, error } = await supabase
         .from('production_partners')
         .insert([{
@@ -291,18 +269,13 @@ export default function PartnerManagement() {
 
       if (error) throw error;
 
-      // 3. Create user role entry
-      if (authData.user) {
-        const { error: roleError } = await supabase
-          .from('user_roles')
-          .insert([{
-            user_id: authData.user.id,
-            role: 'partner_seller'
-          }]);
-
-        if (roleError) {
-          console.error('Error creating user role:', roleError);
-          // Don't throw here as the partner was created successfully
+      // 2. Create auth user using Edge Function
+      if (data && data[0]) {
+        const authSuccess = await createAuthUserForPartner(data[0].id, formData.password);
+        if (!authSuccess) {
+          // If auth user creation fails, we should clean up the partner record
+          await supabase.from('production_partners').delete().eq('id', data[0].id);
+          throw new Error('Failed to create auth user for partner');
         }
       }
 
