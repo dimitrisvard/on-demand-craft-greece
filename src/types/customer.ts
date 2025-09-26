@@ -92,6 +92,8 @@ export type Order = {
   material_costs?: number;
   working_hours_costs?: number;
   total_production_costs?: number;
+  vat_amount?: number;
+  total_with_vat?: number;
 };
 
 export type OrderItem = {

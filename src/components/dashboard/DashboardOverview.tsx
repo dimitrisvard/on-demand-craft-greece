@@ -27,6 +27,7 @@ const DashboardOverview = () => {
     orders: { total: 0, new: 0, trend: '', positive: null },
     productionOrders: { total: 0, inProduction: 0, finished: 0, trend: '', positive: null },
     revenue: { total: 0, trend: '', positive: null },
+    costs: { total: 0, material: 0, labor: 0, vat: 0, trend: '', positive: null },
     partners: { total: 0, active: 0, trend: '', positive: null },
     products: { total: 0, lowStock: 0, trend: '', positive: null }
   });
@@ -92,9 +93,16 @@ const DashboardOverview = () => {
         const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
         const finishedOrders = orders.filter(o => o.production_status === 'ready' || o.production_status === 'completed');
         
+        // Calculate costs
+        const totalMaterialCosts = orders.reduce((sum, o) => sum + (o.material_costs || 0), 0);
+        const totalLaborCosts = orders.reduce((sum, o) => sum + (o.working_hours_costs || 0), 0);
+        const totalVat = orders.reduce((sum, o) => sum + (o.vat_amount || 0), 0);
+        const totalCosts = orders.reduce((sum, o) => sum + (o.total_with_vat || 0), 0);
+        
         setStats({
           orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
-          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, finished: finishedOrders.length, trend: '', positive: null }
+          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, finished: finishedOrders.length, trend: '', positive: null },
+          costs: { total: totalCosts, material: totalMaterialCosts, labor: totalLaborCosts, vat: totalVat, trend: '', positive: null }
         });
 
         // Prepare sales data for chart (only partner's orders)
@@ -152,6 +160,13 @@ const DashboardOverview = () => {
         
         // Revenue
         const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+        
+        // Calculate costs
+        const totalMaterialCosts = orders.reduce((sum, o) => sum + (o.material_costs || 0), 0);
+        const totalLaborCosts = orders.reduce((sum, o) => sum + (o.working_hours_costs || 0), 0);
+        const totalVat = orders.reduce((sum, o) => sum + (o.vat_amount || 0), 0);
+        const totalCosts = orders.reduce((sum, o) => sum + (o.total_with_vat || 0), 0);
+        
         // Partners
         const partners = partnersRes.data || [];
         const activePartners = partners.filter(p => p.active).length;
@@ -165,6 +180,7 @@ const DashboardOverview = () => {
           orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
           productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, finished: finishedOrders.length, trend: '', positive: null },
           revenue: { total: revenueThisMonth, trend: '', positive: null },
+          costs: { total: totalCosts, material: totalMaterialCosts, labor: totalLaborCosts, vat: totalVat, trend: '', positive: null },
           partners: { total: partners.length, active: activePartners, trend: '', positive: null },
           products: { total: products.length, lowStock, trend: '', positive: null }
         });
@@ -323,6 +339,29 @@ const DashboardOverview = () => {
           subtitle={`${stats.productionOrders.total} total production orders`}
           trend={stats.productionOrders.trend}
           trendPositive={stats.productionOrders.positive}
+          isLoading={isLoading}
+          onClick={() => navigate('/orders')}
+        />
+        
+        {/* Cost Statistics Cards */}
+        <StatCard 
+          title="Total Costs"
+          icon={<Factory className="h-4 w-4" />}
+          totalValue={isLoading ? null : `€${stats.costs.total.toFixed(2)}`}
+          subtitle={`€${stats.costs.material.toFixed(2)} materials + €${stats.costs.labor.toFixed(2)} labor`}
+          trend={stats.costs.trend}
+          trendPositive={stats.costs.positive}
+          isLoading={isLoading}
+          onClick={() => navigate('/orders')}
+        />
+        
+        <StatCard 
+          title="Material Costs"
+          icon={<Package className="h-4 w-4" />}
+          totalValue={isLoading ? null : `€${stats.costs.material.toFixed(2)}`}
+          subtitle={`€${stats.costs.vat.toFixed(2)} VAT included`}
+          trend={stats.costs.trend}
+          trendPositive={stats.costs.positive}
           isLoading={isLoading}
           onClick={() => navigate('/orders')}
         />

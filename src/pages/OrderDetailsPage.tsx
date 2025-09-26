@@ -980,6 +980,8 @@ export default function OrderDetailsPage() {
     material_costs: number;
     working_hours_costs: number;
     total_production_costs: number;
+    vat_amount: number;
+    total_with_vat: number;
   }) => {
     if (!order || !id) return;
     
@@ -1275,20 +1277,12 @@ export default function OrderDetailsPage() {
                 )}
               </div>
               {!isEditMode && (
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center">
-                    {getStatusBadge(order.status)}
-                    {getProductionStatusBadge(order.production_status)}
-                  </div>
-                  {(user?.role === 'admin' || user?.role === 'partner_seller') && (
-                    <ProductionCostsBox 
-                      order={order}
-                      onUpdate={handleProductionCostsUpdate}
-                    />
-                  )}
+                <div className="flex items-center">
+                  {getStatusBadge(order.status)}
+                  {getProductionStatusBadge(order.production_status)}
                   {/* Debug info - remove in production */}
                   {process.env.NODE_ENV === 'development' && (
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-gray-500 ml-4">
                       Debug: User role = {user?.role || 'undefined'}
                     </div>
                   )}
@@ -1297,7 +1291,8 @@ export default function OrderDetailsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
               <div>
                 <h3 className="font-medium mb-2">Order Details</h3>
                 <div className="space-y-2">
@@ -1315,10 +1310,28 @@ export default function OrderDetailsPage() {
                       />
                     </div>
                   ) : (
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Total Amount:</span>{' '}
-                      {user?.role === 'partner_seller' ? '' : formatCurrency(order.total_amount, order.currency)}
-                    </p>
+                    <div className="space-y-1">
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Total Amount:</span>{' '}
+                        {user?.role === 'partner_seller' ? '' : formatCurrency(order.total_amount, order.currency)}
+                      </p>
+                      {user?.role === 'partner_seller' && (
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Revenue:</span>{' '}
+                          <span className="font-medium text-green-600">
+                            €{(order?.total_with_vat || 0).toFixed(2)}
+                          </span>
+                        </p>
+                      )}
+                      {user?.role === 'admin' && (
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Cost:</span>{' '}
+                          <span className="font-medium text-red-600">
+                            €{(order?.total_with_vat || 0).toFixed(2)}
+                          </span>
+                        </p>
+                      )}
+                    </div>
                   )}
                   <p className="text-sm">
                     <span className="text-muted-foreground">Created:</span>{' '}
@@ -1496,11 +1509,21 @@ export default function OrderDetailsPage() {
           </CardContent>
         </Card>
 
+        {/* Right Sidebar */}
+        <div className="md:col-span-5 space-y-6">
+          {/* Production Costs Box */}
+          {(user?.role === 'admin' || user?.role === 'partner_seller') && (
+            <ProductionCostsBox 
+              order={order}
+              onUpdate={handleProductionCostsUpdate}
+            />
+          )}
+          
+          {/* Customer Details */}
         {customer && user?.role !== 'partner_seller' && (
-          <div className="md:col-span-5">
             <CustomerDetailsPanel customer={customer} />
-          </div>
         )}
+        </div>
       </div>
 
       {/* Dialogs */}
@@ -1535,33 +1558,51 @@ const ProductionCostsBox = ({
   onUpdate 
 }: { 
   order: Order | null; 
-  onUpdate: (costs: { material_costs: number; working_hours_costs: number; total_production_costs: number }) => void;
+  onUpdate: (costs: { material_costs: number; working_hours_costs: number; total_production_costs: number; vat_amount: number; total_with_vat: number }) => void;
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [costs, setCosts] = useState({
     material_costs: order?.material_costs || 0,
     working_hours_costs: order?.working_hours_costs || 0,
     total_production_costs: order?.total_production_costs || 0,
+    vat_amount: 0,
+    total_with_vat: 0,
   });
 
   useEffect(() => {
+    const materialCosts = order?.material_costs || 0;
+    const workingHoursCosts = order?.working_hours_costs || 0;
+    const totalProductionCosts = materialCosts + workingHoursCosts;
+    const vatAmount = totalProductionCosts * 0.24;
+    const totalWithVat = totalProductionCosts + vatAmount;
+    
     setCosts({
-      material_costs: order?.material_costs || 0,
-      working_hours_costs: order?.working_hours_costs || 0,
-      total_production_costs: order?.total_production_costs || 0,
+      material_costs: materialCosts,
+      working_hours_costs: workingHoursCosts,
+      total_production_costs: totalProductionCosts,
+      vat_amount: vatAmount,
+      total_with_vat: totalWithVat,
     });
   }, [order]);
 
   const handleInputChange = (field: string, value: string) => {
     const numValue = parseFloat(value) || 0;
-    setCosts(prev => ({
-      ...prev,
+    const newCosts = {
+      ...costs,
       [field]: numValue,
-      total_production_costs: field === 'material_costs' || field === 'working_hours_costs' 
-        ? (field === 'material_costs' ? numValue : prev.material_costs) + 
-          (field === 'working_hours_costs' ? numValue : prev.working_hours_costs)
-        : prev.total_production_costs
-    }));
+    };
+    
+    // Recalculate totals
+    const totalProductionCosts = newCosts.material_costs + newCosts.working_hours_costs;
+    const vatAmount = totalProductionCosts * 0.24;
+    const totalWithVat = totalProductionCosts + vatAmount;
+    
+    setCosts({
+      ...newCosts,
+      total_production_costs: totalProductionCosts,
+      vat_amount: vatAmount,
+      total_with_vat: totalWithVat,
+    });
   };
 
   const handleSave = () => {
@@ -1570,16 +1611,24 @@ const ProductionCostsBox = ({
   };
 
   const handleCancel = () => {
+    const materialCosts = order?.material_costs || 0;
+    const workingHoursCosts = order?.working_hours_costs || 0;
+    const totalProductionCosts = materialCosts + workingHoursCosts;
+    const vatAmount = totalProductionCosts * 0.24;
+    const totalWithVat = totalProductionCosts + vatAmount;
+    
     setCosts({
-      material_costs: order?.material_costs || 0,
-      working_hours_costs: order?.working_hours_costs || 0,
-      total_production_costs: order?.total_production_costs || 0,
+      material_costs: materialCosts,
+      working_hours_costs: workingHoursCosts,
+      total_production_costs: totalProductionCosts,
+      vat_amount: vatAmount,
+      total_with_vat: totalWithVat,
     });
     setIsEditing(false);
   };
 
   return (
-    <Card className="w-80">
+    <Card className="w-full">
       <CardHeader className="pb-3">
         <CardTitle className="text-lg flex items-center">
           <Factory className="h-5 w-5 mr-2" />
@@ -1613,7 +1662,7 @@ const ProductionCostsBox = ({
                 />
               </div>
               <div className="pt-2 border-t">
-                <Label htmlFor="total_production_costs" className="text-sm font-medium">Total Production Costs (€)</Label>
+                <Label htmlFor="total_production_costs" className="text-sm font-medium">Subtotal (€)</Label>
                 <Input
                   id="total_production_costs"
                   type="number"
@@ -1621,6 +1670,28 @@ const ProductionCostsBox = ({
                   value={costs.total_production_costs}
                   readOnly
                   className="mt-1 bg-gray-50"
+                />
+              </div>
+              <div>
+                <Label htmlFor="vat_amount" className="text-sm font-medium">VAT 24% (€)</Label>
+                <Input
+                  id="vat_amount"
+                  type="number"
+                  step="0.01"
+                  value={costs.vat_amount}
+                  readOnly
+                  className="mt-1 bg-gray-50"
+                />
+              </div>
+              <div className="pt-2 border-t">
+                <Label htmlFor="total_with_vat" className="text-sm font-medium font-bold">Total with VAT (€)</Label>
+                <Input
+                  id="total_with_vat"
+                  type="number"
+                  step="0.01"
+                  value={costs.total_with_vat}
+                  readOnly
+                  className="mt-1 bg-blue-50 font-bold"
                 />
               </div>
             </div>
@@ -1647,8 +1718,16 @@ const ProductionCostsBox = ({
                 <span className="font-medium">€{costs.working_hours_costs.toFixed(2)}</span>
               </div>
               <div className="flex justify-between pt-2 border-t">
-                <span className="text-sm font-medium">Total:</span>
-                <span className="font-bold text-lg">€{costs.total_production_costs.toFixed(2)}</span>
+                <span className="text-sm font-medium">Subtotal:</span>
+                <span className="font-medium">€{costs.total_production_costs.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">VAT 24%:</span>
+                <span className="font-medium">€{costs.vat_amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t-2 border-blue-200">
+                <span className="text-sm font-bold text-blue-700">Total with VAT:</span>
+                <span className="font-bold text-lg text-blue-700">€{costs.total_with_vat.toFixed(2)}</span>
               </div>
             </div>
             <Button 
