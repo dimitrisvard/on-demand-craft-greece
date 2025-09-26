@@ -56,10 +56,12 @@ export default function OrdersPage() {
   const isProductionPartner = user?.role === 'partner_seller'
 
   useEffect(() => {
-    fetchOrders()
-    fetchCustomers()
-    fetchRfqs()
-  }, [])
+    if (user) {
+      fetchOrders()
+      fetchCustomers()
+      fetchRfqs()
+    }
+  }, [user])
   
   useEffect(() => {
     if (searchQuery.trim() === '') {

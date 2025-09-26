@@ -1280,11 +1280,17 @@ export default function OrderDetailsPage() {
                     {getStatusBadge(order.status)}
                     {getProductionStatusBadge(order.production_status)}
                   </div>
-                  {user?.role === 'admin' && (
+                  {user?.role !== 'partner_seller' && (
                     <ProductionCostsBox 
                       order={order}
                       onUpdate={handleProductionCostsUpdate}
                     />
+                  )}
+                  {/* Debug info - remove in production */}
+                  {process.env.NODE_ENV === 'development' && (
+                    <div className="text-xs text-gray-500">
+                      Debug: User role = {user?.role || 'undefined'}
+                    </div>
                   )}
                 </div>
               )}
