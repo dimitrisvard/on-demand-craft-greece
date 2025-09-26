@@ -31,6 +31,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { CustomerDetailsPanel } from "@/components/customers/CustomerDetailsPanel";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { downloadAndSaveFile } from "@/utils/fileStorage";
 import ThreeDViewerModal from '@/components/ThreeDViewerModal';
 import { downloadAllRfqFiles, getRfqFiles } from '@/utils/rfqFileStorage';
@@ -914,15 +915,52 @@ export default function OrderDetailsPage() {
     if (!order || !id) return;
     
     try {
+      const updateData: any = { production_status: newStatus };
+      
+      // If starting production, update the start_date to current date
+      if (newStatus === 'in_production' && order.production_status !== 'in_production') {
+        updateData.start_date = new Date().toISOString();
+      }
+      
       const { error } = await supabase
         .from('orders')
-        .update({ production_status: newStatus })
+        .update(updateData)
         .eq('id', id);
         
       if (error) throw error;
       
       // Update local state
-      setOrder(prev => prev ? { ...prev, production_status: newStatus } : null);
+      setOrder(prev => prev ? { 
+        ...prev, 
+        production_status: newStatus,
+        start_date: newStatus === 'in_production' ? new Date().toISOString() : prev.start_date
+      } : null);
+      
+      // Send email notification
+      try {
+        const partner = partners.find(p => p.id === order.partner_id);
+        if (partner) {
+          await fetch('/api/send-production-status-notification', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              partnerName: partner.company_name,
+              orderId: order.id,
+              orderTitle: order.title,
+              status: newStatus === 'in_production' ? 'started' : 'finished',
+              startDate: newStatus === 'in_production' ? new Date().toISOString() : order.start_date,
+              deliveryDate: order.delivery_date,
+              totalAmount: order.total_amount,
+              currency: order.currency
+            }),
+          });
+        }
+      } catch (emailError) {
+        console.error('Error sending production status notification:', emailError);
+        // Don't fail the main operation if email fails
+      }
       
       toast({
         title: "Success",
@@ -933,6 +971,38 @@ export default function OrderDetailsPage() {
       toast({
         title: "Error",
         description: "Failed to update production status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleProductionCostsUpdate = async (costs: {
+    material_costs: number;
+    working_hours_costs: number;
+    total_production_costs: number;
+  }) => {
+    if (!order || !id) return;
+    
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update(costs)
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      // Update local state
+      setOrder(prev => prev ? { ...prev, ...costs } : null);
+      
+      toast({
+        title: "Success",
+        description: "Production costs updated successfully",
+      });
+    } catch (error: any) {
+      console.error('Error updating production costs:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update production costs",
         variant: "destructive",
       });
     }
@@ -1080,8 +1150,8 @@ export default function OrderDetailsPage() {
           <Button variant="outline" onClick={() => navigate('/orders')}>
             Back to Orders
           </Button>
-          <Button
-            variant="outline"
+          <Button 
+            variant="outline" 
             onClick={downloadPdf}
             disabled={isProcessingFiles}
             title={isProcessingFiles ? "Files are being organized..." : "Download PDF"}
@@ -1113,27 +1183,27 @@ export default function OrderDetailsPage() {
           )}
           {user?.role !== 'partner_seller' && (
             <>
-              {!isEditMode ? (
-                <Button variant="outline" onClick={handleEditToggle}>
-                  <Edit3 className="h-4 w-4 mr-2" />
-                  Edit Order
-                </Button>
-              ) : (
-                <div className="flex gap-2">
-                  <Button onClick={handleSaveChanges}>
-                    <Save className="h-4 w-4 mr-2" />
-                    Save Changes
-                  </Button>
-                  <Button variant="outline" onClick={handleCancelEdit}>
-                    <X className="h-4 w-4 mr-2" />
-                    Cancel
-                  </Button>
-                </div>
-              )}
-              <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
+          {!isEditMode ? (
+            <Button variant="outline" onClick={handleEditToggle}>
+              <Edit3 className="h-4 w-4 mr-2" />
+              Edit Order
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              <Button onClick={handleSaveChanges}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Changes
               </Button>
+              <Button variant="outline" onClick={handleCancelEdit}>
+                <X className="h-4 w-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          )}
+          <Button variant="destructive" onClick={() => setDeleteDialogOpen(true)}>
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete
+          </Button>
             </>
           )}
         </div>
@@ -1205,9 +1275,17 @@ export default function OrderDetailsPage() {
                 )}
               </div>
               {!isEditMode && (
-                <div className="flex items-center">
-                  {getStatusBadge(order.status)}
-                  {getProductionStatusBadge(order.production_status)}
+                <div className="flex items-center space-x-4">
+                  <div className="flex items-center">
+                    {getStatusBadge(order.status)}
+                    {getProductionStatusBadge(order.production_status)}
+                  </div>
+                  {user?.role !== 'partner_seller' && (
+                    <ProductionCostsBox 
+                      order={order}
+                      onUpdate={handleProductionCostsUpdate}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -1372,29 +1450,15 @@ export default function OrderDetailsPage() {
                   }
                   
                   return (
-                    <div key={item.id} className="p-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-medium">{item.product_name}</h4>
-                          {item.description && (
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {item.description}
-                            </p>
-                          )}
-                          {/* Add part details */}
-                          {parts[idx] && (
-                            <div className="mt-2 text-sm text-gray-600">
-                              <p><strong>Process:</strong> {parts[idx].process || 'Not specified'}</p>
-                              <p><strong>Material:</strong> {parts[idx].material || 'Not specified'}</p>
-                              {parts[idx].surface_roughness && (
-                                <p><strong>Surface Roughness:</strong> {parts[idx].surface_roughness}</p>
-                              )}
-                              {parts[idx].surface_treatment && (
-                                <p><strong>Surface Treatment:</strong> {parts[idx].surface_treatment}</p>
-                              )}
-                              <p><strong>Documentation:</strong> {parts[idx].documentation || 'none'}</p>
-                            </div>
-                          )}
+                  <div key={item.id} className="p-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium">{item.product_name}</h4>
+                        {item.description && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {item.description}
+                          </p>
+                        )}
                           {/* Add files information */}
                           {itemFiles.length > 0 && (
                             <div className="mt-2">
@@ -1407,18 +1471,18 @@ export default function OrderDetailsPage() {
                                 ))}
                               </div>
                             </div>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium">
-                            {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}
-                          </p>
-                        </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium">
+                          {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}
+                        </p>
                       </div>
                     </div>
+                  </div>
                   );
                 })}
               </div>
@@ -1458,3 +1522,141 @@ export default function OrderDetailsPage() {
     </div>
   );
 }
+
+// Production Costs Box Component
+const ProductionCostsBox = ({ 
+  order, 
+  onUpdate 
+}: { 
+  order: Order | null; 
+  onUpdate: (costs: { material_costs: number; working_hours_costs: number; total_production_costs: number }) => void;
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [costs, setCosts] = useState({
+    material_costs: order?.material_costs || 0,
+    working_hours_costs: order?.working_hours_costs || 0,
+    total_production_costs: order?.total_production_costs || 0,
+  });
+
+  useEffect(() => {
+    setCosts({
+      material_costs: order?.material_costs || 0,
+      working_hours_costs: order?.working_hours_costs || 0,
+      total_production_costs: order?.total_production_costs || 0,
+    });
+  }, [order]);
+
+  const handleInputChange = (field: string, value: string) => {
+    const numValue = parseFloat(value) || 0;
+    setCosts(prev => ({
+      ...prev,
+      [field]: numValue,
+      total_production_costs: field === 'material_costs' || field === 'working_hours_costs' 
+        ? (field === 'material_costs' ? numValue : prev.material_costs) + 
+          (field === 'working_hours_costs' ? numValue : prev.working_hours_costs)
+        : prev.total_production_costs
+    }));
+  };
+
+  const handleSave = () => {
+    onUpdate(costs);
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setCosts({
+      material_costs: order?.material_costs || 0,
+      working_hours_costs: order?.working_hours_costs || 0,
+      total_production_costs: order?.total_production_costs || 0,
+    });
+    setIsEditing(false);
+  };
+
+  return (
+    <Card className="w-80">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg flex items-center">
+          <Factory className="h-5 w-5 mr-2" />
+          Production Costs
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isEditing ? (
+          <>
+            <div className="space-y-3">
+              <div>
+                <Label htmlFor="material_costs" className="text-sm font-medium">Material Costs (€)</Label>
+                <Input
+                  id="material_costs"
+                  type="number"
+                  step="0.01"
+                  value={costs.material_costs}
+                  onChange={(e) => handleInputChange('material_costs', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="working_hours_costs" className="text-sm font-medium">Working Hours Costs (€)</Label>
+                <Input
+                  id="working_hours_costs"
+                  type="number"
+                  step="0.01"
+                  value={costs.working_hours_costs}
+                  onChange={(e) => handleInputChange('working_hours_costs', e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div className="pt-2 border-t">
+                <Label htmlFor="total_production_costs" className="text-sm font-medium">Total Production Costs (€)</Label>
+                <Input
+                  id="total_production_costs"
+                  type="number"
+                  step="0.01"
+                  value={costs.total_production_costs}
+                  readOnly
+                  className="mt-1 bg-gray-50"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleSave} size="sm" className="flex-1">
+                <Save className="h-4 w-4 mr-1" />
+                Save
+              </Button>
+              <Button onClick={handleCancel} variant="outline" size="sm" className="flex-1">
+                <X className="h-4 w-4 mr-1" />
+                Cancel
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Material Costs:</span>
+                <span className="font-medium">€{costs.material_costs.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Working Hours:</span>
+                <span className="font-medium">€{costs.working_hours_costs.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t">
+                <span className="text-sm font-medium">Total:</span>
+                <span className="font-bold text-lg">€{costs.total_production_costs.toFixed(2)}</span>
+              </div>
+            </div>
+            <Button 
+              onClick={() => setIsEditing(true)} 
+              variant="outline" 
+              size="sm" 
+              className="w-full"
+            >
+              <Edit3 className="h-4 w-4 mr-1" />
+              Edit Costs
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+};

@@ -89,6 +89,9 @@ export type Order = {
   title: string;
   start_date: string;  // When production starts
   delivery_date: string; // Expected delivery date
+  material_costs?: number;
+  working_hours_costs?: number;
+  total_production_costs?: number;
 };
 
 export type OrderItem = {
