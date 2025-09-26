@@ -25,7 +25,7 @@ const DashboardOverview = () => {
     customers: { total: 0, new: 0, trend: '', positive: null },
     quotes: { total: 0, new: 0, trend: '', positive: null },
     orders: { total: 0, new: 0, trend: '', positive: null },
-    productionOrders: { total: 0, inProduction: 0, trend: '', positive: null },
+    productionOrders: { total: 0, inProduction: 0, finished: 0, trend: '', positive: null },
     revenue: { total: 0, trend: '', positive: null },
     partners: { total: 0, active: 0, trend: '', positive: null },
     products: { total: 0, lowStock: 0, trend: '', positive: null }
@@ -90,10 +90,11 @@ const DashboardOverview = () => {
         // Calculate production orders
         const productionOrders = orders.filter(o => o.production_status && o.production_status !== 'pending');
         const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
+        const finishedOrders = orders.filter(o => o.production_status === 'ready' || o.production_status === 'completed');
         
         setStats({
           orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
-          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, trend: '', positive: null }
+          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, finished: finishedOrders.length, trend: '', positive: null }
         });
 
         // Prepare sales data for chart (only partner's orders)
@@ -147,6 +148,7 @@ const DashboardOverview = () => {
         // Calculate production orders
         const productionOrders = orders.filter(o => o.production_status && o.production_status !== 'pending');
         const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
+        const finishedOrders = orders.filter(o => o.production_status === 'ready' || o.production_status === 'completed');
         
         // Revenue
         const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_amount || 0), 0);
@@ -161,7 +163,7 @@ const DashboardOverview = () => {
           customers: { total: customers.length, new: customersThisMonth.length, trend: '', positive: null },
           quotes: { total: rfqs.length, new: rfqsThisMonth.length, trend: '', positive: null },
           orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
-          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, trend: '', positive: null },
+          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, finished: finishedOrders.length, trend: '', positive: null },
           revenue: { total: revenueThisMonth, trend: '', positive: null },
           partners: { total: partners.length, active: activePartners, trend: '', positive: null },
           products: { total: products.length, lowStock, trend: '', positive: null }
@@ -301,12 +303,24 @@ const DashboardOverview = () => {
           onClick={() => navigate('/orders')}
         />
         
-        {/* Production Orders Card - Show for all users */}
+        {/* Production Orders - In Production Card */}
         <StatCard 
-          title="Production Orders"
+          title="Production Orders - In Production"
           icon={<Factory className="h-4 w-4" />}
-          totalValue={isLoading ? null : stats.productionOrders.total.toString()}
-          subtitle={`${stats.productionOrders.inProduction} in production`}
+          totalValue={isLoading ? null : stats.productionOrders.inProduction.toString()}
+          subtitle={`${stats.productionOrders.total} total production orders`}
+          trend={stats.productionOrders.trend}
+          trendPositive={stats.productionOrders.positive}
+          isLoading={isLoading}
+          onClick={() => navigate('/orders')}
+        />
+        
+        {/* Production Orders - Finished Card */}
+        <StatCard 
+          title="Production Orders - Finished"
+          icon={<Package className="h-4 w-4" />}
+          totalValue={isLoading ? null : stats.productionOrders.finished.toString()}
+          subtitle={`${stats.productionOrders.total} total production orders`}
           trend={stats.productionOrders.trend}
           trendPositive={stats.productionOrders.positive}
           isLoading={isLoading}

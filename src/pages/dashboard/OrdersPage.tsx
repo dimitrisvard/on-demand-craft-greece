@@ -118,7 +118,9 @@ export default function OrdersPage() {
         customer_name: item.customers?.company_name,
         customer_vat: item.customers?.vat_tax_id,
         rfq_id: item.rfq_id,
+        partner_id: item.partner_id,
         status: item.status as OrderStatus,
+        production_status: item.production_status,
         total_amount: item.total_amount || 0,
         currency: item.currency || 'USD',
         created_at: item.created_at,
@@ -281,7 +283,7 @@ export default function OrdersPage() {
     navigate(`/calendar`);
   }
 
-  const getStatusBadge = (status: OrderStatus) => {
+  const getStatusBadge = (status: OrderStatus, productionStatus?: string) => {
     switch (status) {
       case 'new':
         return <Badge>New</Badge>;
@@ -293,6 +295,23 @@ export default function OrdersPage() {
         return <Badge variant="destructive">Cancelled</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const getProductionStatusBadge = (productionStatus?: string) => {
+    if (!productionStatus) return null;
+    
+    switch (productionStatus) {
+      case 'pending':
+        return <Badge variant="outline" className="ml-1">Pending</Badge>;
+      case 'in_production':
+        return <Badge variant="default" className="ml-1 bg-blue-600">In Production</Badge>;
+      case 'ready':
+        return <Badge variant="default" className="ml-1 bg-green-600">Ready</Badge>;
+      case 'completed':
+        return <Badge variant="secondary" className="ml-1">Completed</Badge>;
+      default:
+        return <Badge variant="outline" className="ml-1">{productionStatus}</Badge>;
     }
   };
 
@@ -589,7 +608,12 @@ export default function OrdersPage() {
                   <TableCell className="font-mono">{generateOrderId(order)}</TableCell>
                   <TableCell className="font-medium">{order.title}</TableCell>
                   {!isProductionPartner && <TableCell>{order.customer_name}</TableCell>}
-                  <TableCell>{getStatusBadge(order.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center">
+                      {getStatusBadge(order.status)}
+                      {getProductionStatusBadge(order.production_status)}
+                    </div>
+                  </TableCell>
                   {!isProductionPartner && <TableCell>{formatCurrency(order.total_amount, order.currency)}</TableCell>}
                   <TableCell>{format(new Date(order.start_date), 'MMM d, yyyy')}</TableCell>
                   <TableCell>{format(new Date(order.delivery_date), 'MMM d, yyyy')}</TableCell>
