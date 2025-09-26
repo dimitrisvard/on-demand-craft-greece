@@ -1265,15 +1265,39 @@ export default function OrderDetailsPage() {
 
             <div>
               <h3 className="font-medium mb-4">Order Items</h3>
+              {console.log('Parts array:', parts)}
+              {console.log('Quote files:', quoteFiles)}
               <div className="border rounded-lg divide-y">
                 {orderItems.map((item, idx) => {
                   // Find files associated with this order item
-                  const itemFiles = quoteFiles.filter(file => {
-                    // Try to match by part name or index
-                    return file.part_name === item.product_name || 
-                           file.part_id === parts[idx]?.id ||
-                           (parts[idx] && file.part_name === parts[idx].name);
-                  });
+                  let itemFiles: QuoteFile[] = [];
+                  
+                  // First try to match by part_id if we have parts data
+                  if (parts[idx] && parts[idx].id) {
+                    // Match by part_id (most reliable)
+                    itemFiles = quoteFiles.filter(file => file.part_id === parts[idx].id);
+                    console.log(`Part ${idx + 1} (${parts[idx].id}): Found ${itemFiles.length} files`, itemFiles.map(f => f.file_name));
+                  } else {
+                    // Fallback: try to match by part name or index-based matching
+                    itemFiles = quoteFiles.filter(file => {
+                      // Try to match by part name
+                      if (file.part_name === item.product_name) return true;
+                      
+                      // Try to match by checking if the file name contains part indicators
+                      const productNameLower = item.product_name.toLowerCase();
+                      const fileNameLower = file.file_name.toLowerCase();
+                      
+                      // Check if file name contains part number from product name
+                      const partNumberMatch = productNameLower.match(/part\s*(\d+)/i);
+                      if (partNumberMatch) {
+                        const partNum = partNumberMatch[1];
+                        return fileNameLower.includes(`-${partNum}.`) || fileNameLower.includes(`-${partNum}-`);
+                      }
+                      
+                      return false;
+                    });
+                    console.log(`Part ${idx + 1} (fallback): Found ${itemFiles.length} files`, itemFiles.map(f => f.file_name));
+                  }
                   
                   return (
                     <div key={item.id} className="p-4">
