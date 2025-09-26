@@ -572,7 +572,7 @@ export default function OrdersPage() {
               {!isProductionPartner && <TableHead>Customer</TableHead>}
               <TableHead>Status</TableHead>
               {!isProductionPartner && <TableHead>Total Value</TableHead>}
-              <TableHead>Revenue</TableHead>
+              <TableHead>Total Cost</TableHead>
               <TableHead>Start Date</TableHead>
               <TableHead>Delivery Date</TableHead>
               <TableHead className="text-right">Actions</TableHead>
