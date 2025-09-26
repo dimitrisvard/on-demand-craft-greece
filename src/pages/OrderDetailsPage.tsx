@@ -1293,7 +1293,6 @@ export default function OrderDetailsPage() {
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
-              <div>
                 <h3 className="font-medium mb-2">Order Details</h3>
                 <div className="space-y-2">
                   {isEditMode ? (
@@ -1552,7 +1551,7 @@ export default function OrderDetailsPage() {
   );
 }
 
-// Production Costs Box Component
+// Production Costs Box Component Interface
 interface ProductionCostsBoxProps {
   order: Order | null;
   onUpdate: (costs: { 
