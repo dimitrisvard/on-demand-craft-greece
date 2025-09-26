@@ -60,6 +60,7 @@ import { BackToDashboardButton } from '@/components/dashboard/BackToDashboardBut
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { generateAndSendRFQPDF } from '@/utils/rfqPdfEmailService';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -822,9 +823,38 @@ const RfqDetails = (props: RfqDetailsProps) => {
   };
 
   const handleUpdateStatus = async (newStatus: 'draft' | 'sent' | 'received' | 'approved' | 'rejected') => {
-    if (!rfq) return;
+    if (!rfq || !customer) return;
     
     try {
+      // If marking as sent, send email with PDF
+      if (newStatus === 'sent') {
+        toast({
+          title: "Sending Email",
+          description: "Generating PDF and sending email to customer...",
+        });
+
+        const emailResult = await generateAndSendRFQPDF(
+          rfq,
+          customer,
+          generateRFQPDF
+        );
+
+        if (!emailResult.success) {
+          toast({
+            title: "Email Error",
+            description: emailResult.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        toast({
+          title: "Email Sent",
+          description: "PDF has been sent to customer successfully!",
+        });
+      }
+
+      // Update RFQ status
       const { error } = await supabase
         .from('rfqs')
         .update({ status: newStatus })
@@ -832,10 +862,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
       if (error) throw error;
 
-      toast({
-        title: "Success",
-        description: `RFQ status updated to ${newStatus}`,
-      });
+      if (newStatus !== 'sent') {
+        toast({
+          title: "Success",
+          description: `RFQ status updated to ${newStatus}`,
+        });
+      }
 
       fetchRfqDetails();
     } catch (error: any) {
@@ -874,8 +906,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
     });
   };
 
-  const handleDownloadPdf = async () => {
-    if (!rfq || !customer) return;
+  const generateRFQPDF = async (): Promise<string> => {
+    if (!rfq || !customer) return '';
 
     // Prepare the data structure as per requirements
     const data = {
@@ -1066,6 +1098,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
         ${data.footer_notes.map(note => `<div>${note}</div>`).join('')}
         <div style="margin-top:8px;"><a href='${data.terms_url}' style='color:#1976d2;text-decoration:underline;'>General Sale and Delivery Terms and Conditions</a></div>
       </div>
+      
+      <!-- Add extra spacing at bottom to prevent text overlap with page number -->
+      <div style="margin-top:60px;height:40px;"></div>
     `;
 
     // Use html2canvas to render the container, then jsPDF to create a multi-page PDF
@@ -1085,15 +1120,43 @@ const RfqDetails = (props: RfqDetailsProps) => {
     // Only add the image once (no duplicate pages)
     pdf.addImage(imgData, 'PNG', 10, 10, pdfWidth, pdfHeight);
     pdf.setFontSize(9);
-    pdf.text(`Page 1`, pageWidth - 30, pageHeight - 10);
+    // Position page number higher to avoid overlap with content
+    pdf.text(`Page 1`, pageWidth - 30, pageHeight - 20);
 
-    // Always use the same filename for the same RFQ
-    pdf.save(`offer_${rfqNumber}.pdf`);
+    // Get PDF as base64
+    const pdfBase64 = pdf.output('datauristring').split(',')[1];
+    
+    // Clean up
     document.body.removeChild(container);
-    toast({
-      title: 'Success',
-      description: 'PDF downloaded successfully',
-    });
+    
+    return pdfBase64;
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!rfq || !customer) return;
+
+    try {
+      const pdfBase64 = await generateRFQPDF();
+      if (!pdfBase64) return;
+
+      // Create download link
+      const link = document.createElement('a');
+      link.href = `data:application/pdf;base64,${pdfBase64}`;
+      link.download = `offer_${rfq.rfq_number || rfq.id}.pdf`;
+      link.click();
+
+      toast({
+        title: 'Success',
+        description: 'PDF downloaded successfully',
+      });
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to generate PDF',
+        variant: 'destructive',
+      });
+    }
   };
 
   const formatCurrency = (amount: number, currency: string) => {
