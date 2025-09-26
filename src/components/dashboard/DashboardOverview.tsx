@@ -25,6 +25,7 @@ const DashboardOverview = () => {
     customers: { total: 0, new: 0, trend: '', positive: null },
     quotes: { total: 0, new: 0, trend: '', positive: null },
     orders: { total: 0, new: 0, trend: '', positive: null },
+    productionOrders: { total: 0, inProduction: 0, trend: '', positive: null },
     revenue: { total: 0, trend: '', positive: null },
     partners: { total: 0, active: 0, trend: '', positive: null },
     products: { total: 0, lowStock: 0, trend: '', positive: null }
@@ -80,14 +81,19 @@ const DashboardOverview = () => {
         console.log('Partner data found:', partnerData);
         const ordersRes = await supabase
           .from('orders')
-          .select('id,total_amount,created_at')
+          .select('id,total_amount,created_at,production_status')
           .eq('partner_id', partnerData.id);
         
         const orders = (ordersRes.data || []).filter(o => new Date(o.created_at) >= startDate);
         const ordersThisMonth = orders.filter(o => new Date(o.created_at).getMonth() === new Date().getMonth() && new Date(o.created_at).getFullYear() === new Date().getFullYear());
         
+        // Calculate production orders
+        const productionOrders = orders.filter(o => o.production_status && o.production_status !== 'pending');
+        const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
+        
         setStats({
-          orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null }
+          orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
+          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, trend: '', positive: null }
         });
 
         // Prepare sales data for chart (only partner's orders)
@@ -123,7 +129,7 @@ const DashboardOverview = () => {
         const [customersRes, rfqsRes, ordersRes, partnersRes, productsRes] = await Promise.all([
           supabase.from('customers').select('id,created_at'),
           supabase.from('rfqs').select('id,created_at'),
-          supabase.from('orders').select('id,total_amount,created_at'),
+          supabase.from('orders').select('id,total_amount,created_at,production_status'),
           supabase.from('production_partners').select('id,active'),
           supabase.from('products').select('id,stock_quantity')
         ]);
@@ -137,6 +143,11 @@ const DashboardOverview = () => {
         // Orders
         const orders = (ordersRes.data || []).filter(o => new Date(o.created_at) >= startDate);
         const ordersThisMonth = orders.filter(o => new Date(o.created_at).getMonth() === new Date().getMonth() && new Date(o.created_at).getFullYear() === new Date().getFullYear());
+        
+        // Calculate production orders
+        const productionOrders = orders.filter(o => o.production_status && o.production_status !== 'pending');
+        const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
+        
         // Revenue
         const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_amount || 0), 0);
         // Partners
@@ -150,6 +161,7 @@ const DashboardOverview = () => {
           customers: { total: customers.length, new: customersThisMonth.length, trend: '', positive: null },
           quotes: { total: rfqs.length, new: rfqsThisMonth.length, trend: '', positive: null },
           orders: { total: orders.length, new: ordersThisMonth.length, trend: '', positive: null },
+          productionOrders: { total: productionOrders.length, inProduction: inProductionOrders.length, trend: '', positive: null },
           revenue: { total: revenueThisMonth, trend: '', positive: null },
           partners: { total: partners.length, active: activePartners, trend: '', positive: null },
           products: { total: products.length, lowStock, trend: '', positive: null }
@@ -285,6 +297,18 @@ const DashboardOverview = () => {
           subtitle={`${stats.orders.new} new this month`}
           trend={stats.orders.trend}
           trendPositive={stats.orders.positive}
+          isLoading={isLoading}
+          onClick={() => navigate('/orders')}
+        />
+        
+        {/* Production Orders Card - Show for all users */}
+        <StatCard 
+          title="Production Orders"
+          icon={<Factory className="h-4 w-4" />}
+          totalValue={isLoading ? null : stats.productionOrders.total.toString()}
+          subtitle={`${stats.productionOrders.inProduction} in production`}
+          trend={stats.productionOrders.trend}
+          trendPositive={stats.productionOrders.positive}
           isLoading={isLoading}
           onClick={() => navigate('/orders')}
         />

@@ -82,6 +82,7 @@ export type Order = {
   rfq_id?: string;
   partner_id?: string;
   status: OrderStatus;
+  production_status?: 'pending' | 'in_production' | 'ready' | 'completed';
   total_amount: number;
   currency: string;
   created_at: string;

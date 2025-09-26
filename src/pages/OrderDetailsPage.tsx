@@ -818,6 +818,23 @@ export default function OrderDetailsPage() {
     }
   };
 
+  const getProductionStatusBadge = (productionStatus?: string) => {
+    if (!productionStatus) return null;
+    
+    switch (productionStatus) {
+      case 'pending':
+        return <Badge variant="outline" className="ml-2">Pending Production</Badge>;
+      case 'in_production':
+        return <Badge variant="default" className="ml-2 bg-blue-600">In Production</Badge>;
+      case 'ready':
+        return <Badge variant="default" className="ml-2 bg-green-600">Ready for Delivery</Badge>;
+      case 'completed':
+        return <Badge variant="secondary" className="ml-2">Production Completed</Badge>;
+      default:
+        return <Badge variant="outline" className="ml-2">{productionStatus}</Badge>;
+    }
+  };
+
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
   };
@@ -891,6 +908,34 @@ export default function OrderDetailsPage() {
     setIsEditMode(false);
     // Reset to original values
     fetchOrderDetails();
+  };
+
+  const handleProductionStatusChange = async (newStatus: 'in_production' | 'ready') => {
+    if (!order || !id) return;
+    
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ production_status: newStatus })
+        .eq('id', id);
+        
+      if (error) throw error;
+      
+      // Update local state
+      setOrder(prev => prev ? { ...prev, production_status: newStatus } : null);
+      
+      toast({
+        title: "Success",
+        description: `Order status updated to ${newStatus === 'in_production' ? 'In Production' : 'Ready'}`,
+      });
+    } catch (error: any) {
+      console.error('Error updating production status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update production status",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -1035,8 +1080,8 @@ export default function OrderDetailsPage() {
           <Button variant="outline" onClick={() => navigate('/orders')}>
             Back to Orders
           </Button>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={downloadPdf}
             disabled={isProcessingFiles}
             title={isProcessingFiles ? "Files are being organized..." : "Download PDF"}
@@ -1044,6 +1089,28 @@ export default function OrderDetailsPage() {
             <Download className="h-4 w-4 mr-2" />
             {isProcessingFiles ? "Processing..." : "Download PDF"}
           </Button>
+          {user?.role === 'partner_seller' && order?.partner_id && (
+            <div className="flex gap-2">
+              <Button
+                variant="default"
+                onClick={() => handleProductionStatusChange('in_production')}
+                disabled={order.production_status === 'in_production'}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Factory className="h-4 w-4 mr-2" />
+                Start Production
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => handleProductionStatusChange('ready')}
+                disabled={order.production_status === 'ready' || order.production_status === 'completed'}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <Package className="h-4 w-4 mr-2" />
+                Order Ready
+              </Button>
+            </div>
+          )}
           {user?.role !== 'partner_seller' && (
             <>
               {!isEditMode ? (
@@ -1137,7 +1204,12 @@ export default function OrderDetailsPage() {
                   </>
                 )}
               </div>
-              {!isEditMode && getStatusBadge(order.status)}
+              {!isEditMode && (
+                <div className="flex items-center">
+                  {getStatusBadge(order.status)}
+                  {getProductionStatusBadge(order.production_status)}
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -1171,7 +1243,7 @@ export default function OrderDetailsPage() {
                   {order.partner_id && (
                     <p className="text-sm">
                       <span className="text-muted-foreground">Production Partner:</span>{' '}
-                      {user?.role === 'partner_seller' ? '' : partners.find(p => p.id === order.partner_id)?.company_name || 'Assigned'}
+                      {partners.find(p => p.id === order.partner_id)?.company_name || 'Assigned'}
                     </p>
                   )}
                 </div>
