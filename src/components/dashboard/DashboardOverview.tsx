@@ -108,29 +108,53 @@ const DashboardOverview = () => {
         // Prepare sales data for chart (only partner's orders)
         let chartData: any[] = [];
         if (timeRange === '1y') {
-          const months: {[k: string]: number} = {};
+          const months: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-            months[key] = (months[key] || 0) + (o.total_with_vat || 0);
+            if (!months[key]) {
+              months[key] = { revenue: 0, costs: 0 };
+            }
+            months[key].revenue += (o.total_with_vat || 0); // Partner's revenue
+            months[key].costs += (o.total_with_vat || 0); // Same as revenue for partners
           });
-          chartData = Object.entries(months).map(([month, value]) => ({ label: month, revenue: value }));
+          chartData = Object.entries(months).map(([month, values]) => ({ 
+            label: month, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         } else if (timeRange === '90d') {
-          const weeks: {[k: string]: number} = {};
+          const weeks: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const week = `${d.getFullYear()}-W${Math.ceil((d.getDate() + 6 - d.getDay()) / 7)}`;
-            weeks[week] = (weeks[week] || 0) + (o.total_with_vat || 0);
+            if (!weeks[week]) {
+              weeks[week] = { revenue: 0, costs: 0 };
+            }
+            weeks[week].revenue += (o.total_with_vat || 0); // Partner's revenue
+            weeks[week].costs += (o.total_with_vat || 0); // Same as revenue for partners
           });
-          chartData = Object.entries(weeks).map(([week, value]) => ({ label: week, revenue: value }));
+          chartData = Object.entries(weeks).map(([week, values]) => ({ 
+            label: week, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         } else {
-          const days: {[k: string]: number} = {};
+          const days: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = d.toISOString().slice(0,10);
-            days[key] = (days[key] || 0) + (o.total_with_vat || 0);
+            if (!days[key]) {
+              days[key] = { revenue: 0, costs: 0 };
+            }
+            days[key].revenue += (o.total_with_vat || 0); // Partner's revenue
+            days[key].costs += (o.total_with_vat || 0); // Same as revenue for partners
           });
-          chartData = Object.entries(days).map(([day, value]) => ({ label: day, revenue: value }));
+          chartData = Object.entries(days).map(([day, values]) => ({ 
+            label: day, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         }
         setSalesData(chartData.sort((a, b) => a.label.localeCompare(b.label)));
       } else {
@@ -158,8 +182,8 @@ const DashboardOverview = () => {
         const inProductionOrders = orders.filter(o => o.production_status === 'in_production');
         const finishedOrders = orders.filter(o => o.production_status === 'ready' || o.production_status === 'completed');
         
-        // Revenue
-        const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_with_vat || 0), 0);
+        // Revenue (what customers pay)
+        const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_amount || 0), 0);
         
         // Calculate costs
         const totalMaterialCosts = orders.reduce((sum, o) => sum + (o.material_costs || 0), 0);
@@ -188,29 +212,53 @@ const DashboardOverview = () => {
         // Prepare sales data for chart
         let chartData: any[] = [];
         if (timeRange === '1y') {
-          const months: {[k: string]: number} = {};
+          const months: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-            months[key] = (months[key] || 0) + (o.total_with_vat || 0);
+            if (!months[key]) {
+              months[key] = { revenue: 0, costs: 0 };
+            }
+            months[key].revenue += (o.total_amount || 0);
+            months[key].costs += (o.total_with_vat || 0);
           });
-          chartData = Object.entries(months).map(([month, value]) => ({ label: month, revenue: value }));
+          chartData = Object.entries(months).map(([month, values]) => ({ 
+            label: month, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         } else if (timeRange === '90d') {
-          const weeks: {[k: string]: number} = {};
+          const weeks: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const week = `${d.getFullYear()}-W${Math.ceil((d.getDate() + 6 - d.getDay()) / 7)}`;
-            weeks[week] = (weeks[week] || 0) + (o.total_with_vat || 0);
+            if (!weeks[week]) {
+              weeks[week] = { revenue: 0, costs: 0 };
+            }
+            weeks[week].revenue += (o.total_amount || 0);
+            weeks[week].costs += (o.total_with_vat || 0);
           });
-          chartData = Object.entries(weeks).map(([week, value]) => ({ label: week, revenue: value }));
+          chartData = Object.entries(weeks).map(([week, values]) => ({ 
+            label: week, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         } else {
-          const days: {[k: string]: number} = {};
+          const days: {[k: string]: {revenue: number, costs: number}} = {};
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = d.toISOString().slice(0,10);
-            days[key] = (days[key] || 0) + (o.total_with_vat || 0);
+            if (!days[key]) {
+              days[key] = { revenue: 0, costs: 0 };
+            }
+            days[key].revenue += (o.total_amount || 0);
+            days[key].costs += (o.total_with_vat || 0);
           });
-          chartData = Object.entries(days).map(([day, value]) => ({ label: day, revenue: value }));
+          chartData = Object.entries(days).map(([day, values]) => ({ 
+            label: day, 
+            revenue: values.revenue,
+            costs: values.costs
+          }));
         }
         setSalesData(chartData.sort((a, b) => a.label.localeCompare(b.label)));
       }
@@ -387,8 +435,8 @@ const DashboardOverview = () => {
         
         <Card className="col-span-1">
           <CardHeader>
-            <CardTitle>Sales Overview</CardTitle>
-            <CardDescription>Monthly revenue breakdown</CardDescription>
+            <CardTitle>Revenue vs Costs Overview</CardTitle>
+            <CardDescription>Revenue and costs breakdown over time</CardDescription>
           </CardHeader>
           <CardContent className="h-[300px] flex items-center justify-center">
             {isLoading ? (
@@ -400,16 +448,21 @@ const DashboardOverview = () => {
                 <AreaChart data={salesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.7}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.05}/>
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.7}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.05}/>
+                    </linearGradient>
+                    <linearGradient id="colorCosts" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.7}/>
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                   <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} width={60} />
-                  <Tooltip contentStyle={{ background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', border: 'none', fontSize: 14 }} formatter={v => `€${Number(v).toLocaleString()}`}/>
+                  <Tooltip contentStyle={{ background: '#fff', borderRadius: 8, boxShadow: '0 2px 8px #0001', border: 'none', fontSize: 14 }} formatter={(v, name) => [`€${Number(v).toLocaleString()}`, name === 'revenue' ? 'Revenue' : 'Costs']}/>
                   <Legend verticalAlign="top" height={36} iconType="circle"/>
-                  <Area type="monotone" dataKey="revenue" stroke="#6366f1" fillOpacity={1} fill="url(#colorRevenue)" strokeWidth={3} dot={{ r: 4, fill: '#6366f1', stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 6 }} />
+                  <Area type="monotone" dataKey="revenue" stroke="#10b981" fillOpacity={1} fill="url(#colorRevenue)" strokeWidth={3} dot={{ r: 4, fill: '#10b981', stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 6 }} name="Revenue" />
+                  <Area type="monotone" dataKey="costs" stroke="#ef4444" fillOpacity={1} fill="url(#colorCosts)" strokeWidth={3} dot={{ r: 4, fill: '#ef4444', stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 6 }} name="Costs" />
                 </AreaChart>
               </ResponsiveContainer>
             )}
