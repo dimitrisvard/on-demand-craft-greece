@@ -1553,13 +1553,18 @@ export default function OrderDetailsPage() {
 }
 
 // Production Costs Box Component
-const ProductionCostsBox = ({ 
-  order, 
-  onUpdate 
-}: { 
-  order: Order | null; 
-  onUpdate: (costs: { material_costs: number; working_hours_costs: number; total_production_costs: number; vat_amount: number; total_with_vat: number }) => void;
-}) => {
+interface ProductionCostsBoxProps {
+  order: Order | null;
+  onUpdate: (costs: { 
+    material_costs: number; 
+    working_hours_costs: number; 
+    total_production_costs: number; 
+    vat_amount: number; 
+    total_with_vat: number;
+  }) => void;
+}
+
+const ProductionCostsBox = ({ order, onUpdate }: ProductionCostsBoxProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [costs, setCosts] = useState({
     material_costs: order?.material_costs || 0,
