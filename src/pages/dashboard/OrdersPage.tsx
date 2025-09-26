@@ -127,7 +127,8 @@ export default function OrdersPage() {
         currency: item.currency || 'USD',
         created_at: item.created_at,
         start_date: item.start_date || item.created_at,
-        delivery_date: item.delivery_date || new Date(new Date(item.created_at).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString()
+        delivery_date: item.delivery_date || new Date(new Date(item.created_at).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        total_with_vat: item.total_with_vat || 0
       }));
 
       setOrders(transformedData);
@@ -571,6 +572,7 @@ export default function OrdersPage() {
               {!isProductionPartner && <TableHead>Customer</TableHead>}
               <TableHead>Status</TableHead>
               {!isProductionPartner && <TableHead>Total Value</TableHead>}
+              <TableHead>Revenue</TableHead>
               <TableHead>Start Date</TableHead>
               <TableHead>Delivery Date</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -579,7 +581,7 @@ export default function OrdersPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={isProductionPartner ? 6 : 8} className="text-center">
+                <TableCell colSpan={isProductionPartner ? 7 : 9} className="text-center">
                   <div className="flex items-center justify-center">
                     <div className="animate-spin w-5 h-5 border-2 border-primary border-t-transparent rounded-full"></div>
                     <span className="ml-2">Loading...</span>
@@ -588,7 +590,7 @@ export default function OrdersPage() {
               </TableRow>
             ) : filteredOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isProductionPartner ? 6 : 8} className="text-center py-8">
+                <TableCell colSpan={isProductionPartner ? 7 : 9} className="text-center py-8">
                   <div className="flex flex-col items-center justify-center">
                     <Package className="h-12 w-12 text-gray-300 mb-2" />
                     <p className="text-muted-foreground">No orders found</p>
@@ -617,6 +619,11 @@ export default function OrdersPage() {
                     </div>
                   </TableCell>
                   {!isProductionPartner && <TableCell>{formatCurrency(order.total_amount, order.currency)}</TableCell>}
+                  <TableCell>
+                    {order.total_with_vat ? 
+                      `€${Number(order.total_with_vat).toFixed(2)}` : 
+                      '-'}
+                  </TableCell>
                   <TableCell>{format(new Date(order.start_date), 'MMM d, yyyy')}</TableCell>
                   <TableCell>{format(new Date(order.delivery_date), 'MMM d, yyyy')}</TableCell>
                   <TableCell className="text-right">

@@ -82,7 +82,7 @@ const DashboardOverview = () => {
         console.log('Partner data found:', partnerData);
         const ordersRes = await supabase
           .from('orders')
-          .select('id,total_amount,created_at,production_status')
+          .select('id,total_amount,total_with_vat,created_at,production_status')
           .eq('partner_id', partnerData.id);
         
         const orders = (ordersRes.data || []).filter(o => new Date(o.created_at) >= startDate);
@@ -112,7 +112,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-            months[key] = (months[key] || 0) + (o.total_amount || 0);
+            months[key] = (months[key] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(months).map(([month, value]) => ({ label: month, revenue: value }));
         } else if (timeRange === '90d') {
@@ -120,7 +120,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const week = `${d.getFullYear()}-W${Math.ceil((d.getDate() + 6 - d.getDay()) / 7)}`;
-            weeks[week] = (weeks[week] || 0) + (o.total_amount || 0);
+            weeks[week] = (weeks[week] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(weeks).map(([week, value]) => ({ label: week, revenue: value }));
         } else {
@@ -128,7 +128,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = d.toISOString().slice(0,10);
-            days[key] = (days[key] || 0) + (o.total_amount || 0);
+            days[key] = (days[key] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(days).map(([day, value]) => ({ label: day, revenue: value }));
         }
@@ -138,7 +138,7 @@ const DashboardOverview = () => {
         const [customersRes, rfqsRes, ordersRes, partnersRes, productsRes] = await Promise.all([
           supabase.from('customers').select('id,created_at'),
           supabase.from('rfqs').select('id,created_at'),
-          supabase.from('orders').select('id,total_amount,created_at,production_status'),
+          supabase.from('orders').select('id,total_amount,total_with_vat,created_at,production_status'),
           supabase.from('production_partners').select('id,active'),
           supabase.from('products').select('id,stock_quantity')
         ]);
@@ -159,7 +159,7 @@ const DashboardOverview = () => {
         const finishedOrders = orders.filter(o => o.production_status === 'ready' || o.production_status === 'completed');
         
         // Revenue
-        const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+        const revenueThisMonth = ordersThisMonth.reduce((sum, o) => sum + (o.total_with_vat || 0), 0);
         
         // Calculate costs
         const totalMaterialCosts = orders.reduce((sum, o) => sum + (o.material_costs || 0), 0);
@@ -192,7 +192,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}`;
-            months[key] = (months[key] || 0) + (o.total_amount || 0);
+            months[key] = (months[key] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(months).map(([month, value]) => ({ label: month, revenue: value }));
         } else if (timeRange === '90d') {
@@ -200,7 +200,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const week = `${d.getFullYear()}-W${Math.ceil((d.getDate() + 6 - d.getDay()) / 7)}`;
-            weeks[week] = (weeks[week] || 0) + (o.total_amount || 0);
+            weeks[week] = (weeks[week] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(weeks).map(([week, value]) => ({ label: week, revenue: value }));
         } else {
@@ -208,7 +208,7 @@ const DashboardOverview = () => {
           orders.forEach(o => {
             const d = new Date(o.created_at);
             const key = d.toISOString().slice(0,10);
-            days[key] = (days[key] || 0) + (o.total_amount || 0);
+            days[key] = (days[key] || 0) + (o.total_with_vat || 0);
           });
           chartData = Object.entries(days).map(([day, value]) => ({ label: day, revenue: value }));
         }
@@ -355,16 +355,6 @@ const DashboardOverview = () => {
           onClick={() => navigate('/orders')}
         />
         
-        <StatCard 
-          title="Material Costs"
-          icon={<Package className="h-4 w-4" />}
-          totalValue={isLoading ? null : `€${stats.costs.material.toFixed(2)}`}
-          subtitle={`€${stats.costs.vat.toFixed(2)} VAT included`}
-          trend={stats.costs.trend}
-          trendPositive={stats.costs.positive}
-          isLoading={isLoading}
-          onClick={() => navigate('/orders')}
-        />
       </div>
       
       {/* Charts and additional analytics */}

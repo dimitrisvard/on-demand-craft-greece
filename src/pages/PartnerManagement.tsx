@@ -695,6 +695,7 @@ export default function PartnerManagement() {
                           <TableHead>Customer</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Amount</TableHead>
+                          <TableHead>Revenue</TableHead>
                           <TableHead>Action</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -716,6 +717,11 @@ export default function PartnerManagement() {
                             <TableCell>
                               {order.total_amount ? 
                                 `${order.currency || 'USD'} ${Number(order.total_amount).toFixed(2)}` : 
+                                '-'}
+                            </TableCell>
+                            <TableCell>
+                              {order.total_with_vat ? 
+                                `€${Number(order.total_with_vat).toFixed(2)}` : 
                                 '-'}
                             </TableCell>
                             <TableCell>
