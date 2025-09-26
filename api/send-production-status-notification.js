@@ -134,12 +134,12 @@ export default async function handler(req, res) {
                 'Monitor progress through the dashboard',
                 'Expect regular updates from the production partner',
                 'Contact partner if you have any questions'
-              ] : [
+              ].map(item => `<li>${item}</li>`).join('') : [
                 'Production has been completed successfully',
                 'Order is ready for quality inspection',
                 'Prepare for delivery or pickup',
                 'Update order status in the system'
-              ]}.map(item => `<li>${item}</li>`).join('')}
+              ].map(item => `<li>${item}</li>`).join('')}
             </ul>
           </div>
           

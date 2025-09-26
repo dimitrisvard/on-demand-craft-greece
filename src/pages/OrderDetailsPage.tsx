@@ -1280,7 +1280,7 @@ export default function OrderDetailsPage() {
                     {getStatusBadge(order.status)}
                     {getProductionStatusBadge(order.production_status)}
                   </div>
-                  {user?.role !== 'partner_seller' && (
+                  {user?.role === 'admin' && (
                     <ProductionCostsBox 
                       order={order}
                       onUpdate={handleProductionCostsUpdate}
