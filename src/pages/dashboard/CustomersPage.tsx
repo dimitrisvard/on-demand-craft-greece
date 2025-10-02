@@ -18,13 +18,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { supabase } from "@/integrations/supabase/client"
-import { PencilIcon, PlusCircle, Trash2, UserCircle } from "lucide-react"
+import { PencilIcon, PlusCircle, Trash2, UserCircle, Search } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { BackToDashboardButton } from "@/components/dashboard/BackToDashboardButton"
 import { Badge } from "@/components/ui/badge"
 import { format } from "date-fns"
 import { Customer, CustomerStatus } from "@/types/customer"
 import { CustomerEditForm } from "@/components/customers/CustomerEditForm"
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout"
+import { CustomerDetailsPanel } from "@/components/customers/CustomerDetailsPanel"
+import { Input } from "@/components/ui/input"
 
 const generateSimpleCustomerId = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -32,6 +35,8 @@ const generateSimpleCustomerId = (): string => {
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([])
+  const [searchQuery, setSearchQuery] = useState("")
   const [loading, setLoading] = useState(true)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -59,6 +64,22 @@ export default function CustomersPage() {
   useEffect(() => {
     fetchCustomers()
   }, [])
+
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredCustomers(customers);
+      return;
+    }
+    
+    const lowercaseQuery = searchQuery.toLowerCase();
+    const filtered = customers.filter(customer =>
+      customer.company_name.toLowerCase().includes(lowercaseQuery) ||
+      customer.email.toLowerCase().includes(lowercaseQuery) ||
+      (customer.vat_tax_id && customer.vat_tax_id.toLowerCase().includes(lowercaseQuery))
+    );
+    
+    setFilteredCustomers(filtered);
+  }, [searchQuery, customers]);
 
   async function fetchCustomers() {
     try {
@@ -88,6 +109,7 @@ export default function CustomersPage() {
 
       console.log("Processed customers:", typedCustomers)
       setCustomers(typedCustomers)
+      setFilteredCustomers(typedCustomers)
     } catch (error: any) {
       console.error("Error in fetchCustomers:", error)
       toast({
@@ -366,12 +388,12 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="p-6 pt-20 space-y-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <BackToDashboardButton />
-          <h1 className="text-2xl font-bold">Customers</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">Customers</h1>
+          </div>
         <Button 
           onClick={handleAddClick} 
           className="flex items-center gap-2"
@@ -381,6 +403,17 @@ export default function CustomersPage() {
           <PlusCircle className="h-5 w-5" />
           <span>New Customer</span>
         </Button>
+      </div>
+      
+      {/* Search Bar */}
+      <div className="relative">
+        <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search customers by company name, email, or VAT number..."
+          className="pl-10"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
       </div>
       
       <Card>
@@ -401,12 +434,14 @@ export default function CustomersPage() {
               <TableRow>
                 <TableCell colSpan={7} className="text-center">Loading...</TableCell>
               </TableRow>
-            ) : customers.length === 0 ? (
+            ) : filteredCustomers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center">No customers found</TableCell>
+                <TableCell colSpan={7} className="text-center">
+                  {searchQuery ? 'No customers match your search' : 'No customers found'}
+                </TableCell>
               </TableRow>
             ) : (
-              customers.map((customer) => (
+              filteredCustomers.map((customer) => (
                 <TableRow key={customer.id}>
                   <TableCell className="font-medium">{customer.company_name}</TableCell>
                   <TableCell>{customer.vat_tax_id || '-'}</TableCell>
@@ -553,6 +588,7 @@ export default function CustomersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PersistentDashboardLayout>
   )
 }

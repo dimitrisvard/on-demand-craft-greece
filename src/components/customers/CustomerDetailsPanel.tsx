@@ -16,6 +16,8 @@ import {
   Briefcase
 } from "lucide-react";
 import { CustomerRFQsList } from "./CustomerRFQsList";
+import { CustomerOrdersList } from "./CustomerOrdersList";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CustomerDetailsPanelProps {
   customer: Customer | null;
@@ -23,6 +25,7 @@ interface CustomerDetailsPanelProps {
 
 export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) => {
   const [isRFQsListOpen, setIsRFQsListOpen] = useState(false);
+  const [isOrdersListOpen, setIsOrdersListOpen] = useState(false);
 
   const getStatusColor = (status: string | undefined) => {
     if (!status) return "bg-gray-100 text-gray-800";
@@ -168,14 +171,38 @@ export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) =>
           </div>
           
           <div className="pt-4 border-t mt-4">
-            <Button 
-              variant="outline" 
-              className="w-full flex items-center gap-2"
-              onClick={() => setIsRFQsListOpen(true)}
-            >
-              <FileText className="h-4 w-4" />
-              View Customer RFQs
-            </Button>
+            <Tabs defaultValue="rfqs" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="rfqs" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  RFQs
+                </TabsTrigger>
+                <TabsTrigger value="orders" className="flex items-center gap-2">
+                  <Briefcase className="h-4 w-4" />
+                  Orders
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="rfqs" className="mt-4">
+                <Button 
+                  variant="outline" 
+                  className="w-full flex items-center gap-2"
+                  onClick={() => setIsRFQsListOpen(true)}
+                >
+                  <FileText className="h-4 w-4" />
+                  View Customer RFQs
+                </Button>
+              </TabsContent>
+              <TabsContent value="orders" className="mt-4">
+                <Button 
+                  variant="outline" 
+                  className="w-full flex items-center gap-2"
+                  onClick={() => setIsOrdersListOpen(true)}
+                >
+                  <Briefcase className="h-4 w-4" />
+                  View Customer Orders
+                </Button>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </Card>
@@ -185,6 +212,13 @@ export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) =>
         customerId={customer.id}
         isOpen={isRFQsListOpen}
         onClose={() => setIsRFQsListOpen(false)}
+      />
+
+      {/* Orders List Dialog */}
+      <CustomerOrdersList 
+        customerId={customer.id}
+        isOpen={isOrdersListOpen}
+        onClose={() => setIsOrdersListOpen(false)}
       />
     </>
   );

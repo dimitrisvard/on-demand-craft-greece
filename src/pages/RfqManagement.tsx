@@ -45,8 +45,11 @@ import {
   Plus,
   Download,
   Send,
-  FileCheck
+  FileCheck,
+  UserPlus
 } from "lucide-react";
+import { CustomerSearchAssign } from "@/components/customers/CustomerSearchAssign";
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
 
 type RfqStatus = "draft" | "sent" | "received" | "approved" | "rejected";
 
@@ -67,6 +70,7 @@ export default function RfqManagement() {
   const [isItemDialogOpen, setIsItemDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConvertToOrderDialogOpen, setIsConvertToOrderDialogOpen] = useState(false);
+  const [isCustomerAssignDialogOpen, setIsCustomerAssignDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<RfqStatus | "all">("all");
@@ -446,6 +450,34 @@ export default function RfqManagement() {
     }
   };
 
+  const handleCustomerAssign = async (customer: any) => {
+    if (!selectedRfq) return;
+    
+    try {
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ customer_id: customer?.id || null })
+        .eq('id', selectedRfq.id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: customer ? `Customer ${customer.company_name} assigned successfully` : "Customer assignment removed",
+      });
+      
+      setIsCustomerAssignDialogOpen(false);
+      setSelectedRfq(null);
+      fetchRfqs();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign customer",
+        variant: "destructive",
+      });
+    }
+  };
+
   const updateRfqTotal = async (rfqId: string, total: number) => {
     try {
       const { error } = await supabase
@@ -616,19 +648,12 @@ export default function RfqManagement() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-4">
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => navigate('/dashboard')}
-            className="gap-1"
-          >
-            <ChevronLeft className="h-4 w-4" /> Back
-          </Button>
-          <h1 className="text-2xl font-bold">RFQ Management</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">RFQ Management</h1>
+          </div>
         <Button 
           onClick={handleNewRfqClick}
           className="flex items-center gap-1"
@@ -727,6 +752,15 @@ export default function RfqManagement() {
                             </DropdownMenuItem>
                             
                             {getRfqStatusActions(rfq)}
+                            
+                            <DropdownMenuItem onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedRfq(rfq);
+                              setIsCustomerAssignDialogOpen(true);
+                            }}>
+                              <UserPlus className="mr-2 h-4 w-4" />
+                              Assign Customer
+                            </DropdownMenuItem>
                             
                             <DropdownMenuItem onClick={(e) => {
                               e.stopPropagation();
@@ -1017,6 +1051,17 @@ export default function RfqManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* Customer Assignment Dialog */}
+      <CustomerSearchAssign
+        currentCustomerId={selectedRfq?.customer_id}
+        onCustomerSelect={handleCustomerAssign}
+        isOpen={isCustomerAssignDialogOpen}
+        onClose={() => setIsCustomerAssignDialogOpen(false)}
+        title="Assign Customer to RFQ"
+        description="Search and assign a customer to this RFQ"
+      />
+      </div>
+    </PersistentDashboardLayout>
   );
 }

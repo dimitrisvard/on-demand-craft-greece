@@ -12,7 +12,6 @@ import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadFile } from '@/utils/fileStorage';
-import { getOrCreateCustomer } from '@/utils/customerUtils';
 import { sendRFQEmails } from '@/utils/emailService';
 
 const steps = [
@@ -197,9 +196,8 @@ const MicronsMultiStepForm: React.FC = () => {
       const rfqNumber = `RFQ-${formattedDate}-${sequenceNumber}`;
       console.log('Generated RFQ number:', rfqNumber);
 
-      // Get or create customer based on email address
-      const customerData = await getOrCreateCustomer(values);
-      const customerId = customerData.id;
+      // Note: Customer creation removed - RFQs will be created without customer assignment
+      // Customer can be assigned later manually through admin interface
       
       // Create RFQ with calculated delivery date and parts details
       const dueDate = values.delivery.maxDeliveryDate 
@@ -225,7 +223,7 @@ const MicronsMultiStepForm: React.FC = () => {
           {
             title: `${rfqNumber} - ${values.companyName}`,
             company_name: values.companyName,
-            customer_id: customerId,
+            customer_id: null, // No customer assigned initially
             status: 'draft',
             currency: 'EUR',
             due_date: dueDate.toISOString(),

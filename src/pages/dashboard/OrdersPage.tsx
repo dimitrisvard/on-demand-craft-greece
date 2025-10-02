@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { BackToDashboardButton } from "@/components/dashboard/BackToDashboardButton"
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout"
 import {
   Table,
   TableBody,
@@ -520,12 +521,12 @@ export default function OrdersPage() {
   };
 
   return (
-    <div className="p-6 pt-20 space-y-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <BackToDashboardButton />
-          <h1 className="text-2xl font-bold">Orders</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">Orders</h1>
+          </div>
         <div className="flex gap-2">
           <Button 
             variant="outline" 
@@ -800,6 +801,7 @@ export default function OrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PersistentDashboardLayout>
   )
 }

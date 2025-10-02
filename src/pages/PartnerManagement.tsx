@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
 import {
   Card,
   CardContent,
@@ -404,12 +405,13 @@ export default function PartnerManagement() {
     : "No ratings";
 
   return (
-    <div className="container mx-auto px-4 py-8 pt-16">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center space-x-2">
-          <Factory className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-bold">Production Partners</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center space-x-2">
+            <Factory className="h-6 w-6 text-primary" />
+            <h1 className="text-2xl font-bold">Production Partners</h1>
+          </div>
         <Button onClick={() => {
           setFormData({
             company_name: "",
@@ -871,6 +873,7 @@ export default function PartnerManagement() {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PersistentDashboardLayout>
   );
 }

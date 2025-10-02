@@ -15,7 +15,6 @@ import { FormValues } from './types';
 import { materialOptions, surfaceRoughnessOptions, toleranceOptions, surfaceTreatmentOptions } from './constants/materialOptions';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getOrCreateCustomer } from '@/utils/customerUtils';
 import { trackQuoteRequest, trackFormSubmission } from '@/utils/analytics';
 import { sendRFQEmails } from '@/utils/emailService';
 
@@ -237,8 +236,8 @@ const MultiStepQuoteForm: React.FC = () => {
       const rfqNumber = `RFQ-${formattedDate}-${sequenceNumber}`;
       console.log('Generated RFQ number:', rfqNumber);
 
-      // Get or create customer based on email address
-      const customerData = await getOrCreateCustomer(values);
+      // Note: Customer creation removed - RFQs will be created without customer assignment
+      // Customer can be assigned later manually through admin interface
 
       // Create RFQ with calculated delivery date and parts details
       const partsDetails = values.parts.map((part, index) => {
@@ -317,7 +316,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
           {
             title: `${rfqNumber} - ${values.companyName}`,
             company_name: values.companyName,
-            customer_id: customerData.id,
+            customer_id: null, // No customer assigned initially
             status: 'draft',
             currency: 'EUR',
             due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),

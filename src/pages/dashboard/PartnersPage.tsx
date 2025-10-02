@@ -3,6 +3,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { BackToDashboardButton } from "@/components/dashboard/BackToDashboardButton"
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/integrations/supabase/client"
 import { PencilIcon, PlusCircle, ChevronLeft } from "lucide-react"
@@ -245,12 +246,12 @@ export default function PartnersPage() {
   };
 
   return (
-    <div className="p-6 pt-20 space-y-6">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-4">
-          <BackToDashboardButton />
-          <h1 className="text-2xl font-bold">Production Partners</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">Production Partners</h1>
+          </div>
         <Button 
           onClick={handleAddClick} 
           variant="default" 
@@ -580,6 +581,7 @@ export default function PartnersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </PersistentDashboardLayout>
   );
 }

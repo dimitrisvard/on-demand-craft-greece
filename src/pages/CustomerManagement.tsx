@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { BackToDashboardButton } from "@/components/dashboard/BackToDashboardButton"
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout"
 import { useToast } from "@/components/ui/use-toast"
 import { supabase } from "@/integrations/supabase/client"
 import { 
@@ -93,7 +94,7 @@ export default function CustomerManagement() {
       }
 
       if (searchQuery) {
-        query = query.or(`company_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,first_name.ilike.%${searchQuery}%,last_name.ilike.%${searchQuery}%`)
+        query = query.or(`company_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,first_name.ilike.%${searchQuery}%,last_name.ilike.%${searchQuery}%,vat_tax_id.ilike.%${searchQuery}%`)
       }
 
       const { data, error } = await query
@@ -385,12 +386,12 @@ export default function CustomerManagement() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-4">
-          <BackToDashboardButton />
-          <h1 className="text-2xl font-bold">Customers</h1>
-        </div>
+    <PersistentDashboardLayout>
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">Customers</h1>
+          </div>
         <Button 
           onClick={handleAddClick}
           className="flex items-center gap-2"
@@ -407,7 +408,7 @@ export default function CustomerManagement() {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 h-4 w-4" />
               <Input
                 className="pl-10"
-                placeholder="Search by company, contact or email"
+                placeholder="Search by company, contact, email, or VAT number"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -574,6 +575,7 @@ export default function CustomerManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+      </div>
+    </PersistentDashboardLayout>
   )
 }
