@@ -1,8 +1,8 @@
-
 import React, { useState } from "react";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Customer } from "@/types/customer";
 import { format } from "date-fns";
 import { 
@@ -13,7 +13,9 @@ import {
   Calendar,
   FileText,
   User,
-  Briefcase
+  Briefcase,
+  X,
+  Edit
 } from "lucide-react";
 import { CustomerRFQsList } from "./CustomerRFQsList";
 import { CustomerOrdersList } from "./CustomerOrdersList";
@@ -21,9 +23,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CustomerDetailsPanelProps {
   customer: Customer | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onEdit?: (customer: Customer) => void;
 }
 
-export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) => {
+export const CustomerDetailsPanel = ({ customer, isOpen, onClose, onEdit }: CustomerDetailsPanelProps) => {
   const [isRFQsListOpen, setIsRFQsListOpen] = useState(false);
   const [isOrdersListOpen, setIsOrdersListOpen] = useState(false);
 
@@ -48,131 +53,57 @@ export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) =>
     if (!dateString) return "N/A";
     try {
       return format(new Date(dateString), "MMM d, yyyy");
-    } catch (e) {
-      return "Invalid date";
+    } catch {
+      return "Invalid Date";
     }
   };
 
   if (!customer) {
-    return (
-      <Card className="w-2/5 p-6 flex flex-col items-center justify-center text-muted-foreground h-[400px]">
-        <User className="h-16 w-16 mb-4 opacity-20" />
-        <p className="text-lg">Select a customer to view details</p>
-      </Card>
-    );
+    return null;
   }
 
   return (
     <>
-      <Card className="w-2/5 p-6">
-        <div className="space-y-6">
-          <div>
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="text-xl font-semibold">{customer.company_name}</h3>
-              <Badge className={getStatusColor(customer.status)}>
-                {customer.status?.charAt(0).toUpperCase() + customer.status?.slice(1)}
-              </Badge>
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="flex flex-row items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+                <Building className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <DialogTitle className="text-2xl">{customer.company_name}</DialogTitle>
+                <Badge className={getStatusColor(customer.status)}>
+                  {customer.status?.charAt(0).toUpperCase() + customer.status?.slice(1)}
+                </Badge>
+              </div>
             </div>
-            
-            <div className="text-sm text-muted-foreground mb-4">
-              {customer.customer_id && (
-                <p className="font-mono">ID: {customer.customer_id}</p>
+            <div className="flex items-center gap-2">
+              {onEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onEdit(customer)}
+                  className="flex items-center gap-2"
+                >
+                  <Edit className="h-4 w-4" />
+                  Edit
+                </Button>
               )}
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-          </div>
-          
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-3">
-              <div className="flex items-center gap-2">
-                <Building className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium">Company</span>
-              </div>
-              
-              <div className="grid grid-cols-1 gap-2 ml-6">
-                <div>
-                  <span className="text-sm font-medium block">VAT/Tax ID</span>
-                  <span className="text-sm">{customer.vat_tax_id || "—"}</span>
-                </div>
-                
-                <div>
-                  <span className="text-sm font-medium block">Address</span>
-                  <span className="text-sm">
-                    {customer.street_address ? (
-                      <>
-                        {customer.street_address}
-                        {customer.city && customer.zip_code 
-                          ? `, ${customer.city}, ${customer.zip_code}` 
-                          : customer.city 
-                            ? `, ${customer.city}` 
-                            : customer.zip_code 
-                              ? `, ${customer.zip_code}` 
-                              : ''}
-                        {customer.country ? `, ${customer.country}` : ''}
-                      </>
-                    ) : customer.address || "—"}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-3">
-              <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium">Contact Person</span>
-              </div>
-              
-              <div className="grid grid-cols-1 gap-2 ml-6">
-                <div>
-                  <span className="text-sm font-medium block">Name</span>
-                  <span className="text-sm">
-                    {customer.first_name && customer.last_name 
-                      ? `${customer.first_name} ${customer.last_name}`
-                      : customer.contact_name || "—"}
-                  </span>
-                </div>
-                
-                {customer.position && (
-                  <div>
-                    <span className="text-sm font-medium block">Position</span>
-                    <span className="text-sm">{customer.position}</span>
-                  </div>
-                )}
-                
-                <div className="flex items-center gap-2 mt-1">
-                  <Mail className="h-4 w-4 text-gray-500" />
-                  <span className="text-sm">{customer.email || "—"}</span>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4 text-gray-500" />
-                  <span className="text-sm">{customer.phone || "—"}</span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-3">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium">Dates</span>
-              </div>
-              
-              <div className="grid grid-cols-1 gap-2 ml-6">
-                <div>
-                  <span className="text-sm font-medium block">Created</span>
-                  <span className="text-sm">{getFormattedDate(customer.created_at)}</span>
-                </div>
-                
-                <div>
-                  <span className="text-sm font-medium block">Last Updated</span>
-                  <span className="text-sm">{getFormattedDate(customer.updated_at)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="pt-4 border-t mt-4">
-            <Tabs defaultValue="rfqs" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Professional Tabs */}
+            <Tabs defaultValue="details" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="details" className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Details
+                </TabsTrigger>
                 <TabsTrigger value="rfqs" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   RFQs
@@ -182,40 +113,152 @@ export const CustomerDetailsPanel = ({ customer }: CustomerDetailsPanelProps) =>
                   Orders
                 </TabsTrigger>
               </TabsList>
-              <TabsContent value="rfqs" className="mt-4">
-                <Button 
-                  variant="outline" 
-                  className="w-full flex items-center gap-2"
-                  onClick={() => setIsRFQsListOpen(true)}
-                >
-                  <FileText className="h-4 w-4" />
-                  View Customer RFQs
-                </Button>
+
+              <TabsContent value="details" className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Contact Information */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <User className="h-5 w-5" />
+                        Contact Information
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <User className="h-4 w-4 text-gray-500" />
+                        <div>
+                          <p className="text-sm font-medium">
+                            {customer.first_name} {customer.last_name}
+                          </p>
+                          <p className="text-xs text-gray-500">{customer.position || "Position not specified"}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <Mail className="h-4 w-4 text-gray-500" />
+                        <p className="text-sm">{customer.email}</p>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <Phone className="h-4 w-4 text-gray-500" />
+                        <p className="text-sm">{customer.phone || "Phone not provided"}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Company Information */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Building className="h-5 w-5" />
+                        Company Information
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center space-x-3">
+                        <Building className="h-4 w-4 text-gray-500" />
+                        <div>
+                          <p className="text-sm font-medium">VAT/Tax ID</p>
+                          <p className="text-sm text-gray-600">{customer.vat_tax_id || "Not provided"}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <MapPin className="h-4 w-4 text-gray-500" />
+                        <div>
+                          <p className="text-sm font-medium">Address</p>
+                          <p className="text-sm text-gray-600">
+                            {customer.street_address ? (
+                              <>
+                                {customer.street_address}<br />
+                                {customer.city}, {customer.zip_code}<br />
+                                {customer.country}
+                              </>
+                            ) : (
+                              "Address not provided"
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <Calendar className="h-4 w-4 text-gray-500" />
+                        <div>
+                          <p className="text-sm font-medium">Created</p>
+                          <p className="text-sm text-gray-600">{getFormattedDate(customer.created_at)}</p>
+                        </div>
+                      </div>
+
+                      {customer.updated_at && customer.updated_at !== customer.created_at && (
+                        <div className="flex items-center space-x-3">
+                          <Calendar className="h-4 w-4 text-gray-500" />
+                          <div>
+                            <p className="text-sm font-medium">Last Updated</p>
+                            <p className="text-sm text-gray-600">{getFormattedDate(customer.updated_at)}</p>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
-              <TabsContent value="orders" className="mt-4">
-                <Button 
-                  variant="outline" 
-                  className="w-full flex items-center gap-2"
-                  onClick={() => setIsOrdersListOpen(true)}
-                >
-                  <Briefcase className="h-4 w-4" />
-                  View Customer Orders
-                </Button>
+
+              <TabsContent value="rfqs" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="h-5 w-5" />
+                      Customer RFQs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      variant="outline"
+                      className="w-full flex items-center gap-2"
+                      onClick={() => setIsRFQsListOpen(true)}
+                    >
+                      <FileText className="h-4 w-4" />
+                      View All Customer RFQs
+                    </Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="orders" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Briefcase className="h-5 w-5" />
+                      Customer Orders
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      variant="outline"
+                      className="w-full flex items-center gap-2"
+                      onClick={() => setIsOrdersListOpen(true)}
+                    >
+                      <Briefcase className="h-4 w-4" />
+                      View All Customer Orders
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
             </Tabs>
           </div>
-        </div>
-      </Card>
+        </DialogContent>
+      </Dialog>
 
       {/* RFQs List Dialog */}
-      <CustomerRFQsList 
+      <CustomerRFQsList
         customerId={customer.id}
         isOpen={isRFQsListOpen}
         onClose={() => setIsRFQsListOpen(false)}
       />
 
       {/* Orders List Dialog */}
-      <CustomerOrdersList 
+      <CustomerOrdersList
         customerId={customer.id}
         isOpen={isOrdersListOpen}
         onClose={() => setIsOrdersListOpen(false)}

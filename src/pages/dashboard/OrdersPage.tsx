@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { PlusCircle, Calendar, Package, Search, Download } from "lucide-react"
+import { PlusCircle, Calendar, Package, Search, Download, UserPlus, MoreHorizontal } from "lucide-react"
 import { supabase } from "@/integrations/supabase/client"
 import { useToast } from "@/components/ui/use-toast"
 import { useNavigate } from "react-router-dom"
@@ -30,11 +30,20 @@ import { Order, OrderStatus } from "@/types/customer"
 import { useAuth } from '@/contexts/AuthContext'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
+import { CustomerSearchAssign } from "@/components/customers/CustomerSearchAssign"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isCustomerAssignDialogOpen, setIsCustomerAssignDialogOpen] = useState(false)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [customers, setCustomers] = useState<{id: string, company_name: string}[]>([])
   const [rfqs, setRfqs] = useState<{id: string, title: string}[]>([])
   const [searchQuery, setSearchQuery] = useState("")
@@ -262,6 +271,34 @@ export default function OrdersPage() {
       });
     }
   }
+
+  const handleCustomerAssign = async (customer: any) => {
+    if (!selectedOrder) return;
+    
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ customer_id: customer?.id || null })
+        .eq('id', selectedOrder.id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: customer ? `Customer ${customer.company_name} assigned successfully` : "Customer assignment removed",
+      });
+      
+      setIsCustomerAssignDialogOpen(false);
+      setSelectedOrder(null);
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign customer",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleNewOrderInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -636,6 +673,23 @@ export default function OrdersPage() {
                       >
                         Edit/View
                       </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedOrder(order);
+                            setIsCustomerAssignDialogOpen(true);
+                          }}>
+                            <UserPlus className="mr-2 h-4 w-4" />
+                            Assign Customer
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -801,6 +855,16 @@ export default function OrdersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Customer Assignment Dialog */}
+      <CustomerSearchAssign
+        currentCustomerId={selectedOrder?.customer_id}
+        onCustomerSelect={handleCustomerAssign}
+        isOpen={isCustomerAssignDialogOpen}
+        onClose={() => setIsCustomerAssignDialogOpen(false)}
+        title="Assign Customer to Order"
+        description="Search and assign a customer to this order"
+      />
       </div>
     </PersistentDashboardLayout>
   )

@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RFQ, RfqItem } from "@/types/customer";
 import { Database } from '@/integrations/supabase/types';
+import { Briefcase, FileText } from "lucide-react";
 import { 
   Table, 
   TableBody, 
@@ -62,18 +63,22 @@ type RfqRow = Database['public']['Tables']['rfqs']['Row'];
 
 export default function RfqManagement() {
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [rfqItems, setRfqItems] = useState<RfqItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedRfq, setSelectedRfq] = useState<RFQ | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [expandedRfqId, setExpandedRfqId] = useState<string | null>(null);
   const [isRfqDialogOpen, setIsRfqDialogOpen] = useState(false);
   const [isItemDialogOpen, setIsItemDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isConvertToOrderDialogOpen, setIsConvertToOrderDialogOpen] = useState(false);
   const [isCustomerAssignDialogOpen, setIsCustomerAssignDialogOpen] = useState(false);
+  const [isOrderCustomerAssignDialogOpen, setIsOrderCustomerAssignDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<RfqStatus | "all">("all");
+  const [mainTab, setMainTab] = useState<"rfqs" | "orders">("rfqs");
   
   const [newRfq, setNewRfq] = useState<Partial<RFQ>>({
     title: "",
@@ -98,6 +103,7 @@ export default function RfqManagement() {
   useEffect(() => {
     fetchRfqs();
     fetchCustomers();
+    fetchOrders();
   }, []);
 
   useEffect(() => {
@@ -199,6 +205,24 @@ export default function RfqManagement() {
       toast({
         title: "Error",
         description: error.message || "Failed to load customers",
+        variant: "destructive",
+      });
+    }
+  }
+
+  async function fetchOrders() {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setOrders(data || []);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load orders",
         variant: "destructive",
       });
     }
@@ -478,6 +502,34 @@ export default function RfqManagement() {
     }
   };
 
+  const handleOrderCustomerAssign = async (customer: any) => {
+    if (!selectedOrder) return;
+    
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ customer_id: customer?.id || null })
+        .eq('id', selectedOrder.id);
+        
+      if (error) throw error;
+      
+      toast({
+        title: "Success",
+        description: customer ? `Customer ${customer.company_name} assigned successfully` : "Customer assignment removed",
+      });
+      
+      setIsOrderCustomerAssignDialogOpen(false);
+      setSelectedOrder(null);
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign customer",
+        variant: "destructive",
+      });
+    }
+  };
+
   const updateRfqTotal = async (rfqId: string, total: number) => {
     try {
       const { error } = await supabase
@@ -652,7 +704,7 @@ export default function RfqManagement() {
       <div className="space-y-6">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">RFQ Management</h1>
+            <h1 className="text-2xl font-bold">RFQ & Orders Management</h1>
           </div>
         <Button 
           onClick={handleNewRfqClick}
@@ -662,27 +714,41 @@ export default function RfqManagement() {
         </Button>
       </div>
 
-      <div className="flex items-center gap-4 mb-6">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by title or customer..."
-            className="pl-10"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <Tabs defaultValue="all" className="w-fit" onValueChange={(value) => setActiveTab(value as RfqStatus | "all")}>
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="draft">Draft</TabsTrigger>
-            <TabsTrigger value="sent">Sent</TabsTrigger>
-            <TabsTrigger value="received">Received</TabsTrigger>
-            <TabsTrigger value="approved">Approved</TabsTrigger>
-            <TabsTrigger value="rejected">Rejected</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+      {/* Main Tabs for RFQs vs Orders */}
+      <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as "rfqs" | "orders")} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsTrigger value="rfqs" className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            RFQs
+          </TabsTrigger>
+          <TabsTrigger value="orders" className="flex items-center gap-2">
+            <Briefcase className="h-4 w-4" />
+            Orders
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="rfqs" className="space-y-6">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by title or customer..."
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <Tabs defaultValue="all" className="w-fit" onValueChange={(value) => setActiveTab(value as RfqStatus | "all")}>
+              <TabsList>
+                <TabsTrigger value="all">All</TabsTrigger>
+                <TabsTrigger value="draft">Draft</TabsTrigger>
+                <TabsTrigger value="sent">Sent</TabsTrigger>
+                <TabsTrigger value="received">Received</TabsTrigger>
+                <TabsTrigger value="approved">Approved</TabsTrigger>
+                <TabsTrigger value="rejected">Rejected</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
 
       <Card>
         <CardHeader>
@@ -848,6 +914,74 @@ export default function RfqManagement() {
           </Table>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="orders" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Orders</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Total Amount</TableHead>
+                    <TableHead>Created Date</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center">Loading...</TableCell>
+                    </TableRow>
+                  ) : orders.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center">No orders found</TableCell>
+                    </TableRow>
+                  ) : (
+                    orders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-medium">{order.title}</TableCell>
+                        <TableCell>{order.customer_id ? customers.find(c => c.id === order.customer_id)?.company_name || 'Unknown Customer' : 'Unassigned'}</TableCell>
+                        <TableCell>
+                          <Badge variant={order.status === 'completed' ? 'default' : order.status === 'in_progress' ? 'secondary' : 'outline'}>
+                            {order.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{order.total_amount ? `${order.total_amount} ${order.currency || 'USD'}` : '-'}</TableCell>
+                        <TableCell>{order.created_at ? new Date(order.created_at).toLocaleDateString() : '-'}</TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrder(order);
+                                setIsOrderCustomerAssignDialogOpen(true);
+                              }}>
+                                <UserPlus className="mr-2 h-4 w-4" />
+                                Assign Customer
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={isRfqDialogOpen} onOpenChange={setIsRfqDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
@@ -1052,7 +1186,7 @@ export default function RfqManagement() {
         </DialogContent>
       </Dialog>
 
-      {/* Customer Assignment Dialog */}
+      {/* Customer Assignment Dialog for RFQs */}
       <CustomerSearchAssign
         currentCustomerId={selectedRfq?.customer_id}
         onCustomerSelect={handleCustomerAssign}
@@ -1060,6 +1194,16 @@ export default function RfqManagement() {
         onClose={() => setIsCustomerAssignDialogOpen(false)}
         title="Assign Customer to RFQ"
         description="Search and assign a customer to this RFQ"
+      />
+
+      {/* Customer Assignment Dialog for Orders */}
+      <CustomerSearchAssign
+        currentCustomerId={selectedOrder?.customer_id}
+        onCustomerSelect={handleOrderCustomerAssign}
+        isOpen={isOrderCustomerAssignDialogOpen}
+        onClose={() => setIsOrderCustomerAssignDialogOpen(false)}
+        title="Assign Customer to Order"
+        description="Search and assign a customer to this order"
       />
       </div>
     </PersistentDashboardLayout>

@@ -50,6 +50,7 @@ export default function CustomerManagement() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null)
+  const [isCustomerDetailsOpen, setIsCustomerDetailsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState<CustomerStatus | "all">("all")
   const [formData, setFormData] = useState<Partial<Customer>>({
@@ -153,6 +154,14 @@ export default function CustomerManagement() {
     setSelectedCustomer(customer)
     setFormData(customer)
     setIsEditDialogOpen(true)
+  }
+
+  const handleViewClick = (customer: Customer, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
+    }
+    setSelectedCustomer(customer)
+    setIsCustomerDetailsOpen(true)
   }
 
   const handleDeleteClick = (customer: Customer, e?: React.MouseEvent) => {
@@ -475,10 +484,10 @@ export default function CustomerManagement() {
                         <Button 
                           variant="ghost" 
                           size="sm"
-                          onClick={(e) => handleEditClick(customer, e)}
+                          onClick={(e) => handleViewClick(customer, e)}
                         >
                           <PencilIcon className="h-4 w-4" />
-                          <span className="sr-only">Edit</span>
+                          <span>View/Edit</span>
                         </Button>
                         <Button 
                           variant="ghost" 
@@ -575,6 +584,14 @@ export default function CustomerManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Customer Details Panel */}
+      <CustomerDetailsPanel
+        customer={selectedCustomer}
+        isOpen={isCustomerDetailsOpen}
+        onClose={() => setIsCustomerDetailsOpen(false)}
+        onEdit={handleEditClick}
+      />
       </div>
     </PersistentDashboardLayout>
   )

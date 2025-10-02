@@ -43,6 +43,7 @@ export default function CustomersPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isCustomerDetailsOpen, setIsCustomerDetailsOpen] = useState(false)
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
     company_name: "",
     first_name: "",
@@ -126,6 +127,12 @@ export default function CustomersPage() {
     console.log("Edit clicked for customer:", customer)
     setSelectedCustomer(customer)
     setIsEditDialogOpen(true)
+  }
+
+  const handleViewClick = (customer: Customer) => {
+    console.log("View clicked for customer:", customer)
+    setSelectedCustomer(customer)
+    setIsCustomerDetailsOpen(true)
   }
 
   const handleDeleteClick = (customer: Customer) => {
@@ -455,10 +462,10 @@ export default function CustomersPage() {
                         variant="ghost" 
                         size="sm"
                         type="button"
-                        onClick={() => handleEditClick(customer)}
+                        onClick={() => handleViewClick(customer)}
                       >
                         <PencilIcon className="h-4 w-4 mr-1" />
-                        Edit
+                        View/Edit
                       </Button>
                       <Button 
                         variant="ghost" 
@@ -588,6 +595,14 @@ export default function CustomersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Customer Details Panel */}
+      <CustomerDetailsPanel
+        customer={selectedCustomer}
+        isOpen={isCustomerDetailsOpen}
+        onClose={() => setIsCustomerDetailsOpen(false)}
+        onEdit={handleEditClick}
+      />
       </div>
     </PersistentDashboardLayout>
   )
