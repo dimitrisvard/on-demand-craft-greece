@@ -2,7 +2,9 @@
 
 ## Overview
 
-This feature ensures that when an RFQ (Request for Quote) is submitted through the quote form, the system checks if a customer already exists by email address. If a customer exists, the RFQ is stored under the existing customer record. If no customer exists, a new customer is created.
+**Note:** This feature is currently DISABLED in the RFQ submission forms. RFQs are created without customer assignment (customer_id is set to null). Customers can be assigned manually later through the admin interface.
+
+This document describes the customer existence check feature that was designed to check if a customer already exists by email address when an RFQ is submitted. The implementation is available in `src/utils/customerUtils.ts` but is not currently being used.
 
 ## How It Works
 
