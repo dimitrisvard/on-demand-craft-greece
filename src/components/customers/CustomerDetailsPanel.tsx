@@ -65,7 +65,7 @@ export const CustomerDetailsPanel = ({ customer, isOpen, onClose, onEdit }: Cust
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto w-[95vw]">
           <DialogHeader className="flex flex-row items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
@@ -213,14 +213,12 @@ export const CustomerDetailsPanel = ({ customer, isOpen, onClose, onEdit }: Cust
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <Button
-                      variant="outline"
-                      className="w-full flex items-center gap-2"
-                      onClick={() => setIsRFQsListOpen(true)}
-                    >
-                      <FileText className="h-4 w-4" />
-                      View All Customer RFQs
-                    </Button>
+                    <CustomerRFQsList
+                      customerId={customer.id}
+                      isOpen={true}
+                      onClose={() => {}}
+                      embedded={true}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -234,14 +232,12 @@ export const CustomerDetailsPanel = ({ customer, isOpen, onClose, onEdit }: Cust
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <Button
-                      variant="outline"
-                      className="w-full flex items-center gap-2"
-                      onClick={() => setIsOrdersListOpen(true)}
-                    >
-                      <Briefcase className="h-4 w-4" />
-                      View All Customer Orders
-                    </Button>
+                    <CustomerOrdersList
+                      customerId={customer.id}
+                      isOpen={true}
+                      onClose={() => {}}
+                      embedded={true}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -250,19 +246,6 @@ export const CustomerDetailsPanel = ({ customer, isOpen, onClose, onEdit }: Cust
         </DialogContent>
       </Dialog>
 
-      {/* RFQs List Dialog */}
-      <CustomerRFQsList
-        customerId={customer.id}
-        isOpen={isRFQsListOpen}
-        onClose={() => setIsRFQsListOpen(false)}
-      />
-
-      {/* Orders List Dialog */}
-      <CustomerOrdersList
-        customerId={customer.id}
-        isOpen={isOrdersListOpen}
-        onClose={() => setIsOrdersListOpen(false)}
-      />
     </>
   );
 };

@@ -356,6 +356,44 @@ export default function OrderDetailsPage() {
     if (!id) return;
     
     try {
+      // First, get the order to find associated RFQ files
+      const { data: orderData, error: orderFetchError } = await supabase
+        .from('orders')
+        .select('rfq_id')
+        .eq('id', id)
+        .single();
+        
+      if (orderFetchError) throw orderFetchError;
+
+      // Delete associated files from AWS S3 if this order has an RFQ
+      if (orderData?.rfq_id) {
+        try {
+          // Get RFQ number for folder deletion
+          const { data: rfqData, error: rfqError } = await supabase
+            .from('rfqs')
+            .select('rfq_number')
+            .eq('id', orderData.rfq_id)
+            .single();
+            
+          if (!rfqError && rfqData?.rfq_number) {
+            // Import the deleteFolderFromS3 function
+            const { deleteFolderFromS3 } = await import('@/utils/awsS3Storage');
+            
+            // Delete the entire folder for this RFQ
+            const success = await deleteFolderFromS3(rfqData.rfq_number);
+            if (success) {
+              console.log(`Successfully deleted S3 folder for RFQ ${rfqData.rfq_number}`);
+            } else {
+              console.log(`No files found to delete for RFQ ${rfqData.rfq_number}`);
+            }
+          }
+        } catch (s3Error) {
+          console.error("Error deleting files from S3:", s3Error);
+          // Continue with order deletion even if S3 deletion fails
+        }
+      }
+
+      // Delete order items
       const { error: itemsError } = await supabase
         .from('order_items')
         .delete()
@@ -363,6 +401,7 @@ export default function OrderDetailsPage() {
         
       if (itemsError) throw itemsError;
         
+      // Delete the order itself
       const { error: orderError } = await supabase
         .from('orders')
         .delete()

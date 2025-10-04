@@ -14,6 +14,7 @@ interface CustomerRFQsListProps {
   customerId: string;
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 interface RFQ {
@@ -26,7 +27,7 @@ interface RFQ {
   description: string;
 }
 
-export const CustomerRFQsList = ({ customerId, isOpen, onClose }: CustomerRFQsListProps) => {
+export const CustomerRFQsList = ({ customerId, isOpen, onClose, embedded = false }: CustomerRFQsListProps) => {
   const [rfqs, setRFQs] = useState<RFQ[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -79,8 +80,65 @@ export const CustomerRFQsList = ({ customerId, isOpen, onClose }: CustomerRFQsLi
 
   const handleViewRFQ = (rfqId: string) => {
     navigate(`/rfq/${rfqId}`);
-    onClose();
+    if (!embedded) {
+      onClose();
+    }
   };
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        ) : rfqs.length === 0 ? (
+          <div className="text-center py-8">
+            <FileText className="mx-auto h-12 w-12 text-gray-400" />
+            <p className="mt-2 text-lg font-medium">No RFQs found for this customer</p>
+            <p className="text-sm text-gray-500">This customer hasn't created any quote requests yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Title</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rfqs.map((rfq) => (
+                <TableRow key={rfq.id}>
+                  <TableCell className="font-medium">{rfq.title}</TableCell>
+                  <TableCell>
+                    {rfq.created_at ? format(new Date(rfq.created_at), 'MMM d, yyyy') : '-'}
+                  </TableCell>
+                  <TableCell>{getStatusBadge(rfq.status)}</TableCell>
+                  <TableCell>
+                    {rfq.total_amount ? `${rfq.total_amount} ${rfq.currency}` : '-'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleViewRFQ(rfq.id)}
+                      className="gap-1"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      View
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

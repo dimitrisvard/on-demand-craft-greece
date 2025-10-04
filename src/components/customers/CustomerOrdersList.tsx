@@ -13,6 +13,7 @@ interface CustomerOrdersListProps {
   customerId: string;
   isOpen: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 interface Order {
@@ -26,7 +27,7 @@ interface Order {
   order_number?: string;
 }
 
-export const CustomerOrdersList = ({ customerId, isOpen, onClose }: CustomerOrdersListProps) => {
+export const CustomerOrdersList = ({ customerId, isOpen, onClose, embedded = false }: CustomerOrdersListProps) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -84,9 +85,70 @@ export const CustomerOrdersList = ({ customerId, isOpen, onClose }: CustomerOrde
   };
 
   const handleViewOrder = (orderId: string) => {
-    navigate(`/order/${orderId}`);
-    onClose();
+    navigate(`/orders/${orderId}`);
+    if (!embedded) {
+      onClose();
+    }
   };
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="text-center py-8">
+            <Package className="mx-auto h-12 w-12 text-gray-400" />
+            <p className="mt-2 text-lg font-medium">No orders found for this customer</p>
+            <p className="text-sm text-gray-500">This customer hasn't placed any orders yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Order Number</TableHead>
+                <TableHead>Title</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell className="font-mono text-sm">
+                    {order.order_number || order.id.slice(0, 8)}
+                  </TableCell>
+                  <TableCell className="font-medium">{order.title}</TableCell>
+                  <TableCell>
+                    {order.created_at ? format(new Date(order.created_at), 'MMM d, yyyy') : '-'}
+                  </TableCell>
+                  <TableCell>{getStatusBadge(order.status)}</TableCell>
+                  <TableCell>
+                    {order.total_amount ? `${order.total_amount} ${order.currency}` : '-'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleViewOrder(order.id)}
+                      className="gap-1"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      View
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
