@@ -1288,7 +1288,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
   return (
     <ErrorBoundary>
-      <div className="container mx-auto p-6 pt-20 space-y-6">
+      <div className="w-full max-w-none px-4 py-6 pt-20 space-y-6">
         <div className="flex items-center gap-4 mb-6">
           <Button 
             variant="outline" 
@@ -1311,8 +1311,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <h1 className="text-2xl font-bold">RFQ Details</h1>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <Card className="lg:col-span-2">
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
+          <Card className="xl:col-span-3">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>RFQ Information</CardTitle>
               <div className="flex items-center gap-2">
@@ -1683,73 +1683,60 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 <CardContent className="space-y-4">
                   {rfq && (
                     <>
+                      {/* Debug: Log RFQ data */}
+                      {console.log('RFQ Data:', rfq)}
+                      
                       {/* Company Information */}
                       <div>
                         <h3 className="text-sm font-medium text-gray-500">Company</h3>
-                        <p className="font-semibold">{rfq.company_name}</p>
+                        <p className="font-semibold">{rfq.company_name || 'Not provided'}</p>
                       </div>
-                      {rfq.vat_id && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
-                          <p>{rfq.vat_id}</p>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
+                        <p>{rfq.vat_id || 'Not provided'}</p>
+                      </div>
                       
                       {/* Contact Person */}
                       <div>
                         <h3 className="text-sm font-medium text-gray-500">Contact Person</h3>
-                        <p>{rfq.contact_first_name} {rfq.contact_last_name}</p>
+                        <p>{rfq.contact_first_name || 'Not provided'} {rfq.contact_last_name || ''}</p>
                       </div>
-                      {rfq.contact_position && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Position</h3>
-                          <p>{rfq.contact_position}</p>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Position</h3>
+                        <p>{rfq.contact_position || 'Not provided'}</p>
+                      </div>
                       
                       {/* Contact Information */}
                       <div>
                         <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                        <p>{rfq.contact_email}</p>
+                        <p>{rfq.contact_email || 'Not provided'}</p>
                       </div>
-                      {rfq.contact_phone && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-                          <p>{rfq.contact_phone}</p>
-                        </div>
-                      )}
-                      {rfq.mobile && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Mobile</h3>
-                          <p>{rfq.mobile}</p>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Phone</h3>
+                        <p>{rfq.contact_phone || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Mobile</h3>
+                        <p>{rfq.mobile || 'Not provided'}</p>
+                      </div>
                       
                       {/* Address Information */}
-                      {rfq.address && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Address</h3>
-                          <p className="whitespace-pre-line">{rfq.address}</p>
-                        </div>
-                      )}
-                      {rfq.city && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">City</h3>
-                          <p>{rfq.city}</p>
-                        </div>
-                      )}
-                      {rfq.zip_code && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">ZIP Code</h3>
-                          <p>{rfq.zip_code}</p>
-                        </div>
-                      )}
-                      {rfq.country && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Country</h3>
-                          <p>{rfq.country}</p>
-                        </div>
-                      )}
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Address</h3>
+                        <p className="whitespace-pre-line">{rfq.address || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">City</h3>
+                        <p>{rfq.city || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">ZIP Code</h3>
+                        <p>{rfq.zip_code || 'Not provided'}</p>
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Country</h3>
+                        <p>{rfq.country || 'Not provided'}</p>
+                      </div>
                     </>
                   )}
                 </CardContent>
@@ -1793,46 +1780,6 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     )}
                   </>
                 )}
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader>
-                <CardTitle>Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 gap-4">
-                  {rfq.status !== 'approved' && rfq.status !== 'rejected' && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button 
-                        variant="outline"
-                        className="w-full bg-green-50 hover:bg-green-100 border-green-200"
-                        onClick={() => handleUpdateStatus('approved')}
-                      >
-                        <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
-                        Approve
-                      </Button>
-                      
-                      <Button 
-                        variant="outline"
-                        className="w-full bg-red-50 hover:bg-red-100 border-red-200"
-                        onClick={() => handleUpdateStatus('rejected')}
-                      >
-                        <XCircle className="h-4 w-4 mr-2 text-red-500" />
-                        Reject
-                      </Button>
-                    </div>
-                  )}
-                  
-                  <Button 
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => setIsDeleteRfqDialogOpen(true)}
-                  >
-                    <Trash className="h-4 w-4 mr-2 text-red-500" />
-                    Delete RFQ
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           </div>
