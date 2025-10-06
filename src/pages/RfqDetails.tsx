@@ -6,7 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { 
   Download, FileText, Plus, Edit2, Trash2, CheckCircle, 
   XCircle, Loader2, ChevronLeft, Send, Edit, 
-  Trash, FileDown, ShoppingBag, Upload 
+  Trash, FileDown, ShoppingBag, Upload, User 
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +28,7 @@ import { deleteFolderFromS3 } from '@/utils/awsS3Storage';
 import { RFQ, RfqItem } from '@/types/customer';
 import { Database } from '@/integrations/supabase/types';
 import ThreeDViewerModal from '@/components/ThreeDViewerModal';
+import { CustomerSearchAssign } from '@/components/customers/CustomerSearchAssign';
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [isDeleteItemDialogOpen, setIsDeleteItemDialogOpen] = useState(false);
   const [isDeleteRfqDialogOpen, setIsDeleteRfqDialogOpen] = useState(false);
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
+  const [isCustomerAssignDialogOpen, setIsCustomerAssignDialogOpen] = useState(false);
   const [isDeletionError, setIsDeletionError] = useState(false);
   const [deletionErrorMessage, setDeletionErrorMessage] = useState('');
   const [rfqNumber, setRfqNumber] = useState<string>("");
@@ -509,6 +511,35 @@ const RfqDetails = (props: RfqDetailsProps) => {
       });
     } finally {
       setIsCreatingOrder(false);
+    }
+  };
+
+  const handleCustomerAssign = async (customerId: string) => {
+    if (!rfq) return;
+    
+    try {
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ customer_id: customerId })
+        .eq('id', rfq.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Customer assigned to RFQ successfully",
+      });
+
+      // Refresh RFQ details to get the updated customer information
+      fetchRfqDetails();
+      setIsCustomerAssignDialogOpen(false);
+    } catch (error: any) {
+      console.error('Error assigning customer:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to assign customer",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1311,8 +1342,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <h1 className="text-2xl font-bold">RFQ Details</h1>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
-          <Card className="xl:col-span-3">
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+          <Card className="xl:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>RFQ Information</CardTitle>
               <div className="flex items-center gap-2">
@@ -1323,6 +1354,14 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 >
                   <Download className="h-4 w-4 mr-1" />
                   Download PDF
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setIsCustomerAssignDialogOpen(true)}
+                >
+                  <User className="h-4 w-4 mr-1" />
+                  Assign Customer
                 </Button>
                 <Button 
                   variant="outline" 
@@ -1633,7 +1672,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
           <div className="space-y-6">
             {/* Customer Info and Lead Information side by side */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <Card>
                 <CardHeader>
                   <CardTitle>Customer Info</CardTitle>
@@ -1683,9 +1722,6 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 <CardContent className="space-y-4">
                   {rfq && (
                     <>
-                      {/* Debug: Log RFQ data */}
-                      {console.log('RFQ Data:', rfq)}
-                      
                       {/* Company Information */}
                       <div>
                         <h3 className="text-sm font-medium text-gray-500">Company</h3>
@@ -2109,6 +2145,16 @@ const RfqDetails = (props: RfqDetailsProps) => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Customer Assignment Dialog */}
+        <CustomerSearchAssign
+          currentCustomerId={rfq?.customer_id}
+          onCustomerSelect={handleCustomerAssign}
+          isOpen={isCustomerAssignDialogOpen}
+          onClose={() => setIsCustomerAssignDialogOpen(false)}
+          title="Assign Customer to RFQ"
+          description="Search and assign a customer to this RFQ"
+        />
       </div>
 
       {/* 3D Viewer Modal */}

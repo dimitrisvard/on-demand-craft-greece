@@ -223,6 +223,17 @@ const MicronsMultiStepForm: React.FC = () => {
           {
             title: `${rfqNumber} - ${values.companyName}`,
             company_name: values.companyName,
+            vat_id: values.vatId,
+            address: values.address?.street,
+            city: values.address?.city,
+            zip_code: values.address?.zipCode,
+            country: values.address?.country,
+            contact_first_name: values.contact?.firstName,
+            contact_last_name: values.contact?.lastName,
+            contact_position: values.contact?.position,
+            contact_email: values.contact?.email,
+            contact_phone: values.contact?.phone,
+            mobile: values.contact?.mobile,
             customer_id: null, // No customer assigned initially
             status: 'draft',
             currency: 'EUR',
