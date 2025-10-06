@@ -514,10 +514,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
-  const handleCustomerAssign = async (customerId: string) => {
+  const handleCustomerAssign = async (customer: any) => {
     if (!rfq) return;
     
     try {
+      const customerId = customer?.id || null;
+      
       const { error } = await supabase
         .from('rfqs')
         .update({ customer_id: customerId })
@@ -527,7 +529,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
       toast({
         title: "Success",
-        description: "Customer assigned to RFQ successfully",
+        description: customer ? `Customer ${customer.company_name} assigned to RFQ successfully` : "Customer assignment removed successfully",
       });
 
       // Refresh RFQ details to get the updated customer information
@@ -1319,7 +1321,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full max-w-none px-4 py-6 pt-20 space-y-6">
+      <div className="w-full max-w-none px-6 py-8 pt-24 space-y-8">
         <div className="flex items-center gap-4 mb-6">
           <Button 
             variant="outline" 
@@ -1342,11 +1344,11 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <h1 className="text-2xl font-bold">RFQ Details</h1>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-10">
           <Card className="xl:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>RFQ Information</CardTitle>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button 
                   variant="outline" 
                   size="sm"
@@ -1670,40 +1672,60 @@ const RfqDetails = (props: RfqDetailsProps) => {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
+          <div className="space-y-8">
             {/* Customer Info and Lead Information side by side */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Customer Info</CardTitle>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+              <Card className="h-fit">
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-lg font-semibold">Customer Info</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-5">
                   {customer && (
                     <>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Company</h3>
-                        <p className="font-semibold">{customer.company_name}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Company</h3>
+                        <p className="font-semibold text-gray-900">{customer.company_name}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">VAT/Tax ID</h3>
+                        <p className="text-gray-900">{customer.vat_tax_id || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Contact Person</h3>
+                        <p className="text-gray-900">{customer.first_name || 'Not provided'} {customer.last_name || ''}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Position</h3>
+                        <p className="text-gray-900">{customer.position || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Email</h3>
+                        <p className="text-gray-900">{customer.email || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Phone</h3>
+                        <p className="text-gray-900">{customer.phone || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Mobile</h3>
+                        <p className="text-gray-900">{customer.mobile || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Address</h3>
+                        <p className="text-gray-900 whitespace-pre-line">{customer.address || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">City</h3>
+                        <p className="text-gray-900">{customer.city || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">ZIP Code</h3>
+                        <p className="text-gray-900">{customer.zip_code || 'Not provided'}</p>
                       </div>
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">Contact</h3>
-                        <p>{customer.first_name} {customer.last_name}</p>
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Country</h3>
+                        <p className="text-gray-900">{customer.country || 'Not provided'}</p>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                        <p>{customer.email}</p>
-                      </div>
-                      {customer.phone && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-                          <p>{customer.phone}</p>
-                        </div>
-                      )}
-                      {customer.vat_tax_id && (
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
-                          <p>{customer.vat_tax_id}</p>
-                        </div>
-                      )}
                     </>
                   )}
                   {!customer && (
@@ -1715,63 +1737,63 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Lead Information</CardTitle>
+              <Card className="h-fit">
+                <CardHeader className="pb-4">
+                  <CardTitle className="text-lg font-semibold">Lead Information</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-5">
                   {rfq && (
                     <>
                       {/* Company Information */}
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Company</h3>
-                        <p className="font-semibold">{rfq.company_name || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Company</h3>
+                        <p className="font-semibold text-gray-900">{rfq.company_name || 'Not provided'}</p>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
-                        <p>{rfq.vat_id || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">VAT/Tax ID</h3>
+                        <p className="text-gray-900">{rfq.vat_id || 'Not provided'}</p>
                       </div>
                       
                       {/* Contact Person */}
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Contact Person</h3>
-                        <p>{rfq.contact_first_name || 'Not provided'} {rfq.contact_last_name || ''}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Contact Person</h3>
+                        <p className="text-gray-900">{rfq.contact_first_name || 'Not provided'} {rfq.contact_last_name || ''}</p>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Position</h3>
-                        <p>{rfq.contact_position || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Position</h3>
+                        <p className="text-gray-900">{rfq.contact_position || 'Not provided'}</p>
                       </div>
                       
                       {/* Contact Information */}
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                        <p>{rfq.contact_email || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Email</h3>
+                        <p className="text-gray-900">{rfq.contact_email || 'Not provided'}</p>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-                        <p>{rfq.contact_phone || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Phone</h3>
+                        <p className="text-gray-900">{rfq.contact_phone || 'Not provided'}</p>
                       </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Mobile</h3>
-                        <p>{rfq.mobile || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Mobile</h3>
+                        <p className="text-gray-900">{rfq.mobile || 'Not provided'}</p>
                       </div>
                       
                       {/* Address Information */}
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Address</h3>
-                        <p className="whitespace-pre-line">{rfq.address || 'Not provided'}</p>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Address</h3>
+                        <p className="text-gray-900 whitespace-pre-line">{rfq.address || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">City</h3>
+                        <p className="text-gray-900">{rfq.city || 'Not provided'}</p>
+                      </div>
+                      <div className="border-b border-gray-100 pb-3">
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">ZIP Code</h3>
+                        <p className="text-gray-900">{rfq.zip_code || 'Not provided'}</p>
                       </div>
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">City</h3>
-                        <p>{rfq.city || 'Not provided'}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">ZIP Code</h3>
-                        <p>{rfq.zip_code || 'Not provided'}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Country</h3>
-                        <p>{rfq.country || 'Not provided'}</p>
+                        <h3 className="text-sm font-medium text-gray-600 mb-1">Country</h3>
+                        <p className="text-gray-900">{rfq.country || 'Not provided'}</p>
                       </div>
                     </>
                   )}
@@ -1779,9 +1801,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
               </Card>
             </div>
             
-            <Card>
-              <CardHeader>
-                <CardTitle>Delivery Options</CardTitle>
+            <Card className="mt-8">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg font-semibold">Delivery Options</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 {rfq && (
