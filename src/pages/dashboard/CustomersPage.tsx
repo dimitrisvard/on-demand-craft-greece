@@ -309,6 +309,7 @@ export default function CustomersPage() {
         last_name: newCustomer.last_name || "",
         contact_name: contact_name,
         phone: newCustomer.phone || null,
+        mobile: newCustomer.mobile || null,
         country: newCustomer.country || null,
         address: newCustomer.address || null,
         status: (newCustomer.status || 'lead') as CustomerStatus,

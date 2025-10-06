@@ -69,6 +69,7 @@ export async function createNewCustomer(values: FormValues): Promise<CustomerDat
           position: values.contact.position,
           email: values.contact.email,
           phone: values.contact.phone,
+          mobile: values.contact.mobile,
           status: 'lead',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()

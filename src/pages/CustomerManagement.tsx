@@ -302,6 +302,7 @@ export default function CustomerManagement() {
           last_name: formData.last_name,
           contact_name: contact_name,
           phone: formData.phone || null,
+          mobile: formData.mobile || null,
           country: formData.country || null,
           street_address: formData.street_address || null,
           city: formData.city || null,

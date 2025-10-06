@@ -320,12 +320,14 @@ const RfqDetails = (props: RfqDetailsProps) => {
             last_name,
             email,
             phone,
+            mobile,
             vat_tax_id,
-            address,
             street_address,
+            address,
             city,
             zip_code,
-            country
+            country,
+            position
           )
         `)
         .eq('id', id)

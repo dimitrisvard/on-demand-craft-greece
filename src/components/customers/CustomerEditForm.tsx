@@ -175,6 +175,18 @@ export const CustomerEditForm = ({ customer, onChange, mode }: CustomerEditFormP
               />
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="mobile">Mobile Number</Label>
+            <Input
+              id="mobile"
+              name="mobile"
+              type="tel"
+              value={customer.mobile || ''}
+              onChange={onChange}
+              placeholder="Enter mobile number"
+            />
+          </div>
         </div>
       </div>
 
