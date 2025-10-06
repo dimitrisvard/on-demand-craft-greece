@@ -517,7 +517,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6">
+    <div className="max-w-6xl mx-auto p-6">
       <div className="mb-8">
         <h2 className="text-2xl font-bold mb-4">{t('quote_form_request_quote')}</h2>
         <div className="flex items-center justify-between mb-6">

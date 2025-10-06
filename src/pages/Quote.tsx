@@ -28,14 +28,14 @@ const Quote = () => {
 
       {/* Quote Form Section */}
       <section className="py-10 bg-gray-50">
-        <div className="container-custom max-w-6xl">
+        <div className="container-custom max-w-7xl">
           <MultiStepQuoteForm />
         </div>
       </section>
       
       {/* FAQs */}
       <section className="py-16 bg-white">
-        <div className="container-custom max-w-5xl">
+        <div className="container-custom max-w-6xl">
           <h2 className="text-3xl font-bold mb-12 text-center">{t('quote_page_faq_title')}</h2>
           
           <div className="space-y-6">

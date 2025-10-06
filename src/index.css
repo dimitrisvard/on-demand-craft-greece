@@ -96,7 +96,7 @@
   }
 
   .container-custom {
-    @apply px-4 sm:px-6 lg:px-8 mx-auto max-w-7xl;
+    @apply px-4 sm:px-6 lg:px-8 mx-auto max-w-none 2xl:max-w-[1600px];
   }
 
   .animate-delay-100 {
