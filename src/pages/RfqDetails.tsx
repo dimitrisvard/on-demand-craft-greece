@@ -1311,8 +1311,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <h1 className="text-2xl font-bold">RFQ Details</h1>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="md:col-span-1">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>RFQ Information</CardTitle>
               <div className="flex items-center gap-2">
@@ -1632,117 +1632,129 @@ const RfqDetails = (props: RfqDetailsProps) => {
           </Card>
 
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Customer Info</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {customer && (
-                  <>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Company</h3>
-                      <p className="font-semibold">{customer.company_name}</p>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Contact</h3>
-                      <p>{customer.first_name} {customer.last_name}</p>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                      <p>{customer.email}</p>
-                    </div>
-                    {customer.phone && (
+            {/* Customer Info and Lead Information side by side */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Customer Info</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {customer && (
+                    <>
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-                        <p>{customer.phone}</p>
+                        <h3 className="text-sm font-medium text-gray-500">Company</h3>
+                        <p className="font-semibold">{customer.company_name}</p>
                       </div>
-                    )}
-                    {customer.vat_tax_id && (
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
-                        <p>{customer.vat_tax_id}</p>
+                        <h3 className="text-sm font-medium text-gray-500">Contact</h3>
+                        <p>{customer.first_name} {customer.last_name}</p>
                       </div>
-                    )}
-                  </>
-                )}
-                {!customer && (
-                  <div className="text-center py-8 text-gray-500">
-                    <p>No customer assigned</p>
-                    <p className="text-sm">Check Lead Information below</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      <div>
+                        <h3 className="text-sm font-medium text-gray-500">Email</h3>
+                        <p>{customer.email}</p>
+                      </div>
+                      {customer.phone && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Phone</h3>
+                          <p>{customer.phone}</p>
+                        </div>
+                      )}
+                      {customer.vat_tax_id && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
+                          <p>{customer.vat_tax_id}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {!customer && (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>No customer assigned</p>
+                      <p className="text-sm">Check Lead Information on the right</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Lead Information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {rfq && (
-                  <>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Company</h3>
-                      <p className="font-semibold">{rfq.company_name}</p>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Contact</h3>
-                      <p>{rfq.contact_first_name} {rfq.contact_last_name}</p>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Position</h3>
-                      <p>{rfq.contact_position || 'Not specified'}</p>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                      <p>{rfq.contact_email}</p>
-                    </div>
-                    {rfq.contact_phone && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Lead Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {rfq && (
+                    <>
+                      {/* Company Information */}
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-                        <p>{rfq.contact_phone}</p>
+                        <h3 className="text-sm font-medium text-gray-500">Company</h3>
+                        <p className="font-semibold">{rfq.company_name}</p>
                       </div>
-                    )}
-                    {rfq.mobile && (
+                      {rfq.vat_id && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
+                          <p>{rfq.vat_id}</p>
+                        </div>
+                      )}
+                      
+                      {/* Contact Person */}
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">Mobile</h3>
-                        <p>{rfq.mobile}</p>
+                        <h3 className="text-sm font-medium text-gray-500">Contact Person</h3>
+                        <p>{rfq.contact_first_name} {rfq.contact_last_name}</p>
                       </div>
-                    )}
-                    {rfq.vat_id && (
+                      {rfq.contact_position && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Position</h3>
+                          <p>{rfq.contact_position}</p>
+                        </div>
+                      )}
+                      
+                      {/* Contact Information */}
                       <div>
-                        <h3 className="text-sm font-medium text-gray-500">VAT/Tax ID</h3>
-                        <p>{rfq.vat_id}</p>
+                        <h3 className="text-sm font-medium text-gray-500">Email</h3>
+                        <p>{rfq.contact_email}</p>
                       </div>
-                    )}
-                    {rfq.address && (
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Address</h3>
-                        <p className="whitespace-pre-line">{rfq.address}</p>
-                      </div>
-                    )}
-                    {rfq.city && (
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">City</h3>
-                        <p>{rfq.city}</p>
-                      </div>
-                    )}
-                    {rfq.zip_code && (
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">ZIP Code</h3>
-                        <p>{rfq.zip_code}</p>
-                      </div>
-                    )}
-                    {rfq.country && (
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-500">Country</h3>
-                        <p>{rfq.country}</p>
-                      </div>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
+                      {rfq.contact_phone && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Phone</h3>
+                          <p>{rfq.contact_phone}</p>
+                        </div>
+                      )}
+                      {rfq.mobile && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Mobile</h3>
+                          <p>{rfq.mobile}</p>
+                        </div>
+                      )}
+                      
+                      {/* Address Information */}
+                      {rfq.address && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Address</h3>
+                          <p className="whitespace-pre-line">{rfq.address}</p>
+                        </div>
+                      )}
+                      {rfq.city && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">City</h3>
+                          <p>{rfq.city}</p>
+                        </div>
+                      )}
+                      {rfq.zip_code && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">ZIP Code</h3>
+                          <p>{rfq.zip_code}</p>
+                        </div>
+                      )}
+                      {rfq.country && (
+                        <div>
+                          <h3 className="text-sm font-medium text-gray-500">Country</h3>
+                          <p>{rfq.country}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
             
             <Card>
               <CardHeader>
