@@ -1321,7 +1321,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full max-w-none px-6 py-8 pt-24 space-y-8">
+      <div className="w-full max-w-none px-6 py-6 pt-20 space-y-6">
         <div className="flex items-center gap-4 mb-6">
           <Button 
             variant="outline" 
@@ -1344,7 +1344,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
           <h1 className="text-2xl font-bold">RFQ Details</h1>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-10">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
           <Card className="xl:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>RFQ Information</CardTitle>
@@ -1672,9 +1672,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
             </CardContent>
           </Card>
 
-          <div className="space-y-8">
+          <div className="space-y-6">
             {/* Customer Info and Lead Information side by side */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card className="h-fit">
                 <CardHeader className="pb-4">
                   <CardTitle className="text-lg font-semibold">Customer Info</CardTitle>
@@ -1801,7 +1801,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
               </Card>
             </div>
             
-            <Card className="mt-8">
+            <Card className="mt-6">
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg font-semibold">Delivery Options</CardTitle>
               </CardHeader>
