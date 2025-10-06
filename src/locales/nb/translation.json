@@ -1048,4 +1048,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "[Oversett til NB: Sandblaster betegner overflatebehandling av et materiale ved virkning av strålemidler mot rust, skitt, farge, tinder og andre forurensninger eller for overflatedesign av Matt.]",
   "service_surface-finishes_treatments_glassbead_title": "Glassperlstråler",
   "service_surface-finishes_treatments_glassbead_desc": "[Oversett til NB: Glassperlestråler er en mekanisk overflatebehandling som ligner på sandblåsing, der bittesmå glassperler brukes til å glatte og komprimere overflater som en bjelke.]"
+  ,
+  "navbar_our_work": "Vårt arbeid",
+  "our_work_title": "Vårt arbeid",
+  "our_work_intro": "Her kan du se et utvalg av vårt arbeid innen platebearbeiding, CNC-maskinering, CNC-dreiing og sprøytestøping.",
+  "our_work_open_image": "Åpne bilde",
+  "our_work_image_alt": "Eksempel på arbeid"
 }

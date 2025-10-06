@@ -1097,4 +1097,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "La sabbiatura indica il trattamento superficiale di un materiale mediante l'azione degli agenti del raggio contro ruggine, sporcizia, colore, tinder e altri contaminanti o per la progettazione di superficie di Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Raggi di perle di vetro",
   "service_surface-finishes_treatments_glassbead_desc": "I raggi di perline di vetro sono ono un trattamento meccanico di superficie simili al sabbia, a Cui Vengono utilizzate Piccole Pearl Di Vetro Come Agent A Raggio per Lice E Compat."
+  ,
+  "navbar_our_work": "I nostri lavori",
+  "our_work_title": "I nostri lavori",
+  "our_work_intro": "Qui puoi vedere una selezione dei nostri lavori in lavorazione della lamiera, lavorazione CNC, tornitura CNC e stampaggio a iniezione.",
+  "our_work_open_image": "Apri immagine",
+  "our_work_image_alt": "Immagine esempio di lavoro"
 }

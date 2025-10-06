@@ -1097,4 +1097,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "Sandblasting oznacza obróbkę powierzchniową materiału poprzez działanie środków wiązki przeciwko rdzy, kolorowi, tinderowi i innym zanieczyszczeniom lub do projektowania powierzchni przez Matta.",
   "service_surface-finishes_treatments_glassbead_title": "Szklane promienie koralików",
   "service_surface-finishes_treatments_glassbead_desc": "Promienie szklanych koralików są mechanicznym obróbką powierzchniową podobną do piaskowania, w którym małe szklane koraliki są stosowane jako środek wiązki do wygładzania i zwartych powierzchni."
+  ,
+  "navbar_our_work": "Nasze realizacje",
+  "our_work_title": "Nasze realizacje",
+  "our_work_intro": "Tutaj możesz zobaczyć wybrane przykłady naszych prac: obróbka blach, obróbka CNC, toczenie CNC oraz formowanie wtryskowe.",
+  "our_work_open_image": "Otwórz obraz",
+  "our_work_image_alt": "Przykładowe zdjęcie realizacji"
 }

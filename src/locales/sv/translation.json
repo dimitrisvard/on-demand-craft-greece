@@ -1097,4 +1097,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "Sandblästring betecknar ytbehandlingen av ett material genom verk av strålmedel mot rost, smuts, färg, tinder och andra föroreningar eller för ytdesign av Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Glaspärlstrålar",
   "service_surface-finishes_treatments_glassbead_desc": "Glaspärlstrålar är en mekanisk ytbehandling som liknar sandblästring, i vilken små glaspärlor används som ett balkmedel för att släta och kompakta ytor."
+  ,
+  "navbar_our_work": "Vårt arbete",
+  "our_work_title": "Vårt arbete",
+  "our_work_intro": "Här kan du se ett urval av vårt arbete inom plåtbearbetning, CNC-bearbetning, CNC-svarvning och formsprutning.",
+  "our_work_open_image": "Öppna bild",
+  "our_work_image_alt": "Exempelbild från arbete"
 }

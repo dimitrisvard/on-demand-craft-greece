@@ -1048,4 +1048,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "[Fordítás HU -ra: A homokfúvók egy anyag felületkezelését jelölik a sugárzási ágensek rozsda, szennyeződés, szín, szín, tinder és más szennyező anyagok elleni hatása alapján, vagy a Matt felületi tervezését]",
   "service_surface-finishes_treatments_glassbead_title": "Üveggyöngy",
   "service_surface-finishes_treatments_glassbead_desc": "[Fordítás Hu -ra: Az üveggyöngy -sugarak egy olyan mechanikus felületkezelés, amely hasonló a homokfúváshoz, amelyben az apró üveggyöngyöket gerendaként használják a felületek simításához és tömörítéséhez.]"
+  ,
+  "navbar_our_work": "Munkáink",
+  "our_work_title": "Munkáink",
+  "our_work_intro": "Itt megtekintheti válogatott munkáinkat: lemezmegmunkálás, CNC marás, CNC esztergálás és fröccsöntés.",
+  "our_work_open_image": "Kép megnyitása",
+  "our_work_image_alt": "Munkaminta kép"
 }

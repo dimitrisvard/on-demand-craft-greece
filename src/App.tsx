@@ -18,6 +18,7 @@ import Services from './pages/Services';
 import Industries from './pages/Industries';
 import About from './pages/About';
 import Contact from './pages/Contact';
+import OurWork from './pages/OurWork';
 import SurfaceFinishes from './pages/SurfaceFinishes';
 import SheetMetalFabrication from './pages/SheetMetalFabrication';
 import InjectionMolding from './pages/InjectionMolding';
@@ -62,6 +63,7 @@ function AppContent() {
               <Route path="/:lang/quote-request" element={<QuoteRequestForm />} />
               <Route path="/:lang/services" element={<Services />} />
               <Route path="/:lang/industries" element={<Industries />} />
+              <Route path="/:lang/our-work" element={<OurWork />} />
               <Route path="/:lang/about" element={<About />} />
               <Route path="/:lang/contact" element={<Contact />} />
               
@@ -79,6 +81,7 @@ function AppContent() {
               <Route path="/quote-request" element={<QuoteRequestForm />} />
               <Route path="/services" element={<Services />} />
               <Route path="/industries" element={<Industries />} />
+              <Route path="/our-work" element={<OurWork />} />
               <Route path="/about" element={<About />} />
               <Route path="/contact" element={<Contact />} />
               

@@ -1097,4 +1097,10 @@
   "service_surface-finishes_treatments_sandblasting_desc": "Zandsterkte duidt op de oppervlaktebehandeling van een materiaal door de werking van straalmiddelen tegen roest, vuil, kleur, tondel en andere verontreinigingen of voor oppervlakte -ontwerp door mat.",
   "service_surface-finishes_treatments_glassbead_title": "Glazen kraalstralen",
   "service_surface-finishes_treatments_glassbead_desc": "Glazen kraalstralen zijn een mechanische oppervlaktebehandeling vergelijkbaar met zandstoten, waarbij kleine glazen kralen worden gebruikt als een balkmiddel om gladde en compacte oppervlakken te gladstrijken."
+  ,
+  "navbar_our_work": "Ons werk",
+  "our_work_title": "Ons werk",
+  "our_work_intro": "Hier ziet u een selectie van ons werk in plaatbewerking, CNC-bewerking, CNC-draaien en spuitgieten.",
+  "our_work_open_image": "Afbeelding openen",
+  "our_work_image_alt": "Voorbeeld werkafbeelding"
 }
