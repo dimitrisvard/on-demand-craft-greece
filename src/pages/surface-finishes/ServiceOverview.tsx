@@ -15,7 +15,7 @@ const overview = [
 const ServiceOverview = () => {
   const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
-  const services = [
+    const services = [
     { key: 'service_surface-finishes_overview_service_1', default: 'Anodizing & Hard Anodizing' },
     { key: 'service_surface-finishes_overview_service_2', default: 'Black Finishing & Passivation' },
     { key: 'service_surface-finishes_overview_service_3', default: 'Phosphate Conversion Coating & Nickel Plating' },
