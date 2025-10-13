@@ -10,69 +10,173 @@ export default function OurWork() {
 
   const images = useMemo(
     () => [
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-1.jpg',
       '/lovable-uploads/sheet-metal-fabrication-2.jpg',
       '/lovable-uploads/sheet-metal-fabrication-3.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-1.jpg',
+      '/lovable-uploads/milling-turning-2.jpg',
+      '/lovable-uploads/milling-turning-3.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-4.jpg',
       '/lovable-uploads/sheet-metal-fabrication-5.jpg',
       '/lovable-uploads/sheet-metal-fabrication-6.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-4.jpg',
+      '/lovable-uploads/milling-turning-5.jpg',
+      '/lovable-uploads/milling-turning-6.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-7.jpg',
       '/lovable-uploads/sheet-metal-fabrication-8.jpg',
       '/lovable-uploads/sheet-metal-fabrication-9.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-7.jpg',
+      '/lovable-uploads/milling-turning-8.jpg',
+      '/lovable-uploads/milling-turning-9.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-10.jpg',
       '/lovable-uploads/sheet-metal-fabrication-11.jpg',
       '/lovable-uploads/sheet-metal-fabrication-12.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-10.jpg',
+      '/lovable-uploads/milling-turning-11.jpg',
+      '/lovable-uploads/milling-turning-12.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-13.jpg',
       '/lovable-uploads/sheet-metal-fabrication-14.jpg',
       '/lovable-uploads/sheet-metal-fabrication-15.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-13.jpg',
+      '/lovable-uploads/milling-turning-14.jpg',
+      '/lovable-uploads/milling-turning-15.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-16.jpg',
       '/lovable-uploads/sheet-metal-fabrication-17.jpg',
       '/lovable-uploads/sheet-metal-fabrication-18.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-16.jpg',
+      '/lovable-uploads/milling-turning-17.jpg',
+      '/lovable-uploads/milling-turning-18.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-19.jpg',
       '/lovable-uploads/sheet-metal-fabrication-20.jpg',
       '/lovable-uploads/sheet-metal-fabrication-21.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-19.jpg',
+      '/lovable-uploads/milling-turning-20.jpg',
+      '/lovable-uploads/milling-turning-21.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-22.jpg',
       '/lovable-uploads/sheet-metal-fabrication-23.jpg',
       '/lovable-uploads/sheet-metal-fabrication-24.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-22.jpg',
+      '/lovable-uploads/milling-turning-23.jpg',
+      '/lovable-uploads/milling-turning-24.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-25.jpg',
       '/lovable-uploads/sheet-metal-fabrication-26.jpg',
       '/lovable-uploads/sheet-metal-fabrication-27.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-25.jpg',
+      '/lovable-uploads/milling-turning-26.jpg',
+      '/lovable-uploads/milling-turning-27.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-28.jpg',
       '/lovable-uploads/sheet-metal-fabrication-29.jpg',
       '/lovable-uploads/sheet-metal-fabrication-30.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-28.jpg',
+      '/lovable-uploads/milling-turning-29.jpg',
+      '/lovable-uploads/milling-turning-30.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-31.jpg',
       '/lovable-uploads/sheet-metal-fabrication-32.jpg',
       '/lovable-uploads/sheet-metal-fabrication-33.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-31.jpg',
+      '/lovable-uploads/milling-turning-32.jpg',
+      '/lovable-uploads/milling-turning-33.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-34.jpg',
       '/lovable-uploads/sheet-metal-fabrication-35.jpg',
       '/lovable-uploads/sheet-metal-fabrication-36.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-34.jpg',
+      '/lovable-uploads/milling-turning-35.jpg',
+      '/lovable-uploads/milling-turning-36.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-37.jpg',
       '/lovable-uploads/sheet-metal-fabrication-38.jpg',
       '/lovable-uploads/sheet-metal-fabrication-39.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-37.jpg',
+      '/lovable-uploads/milling-turning-38.jpg',
+      '/lovable-uploads/milling-turning-39.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-40.jpg',
       '/lovable-uploads/sheet-metal-fabrication-41.jpg',
       '/lovable-uploads/sheet-metal-fabrication-42.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-40.jpg',
+      '/lovable-uploads/milling-turning-41.jpg',
+      '/lovable-uploads/milling-turning-42.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-43.jpg',
       '/lovable-uploads/sheet-metal-fabrication-44.jpg',
       '/lovable-uploads/sheet-metal-fabrication-45.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-43.jpg',
+      '/lovable-uploads/milling-turning-44.jpg',
+      '/lovable-uploads/milling-turning-45.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-46.jpg',
       '/lovable-uploads/sheet-metal-fabrication-47.jpg',
       '/lovable-uploads/sheet-metal-fabrication-48.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-46.jpg',
+      '/lovable-uploads/milling-turning-47.jpg',
+      '/lovable-uploads/milling-turning-48.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-49.jpg',
       '/lovable-uploads/sheet-metal-fabrication-50.jpg',
       '/lovable-uploads/sheet-metal-fabrication-51.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-49.jpg',
+      '/lovable-uploads/milling-turning-50.jpg',
+      '/lovable-uploads/milling-turning-51.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-52.jpg',
       '/lovable-uploads/sheet-metal-fabrication-53.jpg',
       '/lovable-uploads/sheet-metal-fabrication-54.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-52.jpg',
+      '/lovable-uploads/milling-turning-53.jpg',
+      '/lovable-uploads/milling-turning-54.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-55.jpg',
       '/lovable-uploads/sheet-metal-fabrication-56.jpg',
       '/lovable-uploads/sheet-metal-fabrication-57.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-55.jpg',
+      '/lovable-uploads/milling-turning-56.jpg',
+      '/lovable-uploads/milling-turning-57.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-58.jpg',
       '/lovable-uploads/sheet-metal-fabrication-59.jpg',
       '/lovable-uploads/sheet-metal-fabrication-60.jpg',
+      // Milling & Turning (3 images)
+      '/lovable-uploads/milling-turning-58.jpg',
+      '/lovable-uploads/milling-turning-59.jpg',
+      '/lovable-uploads/milling-turning-60.jpg',
+      // Sheet Metal Fabrication (3 images)
       '/lovable-uploads/sheet-metal-fabrication-61.jpg',
       '/lovable-uploads/sheet-metal-fabrication-62.jpg',
       '/lovable-uploads/sheet-metal-fabrication-63.jpg',
+      // Milling & Turning (1 image)
+      '/lovable-uploads/milling-turning-61.jpg',
+      // Sheet Metal Fabrication (remaining images)
       '/lovable-uploads/sheet-metal-fabrication-64.jpg',
       '/lovable-uploads/sheet-metal-fabrication-65.jpg',
       '/lovable-uploads/sheet-metal-fabrication-66.jpg',
