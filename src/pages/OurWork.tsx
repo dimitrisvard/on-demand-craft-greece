@@ -11,7 +11,7 @@ export default function OurWork() {
   const images = useMemo(
     () => [
       // Injection Molding (3 images)
-      '/lovable-uploads/injection-molding-1.jpg',
+      '/lovable-uploads/injection-molding-1.jpeg',
       '/lovable-uploads/injection-molding-2.jpg',
       '/lovable-uploads/injection-molding-3.jpg',
       // Sheet Metal Fabrication (3 images)
