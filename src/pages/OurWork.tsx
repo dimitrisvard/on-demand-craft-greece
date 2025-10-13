@@ -1,19 +1,19 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 
 // Professional gallery with lightbox navigation
 export default function OurWork() {
   const { t } = useTranslation();
 
-  // NOTE: Replace the placeholder paths below with your final image paths in public/ or a CDN
   const images = useMemo(
     () => [
-      '/lovable-uploads/sample-ourwork-gear-1.jpg',
-      '/lovable-uploads/sample-ourwork-bottle-mold-1.jpg',
-      '/lovable-uploads/sample-ourwork-die-plate-1.jpg',
-      '/lovable-uploads/sample-ourwork-blocks-1.jpg',
+      '/lovable-uploads/injection-molding-1.jpeg',
+      '/lovable-uploads/injection-molding-2.jpg',
+      '/lovable-uploads/injection-molding-3.jpg',
+      '/lovable-uploads/injection-molding-4.jpg',
     ],
     []
   );
@@ -80,6 +80,9 @@ export default function OurWork() {
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-5xl w-[96vw] p-0 bg-black/95 border-0">
+          <VisuallyHidden>
+            <DialogTitle>{t('our_work_image_alt')}</DialogTitle>
+          </VisuallyHidden>
           <div className="relative w-full h-full">
             <button
               onClick={() => setIsOpen(false)}
