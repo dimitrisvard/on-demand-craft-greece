@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadFile } from '@/utils/fileStorage';
 import { sendRFQEmails } from '@/utils/emailService';
+import { trackGoogleAdsConversion } from '@/utils/analytics';
 
 const steps = [
   { name: 'Company Info', component: StepCompanyInfo },
@@ -365,6 +366,14 @@ const MicronsMultiStepForm: React.FC = () => {
         // Don't throw error here - we don't want email failures to break the form submission
       }
       
+      // Track Google Ads conversion for form submission success
+      trackGoogleAdsConversion('form_submit_success', {
+        event_category: 'form',
+        event_label: 'quote_request_form',
+        value: 0,
+        currency: 'EUR'
+      });
+
       // Show success message
       setSubmitSuccess(true);
       toast({

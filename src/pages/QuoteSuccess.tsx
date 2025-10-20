@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { trackQuoteRequest, trackUserInteraction } from '@/utils/analytics';
+import { trackQuoteRequest, trackUserInteraction, trackGoogleAdsConversion } from '@/utils/analytics';
 
 const QuoteSuccess = () => {
   const { t } = useTranslation();
@@ -18,6 +18,14 @@ const QuoteSuccess = () => {
       currency: 'EUR',
       partCount: 1, // We don't have the exact part count here
       industry: 'general'
+    });
+
+    // Track Google Ads conversion for form submission success
+    trackGoogleAdsConversion('form_submit_success', {
+      event_category: 'form',
+      event_label: 'quote_request_form',
+      value: 0,
+      currency: 'EUR'
     });
   }, []);
 

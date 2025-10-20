@@ -94,6 +94,20 @@ export const trackFormSubmission = (formName: string, success: boolean = true) =
   trackEvent(success ? 'form_submit_success' : 'form_submit_error', 'form', formName);
 };
 
+// Track Google Ads conversion events
+// This function implements the Google Ads measurement protocol for tracking conversions
+// It sends events to Google Analytics which can be used for Google Ads conversion tracking
+export const trackGoogleAdsConversion = (eventName: string, parameters?: Record<string, any>) => {
+  if (typeof window !== 'undefined' && window.gtag) {
+    window.gtag('event', eventName, {
+      // Google Ads specific parameters
+      send_to: GA_MEASUREMENT_ID,
+      ...parameters,
+    });
+    console.log('Google Ads: Conversion tracked', { eventName, parameters });
+  }
+};
+
 // Track user interactions
 export const trackUserInteraction = (action: string, element: string) => {
   trackEvent(action, 'user_interaction', element);
