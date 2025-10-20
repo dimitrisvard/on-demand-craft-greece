@@ -47,3 +47,9 @@ COMMENT ON CONSTRAINT customers_email_unique ON public.customers IS 'Ensures cus
 
 
 
+
+
+
+
+
+
