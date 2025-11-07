@@ -15,7 +15,7 @@ import { FormValues } from './types';
 import { materialOptions, surfaceRoughnessOptions, toleranceOptions, surfaceTreatmentOptions } from './constants/materialOptions';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { trackQuoteRequest, trackFormSubmission, trackGoogleAdsConversion } from '@/utils/analytics';
+import { trackQuoteRequest, trackFormSubmission, trackQuoteFormSubmitSuccess } from '@/utils/analytics';
 import { sendRFQEmails } from '@/utils/emailService';
 
 const validationSchemas = [
@@ -469,11 +469,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
       trackFormSubmission('quote_request_form', true);
 
       // Track Google Ads conversion for form submission success
-      trackGoogleAdsConversion('form_submit_success', {
-        event_category: 'form',
-        event_label: 'quote_request_form',
-        value: 0,
-        currency: 'EUR'
+      trackQuoteFormSubmitSuccess({
+        part_count: values.parts.length,
       });
 
       // Show success message

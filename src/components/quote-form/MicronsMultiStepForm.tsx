@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadFile } from '@/utils/fileStorage';
 import { sendRFQEmails } from '@/utils/emailService';
-import { trackGoogleAdsConversion } from '@/utils/analytics';
+import { trackQuoteFormSubmitSuccess } from '@/utils/analytics';
 
 const steps = [
   { name: 'Company Info', component: StepCompanyInfo },
@@ -367,12 +367,7 @@ const MicronsMultiStepForm: React.FC = () => {
       }
       
       // Track Google Ads conversion for form submission success
-      trackGoogleAdsConversion('form_submit_success', {
-        event_category: 'form',
-        event_label: 'quote_request_form',
-        value: 0,
-        currency: 'EUR'
-      });
+      trackQuoteFormSubmitSuccess();
 
       // Show success message
       setSubmitSuccess(true);

@@ -108,6 +108,24 @@ export const trackGoogleAdsConversion = (eventName: string, parameters?: Record<
   }
 };
 
+// Track quote form submission success event for Google Ads and analytics
+export const trackQuoteFormSubmitSuccess = (parameters?: Record<string, any>) => {
+  const eventParameters = {
+    event_category: 'form',
+    event_label: 'quote_request_form',
+    value: 0,
+    currency: 'EUR',
+    ...parameters,
+  };
+
+  if (typeof window !== 'undefined' && window.gtag) {
+    window.gtag('event', 'form_submit_success', eventParameters);
+    console.log('GA: Quote form submit success event tracked', { eventParameters });
+  }
+
+  trackGoogleAdsConversion('form_submit_success', eventParameters);
+};
+
 // Track user interactions
 export const trackUserInteraction = (action: string, element: string) => {
   trackEvent(action, 'user_interaction', element);
