@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { 
@@ -17,12 +16,15 @@ import {
   PieChart, 
   Pie, 
   Cell, 
-  Legend,
-  LineChart,
-  Line
+  Legend
 } from 'recharts';
-import { format, subDays, startOfMonth, endOfMonth, parseISO } from "date-fns";
-import { Loader2, TrendingUp, TrendingDown, DollarSign, ShoppingCart, Users, Package } from "lucide-react";
+import { format, subDays, startOfYear, endOfYear, parseISO, isWithinInterval } from "date-fns";
+import { Loader2, TrendingUp, TrendingDown, DollarSign, ShoppingCart, Package, Calendar as CalendarIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Button } from "@/components/ui/button";
+import { DateRange } from "react-day-picker";
+import { cn } from "@/lib/utils";
 
 // Types for our analytics data
 interface RevenueData {
@@ -52,6 +54,7 @@ interface CustomerGrowthData {
 
 const AnalyticsPage = () => {
   const [timeRange, setTimeRange] = useState("30d");
+  const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [isLoading, setIsLoading] = useState(true);
   
   // State for chart data
@@ -71,24 +74,43 @@ const AnalyticsPage = () => {
   });
 
   useEffect(() => {
-    fetchAnalyticsData();
+    if (timeRange !== 'custom') {
+      setDateRange(undefined);
+      fetchAnalyticsData();
+    }
   }, [timeRange]);
 
-  const getStartDate = () => {
+  useEffect(() => {
+    if (timeRange === 'custom' && dateRange?.from && dateRange?.to) {
+      fetchAnalyticsData();
+    }
+  }, [dateRange]);
+
+  const getDateFilter = () => {
     const now = new Date();
+    
+    if (timeRange === 'custom' && dateRange?.from) {
+      return {
+        start: dateRange.from,
+        end: dateRange.to || dateRange.from
+      };
+    }
+
     switch (timeRange) {
-      case '7d': return subDays(now, 7);
-      case '30d': return subDays(now, 30);
-      case '90d': return subDays(now, 90);
-      case '1y': return subDays(now, 365);
-      default: return subDays(now, 30);
+      case '7d': return { start: subDays(now, 7), end: now };
+      case '30d': return { start: subDays(now, 30), end: now };
+      case '90d': return { start: subDays(now, 90), end: now };
+      case 'ytd': return { start: startOfYear(now), end: now };
+      case '1y': return { start: subDays(now, 365), end: now };
+      default: return { start: subDays(now, 30), end: now };
     }
   };
 
   const fetchAnalyticsData = async () => {
     setIsLoading(true);
-    const startDate = getStartDate();
-    const isoStartDate = startDate.toISOString();
+    const { start, end } = getDateFilter();
+    const isoStartDate = start.toISOString();
+    const isoEndDate = end.toISOString();
 
     try {
       // 1. Fetch Orders for Revenue & Status
@@ -96,6 +118,7 @@ const AnalyticsPage = () => {
         .from('orders')
         .select('created_at, total_amount, total_with_vat, status, production_status, material_costs, working_hours_costs')
         .gte('created_at', isoStartDate)
+        .lte('created_at', isoEndDate)
         .order('created_at', { ascending: true });
 
       if (ordersError) throw ordersError;
@@ -105,16 +128,13 @@ const AnalyticsPage = () => {
         .from('customers')
         .select('created_at, status')
         .gte('created_at', isoStartDate)
+        .lte('created_at', isoEndDate)
         .order('created_at', { ascending: true });
 
       if (customersError) throw customersError;
 
       // 3. Process Revenue Data
       const revenueMap = new Map<string, RevenueData>();
-      
-      // Initialize map with all dates in range (to handle gaps)
-      // For simplicity in this demo, we'll just map the actual data points
-      // In a real app, you'd want to fill in the missing dates with 0s
       
       orders?.forEach(order => {
         const date = format(parseISO(order.created_at), 'MMM dd');
@@ -182,21 +202,18 @@ const AnalyticsPage = () => {
       setCustomerData(processedCustomerData);
       setMetrics({
         totalRevenue,
-        revenueGrowth: 12.5, // Mocked for demo (needs comparison period)
+        revenueGrowth: 0, // Needs comparison logic
         totalOrders,
-        orderGrowth: 5.2, // Mocked for demo
+        orderGrowth: 0, // Needs comparison logic
         avgOrderValue,
-        conversionRate: 3.4 // Mocked for demo
+        conversionRate: 0 // Needs traffic data
       });
 
-      // Mock product data since we might not have ordered_items table joined easily yet
-      setProductData([
-        { name: "CNC Machined Parts", sales: 45, revenue: 12500 },
-        { name: "3D Prints (SLA)", sales: 32, revenue: 4800 },
-        { name: "Injection Molding", sales: 12, revenue: 28000 },
-        { name: "Sheet Metal", sales: 28, revenue: 9500 },
-        { name: "Vacuum Casting", sales: 8, revenue: 3200 },
-      ]);
+      // 7. Real Product Data (if available) or Empty State
+      // We removed the dummy data here as requested.
+      // If you have a way to link orders to products (e.g. order_items table), fetch it here.
+      // For now, we'll leave it empty to ensure no fake data is shown.
+      setProductData([]); 
 
     } catch (error) {
       console.error("Error fetching analytics:", error);
@@ -222,7 +239,48 @@ const AnalyticsPage = () => {
             <p className="text-muted-foreground mt-1">Deep insights into your business performance.</p>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-center gap-2">
+            {timeRange === 'custom' && (
+              <div className="grid gap-2">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="date"
+                      variant={"outline"}
+                      className={cn(
+                        "w-[260px] justify-start text-left font-normal",
+                        !dateRange && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {dateRange?.from ? (
+                        dateRange.to ? (
+                          <>
+                            {format(dateRange.from, "LLL dd, y")} -{" "}
+                            {format(dateRange.to, "LLL dd, y")}
+                          </>
+                        ) : (
+                          format(dateRange.from, "LLL dd, y")
+                        )
+                      ) : (
+                        <span>Pick a date</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      initialFocus
+                      mode="range"
+                      defaultMonth={dateRange?.from}
+                      selected={dateRange}
+                      onSelect={setDateRange}
+                      numberOfMonths={2}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+
             <Select value={timeRange} onValueChange={setTimeRange}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Select range" />
@@ -231,9 +289,12 @@ const AnalyticsPage = () => {
                 <SelectItem value="7d">Last 7 days</SelectItem>
                 <SelectItem value="30d">Last 30 days</SelectItem>
                 <SelectItem value="90d">Last 3 months</SelectItem>
+                <SelectItem value="ytd">This Year (YTD)</SelectItem>
                 <SelectItem value="1y">Last year</SelectItem>
+                <SelectItem value="custom">Custom Range</SelectItem>
               </SelectContent>
             </Select>
+            
             <Button variant="outline" onClick={fetchAnalyticsData} disabled={isLoading}>
                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
             </Button>
@@ -259,14 +320,14 @@ const AnalyticsPage = () => {
           <MetricCard 
             title="Avg. Order Value" 
             value={formatCurrency(metrics.avgOrderValue)} 
-            trend={2.1} 
+            trend={0} 
             icon={<Package className="h-4 w-4" />}
             loading={isLoading}
           />
           <MetricCard 
             title="Conversion Rate" 
             value={`${metrics.conversionRate}%`} 
-            trend={-0.5} 
+            trend={0} 
             icon={<TrendingUp className="h-4 w-4" />}
             loading={isLoading}
             inverseTrend
@@ -287,7 +348,7 @@ const AnalyticsPage = () => {
                 <div className="h-full flex items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
+              ) : revenueData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={revenueData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <defs>
@@ -344,6 +405,11 @@ const AnalyticsPage = () => {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                  <TrendingUp className="h-12 w-12 mb-4 opacity-20" />
+                  <p>No revenue data available for this period</p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -359,7 +425,7 @@ const AnalyticsPage = () => {
                 <div className="h-full flex items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
+              ) : orderStatusData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -386,6 +452,11 @@ const AnalyticsPage = () => {
                     <Legend verticalAlign="bottom" height={36} />
                   </PieChart>
                 </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                  <Package className="h-12 w-12 mb-4 opacity-20" />
+                  <p>No order status data available</p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -401,7 +472,7 @@ const AnalyticsPage = () => {
                 <div className="h-full flex items-center justify-center">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
-              ) : (
+              ) : productData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     layout="vertical"
@@ -435,6 +506,12 @@ const AnalyticsPage = () => {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                  <ShoppingCart className="h-12 w-12 mb-4 opacity-20" />
+                  <p>No product revenue data available yet.</p>
+                  <p className="text-xs mt-1">Data will appear here once orders are linked to products.</p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -470,7 +547,7 @@ const MetricCard = ({ title, value, trend, icon, loading, inverseTrend }: any) =
         </div>
         
         <div className="mt-4 flex items-center text-xs">
-          {!loading && (
+          {!loading && trend !== 0 && (
             <>
               <span className={`flex items-center font-medium ${isGood ? 'text-green-600' : 'text-red-600'}`}>
                 {isPositive ? <TrendingUp className="h-3 w-3 mr-1" /> : <TrendingDown className="h-3 w-3 mr-1" />}
@@ -479,6 +556,9 @@ const MetricCard = ({ title, value, trend, icon, loading, inverseTrend }: any) =
               <span className="text-muted-foreground ml-2">vs last period</span>
             </>
           )}
+          {!loading && trend === 0 && (
+             <span className="text-muted-foreground">No trend data available</span>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -486,4 +566,3 @@ const MetricCard = ({ title, value, trend, icon, loading, inverseTrend }: any) =
 };
 
 export default AnalyticsPage;
-
