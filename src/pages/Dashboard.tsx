@@ -56,23 +56,23 @@ const ProductsModule = () => {
           </Button>
         </div>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Products Overview</CardTitle>
+      <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="bg-muted/5">
+          <CardTitle className="text-lg font-medium text-foreground">Products Overview</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">Total Products</h3>
-              <p className="text-2xl font-bold mt-2">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-primary/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">Total Products</h3>
+              <p className="text-3xl font-bold mt-2">--</p>
             </div>
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">Low Stock Items</h3>
-              <p className="text-2xl font-bold mt-2 text-yellow-600">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-yellow-500/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">Low Stock Items</h3>
+              <p className="text-3xl font-bold mt-2 text-yellow-600">--</p>
             </div>
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">Out of Stock</h3>
-              <p className="text-2xl font-bold mt-2 text-red-600">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-red-500/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">Out of Stock</h3>
+              <p className="text-3xl font-bold mt-2 text-red-600">--</p>
             </div>
           </div>
         </CardContent>
@@ -96,23 +96,23 @@ const OrdersModule = () => {
           <span>Manage Orders</span>
         </Button>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Orders Overview</CardTitle>
+      <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="bg-muted/5">
+          <CardTitle className="text-lg font-medium text-foreground">Orders Overview</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">New Orders</h3>
-              <p className="text-2xl font-bold mt-2">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-primary/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">New Orders</h3>
+              <p className="text-3xl font-bold mt-2">--</p>
             </div>
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">In Progress</h3>
-              <p className="text-2xl font-bold mt-2 text-blue-600">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-blue-500/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">In Progress</h3>
+              <p className="text-3xl font-bold mt-2 text-blue-600">--</p>
             </div>
-            <div className="p-4 border rounded-lg">
-              <h3 className="font-medium">Completed This Month</h3>
-              <p className="text-2xl font-bold mt-2 text-green-600">--</p>
+            <div className="p-4 border rounded-lg bg-card hover:border-green-500/50 transition-colors">
+              <h3 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">Completed This Month</h3>
+              <p className="text-3xl font-bold mt-2 text-green-600">--</p>
             </div>
           </div>
           
@@ -165,11 +165,11 @@ const CalendarModule = () => {
           </Button>
         </div>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Upcoming Deliveries</CardTitle>
+      <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
+        <CardHeader className="bg-muted/5">
+          <CardTitle className="text-lg font-medium text-foreground">Upcoming Deliveries</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between p-2 border rounded-md bg-green-50">
               <div>

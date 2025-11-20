@@ -69,155 +69,114 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
   return (
     <div className="flex min-h-screen bg-background pt-16">
       {/* Persistent Sidebar */}
-      <div className="w-64 border-r bg-card hidden md:block p-4 space-y-6">
-        <div className="flex items-center mb-8">
-          <LayoutDashboard className="h-6 w-6 mr-2 text-primary" />
-          <h2 className="text-xl font-bold">CRM System</h2>
+      <div className="w-64 border-r bg-slate-50/50 dark:bg-slate-950/50 hidden md:block flex-col h-[calc(100vh-4rem)] sticky top-16">
+        <div className="p-6 border-b">
+          <div className="flex items-center gap-2 text-primary">
+            <LayoutDashboard className="h-6 w-6" />
+            <h2 className="text-lg font-bold tracking-tight">CRM System</h2>
+          </div>
         </div>
 
-        <nav className="space-y-1">
+        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {/* Overview - Show for all users */}
-          <button 
-            className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-              activeModule === "overview" 
-                ? "bg-primary text-primary-foreground" 
-                : "text-muted-foreground hover:bg-muted"
-            }`}
+          <NavButton 
+            active={activeModule === "overview"}
             onClick={() => handleNavigation("overview", "/dashboard")}
-          >
-            <BarChart3 className="h-5 w-5" />
-            <span>Overview</span>
-          </button>
+            icon={<BarChart3 className="h-4 w-4" />}
+            label="Overview"
+          />
 
           {/* Admin-only menu items */}
           {!isProductionPartner && (
             <>
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "customers" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Management
+              </div>
+              <NavButton 
+                active={activeModule === "customers"}
                 onClick={() => handleNavigation("customers", "/customers")}
-              >
-                <Users className="h-5 w-5" />
-                <span>Customers</span>
-              </button>
+                icon={<Users className="h-4 w-4" />}
+                label="Customers"
+              />
               
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "partners" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <NavButton 
+                active={activeModule === "partners"}
                 onClick={() => handleNavigation("partners", "/partners")}
-              >
-                <Factory className="h-5 w-5" />
-                <span>Production Partners</span>
-              </button>
+                icon={<Factory className="h-4 w-4" />}
+                label="Production Partners"
+              />
               
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "products" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <NavButton 
+                active={activeModule === "products"}
                 onClick={() => handleNavigation("products", "/products")}
-              >
-                <ShoppingBag className="h-5 w-5" />
-                <span>Products & Inventory</span>
-              </button>
+                icon={<ShoppingBag className="h-4 w-4" />}
+                label="Products & Inventory"
+              />
               
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "quotes" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <NavButton 
+                active={activeModule === "quotes"}
                 onClick={() => handleNavigation("quotes", "/rfq-management")}
-              >
-                <FileText className="h-5 w-5" />
-                <span>RFQ & Quotes</span>
-              </button>
+                icon={<FileText className="h-4 w-4" />}
+                label="RFQ & Quotes"
+              />
             </>
           )}
           
+          <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Operations
+          </div>
+          
           {/* Orders - Show for all users */}
-          <button 
-            className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-              activeModule === "orders" 
-                ? "bg-primary text-primary-foreground" 
-                : "text-muted-foreground hover:bg-muted"
-            }`}
+          <NavButton 
+            active={activeModule === "orders"}
             onClick={() => handleNavigation("orders", "/orders")}
-          >
-            <Package className="h-5 w-5" />
-            <span>Orders</span>
-          </button>
+            icon={<Package className="h-4 w-4" />}
+            label="Orders"
+          />
           
           {/* Calendar - Show for all users */}
-          <button 
-            className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-              activeModule === "calendar" 
-                ? "bg-primary text-primary-foreground" 
-                : "text-muted-foreground hover:bg-muted"
-            }`}
+          <NavButton 
+            active={activeModule === "calendar"}
             onClick={() => handleNavigation("calendar", "/calendar")}
-          >
-            <Calendar className="h-5 w-5" />
-            <span>Calendar</span>
-          </button>
+            icon={<Calendar className="h-4 w-4" />}
+            label="Calendar"
+          />
 
           {/* Admin-only additional menu items */}
           {!isProductionPartner && (
             <>
-              <Separator className="my-4" />
+              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                System
+              </div>
               
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "notifications" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <NavButton 
+                active={activeModule === "notifications"}
                 onClick={() => handleNavigation("notifications", "/notifications")}
-              >
-                <Bell className="h-5 w-5" />
-                <span>Notifications</span>
-              </button>
+                icon={<Bell className="h-4 w-4" />}
+                label="Notifications"
+              />
               
-              <button 
-                className={`w-full flex items-center space-x-2 px-3 py-2 rounded-md text-sm ${
-                  activeModule === "settings" 
-                    ? "bg-primary text-primary-foreground" 
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
+              <NavButton 
+                active={activeModule === "settings"}
                 onClick={() => handleNavigation("settings", "/settings")}
-              >
-                <Settings className="h-5 w-5" />
-                <span>Settings</span>
-              </button>
+                icon={<Settings className="h-4 w-4" />}
+                label="Settings"
+              />
             </>
           )}
-        </nav>
+        </div>
 
         {/* User info at bottom */}
         {user && (
-          <div className="absolute bottom-4 left-0 w-64 p-4">
-            <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
+          <div className="p-4 border-t bg-background/50">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold border border-primary/20">
                 {user.email?.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-medium truncate">{user.email}</p>
-                <p className="text-xs text-muted-foreground">
-                  {user.role === 'partner_seller' ? 'Partner' : 
-                   user.role === 'admin' ? 'Admin' : 
-                   user.role === 'sales_rep' ? 'Sales Rep' :
-                   user.role === 'production_manager' ? 'Production Manager' :
-                   user.role === 'customer' ? 'Customer' :
-                   user.role === 'supplier' ? 'Supplier' :
-                   user.role === 'accountant' ? 'Accountant' :
-                   user.role || 'User'}
+                <p className="text-sm font-medium truncate text-foreground">{user.email}</p>
+                <p className="text-xs text-muted-foreground capitalize">
+                  {user.role?.replace('_', ' ') || 'User'}
                 </p>
               </div>
             </div>
@@ -226,13 +185,34 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-auto">
-        <div className="p-6">
+      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-slate-50/30 dark:bg-slate-900/30">
+        <div className="p-8 max-w-7xl mx-auto">
           {children}
         </div>
       </div>
     </div>
   );
 };
+
+interface NavButtonProps {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}
+
+const NavButton = ({ active, onClick, icon, label }: NavButtonProps) => (
+  <button 
+    className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+      active 
+        ? "bg-primary text-primary-foreground shadow-sm" 
+        : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-foreground"
+    }`}
+    onClick={onClick}
+  >
+    {icon}
+    <span>{label}</span>
+  </button>
+);
 
 export default PersistentDashboardLayout;

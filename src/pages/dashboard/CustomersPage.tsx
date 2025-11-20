@@ -424,7 +424,7 @@ export default function CustomersPage() {
         />
       </div>
       
-      <Card>
+      <Card className="shadow-sm border hover:shadow-md transition-all duration-200 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>

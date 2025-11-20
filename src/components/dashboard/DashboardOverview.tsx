@@ -531,44 +531,55 @@ const StatCard = ({
   onClick
 }: StatCardProps) => {
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">
-          {title}
-        </CardTitle>
-        <div className="h-4 w-4 text-muted-foreground">
-          {icon}
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-4 w-28" />
-          </div>
-        ) : (
-          <>
-            <div className="text-2xl font-bold">{totalValue}</div>
-            <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
-            {trend !== 'neutral' && (
-              <div className={`flex items-center text-xs mt-2 ${
-                trendPositive 
-                  ? 'text-green-500' 
-                  : trendPositive === false 
-                    ? 'text-red-500' 
-                    : 'text-muted-foreground'
-              }`}>
-                {trendPositive 
-                  ? <ChevronUp className="h-3 w-3 mr-1" />
-                  : trendPositive === false 
-                    ? <ChevronDown className="h-3 w-3 mr-1" />
-                    : null
-                }
-                <span>{trend}</span>
-              </div>
+    <Card 
+      className="cursor-pointer hover:shadow-md transition-all duration-200 border-l-4 border-l-transparent hover:border-l-primary overflow-hidden group"
+      onClick={onClick}
+    >
+      <CardContent className="p-6">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+              {title}
+            </p>
+            {isLoading ? (
+              <Skeleton className="h-9 w-24 mt-1" />
+            ) : (
+              <h3 className="text-3xl font-bold text-foreground tracking-tight">
+                {totalValue}
+              </h3>
             )}
-          </>
-        )}
+          </div>
+          <div className="p-2 bg-primary/5 text-primary rounded-lg group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-200">
+            {icon}
+          </div>
+        </div>
+        
+        <div className="flex items-center justify-between">
+          {isLoading ? (
+            <Skeleton className="h-4 w-28" />
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">{subtitle}</p>
+              {trend !== 'neutral' && (
+                <div className={`flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                  trendPositive 
+                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                    : trendPositive === false 
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' 
+                      : 'bg-gray-100 text-gray-700'
+                }`}>
+                  {trendPositive 
+                    ? <ChevronUp className="h-3 w-3 mr-1" />
+                    : trendPositive === false 
+                      ? <ChevronDown className="h-3 w-3 mr-1" />
+                      : null
+                  }
+                  <span>{trend}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -584,10 +595,12 @@ const QuickActionButton = ({ icon, label, onClick }: QuickActionButtonProps) => 
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center justify-center p-4 border rounded-lg hover:bg-muted transition-colors"
+      className="flex flex-col items-center justify-center p-6 border rounded-xl bg-card hover:bg-accent/5 hover:border-accent/20 hover:shadow-sm transition-all duration-200 group"
     >
-      <div className="h-8 w-8 text-primary mb-2">{icon}</div>
-      <span className="text-sm">{label}</span>
+      <div className="h-10 w-10 rounded-full bg-primary/5 flex items-center justify-center text-primary mb-3 group-hover:scale-110 transition-transform duration-200">
+        {icon}
+      </div>
+      <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{label}</span>
     </button>
   );
 };
