@@ -36,6 +36,7 @@ import RapidPrototyping from './pages/RapidPrototyping';
 import TestPartnerNotification from './pages/TestPartnerNotification';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import CookiePolicy from './pages/CookiePolicy';
+import AnalyticsPage from './pages/dashboard/AnalyticsPage';
 
 // Import Dashboard/QuotesPage separately - DO NOT render this component directly in Routes
 // It requires specific props that need to be passed when used
@@ -108,6 +109,7 @@ function AppContent() {
               <Route path="/dashboard/orders" element={<OrdersPage />} />
               <Route path="/dashboard/customers" element={<CustomersPage />} />
               <Route path="/dashboard/quotes" element={<QuotesPage />} />
+              <Route path="/dashboard/analytics" element={<AnalyticsPage />} />
               <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
               <Route path="/cookie-policy" element={<CookiePolicy />} />
             </Routes>

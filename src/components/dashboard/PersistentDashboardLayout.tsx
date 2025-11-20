@@ -11,7 +11,8 @@ import {
   Bell, 
   Settings,
   LayoutDashboard,
-  BarChart3
+  BarChart3,
+  TrendingUp
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -36,6 +37,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
   const getActiveModule = () => {
     const path = location.pathname;
     if (path === '/dashboard' || path === '/') return 'overview';
+    if (path === '/dashboard/analytics') return 'analytics';
     if (path === '/customers') return 'customers';
     if (path === '/partners') return 'partners';
     if (path === '/products') return 'products';
@@ -84,6 +86,13 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
             onClick={() => handleNavigation("overview", "/dashboard")}
             icon={<BarChart3 className="h-4 w-4" />}
             label="Overview"
+          />
+
+          <NavButton 
+            active={activeModule === "analytics"}
+            onClick={() => handleNavigation("analytics", "/dashboard/analytics")}
+            icon={<TrendingUp className="h-4 w-4" />}
+            label="Analytics"
           />
 
           {/* Admin-only menu items */}
