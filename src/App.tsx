@@ -38,6 +38,11 @@ import CookieConsentBanner from './components/CookieConsentBanner';
 import CookiePolicy from './pages/CookiePolicy';
 import AnalyticsPage from './pages/dashboard/AnalyticsPage';
 
+import BlogList from './pages/dashboard/BlogList';
+import BlogEditor from './pages/dashboard/BlogEditor';
+import BlogIndex from './pages/BlogIndex';
+import BlogPost from './pages/BlogPost';
+
 // Import Dashboard/QuotesPage separately - DO NOT render this component directly in Routes
 // It requires specific props that need to be passed when used
 import QuotesPage from './pages/dashboard/QuotesPage';
@@ -58,6 +63,8 @@ function AppContent() {
               
               {/* Language-specific routes */}
               <Route path="/:lang" element={<Index />} />
+              <Route path="/:lang/blog" element={<BlogIndex />} />
+              <Route path="/:lang/blog/:slug" element={<BlogPost />} />
               <Route path="/:lang/login" element={<Login />} />
               <Route path="/:lang/quote" element={<Quote />} />
               <Route path="/:lang/quote/success" element={<QuoteSuccess />} />
@@ -110,6 +117,9 @@ function AppContent() {
               <Route path="/dashboard/customers" element={<CustomersPage />} />
               <Route path="/dashboard/quotes" element={<QuotesPage />} />
               <Route path="/dashboard/analytics" element={<AnalyticsPage />} />
+              <Route path="/dashboard/blog" element={<BlogList />} />
+              <Route path="/dashboard/blog/new" element={<BlogEditor />} />
+              <Route path="/dashboard/blog/edit/:id" element={<BlogEditor />} />
               <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
               <Route path="/cookie-policy" element={<CookiePolicy />} />
             </Routes>

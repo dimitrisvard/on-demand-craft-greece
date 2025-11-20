@@ -12,7 +12,8 @@ import {
   Settings,
   LayoutDashboard,
   BarChart3,
-  TrendingUp
+  TrendingUp,
+  BookOpen
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -38,6 +39,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     const path = location.pathname;
     if (path === '/dashboard' || path === '/') return 'overview';
     if (path === '/dashboard/analytics') return 'analytics';
+    if (path.startsWith('/dashboard/blog')) return 'blog';
     if (path === '/customers') return 'customers';
     if (path === '/partners') return 'partners';
     if (path === '/products') return 'products';
@@ -98,6 +100,16 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
           {/* Admin-only menu items */}
           {!isProductionPartner && (
             <>
+              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Content
+              </div>
+              <NavButton 
+                active={activeModule === "blog"}
+                onClick={() => handleNavigation("blog", "/dashboard/blog")}
+                icon={<BookOpen className="h-4 w-4" />}
+                label="Blog Articles"
+              />
+
               <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Management
               </div>
