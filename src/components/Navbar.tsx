@@ -51,6 +51,7 @@ const Navbar = () => {
           <NavLink to={getLocalizedPath('/services')} label={t('navbar_services')} isActive={isRouteActive('/services')} />
           <NavLink to={getLocalizedPath('/industries')} label={t('navbar_industries')} isActive={isRouteActive('/industries')} />
           <NavLink to={getLocalizedPath('/our-work')} label={t('navbar_our_work')} isActive={isRouteActive('/our-work')} />
+          <NavLink to={getLocalizedPath('/blog')} label={t('navbar_blog', 'Blog')} isActive={isRouteActive('/blog')} />
           <NavLink to={getLocalizedPath('/about')} label={t('navbar_about')} isActive={isRouteActive('/about')} />
           <NavLink to={getLocalizedPath('/contact')} label={t('navbar_contact')} isActive={isRouteActive('/contact')} />
         </div>
@@ -86,6 +87,7 @@ const Navbar = () => {
           <MobileNavLink to={getLocalizedPath('/services')} label={t('navbar_services')} />
           <MobileNavLink to={getLocalizedPath('/industries')} label={t('navbar_industries')} />
           <MobileNavLink to={getLocalizedPath('/our-work')} label={t('navbar_our_work')} />
+          <MobileNavLink to={getLocalizedPath('/blog')} label={t('navbar_blog', 'Blog')} />
           <MobileNavLink to={getLocalizedPath('/about')} label={t('navbar_about')} />
           <MobileNavLink to={getLocalizedPath('/contact')} label={t('navbar_contact')} />
           <Link to={getLocalizedPath('/quote')} className="btn-primary text-center">{t('navbar_get_quote')}</Link>
