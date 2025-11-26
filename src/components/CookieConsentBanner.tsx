@@ -69,17 +69,17 @@ export const CookieConsentBanner: React.FC = () => {
     localStorage.setItem(COOKIE_CONSENT_KEY, choice);
     setVisible(false);
     if (choice === 'accepted') {
-      // Dynamically load Google Analytics or other scripts here if needed
+      // Dynamically load Google tag (gtag.js)
       const gaScript = document.createElement('script');
       gaScript.async = true;
-      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=324696974';
+      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
       document.head.appendChild(gaScript);
       gaScript.onload = function() {
         (window as any).dataLayer = (window as any).dataLayer || [];
         function gtag(){(window as any).dataLayer.push(arguments);}
         (window as any).gtag = gtag;
         (window as any).gtag('js', new Date());
-        (window as any).gtag('config', '324696974');
+        (window as any).gtag('config', 'AW-17760727501');
       };
     }
   };
