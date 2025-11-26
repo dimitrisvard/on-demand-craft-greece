@@ -72,13 +72,14 @@ export const CookieConsentBanner: React.FC = () => {
       // Dynamically load Google tag (gtag.js)
       const gaScript = document.createElement('script');
       gaScript.async = true;
-      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
+      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-G6T5PMFLRH';
       document.head.appendChild(gaScript);
       gaScript.onload = function() {
         (window as any).dataLayer = (window as any).dataLayer || [];
         function gtag(){(window as any).dataLayer.push(arguments);}
         (window as any).gtag = gtag;
         (window as any).gtag('js', new Date());
+        (window as any).gtag('config', 'G-G6T5PMFLRH');
         (window as any).gtag('config', 'AW-17760727501');
       };
     }

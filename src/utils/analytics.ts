@@ -7,7 +7,8 @@ declare global {
 }
 
 // Google Analytics measurement ID from environment variable
-export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID || 'AW-17760727501';
+export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID || 'G-G6T5PMFLRH';
+export const GOOGLE_ADS_ID = 'AW-17760727501';
 
 // Initialize Google Analytics
 export const initGA = () => {
@@ -101,7 +102,7 @@ export const trackGoogleAdsConversion = (eventName: string, parameters?: Record<
   if (typeof window !== 'undefined' && window.gtag) {
     window.gtag('event', eventName, {
       // Google Ads specific parameters
-      send_to: GA_MEASUREMENT_ID,
+      send_to: GOOGLE_ADS_ID,
       ...parameters,
     });
     console.log('Google Ads: Conversion tracked', { eventName, parameters });
