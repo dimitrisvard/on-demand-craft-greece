@@ -3,8 +3,6 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Calendar, Clock, ChevronRight } from "lucide-react";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 import { Helmet } from "react-helmet-async";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +22,7 @@ const BlogIndex = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const currentLang = lang || i18n.language || 'en';
+  const heroSubtitle = "Insights, news, and technical articles about manufacturing and engineering.";
 
   useEffect(() => {
     fetchArticles();
@@ -54,7 +53,6 @@ const BlogIndex = () => {
         <title>Blog | Microns Hub</title>
         <meta name="description" content="Latest news, updates, and insights from Microns Hub." />
       </Helmet>
-      <Navbar />
       
       <div className="pt-24 pb-16">
         <div className="container-custom mx-auto px-4">
@@ -63,7 +61,7 @@ const BlogIndex = () => {
               Latest Updates
             </h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Insights, news, and technical articles about manufacturing and engineering.
+              {heroSubtitle}
             </p>
           </div>
 
@@ -124,8 +122,6 @@ const BlogIndex = () => {
           )}
         </div>
       </div>
-
-      <Footer />
     </div>
   );
 };

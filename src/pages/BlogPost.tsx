@@ -3,8 +3,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Calendar, Clock, ArrowLeft } from "lucide-react";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
@@ -62,7 +60,6 @@ const BlogPost = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-white">
-        <Navbar />
         <div className="pt-32 pb-16 container-custom mx-auto px-4">
           <div className="max-w-3xl mx-auto space-y-8">
             <div className="h-8 w-32 bg-gray-100 rounded animate-pulse" />
@@ -75,7 +72,6 @@ const BlogPost = () => {
             </div>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -88,7 +84,6 @@ const BlogPost = () => {
         <title>{article.meta_title || article.title} | Microns Hub</title>
         <meta name="description" content={article.meta_description || ""} />
       </Helmet>
-      <Navbar />
       
       <article className="pt-32 pb-16">
         <div className="container-custom mx-auto px-4">
@@ -137,8 +132,6 @@ const BlogPost = () => {
           </div>
         </div>
       </article>
-
-      <Footer />
     </div>
   );
 };

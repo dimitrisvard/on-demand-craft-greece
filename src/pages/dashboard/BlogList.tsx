@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Pencil, PlusCircle, Search, Trash2, Eye, FileText } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface Article {
   id: string;
@@ -21,10 +28,29 @@ interface Article {
   author_id: string;
 }
 
+const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "de", label: "German" },
+  { code: "fr", label: "French" },
+  { code: "es", label: "Spanish" },
+  { code: "it", label: "Italian" },
+  { code: "nl", label: "Dutch" },
+  { code: "pl", label: "Polish" },
+  { code: "sv", label: "Swedish" },
+  { code: "da", label: "Danish" },
+  { code: "fi", label: "Finnish" },
+  { code: "cs", label: "Czech" },
+  { code: "hu", label: "Hungarian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "nb", label: "Norwegian" },
+];
+
 const BlogList = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [languageFilter, setLanguageFilter] = useState("all");
+  const [dateSort, setDateSort] = useState("newest");
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -80,10 +106,19 @@ const BlogList = () => {
     }
   };
 
-  const filteredArticles = articles.filter(article => 
-    article.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    article.language.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredArticles = useMemo(() => {
+    return articles
+      .filter(article => {
+        const matchesSearch = article.title.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchesLanguage = languageFilter === "all" || article.language === languageFilter;
+        return matchesSearch && matchesLanguage;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateSort === "newest" ? dateB - dateA : dateA - dateB;
+      });
+  }, [articles, searchQuery, languageFilter, dateSort]);
 
   const getLanguageFlag = (lang: string) => {
     const flags: Record<string, string> = {
@@ -119,14 +154,43 @@ const BlogList = () => {
           </Button>
         </div>
 
-        <div className="flex items-center space-x-2 bg-background p-1 border rounded-md w-full sm:w-96">
-          <Search className="h-4 w-4 text-muted-foreground ml-2" />
-          <Input
-            placeholder="Search articles..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-          />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex items-center space-x-2 bg-background p-1 border rounded-md w-full sm:w-96">
+            <Search className="h-4 w-4 text-muted-foreground ml-2" />
+            <Input
+              placeholder="Search by title..."
+              aria-label="Search articles by title"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+            />
+          </div>
+          
+          <div className="flex gap-4 w-full sm:w-auto">
+            <Select value={languageFilter} onValueChange={setLanguageFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by Language" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Languages</SelectItem>
+                {LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    {getLanguageFlag(lang.code)} {lang.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={dateSort} onValueChange={setDateSort}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Sort by Date" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="oldest">Oldest First</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <Card className="shadow-sm border">
@@ -153,7 +217,7 @@ const BlogList = () => {
                     <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                       <div className="flex flex-col items-center justify-center">
                         <FileText className="h-12 w-12 mb-2 opacity-20" />
-                        <p>No articles found. Create your first post!</p>
+                        <p>No articles found matching your filters.</p>
                       </div>
                     </TableCell>
                   </TableRow>
