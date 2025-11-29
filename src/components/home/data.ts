@@ -5,25 +5,25 @@ export const heroImage = "/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3.
 export const trustedCompanies = [
   { 
     name: "Aerospace & Defense", 
-    icon: "Plane",
+    image: "/lovable-uploads/b8cf7ba7-ff7c-4b2f-b0f3-6e2a22c67a56.png",
     industry: "Aerospace",
     translationKey: "trusted_company_aerospace"
   },
   { 
     name: "Automotive", 
-    icon: "Car",
+    image: "/lovable-uploads/60e70592-dead-43bf-8e13-84721335759b.png",
     industry: "Automotive",
     translationKey: "trusted_company_automotive"
   },
   { 
     name: "Medical Technology", 
-    icon: "Stethoscope", 
+    image: "/lovable-uploads/87b2d570-3452-484d-95f7-9f5f5e34302b.png",
     industry: "Medical",
     translationKey: "trusted_company_medical"
   },
   { 
     name: "Industrial Automation", 
-    icon: "Bot", 
+    image: "/lovable-uploads/f9f6c191-3f92-4b8d-be22-0c26f59e729b.png",
     industry: "Automation",
     translationKey: "trusted_company_automation"
   }
