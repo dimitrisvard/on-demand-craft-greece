@@ -45,7 +45,7 @@ const Navbar = () => {
           />
         </Link>
 
-        <div className="hidden md:flex space-x-8">
+        <div className="hidden lg:flex space-x-8">
           <NavLink to={getLocalizedPath('/')} label={t('home_title', 'Home')} isActive={isRouteActive('/')} />
           <NavLink to="/dashboard" label="Dashboard" isActive={isRouteActive('/dashboard')} />
           <NavLink to={getLocalizedPath('/services')} label={t('navbar_services')} isActive={isRouteActive('/services')} />
@@ -56,7 +56,7 @@ const Navbar = () => {
           <NavLink to={getLocalizedPath('/contact')} label={t('navbar_contact')} isActive={isRouteActive('/contact')} />
         </div>
 
-        <div className="hidden md:flex items-center space-x-4">
+        <div className="hidden lg:flex items-center space-x-4">
           <Link to={getLocalizedPath('/quote')}>
             <Button size="sm" variant="default" className="text-white bg-brand-accent hover:bg-brand-accent/90 px-2">
               {t('navbar_get_quote')}
@@ -75,12 +75,12 @@ const Navbar = () => {
           <LanguageSwitcher />
         </div>
 
-        <button className="md:hidden text-brand-dark" onClick={() => setIsOpen(!isOpen)}>
+        <button className="lg:hidden text-brand-dark" onClick={() => setIsOpen(!isOpen)}>
           {isOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>
 
-      <div className={`md:hidden absolute top-full left-0 right-0 bg-white shadow-md transition-all duration-300 ${isOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+      <div className={`lg:hidden absolute top-full left-0 right-0 bg-white shadow-md transition-all duration-300 ${isOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'}`}>
         <div className="container-custom py-4 flex flex-col space-y-4">
           <MobileNavLink to={getLocalizedPath('/')} label={t('home_title', 'Home')} />
           <MobileNavLink to="/dashboard" label="Dashboard" />

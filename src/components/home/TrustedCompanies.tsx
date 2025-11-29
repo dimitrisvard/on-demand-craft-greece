@@ -7,6 +7,7 @@ interface Company {
   name: string;
   icon?: string;
   industry: string;
+  translationKey?: string;
 }
 
 interface TrustedCompaniesProps {
@@ -26,7 +27,9 @@ const TrustedCompanies: React.FC<TrustedCompaniesProps> = ({ companies }) => {
               <div className="h-24 w-24 lg:h-28 lg:w-28 bg-white rounded-full shadow-sm flex items-center justify-center text-primary mb-3 border-2 border-transparent group-hover:border-primary/10">
                 {company.icon && <IconRenderer iconName={company.icon} className="w-10 h-10 md:w-12 md:h-12" />}
               </div>
-              <p className="text-sm md:text-base text-center font-semibold text-gray-800 mt-2">{company.name}</p>
+              <p className="text-sm md:text-base text-center font-semibold text-gray-800 mt-2">
+                {company.translationKey ? t(company.translationKey) : company.name}
+              </p>
             </div>
           ))}
         </div>

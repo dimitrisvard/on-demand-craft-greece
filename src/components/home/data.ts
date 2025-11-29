@@ -6,22 +6,26 @@ export const trustedCompanies = [
   { 
     name: "Aerospace & Defense", 
     icon: "Plane",
-    industry: "Aerospace"
+    industry: "Aerospace",
+    translationKey: "trusted_company_aerospace"
   },
   { 
     name: "Automotive", 
     icon: "Car",
-    industry: "Automotive"
+    industry: "Automotive",
+    translationKey: "trusted_company_automotive"
   },
   { 
     name: "Medical Technology", 
     icon: "Stethoscope", 
-    industry: "Medical"
+    industry: "Medical",
+    translationKey: "trusted_company_medical"
   },
   { 
     name: "Industrial Automation", 
     icon: "Bot", 
-    industry: "Automation"
+    industry: "Automation",
+    translationKey: "trusted_company_automation"
   }
 ];
 
