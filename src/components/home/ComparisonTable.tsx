@@ -11,7 +11,12 @@ const ComparisonTable: React.FC = () => {
       marketplace: t('comparison_production_execution_marketplace')
     },
     {
-      feature: t('comparison_repeat_orders'),
+      feature: t('comparison_pricing_advantage'),
+      micronsHub: t('comparison_pricing_advantage_microns'),
+      marketplace: t('comparison_pricing_advantage_marketplace')
+    },
+    {
+      feature: t('comparison_repeat_orders'), // Used as "Responsibility" row key based on prompt mapping in translations
       micronsHub: t('comparison_repeat_orders_microns'),
       marketplace: t('comparison_repeat_orders_marketplace')
     },
@@ -26,11 +31,6 @@ const ComparisonTable: React.FC = () => {
       marketplace: t('comparison_dedicated_engineer_marketplace')
     },
     {
-      feature: t('comparison_pricing_advantage'),
-      micronsHub: t('comparison_pricing_advantage_microns'),
-      marketplace: t('comparison_pricing_advantage_marketplace')
-    },
-    {
       feature: t('comparison_quality_control'),
       micronsHub: t('comparison_quality_control_microns'),
       marketplace: t('comparison_quality_control_marketplace')
@@ -39,21 +39,6 @@ const ComparisonTable: React.FC = () => {
       feature: t('comparison_ip_confidentiality'),
       micronsHub: t('comparison_ip_confidentiality_microns'),
       marketplace: t('comparison_ip_confidentiality_marketplace')
-    },
-    {
-      feature: t('comparison_flexibility_turnaround'),
-      micronsHub: t('comparison_flexibility_turnaround_microns'),
-      marketplace: t('comparison_flexibility_turnaround_marketplace')
-    },
-    {
-      feature: t('comparison_platform_services'),
-      micronsHub: t('comparison_platform_services_microns'),
-      marketplace: t('comparison_platform_services_marketplace')
-    },
-    {
-      feature: t('comparison_supply_chain'),
-      micronsHub: t('comparison_supply_chain_microns'),
-      marketplace: t('comparison_supply_chain_marketplace')
     }
   ];
 
@@ -71,11 +56,11 @@ const ComparisonTable: React.FC = () => {
 
         <div className="overflow-x-auto">
           <table className="w-full border-collapse bg-white rounded-lg shadow-xl overflow-hidden border border-gray-200">
-                         <thead className="bg-gradient-to-r from-orange-500 to-red-500 text-white">
+             <thead className="bg-gradient-to-r from-orange-500 to-red-500 text-white">
                <tr>
-                 <th className="px-6 py-5 text-left font-bold text-lg border-r border-orange-400">{t('comparison_header_feature')}</th>
-                 <th className="px-6 py-5 text-center font-bold text-lg border-r border-orange-400">{t('comparison_header_microns_hub')}</th>
-                 <th className="px-6 py-5 text-center font-bold text-lg">{t('comparison_header_marketplace')}</th>
+                 <th className="px-6 py-5 text-left font-bold text-lg border-r border-orange-400 w-1/4">{t('comparison_header_feature')}</th>
+                 <th className="px-6 py-5 text-center font-bold text-lg border-r border-orange-400 w-1/3">{t('comparison_header_microns_hub')}</th>
+                 <th className="px-6 py-5 text-center font-bold text-lg w-1/3">{t('comparison_header_marketplace')}</th>
                </tr>
              </thead>
             <tbody>
@@ -84,14 +69,14 @@ const ComparisonTable: React.FC = () => {
                   <td className="px-6 py-5 font-semibold text-gray-900 border-r border-gray-200">
                     {row.feature}
                   </td>
-                  <td className="px-6 py-5 text-gray-700 border-r border-gray-200">
-                    <div className="flex items-start">
+                  <td className="px-6 py-5 text-gray-700 border-r border-gray-200 bg-green-50/30">
+                    <div className="flex items-start justify-center text-left">
                       <div className="w-3 h-3 bg-green-500 rounded-full mt-2 mr-3 flex-shrink-0 shadow-sm"></div>
-                      <span>{row.micronsHub}</span>
+                      <span className="font-medium text-gray-800">{row.micronsHub}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-5 text-gray-700">
-                    <div className="flex items-start">
+                  <td className="px-6 py-5 text-gray-700 bg-red-50/30">
+                    <div className="flex items-start justify-center text-left">
                       <div className="w-3 h-3 bg-red-500 rounded-full mt-2 mr-3 flex-shrink-0 shadow-sm"></div>
                       <span>{row.marketplace}</span>
                     </div>

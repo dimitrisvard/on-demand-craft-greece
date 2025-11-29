@@ -4,34 +4,24 @@ export const heroImage = "/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3.
 
 export const trustedCompanies = [
   { 
-    name: "Boeing", 
-    logo: "/lovable-uploads/3332eeec-efa1-4b56-b136-32788a0df777.png",
+    name: "Aerospace & Defense", 
+    icon: "Plane",
     industry: "Aerospace"
   },
   { 
-    name: "Tesla", 
-    logo: "/lovable-uploads/45ba3275-4b6e-40b2-9400-a5075affa478.png",
+    name: "Automotive", 
+    icon: "Car",
     industry: "Automotive"
   },
   { 
-    name: "Samsung", 
-    logo: "/lovable-uploads/7de98e21-e3d9-4e21-ad0a-aac899943514.png",
-    industry: "Electronics"
-  },
-  { 
-    name: "Siemens", 
-    logo: "/lovable-uploads/b47b85f4-7bc9-49f4-9a44-1c68328ca35d.png",
-    industry: "Engineering"
-  },
-  { 
-    name: "Medtronic", 
-    logo: "/lovable-uploads/aa09169f-4106-496d-88fe-6fd893387f51.png",
+    name: "Medical Technology", 
+    icon: "Stethoscope", 
     industry: "Medical"
   },
   { 
-    name: "Shell", 
-    logo: "/lovable-uploads/ae609ff1-2d11-4c38-83f5-18c37c6fc462.png",
-    industry: "Energy"
+    name: "Industrial Automation", 
+    icon: "Bot", 
+    industry: "Automation"
   }
 ];
 
