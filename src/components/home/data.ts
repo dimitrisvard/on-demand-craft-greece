@@ -5,7 +5,7 @@ export const heroImage = "/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3.
 export const trustedCompanies = [
   { 
     name: "Aerospace & Defense", 
-    image: "/lovable-uploads/aerospace-defense.jpg",
+    image: "/lovable-uploads/aerospace-and-defence.jpg",
     industry: "Aerospace",
     translationKey: "trusted_company_aerospace"
   },
@@ -17,7 +17,7 @@ export const trustedCompanies = [
   },
   { 
     name: "Medical Technology", 
-    image: "/lovable-uploads/medical-technology.jpg",
+    image: "/lovable-uploads/medical-industry.jpg",
     industry: "Medical",
     translationKey: "trusted_company_medical"
   },
