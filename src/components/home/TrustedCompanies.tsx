@@ -19,24 +19,26 @@ const TrustedCompanies: React.FC<TrustedCompaniesProps> = ({ companies }) => {
   const { t } = useTranslation();
   
   return (
-    <section className="bg-gray-100 py-12">
+    <section className="bg-white py-16">
       <div className="container-custom">
-        <p className="text-center text-gray-500 mb-8 font-medium">{t('trusted_by_companies', 'Trusted by industry-leading companies')}</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 justify-items-center items-center">
+        <p className="text-center text-gray-500 mb-12 font-medium uppercase tracking-wider">{t('trusted_by_companies', 'Trusted by industry-leading companies')}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8 w-full">
           {companies.map((company, i) => (
-            <div key={i} className="flex flex-col items-center group transition-transform hover:scale-105 duration-300">
-              <div className="h-24 w-24 lg:h-28 lg:w-28 bg-white rounded-full shadow-sm flex items-center justify-center text-primary mb-3 border-2 border-transparent group-hover:border-primary/10 overflow-hidden p-4">
+            <div key={i} className="flex flex-col items-center group w-full">
+              <div className="w-full aspect-[4/3] overflow-hidden rounded-xl shadow-md hover:shadow-xl transition-all duration-300 bg-gray-50">
                 {company.image ? (
                   <img 
                     src={company.image} 
                     alt={company.translationKey ? t(company.translationKey) : company.name} 
-                    className="w-full h-full object-contain opacity-80 group-hover:opacity-100 transition-opacity"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 ) : (
-                  company.icon && <IconRenderer iconName={company.icon} className="w-10 h-10 md:w-12 md:h-12" />
+                  <div className="w-full h-full flex items-center justify-center p-8">
+                    {company.icon && <IconRenderer iconName={company.icon} className="w-16 h-16 text-primary/80" />}
+                  </div>
                 )}
               </div>
-              <p className="text-sm md:text-base text-center font-semibold text-gray-800 mt-2">
+              <p className="text-lg md:text-xl text-center font-bold text-gray-900 mt-4 group-hover:text-primary transition-colors">
                 {company.translationKey ? t(company.translationKey) : company.name}
               </p>
             </div>
