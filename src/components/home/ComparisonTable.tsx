@@ -16,7 +16,7 @@ const ComparisonTable: React.FC = () => {
       marketplace: t('comparison_pricing_advantage_marketplace')
     },
     {
-      feature: t('comparison_repeat_orders'), // Used as "Responsibility" row key based on prompt mapping in translations
+      feature: t('comparison_repeat_orders'), // "Responsibility"
       micronsHub: t('comparison_repeat_orders_microns'),
       marketplace: t('comparison_repeat_orders_marketplace')
     },
@@ -39,6 +39,21 @@ const ComparisonTable: React.FC = () => {
       feature: t('comparison_ip_confidentiality'),
       micronsHub: t('comparison_ip_confidentiality_microns'),
       marketplace: t('comparison_ip_confidentiality_marketplace')
+    },
+    {
+      feature: t('comparison_flexibility_turnaround'),
+      micronsHub: t('comparison_flexibility_turnaround_microns'),
+      marketplace: t('comparison_flexibility_turnaround_marketplace')
+    },
+    {
+      feature: t('comparison_platform_services'),
+      micronsHub: t('comparison_platform_services_microns'),
+      marketplace: t('comparison_platform_services_marketplace')
+    },
+    {
+      feature: t('comparison_supply_chain'),
+      micronsHub: t('comparison_supply_chain_microns'),
+      marketplace: t('comparison_supply_chain_marketplace')
     }
   ];
 

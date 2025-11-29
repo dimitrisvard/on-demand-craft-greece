@@ -35,14 +35,17 @@ const QuoteSection: React.FC<QuoteSectionProps> = ({ benefits }) => {
             ))}
           </ul>
           
-          <div className="flex flex-col items-center gap-4">
-            <Link to={getLocalizedPath('/quote')} className="btn-primary inline-flex items-center justify-center w-full sm:w-auto">
-              {t('quote_section_button', 'Get Your Quote Now')} <ArrowRight size={18} className="ml-2" />
+          <div className="flex flex-col items-center gap-6">
+            <Link to={getLocalizedPath('/quote')} className="btn-primary inline-flex items-center justify-center w-full sm:w-auto px-8 py-4 text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300">
+              {t('quote_section_button', 'Get Your Quote Now')} <ArrowRight size={20} className="ml-2" />
             </Link>
             
-            <div className="flex items-center gap-2 bg-blue-50 text-blue-800 px-4 py-2 rounded-full border border-blue-100 shadow-sm animate-fade-in">
-              <ShieldCheck size={18} className="text-blue-600" />
-              <span className="text-sm font-semibold">Made in EU 🇪🇺 | Tax-Free Shipping within Europe</span>
+            <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900 px-6 py-3 rounded-xl border border-blue-200 shadow-md animate-fade-in">
+              <ShieldCheck size={24} className="text-blue-600 shrink-0" />
+              <div className="flex flex-col items-start">
+                <span className="text-base font-bold">Made in EU 🇪🇺 | Tax-Free Shipping within Europe</span>
+                <span className="text-xs font-medium text-blue-700 uppercase tracking-wider">No Customs • No Import Duties • Fast Delivery</span>
+              </div>
             </div>
           </div>
         </div>
