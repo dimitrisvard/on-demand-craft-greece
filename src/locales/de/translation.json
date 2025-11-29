@@ -13,8 +13,8 @@
   "cookie_accept": "Akzeptieren",
   "cookie_decline": "Ablehnen",
   "for_more_information": "für mehr Informationen.",
-  "hero_title": "Präzisions-CNC-Bearbeitung für Ihre individuellen Teile",
-  "hero_subtitle": "Von Prototyp bis Produktion liefert unsere digitale Fertigungsplattform hochwertige CNC-Bearbeitung, Blechbearbeitung und maßgeschneiderte Teile mit außergewöhnlicher Präzision.",
+  "hero_title": "Direkt vom Hersteller. Keine Zwischenhändler. Keine Aufschläge.",
+  "hero_subtitle": "Hören Sie auf, Maklerprovisionen zu zahlen. Beziehen Sie Ihre Teile direkt aus unserer ISO-zertifizierten Anlage in der EU.",
   "hero_get_quote": "Jetzt Angebot einholen",
   "hero_explore_services": "Dienstleistungen erkunden",
   "hero_learn_more": "Mehr erfahren",
@@ -24,7 +24,6 @@
   "learn_more": "Mehr erfahren",
   "service_cnc-machining_title": "CNC-Bearbeitung",
   "service_cnc-machining_desc": "Hochpräzise Bearbeitung für komplexe Teile. Unsere modernen 3-, 4- und 5-Achsen-CNC-Bearbeitungszentren können komplexe Geometrien mit engen Toleranzen und exzellenten Oberflächen herstellen.",
-  
   "comparison_title": "Warum Microns Hub Marktplatz-Fertigung übertrifft",
   "comparison_subtitle": "Entdecken Sie die wichtigsten Vorteile der direkten Zusammenarbeit mit unserem internen Fertigungsteam im Vergleich zu traditionellen Marktplatz-Plattformen.",
   "comparison_header_feature": "Funktion",
@@ -33,6 +32,9 @@
   "comparison_production_execution": "Produktionsquelle",
   "comparison_production_execution_microns": "100% Interne Produktion",
   "comparison_production_execution_marketplace": "Ausgelagert an zufällige Werkstätten",
+  "comparison_pricing_advantage": "Preisgestaltung",
+  "comparison_pricing_advantage_microns": "Direkt ab Werk Preise",
+  "comparison_pricing_advantage_marketplace": "Werkskosten + 20-30% Provision",
   "comparison_repeat_orders": "Verantwortung",
   "comparison_repeat_orders_microns": "Direkte Verantwortung von den Leuten, die Ihre Teile herstellen",
   "comparison_repeat_orders_marketplace": "Zwischenhändler bearbeitet Streitfälle",
@@ -42,9 +44,6 @@
   "comparison_dedicated_engineer": "Dedizierter Ingenieur pro Projekt",
   "comparison_dedicated_engineer_microns": "Jedes Projekt hat eine spezifische Ingenieurressource, die es überwacht.",
   "comparison_dedicated_engineer_marketplace": "Ingenieurüberwachung ist verallgemeinert oder verlässt sich auf den Lieferanten.",
-  "comparison_pricing_advantage": "Preisgestaltung",
-  "comparison_pricing_advantage_microns": "Direkt ab Werk Preise",
-  "comparison_pricing_advantage_marketplace": "Werkskosten + 20-30% Provision",
   "comparison_quality_control": "Qualitätskontrolle",
   "comparison_quality_control_microns": "Direkte Überwachung des Prozesses und der QS.",
   "comparison_quality_control_marketplace": "Verlässt sich auf die Überprüfung der Lieferanten durch die Plattform; QS variiert je nach Lieferant.",
@@ -352,7 +351,6 @@
   "quote_form_success_message": "Vielen Dank für Ihre Anfrage. Unser Team prüft Ihre Anfrage und meldet sich in Kürze mit einem detaillierten Angebot bei Ihnen.",
   "quote_form_success_return_home": "Zurück zur Startseite",
   "quote_form_success_submit_another": "Weitere Anfrage stellen",
-  
   "rfq_not_found": "Angebot nicht gefunden",
   "rfq_failed_load_files": "Angebotsdateien konnten nicht geladen werden",
   "rfq_problem_loading_data": "Beim Laden der Angebotsdaten ist ein Problem aufgetreten",
@@ -378,7 +376,7 @@
   "contact_email_us": "E-Mail senden",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Rufen Sie uns an",
-      "contact_phone": "+30-697-00-77-401",
+  "contact_phone": "+30-697-00-77-401",
   "contact_business_hours": "Geschäftszeiten",
   "contact_hours_weekdays": "Montag - Freitag: 9:00 - 18:00 Uhr",
   "contact_hours_weekend": "Samstag - Sonntag: Geschlossen",
@@ -1152,4 +1150,4 @@
   "service_surface-finishes_treatments_sandblasting_desc": "Sandstrahlen bezeichnet die Oberflächenbehandlung eines Materials durch Einwirkung von Strahlmitteln gegen Rost, Schmutz, Farbe, Zunder und andere Verunreinigungen oder zur Oberflächengestaltung durch Mattieren.",
   "service_surface-finishes_treatments_glassbead_title": "Glasperlenstrahlen",
   "service_surface-finishes_treatments_glassbead_desc": "Glasperlenstrahlen ist eine mechanische Oberflächenbehandlung ähnlich dem Sandstrahlen, bei der winzige Glasperlen als Strahlmittel zum Glätten und Verdichten von Oberflächen verwendet werden."
-} 
+}
