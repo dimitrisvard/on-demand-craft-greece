@@ -32,6 +32,7 @@ import RfqDetails from './pages/RfqDetails';
 import RfqManagement from './pages/RfqManagement';
 import ProductsPage from './pages/ProductsPage';
 import QuoteSuccess from './pages/QuoteSuccess';
+import ContactSuccess from './pages/ContactSuccess';
 import RapidPrototyping from './pages/RapidPrototyping';
 import TestPartnerNotification from './pages/TestPartnerNotification';
 import CookieConsentBanner from './components/CookieConsentBanner';
@@ -74,6 +75,7 @@ function AppContent() {
               <Route path="/:lang/our-work" element={<OurWork />} />
               <Route path="/:lang/about" element={<About />} />
               <Route path="/:lang/contact" element={<Contact />} />
+              <Route path="/:lang/contact/success" element={<ContactSuccess />} />
               
               <Route path="/:lang/services/surface-finishes" element={<SurfaceFinishes />} />
               <Route path="/:lang/services/sheet-metal" element={<SheetMetalFabrication />} />
@@ -92,6 +94,7 @@ function AppContent() {
               <Route path="/our-work" element={<OurWork />} />
               <Route path="/about" element={<About />} />
               <Route path="/contact" element={<Contact />} />
+              <Route path="/contact/success" element={<ContactSuccess />} />
               
               <Route path="/services/surface-finishes" element={<SurfaceFinishes />} />
               <Route path="/services/sheet-metal" element={<SheetMetalFabrication />} />

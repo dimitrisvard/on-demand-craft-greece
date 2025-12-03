@@ -1,12 +1,16 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Phone, Mail, MapPin, Clock, Check, AlertCircle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import CTASection from '../components/CTASection';
 import { useTranslation } from 'react-i18next';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const Contact = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { getLocalizedPath } = useLanguage();
+  const navigate = useNavigate();
   const [formState, setFormState] = useState({
     name: '',
     email: '',
@@ -45,6 +49,9 @@ const Contact = () => {
         title: "Success!",
         description: "Your message has been sent successfully.",
       });
+      
+      // Redirect to success page
+      navigate(getLocalizedPath('/contact/success'));
       
       // Reset form after success
       setTimeout(() => {
@@ -147,17 +154,8 @@ const Contact = () => {
               <div className="bg-white rounded-lg shadow-lg p-8 border border-gray-100">
                 <h2 className="text-2xl font-bold mb-6">{t('contact_send_message', 'Send Us a Message')}</h2>
                 
-                {submitSuccess ? (
-                  <div className="text-center py-8">
-                    <div className="inline-flex items-center justify-center bg-green-100 p-3 rounded-full mb-4">
-                      <Check size={24} className="text-green-600" />
-                    </div>
-                    <h3 className="text-2xl font-bold text-gray-800 mb-2">{t('contact_form_success_title', 'Message Sent!')}</h3>
-                    <p className="text-gray-600">{t('contact_form_success_message', "We'll get back to you as soon as possible.")}</p>
-                  </div>
-                ) : (
-                  <form onSubmit={handleSubmit} className="space-y-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="name">
                           {t('contact_form_name', 'Full Name')}
@@ -277,7 +275,6 @@ const Contact = () => {
                       {t('contact_form_response_time', 'We typically respond to all inquiries within 24 hours.')}
                     </div>
                   </form>
-                )}
               </div>
             </div>
           </div>

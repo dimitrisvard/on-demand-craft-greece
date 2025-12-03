@@ -469,5 +469,8 @@
   "contact_hours_weekdays": "Monday - Friday: 9:00 AM - 6:00 PM",
   "contact_hours_weekend": "Saturday - Sunday: Closed",
   "contact_send_message": "Send Us a Message",
-  "contact_form_success_message": "We'll get back to you as soon as possible."
+  "contact_form_success_message": "We'll get back to you as soon as possible.",
+  "contact_success_title": "Message Sent Successfully!",
+  "contact_success_message": "Thank you for contacting us. We have received your message and will respond shortly.",
+  "contact_success_return_home": "Return to Home"
 }

@@ -7,7 +7,7 @@ declare global {
 }
 
 // Google Analytics measurement ID from environment variable
-export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID || 'G-G6T5PMFLRH';
+export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID || 'GT-TNSNTJPB';
 export const GOOGLE_ADS_ID = 'AW-17760727501';
 
 // Initialize Google Analytics
@@ -125,6 +125,24 @@ export const trackQuoteFormSubmitSuccess = (parameters?: Record<string, any>) =>
   }
 
   trackGoogleAdsConversion('form_submit_success', eventParameters);
+};
+
+// Track contact form submission success event for Google Ads and analytics
+export const trackContactFormSubmitSuccess = (parameters?: Record<string, any>) => {
+  const eventParameters = {
+    event_category: 'form',
+    event_label: 'contact_form',
+    value: 0,
+    currency: 'EUR',
+    ...parameters,
+  };
+
+  if (typeof window !== 'undefined' && window.gtag) {
+    window.gtag('event', 'contact_submit_success', eventParameters);
+    console.log('GA: Contact form submit success event tracked', { eventParameters });
+  }
+
+  trackGoogleAdsConversion('contact_submit_success', eventParameters);
 };
 
 // Track user interactions
