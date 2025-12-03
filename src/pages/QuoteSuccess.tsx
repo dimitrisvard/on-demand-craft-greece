@@ -54,19 +54,19 @@ const QuoteSuccess = () => {
 
           {/* What happens next section */}
           <div className="bg-blue-50 rounded-lg p-6 mb-8 text-left">
-            <h3 className="text-lg font-semibold text-blue-900 mb-4">What happens next?</h3>
+            <h3 className="text-lg font-semibold text-blue-900 mb-4">{t('quote_success_what_next', 'What happens next?')}</h3>
             <ul className="space-y-2 text-blue-800">
               <li className="flex items-start">
                 <span className="text-blue-600 mr-2">•</span>
-                Our team will review your inquiry
+                {t('quote_success_review', 'Our team will review your inquiry')}
               </li>
               <li className="flex items-start">
                 <span className="text-blue-600 mr-2">•</span>
-                We'll respond within 24 hours
+                {t('quote_success_respond', "We'll respond within 24 hours")}
               </li>
               <li className="flex items-start">
                 <span className="text-blue-600 mr-2">•</span>
-                If urgent, call us directly at +30-697-00-77-401
+                {t('quote_success_urgent', 'If urgent, call us directly at +30-697-00-77-401')}
               </li>
             </ul>
           </div>
@@ -77,14 +77,14 @@ const QuoteSuccess = () => {
               onClick={handleReturnHome}
               className="w-full sm:w-auto"
             >
-              {t('quote_sucess_return_home')}
+              {t('quote_success_return_home')}
             </Button>
             
             <Button 
               onClick={handleSubmitAnother}
               className="w-full sm:w-auto"
             >
-              {t('quote_sucess_submit_another')}
+              {t('quote_success_submit_another')}
             </Button>
           </div>
         </div>
