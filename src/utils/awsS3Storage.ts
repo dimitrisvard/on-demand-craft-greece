@@ -2,44 +2,35 @@ import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl as getPresignedUrl } from '@aws-sdk/s3-request-presigner';
 
-// Debug logging for environment variables
-console.log('Environment Variables:', {
-  region: import.meta.env.VITE_AWS_REGION,
-  bucket: import.meta.env.VITE_AWS_BUCKET_NAME,
-  hasAccessKey: !!import.meta.env.VITE_AWS_ACCESS_KEY_ID,
-  hasSecretKey: !!import.meta.env.VITE_AWS_SECRET_ACCESS_KEY,
-  allEnv: import.meta.env
-});
+// Helper to get client lazily
+let s3ClientInstance: S3Client | null = null;
 
-// Initialize S3 client with error handling
-let s3Client: S3Client;
-try {
+const getS3Client = () => {
+  if (s3ClientInstance) return s3ClientInstance;
+
   const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
-  const bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
-  
-  console.log('Initializing S3 client with:', {
-    region,
-    bucketName,
-    hasBucketName: !!bucketName
-  });
+  const accessKeyId = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
+  const secretAccessKey = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
 
-  if (!bucketName) {
-    throw new Error('AWS Bucket name is required. Please check your .env file and make sure VITE_AWS_BUCKET_NAME is set.');
+  if (!accessKeyId || !secretAccessKey) {
+    console.error('AWS credentials missing. Please check VITE_AWS_ACCESS_KEY_ID and VITE_AWS_SECRET_ACCESS_KEY');
+    throw new Error('AWS Credentials are required');
   }
 
-  s3Client = new S3Client({
-    region,
-    credentials: {
-      accessKeyId: import.meta.env.VITE_AWS_ACCESS_KEY_ID || '',
-      secretAccessKey: import.meta.env.VITE_AWS_SECRET_ACCESS_KEY || '',
-    },
-  });
-
-  console.log('S3 client initialized successfully');
-} catch (error) {
-  console.error('Error initializing S3 client:', error);
-  throw error;
-}
+  try {
+    s3ClientInstance = new S3Client({
+      region,
+      credentials: {
+        accessKeyId: accessKeyId.trim(),
+        secretAccessKey: secretAccessKey.trim(),
+      },
+    });
+    return s3ClientInstance;
+  } catch (error) {
+    console.error('Failed to initialize S3 client:', error);
+    throw error;
+  }
+};
 
 /**
  * Upload a file to S3
@@ -51,8 +42,10 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
   try {
     const bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
     if (!bucketName) {
-      throw new Error('AWS Bucket name is required');
+      throw new Error('AWS Bucket name is required (VITE_AWS_BUCKET_NAME)');
     }
+
+    const client = getS3Client();
 
     // Create a unique file path with original filename
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -63,7 +56,7 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
     console.log(`Uploading file to S3: ${bucketName}/${filePath}`);
 
     const upload = new Upload({
-      client: s3Client,
+      client,
       params: {
         Bucket: bucketName,
         Key: filePath,
@@ -89,16 +82,15 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
 export const getSignedUrl = async (filePath: string): Promise<string | null> => {
   try {
     const bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
-    if (!bucketName) {
-      throw new Error('AWS Bucket name is required');
-    }
+    if (!bucketName) throw new Error('AWS Bucket name is required');
 
+    const client = getS3Client();
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: filePath,
     });
 
-    const url = await getPresignedUrl(s3Client, command, { expiresIn: 3600 });
+    const url = await getPresignedUrl(client, command, { expiresIn: 3600 });
     console.log('Generated signed URL for file:', filePath);
     return url;
   } catch (error) {
@@ -115,16 +107,15 @@ export const getSignedUrl = async (filePath: string): Promise<string | null> => 
 export const deleteFileFromS3 = async (filePath: string): Promise<boolean> => {
   try {
     const bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
-    if (!bucketName) {
-      throw new Error('AWS Bucket name is required');
-    }
+    if (!bucketName) throw new Error('AWS Bucket name is required');
 
+    const client = getS3Client();
     const command = new DeleteObjectCommand({
       Bucket: bucketName,
       Key: filePath,
     });
 
-    await s3Client.send(command);
+    await client.send(command);
     console.log('File deleted successfully from S3:', filePath);
     return true;
   } catch (error) {
@@ -143,9 +134,9 @@ export const deleteFolderFromS3 = async (folderPrefix: string): Promise<boolean>
   try {
     console.log(`Attempting to delete folder with prefix: ${folderPrefix}`);
     const bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
-    if (!bucketName) {
-      throw new Error('AWS Bucket name is required');
-    }
+    if (!bucketName) throw new Error('AWS Bucket name is required');
+
+    const client = getS3Client();
 
     // First, list all objects with the given prefix
     const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
@@ -155,7 +146,7 @@ export const deleteFolderFromS3 = async (folderPrefix: string): Promise<boolean>
       Prefix: folderPrefix,
     });
 
-    const listedObjects = await s3Client.send(listCommand);
+    const listedObjects = await client.send(listCommand);
     if (!listedObjects.Contents || listedObjects.Contents.length === 0) {
       console.log(`No objects found with prefix: ${folderPrefix}`);
       return false;
@@ -172,7 +163,7 @@ export const deleteFolderFromS3 = async (folderPrefix: string): Promise<boolean>
         Key: object.Key,
       });
       
-      await s3Client.send(deleteCommand);
+      await client.send(deleteCommand);
       console.log(`Deleted object: ${object.Key}`);
     }
     
@@ -181,4 +172,4 @@ export const deleteFolderFromS3 = async (folderPrefix: string): Promise<boolean>
     console.error('Error deleting folder from S3:', error);
     return false;
   }
-}; 
+};
