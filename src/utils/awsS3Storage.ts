@@ -1,5 +1,4 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { Upload } from '@aws-sdk/lib-storage';
+import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl as getPresignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Helper to get client lazily
@@ -24,9 +23,6 @@ const getS3Client = () => {
         accessKeyId: accessKeyId.trim(),
         secretAccessKey: secretAccessKey.trim(),
       },
-      // Disable complex checksums that might trigger CORS issues or 500s on some S3 endpoints
-      requestChecksumCalculation: "WHEN_REQUIRED",
-      responseChecksumValidation: "WHEN_REQUIRED",
     });
     return s3ClientInstance;
   } catch (error) {
@@ -36,7 +32,7 @@ const getS3Client = () => {
 };
 
 /**
- * Upload a file to S3
+ * Upload a file to S3 using presigned URL (more reliable for browser uploads)
  * @param file The file to upload
  * @param prefix Optional prefix for the file path
  * @returns The file path if successful, null if failed
@@ -51,7 +47,6 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
     const client = getS3Client();
 
     // Create a unique file path with original filename
-    // Replace spaces and special chars to avoid URL issues
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const filePath = prefix 
       ? `${prefix}/${safeFileName}`
@@ -59,27 +54,30 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
 
     console.log(`Uploading file to S3: ${bucketName}/${filePath}`);
 
-    // Use Upload class for better large file handling and multipart uploads
-    const upload = new Upload({
-      client,
-      params: {
-        Bucket: bucketName,
-        Key: filePath,
-        Body: file,
-        ContentType: file.type || 'application/octet-stream',
-        // Explicitly set ACL to private if bucket settings allow, or remove if bucket enforces ownership
-        // ACL: 'private', 
+    // Generate a presigned PUT URL
+    const putCommand = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: filePath,
+      ContentType: file.type || 'application/octet-stream',
+    });
+
+    const presignedUrl = await getPresignedUrl(client, putCommand, { expiresIn: 300 }); // 5 minutes
+
+    // Upload using simple fetch with presigned URL (avoids SDK CORS issues)
+    const response = await fetch(presignedUrl, {
+      method: 'PUT',
+      body: file,
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
       },
-      // Disable concurrent queue to simplify debugging if needed, but default is usually fine
-      queueSize: 4, 
-      partSize: 1024 * 1024 * 5, // 5MB chunks
     });
 
-    upload.on('httpUploadProgress', (progress) => {
-      console.log(`Upload progress: ${progress.loaded} / ${progress.total}`);
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('S3 upload failed:', response.status, errorText);
+      throw new Error(`S3 upload failed: ${response.status} ${errorText}`);
+    }
 
-    await upload.done();
     console.log('File uploaded successfully to S3');
     return filePath;
   } catch (error: any) {
@@ -108,7 +106,6 @@ export const getSignedUrl = async (filePath: string): Promise<string | null> => 
     });
 
     const url = await getPresignedUrl(client, command, { expiresIn: 3600 });
-    // console.log('Generated signed URL for file:', filePath);
     return url;
   } catch (error) {
     console.error('Error generating signed URL:', error);
