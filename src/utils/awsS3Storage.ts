@@ -24,6 +24,9 @@ const getS3Client = () => {
         accessKeyId: accessKeyId.trim(),
         secretAccessKey: secretAccessKey.trim(),
       },
+      // Disable complex checksums that might trigger CORS issues or 500s on some S3 endpoints
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
     });
     return s3ClientInstance;
   } catch (error) {
@@ -48,6 +51,7 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
     const client = getS3Client();
 
     // Create a unique file path with original filename
+    // Replace spaces and special chars to avoid URL issues
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const filePath = prefix 
       ? `${prefix}/${safeFileName}`
@@ -55,6 +59,7 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
 
     console.log(`Uploading file to S3: ${bucketName}/${filePath}`);
 
+    // Use Upload class for better large file handling and multipart uploads
     const upload = new Upload({
       client,
       params: {
@@ -62,14 +67,26 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
         Key: filePath,
         Body: file,
         ContentType: file.type || 'application/octet-stream',
+        // Explicitly set ACL to private if bucket settings allow, or remove if bucket enforces ownership
+        // ACL: 'private', 
       },
+      // Disable concurrent queue to simplify debugging if needed, but default is usually fine
+      queueSize: 4, 
+      partSize: 1024 * 1024 * 5, // 5MB chunks
+    });
+
+    upload.on('httpUploadProgress', (progress) => {
+      console.log(`Upload progress: ${progress.loaded} / ${progress.total}`);
     });
 
     await upload.done();
     console.log('File uploaded successfully to S3');
     return filePath;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error uploading file to S3:', error);
+    if (error.name === 'InvalidAccessKeyId') {
+      console.error('CRITICAL: The AWS Access Key ID is invalid. Check Vercel environment variables.');
+    }
     return null;
   }
 };
@@ -91,7 +108,7 @@ export const getSignedUrl = async (filePath: string): Promise<string | null> => 
     });
 
     const url = await getPresignedUrl(client, command, { expiresIn: 3600 });
-    console.log('Generated signed URL for file:', filePath);
+    // console.log('Generated signed URL for file:', filePath);
     return url;
   } catch (error) {
     console.error('Error generating signed URL:', error);
