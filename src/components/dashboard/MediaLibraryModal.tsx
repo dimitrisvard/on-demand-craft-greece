@@ -1,20 +1,38 @@
 import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Loader2, Upload, Image as ImageIcon, Check } from "lucide-react";
-import { uploadToBucket, listFiles } from "@/utils/mediaStorage";
-import { supabase } from "@/integrations/supabase/client";
+import { Loader2, Upload, Image as ImageIcon, Trash2 } from "lucide-react";
+import { uploadArticleImageToS3, listArticleImages, deleteArticleImageFromS3 } from "@/utils/articleImageStorage";
 import { useToast } from "@/components/ui/use-toast";
 
 interface MediaLibraryModalProps {
   onSelect: (url: string) => void;
   trigger?: React.ReactNode;
+  articleId?: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
-  const [isOpen, setIsOpen] = useState(false);
+const MediaLibraryModal = ({ 
+  onSelect, 
+  trigger, 
+  articleId, 
+  open: controlledOpen, 
+  onOpenChange: controlledOnOpenChange 
+}: MediaLibraryModalProps) => {
+  const [internalOpen, setInternalOpen] = useState(false);
+  
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? controlledOpen : internalOpen;
+  const setIsOpen = (newOpen: boolean) => {
+    if (controlledOnOpenChange) {
+      controlledOnOpenChange(newOpen);
+    } else {
+      setInternalOpen(newOpen);
+    }
+  };
+
   const [uploading, setUploading] = useState(false);
   const [images, setImages] = useState<any[]>([]);
   const [loadingImages, setLoadingImages] = useState(false);
@@ -28,14 +46,27 @@ const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
 
   const fetchImages = async () => {
     setLoadingImages(true);
-    const files = await listFiles('blog-images');
-    // Map to include public URLs
-    const imagesWithUrls = files.map(file => {
-      const { data } = supabase.storage.from('blog-images').getPublicUrl(file.name);
-      return { ...file, url: data.publicUrl };
-    });
-    setImages(imagesWithUrls);
-    setLoadingImages(false);
+    try {
+      // List images from S3. 
+      // We list both 'featured' and 'content' to show a comprehensive library.
+      // If articleId is specific, we might want to prioritize those, but for now show all.
+      
+      const [featured, content] = await Promise.all([
+        listArticleImages('featured'),
+        listArticleImages('content')
+      ]);
+      
+      const allImages = [...featured, ...content].sort((a, b) => {
+        return (b.lastModified?.getTime() || 0) - (a.lastModified?.getTime() || 0);
+      });
+
+      setImages(allImages);
+    } catch (error) {
+      console.error("Failed to fetch images", error);
+      toast({ title: "Error", description: "Failed to load images", variant: "destructive" });
+    } finally {
+      setLoadingImages(false);
+    }
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,7 +83,10 @@ const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
     }
 
     setUploading(true);
-    const url = await uploadToBucket(file, 'blog-images');
+    // Use provided articleId or 'shared' if not provided
+    const targetId = articleId || 'shared';
+    // Default to 'featured' for manual uploads in library
+    const url = await uploadArticleImageToS3(file, 'featured', targetId);
     setUploading(false);
 
     if (url) {
@@ -62,6 +96,22 @@ const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
       setIsOpen(false);
     } else {
       toast({ title: "Error", description: "Failed to upload image", variant: "destructive" });
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, url: string) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this image?")) return;
+
+    // Optimistic update
+    setImages(prev => prev.filter(img => img.url !== url));
+
+    const success = await deleteArticleImageFromS3(url);
+    if (!success) {
+      toast({ title: "Error", description: "Failed to delete image", variant: "destructive" });
+      fetchImages(); // Revert/Refresh
+    } else {
+      toast({ title: "Success", description: "Image deleted" });
     }
   };
 
@@ -100,18 +150,26 @@ const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                 {images.map((img) => (
                   <div 
-                    key={img.id || img.name} 
+                    key={img.key} 
                     className="group relative aspect-square bg-white rounded-lg border overflow-hidden cursor-pointer hover:border-primary transition-all"
                     onClick={() => handleSelect(img.url)}
                   >
                     <img 
                       src={img.url} 
-                      alt={img.name} 
+                      alt={img.key} 
                       className="w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center gap-2">
                       <Button size="sm" variant="secondary" className="opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 transition-all">
                         Select
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="destructive" 
+                        className="opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100 transition-all p-2 h-8 w-8"
+                        onClick={(e) => handleDelete(e, img.url)}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -151,4 +209,3 @@ const MediaLibraryModal = ({ onSelect, trigger }: MediaLibraryModalProps) => {
 };
 
 export default MediaLibraryModal;
-

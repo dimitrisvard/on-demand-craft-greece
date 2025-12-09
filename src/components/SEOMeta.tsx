@@ -10,6 +10,8 @@ interface SEOMetaProps {
   canonicalUrl?: string;
   ogImage?: string;
   ogType?: string;
+  hreflangLinks?: Array<{ lang: string; url: string }>;
+  disableDefaultHreflang?: boolean;
 }
 
 const SEOMeta: React.FC<SEOMetaProps> = ({
@@ -18,7 +20,9 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
   keywords,
   canonicalUrl,
   ogImage,
-  ogType = 'website'
+  ogType = 'website',
+  hreflangLinks,
+  disableDefaultHreflang = false
 }) => {
   const { currentLanguage, supportedLanguages, getLocalizedPath, getPathWithoutLanguage } = useLanguage();
   const { t } = useTranslation();
@@ -56,7 +60,7 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
   }
 
   // Generate hreflang URLs for all supported languages
-  const hreflangUrls = Object.keys(supportedLanguages).map(lang => {
+  const computedHreflangLinks = hreflangLinks || (disableDefaultHreflang ? [] : Object.keys(supportedLanguages).map(lang => {
     let url;
     if (shouldHaveLanguagePrefix) {
       // For language-prefixed routes, generate language alternatives using cleaned path
@@ -67,7 +71,7 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
       url = `${baseUrl}${currentPath}`;
     }
     return { lang, url };
-  });
+  }));
 
   return (
     <Helmet>
@@ -81,7 +85,7 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
       <link rel="canonical" href={canonical} />
       
       {/* Hreflang Tags for International SEO */}
-      {hreflangUrls.map(({ lang, url }) => (
+      {computedHreflangLinks.map(({ lang, url }) => (
         <link key={lang} rel="alternate" hrefLang={lang} href={url} />
       ))}
       

@@ -6,18 +6,24 @@ import { Calendar, Clock, ArrowLeft } from "lucide-react";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
+import SEOMeta from "@/components/SEOMeta";
 
 interface Article {
   id: string;
   title: string;
+  slug: string;
   content: string;
+  excerpt: string;
+  language: string;
   featured_image: string;
-  created_at: string;
+  featured_image_alt?: string;
+  status: string;
   meta_title: string;
   meta_description: string;
-  author: {
-    email: string;
-  };
+  created_at: string;
+  updated_at: string;
+  author_id: string;
+  translation_id?: string;
 }
 
 const BlogPost = () => {
@@ -26,6 +32,7 @@ const BlogPost = () => {
   const { i18n } = useTranslation();
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hreflangLinks, setHreflangLinks] = useState<Array<{ lang: string; url: string }>>([]);
   const currentLang = lang || i18n.language || 'en';
 
   useEffect(() => {
@@ -37,9 +44,9 @@ const BlogPost = () => {
   const fetchArticle = async () => {
     try {
       setLoading(true);
-      // Note: we're not selecting author yet as it requires a join that might not be set up
-      // Simplification for now: just getting article data
-      const { data, error } = await supabase
+      
+      // 1. Fetch the current article
+      const { data: currentArticle, error } = await supabase
         .from('articles')
         .select('*')
         .eq('slug', slug)
@@ -48,7 +55,35 @@ const BlogPost = () => {
         .single();
 
       if (error) throw error;
-      setArticle(data);
+      setArticle(currentArticle);
+
+      // 2. Fetch translations (siblings with same translation_id)
+      if (currentArticle?.translation_id) {
+        const { data: translations } = await supabase
+          .from('articles')
+          .select('language, slug')
+          .eq('translation_id', currentArticle.translation_id)
+          .eq('status', 'published')
+          .neq('id', currentArticle.id); // Exclude current article
+
+        if (translations) {
+          const baseUrl = window.location.origin;
+          
+          // Create links for translations
+          const links = translations.map(t => ({
+            lang: t.language,
+            url: `${baseUrl}/${t.language}/blog/${t.slug}`
+          }));
+
+          // Add current article to the list as well (self-referencing hreflang is required)
+          links.push({
+            lang: currentLang,
+            url: `${baseUrl}/${currentLang}/blog/${currentArticle.slug}`
+          });
+
+          setHreflangLinks(links);
+        }
+      }
     } catch (error) {
       console.error('Error fetching article:', error);
       navigate(`/${currentLang}/blog`); // Redirect to index if not found
@@ -78,11 +113,43 @@ const BlogPost = () => {
 
   if (!article) return null;
 
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": article.title,
+    "image": article.featured_image ? [article.featured_image] : [],
+    "datePublished": article.created_at,
+    "dateModified": article.updated_at || article.created_at,
+    "author": [{
+        "@type": "Person",
+        "name": "MicronsHub Team",
+        "url": "https://micronshub.com" 
+    }],
+    "publisher": {
+        "@type": "Organization",
+        "name": "MicronsHub",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://micronshub.com/logo.png"
+        }
+    },
+    "description": article.meta_description || article.excerpt || ""
+  };
+
   return (
     <div className="min-h-screen bg-white">
+      <SEOMeta 
+        title={`${article.meta_title || article.title} | Microns Hub`}
+        description={article.meta_description || article.excerpt}
+        ogImage={article.featured_image}
+        ogType="article"
+        hreflangLinks={hreflangLinks.length > 0 ? hreflangLinks : undefined}
+        disableDefaultHreflang={hreflangLinks.length > 0}
+      />
       <Helmet>
-        <title>{article.meta_title || article.title} | Microns Hub</title>
-        <meta name="description" content={article.meta_description || ""} />
+        <script type="application/ld+json">
+          {JSON.stringify(structuredData)}
+        </script>
       </Helmet>
       
       <article className="pt-32 pb-16">
@@ -119,7 +186,7 @@ const BlogPost = () => {
               <div className="mb-10 rounded-xl overflow-hidden shadow-md">
                 <img 
                   src={article.featured_image} 
-                  alt={article.title} 
+                  alt={article.featured_image_alt || article.title} 
                   className="w-full h-auto object-cover"
                 />
               </div>
