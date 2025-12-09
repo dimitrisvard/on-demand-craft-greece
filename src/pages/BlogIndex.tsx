@@ -19,11 +19,10 @@ interface Article {
 
 const BlogIndex = () => {
   const { lang } = useParams();
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const currentLang = lang || i18n.language || 'en';
-  const heroSubtitle = "Insights, news, and technical articles about manufacturing and engineering.";
 
   useEffect(() => {
     fetchArticles();
@@ -51,8 +50,8 @@ const BlogIndex = () => {
   return (
     <div className="min-h-screen bg-white">
       <SEOMeta 
-        title="Blog | Microns Hub"
-        description="Latest news, updates, and insights from Microns Hub about manufacturing, engineering, and precision parts."
+        title={`${t('blog_title', 'Latest Updates')} | Microns Hub`}
+        description={t('blog_subtitle', 'Latest news, updates, and insights from Microns Hub about manufacturing, engineering, and precision parts.')}
         ogType="website"
       />
       
@@ -60,10 +59,10 @@ const BlogIndex = () => {
         <div className="container-custom mx-auto px-4">
           <div className="text-center mb-16">
             <h1 className="text-4xl font-bold tracking-tight mb-4">
-              Latest Updates
+              {t('blog_title', 'Latest Updates')}
             </h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              {heroSubtitle}
+              {t('blog_subtitle', 'Insights, news, and technical articles about manufacturing and engineering.')}
             </p>
           </div>
 
@@ -91,7 +90,7 @@ const BlogIndex = () => {
                     </div>
                   ) : (
                     <div className="h-48 bg-gray-100 flex items-center justify-center">
-                      <span className="text-gray-400">No Image</span>
+                      <span className="text-gray-400">{t('blog_no_image', 'No Image')}</span>
                     </div>
                   )}
                   
@@ -110,7 +109,7 @@ const BlogIndex = () => {
                     </p>
                     
                     <div className="flex items-center text-primary font-medium mt-auto">
-                      Read More 
+                      {t('blog_read_more', 'Read More')} 
                       <ChevronRight className="h-4 w-4 ml-1 group-hover:translate-x-1 transition-transform" />
                     </div>
                   </div>
@@ -119,7 +118,7 @@ const BlogIndex = () => {
             </div>
           ) : (
             <div className="text-center py-12 bg-gray-50 rounded-lg">
-              <p className="text-lg text-muted-foreground">No articles found in this language.</p>
+              <p className="text-lg text-muted-foreground">{t('blog_no_articles', 'No articles found in this language.')}</p>
             </div>
           )}
         </div>

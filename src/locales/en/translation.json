@@ -476,5 +476,11 @@
   "contact_form_success_message": "We'll get back to you as soon as possible.",
   "contact_success_title": "Message Sent Successfully!",
   "contact_success_message": "Thank you for contacting us. We have received your message and will respond shortly.",
-  "contact_success_return_home": "Return to Home"
+  "contact_success_return_home": "Return to Home",
+  "blog_title": "Latest Updates",
+  "blog_subtitle": "Insights, news, and technical articles about manufacturing and engineering.",
+  "blog_read_more": "Read More",
+  "blog_no_image": "No Image",
+  "blog_no_articles": "No articles found in this language.",
+  "blog_back_to_blog": "Back to Blog"
 }

@@ -29,7 +29,7 @@ interface Article {
 const BlogPost = () => {
   const { lang, slug } = useParams();
   const navigate = useNavigate();
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
   const [hreflangLinks, setHreflangLinks] = useState<Array<{ lang: string; url: string }>>([]);
@@ -161,7 +161,7 @@ const BlogPost = () => {
               onClick={() => navigate(`/${currentLang}/blog`)}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Blog
+              {t('blog_back_to_blog', 'Back to Blog')}
             </Button>
 
             <div className="space-y-6 mb-8">
