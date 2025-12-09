@@ -6,17 +6,28 @@ declare global {
   }
 }
 
-// Google Analytics measurement ID from environment variable
-export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID || 'GT-TNSNTJPB';
+// Google Analytics measurement ID
+// Hardcoded to ensure it works without env vars for now, can be moved back to env later if needed
+export const GA_MEASUREMENT_ID = 'G-G6T5PMFLRH'; 
 export const GOOGLE_ADS_ID = 'AW-17760727501';
 
 // Initialize Google Analytics
 export const initGA = () => {
-  // GA is already initialized via the script tags in index.html
-  // This function can be used for additional setup if needed
-  if (typeof window !== 'undefined' && window.gtag) {
-    console.log('Google Analytics initialized');
+  if (typeof window === 'undefined') return;
+
+  // Ensure dataLayer exists
+  window.dataLayer = window.dataLayer || [];
+  
+  // Define gtag if it doesn't exist
+  if (!window.gtag) {
+    window.gtag = function() {
+      window.dataLayer.push(arguments);
+    };
   }
+
+  // We don't need to load the script here because it's handled by CookieConsentBanner
+  // or index.html based on consent.
+  console.log('Analytics utility initialized');
 };
 
 // Track page views

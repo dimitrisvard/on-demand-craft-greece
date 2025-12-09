@@ -8,11 +8,13 @@ const getS3Client = () => {
   if (s3ClientInstance) return s3ClientInstance;
 
   const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
-  const accessKeyId = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
-  const secretAccessKey = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
+  
+  // Use specific article credentials if available, otherwise fall back to generic ones
+  const accessKeyId = import.meta.env.VITE_AWS_ARTICLES_ACCESS_KEY_ID || import.meta.env.VITE_AWS_ACCESS_KEY_ID;
+  const secretAccessKey = import.meta.env.VITE_AWS_ARTICLES_SECRET_ACCESS_KEY || import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
 
   if (!accessKeyId || !secretAccessKey) {
-    console.error('AWS credentials missing. Please check VITE_AWS_ACCESS_KEY_ID and VITE_AWS_SECRET_ACCESS_KEY');
+    console.error('AWS credentials missing. Please check VITE_AWS_ARTICLES_ACCESS_KEY_ID or VITE_AWS_ACCESS_KEY_ID');
     throw new Error('AWS Credentials are required');
   }
 

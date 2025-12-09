@@ -69,21 +69,53 @@ export const CookieConsentBanner: React.FC = () => {
     localStorage.setItem(COOKIE_CONSENT_KEY, choice);
     setVisible(false);
     if (choice === 'accepted') {
-      // Dynamically load Google tag (gtag.js)
+      // Load Google tag (gtag.js) only after consent
       const gaScript = document.createElement('script');
       gaScript.async = true;
-      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
+      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-G6T5PMFLRH';
       document.head.appendChild(gaScript);
+      
+      gaScript.onload = function() {
+        // Initialize dataLayer and gtag
+        (window as any).dataLayer = (window as any).dataLayer || [];
+        function gtag(){(window as any).dataLayer.push(arguments);}
+        (window as any).gtag = gtag;
+        (window as any).gtag('js', new Date());
+        
+        // Configure Google Analytics
+        (window as any).gtag('config', 'G-G6T5PMFLRH', {
+          anonymize_ip: false,
+        });
+        
+        // Configure Google Ads
+        (window as any).gtag('config', 'AW-17760727501');
+        
+        console.log('Google Analytics and Ads initialized after consent');
+      };
+    }
+  };
+  
+  // Check if consent was already given and load scripts immediately
+  useEffect(() => {
+    const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
+    if (consent === 'accepted' && typeof window !== 'undefined' && !(window as any).gtag) {
+      // User already consented, load scripts now
+      const gaScript = document.createElement('script');
+      gaScript.async = true;
+      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-G6T5PMFLRH';
+      document.head.appendChild(gaScript);
+      
       gaScript.onload = function() {
         (window as any).dataLayer = (window as any).dataLayer || [];
         function gtag(){(window as any).dataLayer.push(arguments);}
         (window as any).gtag = gtag;
         (window as any).gtag('js', new Date());
-        (window as any).gtag('config', 'AW-17760727501');
         (window as any).gtag('config', 'G-G6T5PMFLRH');
+        (window as any).gtag('config', 'AW-17760727501');
+        console.log('Google Analytics and Ads initialized (existing consent)');
       };
     }
-  };
+  }, []);
 
   if (!visible) return null;
 
