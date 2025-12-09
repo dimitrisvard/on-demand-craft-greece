@@ -10,6 +10,9 @@ declare global {
 // Hardcoded to ensure it works without env vars for now, can be moved back to env later if needed
 export const GA_MEASUREMENT_ID = 'G-G6T5PMFLRH'; 
 export const GOOGLE_ADS_ID = 'AW-17760727501';
+// Google Ads Conversion Label - Get this from Google Ads > Goals > Conversions > [Your Conversion] > Tag Setup
+// Format: 'AW-XXXXXXXXX/LabelString' or just 'LabelString' (we'll prepend the ID)
+export const GOOGLE_ADS_CONVERSION_LABEL = import.meta.env.VITE_GOOGLE_ADS_CONVERSION_LABEL || '';
 
 // Initialize Google Analytics
 export const initGA = () => {
@@ -111,12 +114,19 @@ export const trackFormSubmission = (formName: string, success: boolean = true) =
 // It sends events to Google Analytics which can be used for Google Ads conversion tracking
 export const trackGoogleAdsConversion = (eventName: string, parameters?: Record<string, any>) => {
   if (typeof window !== 'undefined' && window.gtag) {
+    // Build the send_to parameter with conversion label if available
+    let sendTo = GOOGLE_ADS_ID;
+    if (GOOGLE_ADS_CONVERSION_LABEL) {
+      // If label is provided, append it to the account ID
+      sendTo = `${GOOGLE_ADS_ID}/${GOOGLE_ADS_CONVERSION_LABEL}`;
+    }
+    
     window.gtag('event', eventName, {
-      // Google Ads specific parameters
-      send_to: GOOGLE_ADS_ID,
+      // Google Ads specific parameters - send_to must include conversion label for proper tracking
+      send_to: sendTo,
       ...parameters,
     });
-    console.log('Google Ads: Conversion tracked', { eventName, parameters });
+    console.log('Google Ads: Conversion tracked', { eventName, send_to: sendTo, parameters });
   }
 };
 
