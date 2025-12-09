@@ -1103,5 +1103,11 @@
   "our_work_title": "Vårt arbete",
   "our_work_intro": "Här kan du se ett urval av vårt arbete inom plåtbearbetning, CNC-bearbetning, CNC-svarvning och formsprutning.",
   "our_work_open_image": "Öppna bild",
-  "our_work_image_alt": "Exempelbild från arbete"
+  "our_work_image_alt": "Exempelbild från arbete",
+  "blog_title": "Senaste uppdateringar",
+  "blog_subtitle": "Insikter, nyheter och tekniska artiklar om tillverkning och teknik.",
+  "blog_read_more": "Läs mer",
+  "blog_no_image": "Ingen bild",
+  "blog_no_articles": "Inga artiklar hittades på detta språk.",
+  "blog_back_to_blog": "Tillbaka till bloggen"
 }

@@ -1157,5 +1157,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Sandstrahlen",
   "service_surface-finishes_treatments_sandblasting_desc": "Sandstrahlen bezeichnet die Oberflächenbehandlung eines Materials durch Einwirkung von Strahlmitteln gegen Rost, Schmutz, Farbe, Zunder und andere Verunreinigungen oder zur Oberflächengestaltung durch Mattieren.",
   "service_surface-finishes_treatments_glassbead_title": "Glasperlenstrahlen",
-  "service_surface-finishes_treatments_glassbead_desc": "Glasperlenstrahlen ist eine mechanische Oberflächenbehandlung ähnlich dem Sandstrahlen, bei der winzige Glasperlen als Strahlmittel zum Glätten und Verdichten von Oberflächen verwendet werden."
+  "service_surface-finishes_treatments_glassbead_desc": "Glasperlenstrahlen ist eine mechanische Oberflächenbehandlung ähnlich dem Sandstrahlen, bei der winzige Glasperlen als Strahlmittel zum Glätten und Verdichten von Oberflächen verwendet werden.",
+  "blog_title": "Neueste Updates",
+  "blog_subtitle": "Einblicke, Neuigkeiten und technische Artikel über Fertigung und Ingenieurwesen.",
+  "blog_read_more": "Weiterlesen",
+  "blog_no_image": "Kein Bild",
+  "blog_no_articles": "Keine Artikel in dieser Sprache gefunden.",
+  "blog_back_to_blog": "Zurück zum Blog"
 }

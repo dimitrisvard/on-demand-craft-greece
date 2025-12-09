@@ -1103,5 +1103,11 @@
   "our_work_title": "I nostri lavori",
   "our_work_intro": "Qui puoi vedere una selezione dei nostri lavori in lavorazione della lamiera, lavorazione CNC, tornitura CNC e stampaggio a iniezione.",
   "our_work_open_image": "Apri immagine",
-  "our_work_image_alt": "Immagine esempio di lavoro"
+  "our_work_image_alt": "Immagine esempio di lavoro",
+  "blog_title": "Ultimi aggiornamenti",
+  "blog_subtitle": "Approfondimenti, notizie e articoli tecnici su produzione e ingegneria.",
+  "blog_read_more": "Leggi di più",
+  "blog_no_image": "Nessuna immagine",
+  "blog_no_articles": "Nessun articolo trovato in questa lingua.",
+  "blog_back_to_blog": "Torna al blog"
 }

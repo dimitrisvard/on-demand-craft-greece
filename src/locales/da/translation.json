@@ -1103,5 +1103,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Sandblast",
   "service_surface-finishes_treatments_sandblasting_desc": "Sandblæsning betegner overfladebehandlingen af et materiale ved hjælp af bjælkeagenter mod rust, snavs, farve, tinder og andre forurenende stoffer eller til overfladedesign af Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Glasperlerstråler",
-  "service_surface-finishes_treatments_glassbead_desc": "Glasperlerstråler er en mekanisk overfladebärling, lignerens sandblæsning, hvor små glasperler Bruges som Bjælkeagent til glat og kompakt overflador."
+  "service_surface-finishes_treatments_glassbead_desc": "Glasperlerstråler er en mekanisk overfladebärling, lignerens sandblæsning, hvor små glasperler Bruges som Bjælkeagent til glat og kompakt overflador.",
+  "blog_title": "Seneste opdateringer",
+  "blog_subtitle": "Indsigt, nyheder og tekniske artikler om produktion og ingeniørvidenskab.",
+  "blog_read_more": "Læs mere",
+  "blog_no_image": "Intet billede",
+  "blog_no_articles": "Ingen artikler fundet på dette sprog.",
+  "blog_back_to_blog": "Tilbage til blog"
 }

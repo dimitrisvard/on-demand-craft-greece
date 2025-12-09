@@ -1103,5 +1103,11 @@
   "our_work_title": "Nasze realizacje",
   "our_work_intro": "Tutaj możesz zobaczyć wybrane przykłady naszych prac: obróbka blach, obróbka CNC, toczenie CNC oraz formowanie wtryskowe.",
   "our_work_open_image": "Otwórz obraz",
-  "our_work_image_alt": "Przykładowe zdjęcie realizacji"
+  "our_work_image_alt": "Przykładowe zdjęcie realizacji",
+  "blog_title": "Najnowsze aktualizacje",
+  "blog_subtitle": "Wglądy, wiadomości i artykuły techniczne dotyczące produkcji i inżynierii.",
+  "blog_read_more": "Czytaj więcej",
+  "blog_no_image": "Brak obrazu",
+  "blog_no_articles": "Nie znaleziono artykułów w tym języku.",
+  "blog_back_to_blog": "Powrót do bloga"
 }

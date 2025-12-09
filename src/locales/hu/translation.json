@@ -1054,5 +1054,11 @@
   "our_work_title": "Munkáink",
   "our_work_intro": "Itt megtekintheti válogatott munkáinkat: lemezmegmunkálás, CNC marás, CNC esztergálás és fröccsöntés.",
   "our_work_open_image": "Kép megnyitása",
-  "our_work_image_alt": "Munkaminta kép"
+  "our_work_image_alt": "Munkaminta kép",
+  "blog_title": "Legfrissebb frissítések",
+  "blog_subtitle": "Bepillantások, hírek és műszaki cikkek a gyártásról és a mérnöki munkáról.",
+  "blog_read_more": "Tovább olvasás",
+  "blog_no_image": "Nincs kép",
+  "blog_no_articles": "Nem találhatók cikkek ezen a nyelven.",
+  "blog_back_to_blog": "Vissza a bloghoz"
 }

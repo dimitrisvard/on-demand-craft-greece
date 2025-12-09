@@ -1103,5 +1103,11 @@
   "our_work_title": "Nosso trabalho",
   "our_work_intro": "Aqui você pode ver uma seleção do nosso trabalho em chapa metálica, usinagem CNC, torneamento CNC e moldagem por injeção.",
   "our_work_open_image": "Abrir imagem",
-  "our_work_image_alt": "Imagem de exemplo de trabalho"
+  "our_work_image_alt": "Imagem de exemplo de trabalho",
+  "blog_title": "Últimas atualizações",
+  "blog_subtitle": "Insights, notícias e artigos técnicos sobre manufatura e engenharia.",
+  "blog_read_more": "Ler mais",
+  "blog_no_image": "Sem imagem",
+  "blog_no_articles": "Nenhum artigo encontrado neste idioma.",
+  "blog_back_to_blog": "Voltar ao blog"
 }

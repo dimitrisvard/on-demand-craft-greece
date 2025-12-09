@@ -1103,5 +1103,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Hiekkapuhaltaa",
   "service_surface-finishes_treatments_sandblasting_desc": "Hiekkapuhallus merkitsee materiaalin pintakäsittelyä säteenaineiden vaikutuksella ruostetta, likaa, väriä, tiniä ja muita epäpuhtauksia tai Mattin pintasuunnitelmaa varten.",
   "service_surface-finishes_treatments_glassbead_title": "Lasihelmet",
-  "service_surface-finishes_treatments_glassbead_desc": "Lasihelmisäteet ovat mekaaninen pintakäsittely, joka on samanlainen kuin hiekkapuhallus, jossa pieniä lasihelmiä käytetään säteenaina tasapainottamiseen ja kompakteihin pintoihin."
+  "service_surface-finishes_treatments_glassbead_desc": "Lasihelmisäteet ovat mekaaninen pintakäsittely, joka on samanlainen kuin hiekkapuhallus, jossa pieniä lasihelmiä käytetään säteenaina tasapainottamiseen ja kompakteihin pintoihin.",
+  "blog_title": "Viimeisimmät päivitykset",
+  "blog_subtitle": "Näkemyksiä, uutisia ja tekniset artikkelit valmistuksesta ja tekniikasta.",
+  "blog_read_more": "Lue lisää",
+  "blog_no_image": "Ei kuvaa",
+  "blog_no_articles": "Artikkeleita ei löytynyt tällä kielellä.",
+  "blog_back_to_blog": "Takaisin blogiin"
 }

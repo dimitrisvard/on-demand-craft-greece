@@ -1066,5 +1066,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Jet de sable",
   "service_surface-finishes_treatments_sandblasting_desc": "Le sablage indique le traitement de surface d'un matériau par l'action des agents de poutre contre la rouille, la saleté, la couleur, l'entrée et d'autres contaminants ou pour la conception de surface par Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Rayons de perles de verre",
-  "service_surface-finishes_treatments_glassbead_desc": "Les rayons de perles de verre sont un traitement de surface mécanique similaire à la trombe de sable, dans laquelle de minuscules perles de verre sont utilisées comme agent de poutre pour lisser et compacter les surfaces."
+  "service_surface-finishes_treatments_glassbead_desc": "Les rayons de perles de verre sont un traitement de surface mécanique similaire à la trombe de sable, dans laquelle de minuscules perles de verre sont utilisées comme agent de poutre pour lisser et compacter les surfaces.",
+  "blog_title": "Dernières mises à jour",
+  "blog_subtitle": "Aperçus, actualités et articles techniques sur la fabrication et l'ingénierie.",
+  "blog_read_more": "Lire la suite",
+  "blog_no_image": "Pas d'image",
+  "blog_no_articles": "Aucun article trouvé dans cette langue.",
+  "blog_back_to_blog": "Retour au blog"
 }

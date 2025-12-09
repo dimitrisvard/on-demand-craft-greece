@@ -1052,5 +1052,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Sandblast",
   "service_surface-finishes_treatments_sandblasting_desc": "[Přeložit do CS: Sandblasty označují povrchové ošetření materiálu působením paprskových látek proti rezi, nečistotce, barvě, Tinderovi a dalším kontaminantům nebo pro návrh povrchu od Matta.]",
   "service_surface-finishes_treatments_glassbead_title": "Skleněné korálky",
-  "service_surface-finishes_treatments_glassbead_desc": "[Přeložit do CS: Skleněné korálkové paprsky je mechanické povrchové ošetření podobné pískoviště, ve kterém se malé skleněné korálky používají jako proud pro vyhlazení a kompaktní povrchy.]"
+  "service_surface-finishes_treatments_glassbead_desc": "[Přeložit do CS: Skleněné korálkové paprsky je mechanické povrchové ošetření podobné pískoviště, ve kterém se malé skleněné korálky používají jako proud pro vyhlazení a kompaktní povrchy.]",
+  "blog_title": "Nejnovější aktualizace",
+  "blog_subtitle": "Pohledy, novinky a technické články o výrobě a inženýrství.",
+  "blog_read_more": "Číst více",
+  "blog_no_image": "Žádný obrázek",
+  "blog_no_articles": "V tomto jazyce nebyly nalezeny žádné články.",
+  "blog_back_to_blog": "Zpět na blog"
 }

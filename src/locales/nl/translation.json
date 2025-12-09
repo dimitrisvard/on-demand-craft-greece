@@ -1103,5 +1103,11 @@
   "our_work_title": "Ons werk",
   "our_work_intro": "Hier ziet u een selectie van ons werk in plaatbewerking, CNC-bewerking, CNC-draaien en spuitgieten.",
   "our_work_open_image": "Afbeelding openen",
-  "our_work_image_alt": "Voorbeeld werkafbeelding"
+  "our_work_image_alt": "Voorbeeld werkafbeelding",
+  "blog_title": "Laatste updates",
+  "blog_subtitle": "Inzichten, nieuws en technische artikelen over productie en engineering.",
+  "blog_read_more": "Lees meer",
+  "blog_no_image": "Geen afbeelding",
+  "blog_no_articles": "Geen artikelen gevonden in deze taal.",
+  "blog_back_to_blog": "Terug naar blog"
 }

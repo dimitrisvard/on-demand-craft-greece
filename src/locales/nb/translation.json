@@ -1054,5 +1054,11 @@
   "our_work_title": "Vårt arbeid",
   "our_work_intro": "Her kan du se et utvalg av vårt arbeid innen platebearbeiding, CNC-maskinering, CNC-dreiing og sprøytestøping.",
   "our_work_open_image": "Åpne bilde",
-  "our_work_image_alt": "Eksempel på arbeid"
+  "our_work_image_alt": "Eksempel på arbeid",
+  "blog_title": "Siste oppdateringer",
+  "blog_subtitle": "Innsikter, nyheter og tekniske artikler om produksjon og ingeniørfag.",
+  "blog_read_more": "Les mer",
+  "blog_no_image": "Ingen bilde",
+  "blog_no_articles": "Ingen artikler funnet på dette språket.",
+  "blog_back_to_blog": "Tilbake til blogg"
 }

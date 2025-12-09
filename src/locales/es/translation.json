@@ -1103,5 +1103,11 @@
   "service_surface-finishes_treatments_sandblasting_title": "Chorro de arena",
   "service_surface-finishes_treatments_sandblasting_desc": "La arena denota el tratamiento de la superficie de un material por la acción de los agentes del haz contra el óxido, la suciedad, el color, la engaño y otros contaminantes o para el diseño de superficie por Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Rayos de cuentas de vidrio",
-  "service_surface-finishes_treatments_glassbead_desc": "Los rayos de cuentas de vidrio son un tratamiento de superficie mecánica similar a la arena de arena, en el que se usan pequeñas cuentas de vidrio como agente de haz para suavizar las superficies y compactos."
+  "service_surface-finishes_treatments_glassbead_desc": "Los rayos de cuentas de vidrio son un tratamiento de superficie mecánica similar a la arena de arena, en el que se usan pequeñas cuentas de vidrio como agente de haz para suavizar las superficies y compactos.",
+  "blog_title": "Últimas actualizaciones",
+  "blog_subtitle": "Perspectivas, noticias y artículos técnicos sobre fabricación e ingeniería.",
+  "blog_read_more": "Leer más",
+  "blog_no_image": "Sin imagen",
+  "blog_no_articles": "No se encontraron artículos en este idioma.",
+  "blog_back_to_blog": "Volver al blog"
 }
