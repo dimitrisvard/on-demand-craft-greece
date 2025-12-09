@@ -10,9 +10,9 @@ declare global {
 // Hardcoded to ensure it works without env vars for now, can be moved back to env later if needed
 export const GA_MEASUREMENT_ID = 'G-G6T5PMFLRH'; 
 export const GOOGLE_ADS_ID = 'AW-17760727501';
-// Google Ads Conversion Label - Get this from Google Ads > Goals > Conversions > [Your Conversion] > Tag Setup
-// Format: 'AW-XXXXXXXXX/LabelString' or just 'LabelString' (we'll prepend the ID)
-export const GOOGLE_ADS_CONVERSION_LABEL = import.meta.env.VITE_GOOGLE_ADS_CONVERSION_LABEL || '';
+// Google Ads Conversion Label for Quote Form Submission
+// Get this from Google Ads > Goals > Conversions > [Your Conversion] > Tag Setup
+export const GOOGLE_ADS_CONVERSION_LABEL = import.meta.env.VITE_GOOGLE_ADS_CONVERSION_LABEL || 'b9kmCO_6lcsbEM3j_JRC';
 
 // Initialize Google Analytics
 export const initGA = () => {
@@ -140,12 +140,21 @@ export const trackQuoteFormSubmitSuccess = (parameters?: Record<string, any>) =>
     ...parameters,
   };
 
+  // Track in Google Analytics
   if (typeof window !== 'undefined' && window.gtag) {
     window.gtag('event', 'form_submit_success', eventParameters);
     console.log('GA: Quote form submit success event tracked', { eventParameters });
   }
 
-  trackGoogleAdsConversion('form_submit_success', eventParameters);
+  // Track Google Ads conversion with the correct format
+  if (typeof window !== 'undefined' && window.gtag && GOOGLE_ADS_CONVERSION_LABEL) {
+    const sendTo = `${GOOGLE_ADS_ID}/${GOOGLE_ADS_CONVERSION_LABEL}`;
+    window.gtag('event', 'conversion', {
+      'send_to': sendTo,
+      ...parameters,
+    });
+    console.log('Google Ads: Conversion tracked', { send_to: sendTo, parameters });
+  }
 };
 
 // Track contact form submission success event for Google Ads and analytics
