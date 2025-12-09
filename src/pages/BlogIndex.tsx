@@ -3,8 +3,8 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Calendar, Clock, ChevronRight } from "lucide-react";
-import { Helmet } from "react-helmet-async";
 import { useTranslation } from "react-i18next";
+import SEOMeta from "@/components/SEOMeta";
 
 interface Article {
   id: string;
@@ -12,6 +12,7 @@ interface Article {
   slug: string;
   excerpt: string;
   featured_image: string;
+  featured_image_alt?: string;
   created_at: string;
   language: string;
 }
@@ -33,7 +34,7 @@ const BlogIndex = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from('articles')
-        .select('id, title, slug, excerpt, featured_image, created_at, language')
+        .select('id, title, slug, excerpt, featured_image, featured_image_alt, created_at, language')
         .eq('language', currentLang)
         .eq('status', 'published')
         .order('created_at', { ascending: false });
@@ -49,10 +50,11 @@ const BlogIndex = () => {
 
   return (
     <div className="min-h-screen bg-white">
-      <Helmet>
-        <title>Blog | Microns Hub</title>
-        <meta name="description" content="Latest news, updates, and insights from Microns Hub." />
-      </Helmet>
+      <SEOMeta 
+        title="Blog | Microns Hub"
+        description="Latest news, updates, and insights from Microns Hub about manufacturing, engineering, and precision parts."
+        ogType="website"
+      />
       
       <div className="pt-24 pb-16">
         <div className="container-custom mx-auto px-4">
@@ -83,7 +85,7 @@ const BlogIndex = () => {
                     <div className="h-48 overflow-hidden">
                       <img 
                         src={article.featured_image} 
-                        alt={article.title} 
+                        alt={article.featured_image_alt || article.title} 
                         className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-300"
                       />
                     </div>
