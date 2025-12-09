@@ -65,55 +65,50 @@ export const CookieConsentBanner: React.FC = () => {
     }
   }, []);
 
+  const loadGoogleTags = () => {
+    // Check if already loaded
+    if ((window as any).gtag && (window as any).dataLayer) {
+      return; // Already loaded
+    }
+
+    // Load Google tag (gtag.js) with Google Ads ID as primary (as per Google's recommendation)
+    const gaScript = document.createElement('script');
+    gaScript.async = true;
+    gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
+    document.head.appendChild(gaScript);
+    
+    gaScript.onload = function() {
+      // Initialize dataLayer and gtag
+      (window as any).dataLayer = (window as any).dataLayer || [];
+      function gtag(){(window as any).dataLayer.push(arguments);}
+      (window as any).gtag = gtag;
+      (window as any).gtag('js', new Date());
+      
+      // Configure Google Ads first (as per Google's recommendation)
+      (window as any).gtag('config', 'AW-17760727501');
+      
+      // Configure Google Analytics
+      (window as any).gtag('config', 'G-G6T5PMFLRH', {
+        anonymize_ip: false,
+      });
+      
+      console.log('Google Analytics and Ads initialized');
+    };
+  };
+
   const handleConsent = (choice: 'accepted' | 'declined') => {
     localStorage.setItem(COOKIE_CONSENT_KEY, choice);
     setVisible(false);
     if (choice === 'accepted') {
-      // Load Google tag (gtag.js) only after consent
-      const gaScript = document.createElement('script');
-      gaScript.async = true;
-      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-G6T5PMFLRH';
-      document.head.appendChild(gaScript);
-      
-      gaScript.onload = function() {
-        // Initialize dataLayer and gtag
-        (window as any).dataLayer = (window as any).dataLayer || [];
-        function gtag(){(window as any).dataLayer.push(arguments);}
-        (window as any).gtag = gtag;
-        (window as any).gtag('js', new Date());
-        
-        // Configure Google Analytics
-        (window as any).gtag('config', 'G-G6T5PMFLRH', {
-          anonymize_ip: false,
-        });
-        
-        // Configure Google Ads
-        (window as any).gtag('config', 'AW-17760727501');
-        
-        console.log('Google Analytics and Ads initialized after consent');
-      };
+      loadGoogleTags();
     }
   };
   
   // Check if consent was already given and load scripts immediately
   useEffect(() => {
     const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
-    if (consent === 'accepted' && typeof window !== 'undefined' && !(window as any).gtag) {
-      // User already consented, load scripts now
-      const gaScript = document.createElement('script');
-      gaScript.async = true;
-      gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=G-G6T5PMFLRH';
-      document.head.appendChild(gaScript);
-      
-      gaScript.onload = function() {
-        (window as any).dataLayer = (window as any).dataLayer || [];
-        function gtag(){(window as any).dataLayer.push(arguments);}
-        (window as any).gtag = gtag;
-        (window as any).gtag('js', new Date());
-        (window as any).gtag('config', 'G-G6T5PMFLRH');
-        (window as any).gtag('config', 'AW-17760727501');
-        console.log('Google Analytics and Ads initialized (existing consent)');
-      };
+    if (consent === 'accepted') {
+      loadGoogleTags();
     }
   }, []);
 
