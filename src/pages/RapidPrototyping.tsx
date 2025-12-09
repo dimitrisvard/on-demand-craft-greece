@@ -1,7 +1,8 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import SEOMeta from '../components/SEOMeta';
 import CTASection from '../components/CTASection';
 import PrototypingSection from './injection-molding/PrototypingSection';
-import { useTranslation } from 'react-i18next';
 
 const RapidPrototypingHero = () => {
   const { t } = useTranslation();
@@ -28,8 +29,15 @@ const RapidPrototypingHero = () => {
 };
 
 const RapidPrototyping = () => {
+  const { t } = useTranslation();
+  
   return (
     <div className="min-h-screen pt-16">
+      <SEOMeta 
+        title={`${t('seo_rapid_prototyping_title', 'Rapid Prototyping Services')} | Microns Hub`}
+        description={t('seo_rapid_prototyping_description', 'Accelerate your product development with fast, flexible prototyping solutions. Quick prototypes with 3D printing, CNC machining, and vacuum casting.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
+      />
       <RapidPrototypingHero />
       <PrototypingSection />
       <CTASection />

@@ -1,10 +1,11 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import SEOMeta from '../components/SEOMeta';
 import CTASection from '../components/CTASection';
 import IndustryHero from '../components/industries/IndustryHero';
 import IndustryDetail from '../components/industries/IndustryDetail';
 import FeaturedCaseStudies from '../components/industries/FeaturedCaseStudies';
 import { industriesData, featuredCaseStudies } from '../data/industriesData';
-import { useTranslation } from 'react-i18next';
 
 // Industry descriptions
 const industryDescriptions = {
@@ -36,8 +37,14 @@ const industryApplications = {
 
 const Industries = () => {
   const { t } = useTranslation();
+  
   return (
     <div className="min-h-screen pt-16">
+      <SEOMeta 
+        title={`${t('seo_industries_title', 'Industries We Serve')} | Microns Hub`}
+        description={t('seo_industries_description', 'Manufacturing solutions for aerospace, automotive, medical, electronics, and more. Precision parts for diverse industries.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
+      />
       {/* Hero Section */}
       <IndustryHero 
         title={t('industries_hero_title', 'Industries We Serve')}

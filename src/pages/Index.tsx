@@ -29,7 +29,7 @@ const Index = () => {
       <SEOMeta 
         title={t('home_title')}
         description={t('home_subtitle')}
-        keywords="CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding"
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
         ogImage="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"
       />
       <HeroSection heroImage={heroImage} />

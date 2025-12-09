@@ -52,6 +52,7 @@ const BlogIndex = () => {
       <SEOMeta 
         title={`${t('blog_title', 'Latest Updates')} | Microns Hub`}
         description={t('blog_subtitle', 'Latest news, updates, and insights from Microns Hub about manufacturing, engineering, and precision parts.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
         ogType="website"
       />
       

@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import SEOMeta from '../components/SEOMeta';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -233,6 +234,11 @@ export default function OurWork() {
 
   return (
     <div className="pt-20">{/* account for fixed navbar */}
+      <SEOMeta 
+        title={`${t('seo_our_work_title', 'Our Work Portfolio')} | Microns Hub`}
+        description={t('seo_our_work_description', 'View our portfolio of manufacturing projects. Examples of CNC machining, sheet metal fabrication, injection molding, and more.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
+      />
       <div className="bg-gradient-to-b from-brand-primary/5 to-transparent py-12">
         <div className="container-custom text-center">
           <h1 className="text-3xl md:text-4xl font-bold text-brand-dark">

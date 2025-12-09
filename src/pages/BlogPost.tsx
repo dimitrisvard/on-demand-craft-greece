@@ -141,6 +141,7 @@ const BlogPost = () => {
       <SEOMeta 
         title={`${article.meta_title || article.title} | Microns Hub`}
         description={article.meta_description || article.excerpt}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
         ogImage={article.featured_image}
         ogType="article"
         hreflangLinks={hreflangLinks.length > 0 ? hreflangLinks : undefined}

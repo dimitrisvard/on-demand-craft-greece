@@ -1,5 +1,6 @@
 import { Box } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
+import SEOMeta from '../components/SEOMeta';
 import MultiStepQuoteForm from '../components/quote-form/MultiStepQuoteForm';
 import { useTranslation } from 'react-i18next';
 
@@ -8,6 +9,11 @@ const Quote = () => {
 
   return (
     <div className="min-h-screen pt-16">
+      <SEOMeta 
+        title={`${t('seo_quote_title', 'Get Your Manufacturing Quote')} | Microns Hub`}
+        description={t('seo_quote_description', 'Upload your CAD files and get a detailed manufacturing quote within 24 hours. Our team of experts is ready to bring your designs to life.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
+      />
       {/* Hero Section */}
       <section className="relative py-20 bg-gray-900">
         <div className="absolute inset-0 bg-cover bg-center opacity-50" style={{ 

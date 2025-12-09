@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, Mail, MapPin, Clock, Check, AlertCircle } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
+import SEOMeta from '../components/SEOMeta';
 import CTASection from '../components/CTASection';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -78,6 +79,11 @@ const Contact = () => {
 
   return (
     <div className="min-h-screen pt-16">
+      <SEOMeta 
+        title={`${t('seo_contact_title', 'Contact Us')} | Microns Hub`}
+        description={t('seo_contact_description', 'Get in touch with Microns Hub. Contact our team for manufacturing inquiries, quotes, and support. We\'re here to help with your manufacturing needs.')}
+        keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
+      />
       {/* Hero Section */}
       <section className="relative py-24 bg-gray-900">
         <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ 

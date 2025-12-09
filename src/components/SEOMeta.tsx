@@ -33,7 +33,7 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
   
   const pageTitle = title || defaultTitle;
   const pageDescription = description || defaultDescription;
-  const pageKeywords = keywords || 'CNC machining, 3D printing, manufacturing, Greece, precision parts';
+  const pageKeywords = keywords || t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding');
 
   // Generate canonical URL
   const baseUrl = window.location.origin;
