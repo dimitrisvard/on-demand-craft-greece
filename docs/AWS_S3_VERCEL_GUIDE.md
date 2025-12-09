@@ -98,6 +98,34 @@ Create a dedicated IAM user for the application with limited permissions.
     ]
 }
 ```
+
+### Option B: Reusing an Existing IAM User (Multi-Bucket Access)
+
+If you already have an IAM user (e.g., for RFQs) and want to grant it access to the new articles bucket as well, update its policy to include both buckets:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:DeleteObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::YOUR_EXISTING_RFQ_BUCKET",
+                "arn:aws:s3:::YOUR_EXISTING_RFQ_BUCKET/*",
+                "arn:aws:s3:::YOUR_NEW_ARTICLES_BUCKET",
+                "arn:aws:s3:::YOUR_NEW_ARTICLES_BUCKET/*"
+            ]
+        }
+    ]
+}
+```
+
 5. Create user and generate **Access Key**.
    - Note down the `Access Key ID` and `Secret Access Key`.
 
