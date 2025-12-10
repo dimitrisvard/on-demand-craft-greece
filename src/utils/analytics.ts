@@ -36,11 +36,20 @@ export const initGA = () => {
 // Track page views
 export const trackPageView = (url: string, title?: string) => {
   if (typeof window !== 'undefined' && window.gtag) {
-    window.gtag('config', GA_MEASUREMENT_ID, {
-      page_title: title,
-      page_location: url,
+    try {
+      window.gtag('config', GA_MEASUREMENT_ID, {
+        page_title: title,
+        page_location: url,
+      });
+      console.log('GA: Page view tracked', { url, title, measurementId: GA_MEASUREMENT_ID });
+    } catch (error) {
+      console.error('GA: Error tracking page view', error);
+    }
+  } else {
+    console.warn('GA: gtag not available for page view tracking', { 
+      hasGtag: typeof window !== 'undefined' && !!window.gtag,
+      url 
     });
-    console.log('GA: Page view tracked', { url, title });
   }
 };
 

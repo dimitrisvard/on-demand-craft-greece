@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Separator } from "@/components/ui/separator";
 import { 
   Users, 
   Factory, 
@@ -13,9 +12,18 @@ import {
   LayoutDashboard,
   BarChart3,
   TrendingUp,
-  BookOpen
+  BookOpen,
+  ChevronDown,
+  Mail
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface PersistentDashboardLayoutProps {
   children: React.ReactNode;
@@ -40,23 +48,22 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard' || path === '/') return 'overview';
     if (path === '/dashboard/analytics') return 'analytics';
     if (path.startsWith('/dashboard/blog')) return 'blog';
+    if (path.startsWith('/dashboard/email-marketing')) return 'email-marketing';
     if (path === '/customers') return 'customers';
     if (path === '/partners') return 'partners';
     if (path === '/products') return 'products';
     if (path === '/rfq-management') return 'quotes';
     if (path === '/orders') return 'orders';
     if (path === '/calendar') return 'calendar';
+    if (path === '/notifications') return 'notifications';
+    if (path === '/settings') return 'settings';
     return 'overview';
   };
 
   const activeModule = getActiveModule();
 
-  const handleNavigation = (module: string, path: string) => {
-    if (module === 'overview') {
-      navigate('/dashboard');
-    } else {
-      navigate(path);
-    }
+  const handleNavigation = (path: string) => {
+    navigate(path);
   };
 
   if (loading) {
@@ -73,125 +80,163 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
   return (
     <div className="flex min-h-screen bg-background pt-16">
       {/* Persistent Sidebar */}
-      <div className="w-64 border-r bg-slate-50/50 dark:bg-slate-950/50 hidden md:block flex-col h-[calc(100vh-4rem)] sticky top-16">
-        <div className="p-6 border-b">
+      <div className="w-64 border-r bg-card/50 hidden md:flex flex-col h-[calc(100vh-4rem)] sticky top-16 shadow-sm">
+        <div className="p-6 border-b shrink-0">
           <div className="flex items-center gap-2 text-primary">
             <LayoutDashboard className="h-6 w-6" />
             <h2 className="text-lg font-bold tracking-tight">CRM System</h2>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-          {/* Overview - Show for all users */}
-          <NavButton 
-            active={activeModule === "overview"}
-            onClick={() => handleNavigation("overview", "/dashboard")}
-            icon={<BarChart3 className="h-4 w-4" />}
-            label="Overview"
-          />
+        <ScrollArea className="flex-1">
+          <div className="px-3 py-4">
+            {/* Overview Section - Always visible */}
+            <div className="space-y-1 mb-4">
+              <NavButton 
+                active={activeModule === "overview"}
+                onClick={() => handleNavigation("/dashboard")}
+                icon={<BarChart3 className="h-4 w-4" />}
+                label="Overview"
+              />
+              <NavButton 
+                active={activeModule === "analytics"}
+                onClick={() => handleNavigation("/dashboard/analytics")}
+                icon={<TrendingUp className="h-4 w-4" />}
+                label="Analytics"
+              />
+            </div>
 
-          <NavButton 
-            active={activeModule === "analytics"}
-            onClick={() => handleNavigation("analytics", "/dashboard/analytics")}
-            icon={<TrendingUp className="h-4 w-4" />}
-            label="Analytics"
-          />
+            {/* Collapsible Sections */}
+            <Accordion type="multiple" defaultValue={["management", "content", "operations", "system"]} className="space-y-2">
+              
+              {/* Management Section */}
+              {!isProductionPartner && (
+                <AccordionItem value="management" className="border-none">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Management
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton 
+                      active={activeModule === "customers"}
+                      onClick={() => handleNavigation("/customers")}
+                      icon={<Users className="h-4 w-4" />}
+                      label="Customers"
+                    />
+                    <NavButton 
+                      active={activeModule === "partners"}
+                      onClick={() => handleNavigation("/partners")}
+                      icon={<Factory className="h-4 w-4" />}
+                      label="Production Partners"
+                    />
+                    <NavButton 
+                      active={activeModule === "products"}
+                      onClick={() => handleNavigation("/products")}
+                      icon={<ShoppingBag className="h-4 w-4" />}
+                      label="Products & Inventory"
+                    />
+                    <NavButton 
+                      active={activeModule === "quotes"}
+                      onClick={() => handleNavigation("/rfq-management")}
+                      icon={<FileText className="h-4 w-4" />}
+                      label="RFQ & Quotes"
+                    />
+                     {/* Orders Moved Here */}
+                    <NavButton 
+                      active={activeModule === "orders"}
+                      onClick={() => handleNavigation("/orders")}
+                      icon={<Package className="h-4 w-4" />}
+                      label="Orders"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )}
 
-          {/* Admin-only menu items */}
-          {!isProductionPartner && (
-            <>
-              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Content
-              </div>
-              <NavButton 
-                active={activeModule === "blog"}
-                onClick={() => handleNavigation("blog", "/dashboard/blog")}
-                icon={<BookOpen className="h-4 w-4" />}
-                label="Blog Articles"
-              />
+              {/* Content Section */}
+              {!isProductionPartner && (
+                <AccordionItem value="content" className="border-none">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Content
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton 
+                      active={activeModule === "blog"}
+                      onClick={() => handleNavigation("/dashboard/blog")}
+                      icon={<BookOpen className="h-4 w-4" />}
+                      label="Blog Articles"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )}
 
-              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Management
-              </div>
-              <NavButton 
-                active={activeModule === "customers"}
-                onClick={() => handleNavigation("customers", "/customers")}
-                icon={<Users className="h-4 w-4" />}
-                label="Customers"
-              />
-              
-              <NavButton 
-                active={activeModule === "partners"}
-                onClick={() => handleNavigation("partners", "/partners")}
-                icon={<Factory className="h-4 w-4" />}
-                label="Production Partners"
-              />
-              
-              <NavButton 
-                active={activeModule === "products"}
-                onClick={() => handleNavigation("products", "/products")}
-                icon={<ShoppingBag className="h-4 w-4" />}
-                label="Products & Inventory"
-              />
-              
-              <NavButton 
-                active={activeModule === "quotes"}
-                onClick={() => handleNavigation("quotes", "/rfq-management")}
-                icon={<FileText className="h-4 w-4" />}
-                label="RFQ & Quotes"
-              />
-            </>
-          )}
-          
-          <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Operations
+              {/* Operations Section */}
+              <AccordionItem value="operations" className="border-none">
+                <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  Operations
+                </AccordionTrigger>
+                <AccordionContent className="pb-0 pt-1 space-y-1">
+                  {/* Production Partner sees Orders here if strictly needed, but let's keep consistent if possible. 
+                      If isProductionPartner is true, they don't see "Management" block above, 
+                      so we should add Orders here for them or create a separate block.
+                      The logic above hides "Management" for partners.
+                  */}
+                  {isProductionPartner && (
+                     <NavButton 
+                      active={activeModule === "orders"}
+                      onClick={() => handleNavigation("/orders")}
+                      icon={<Package className="h-4 w-4" />}
+                      label="Orders"
+                    />
+                  )}
+                <NavButton 
+                  active={activeModule === "calendar"}
+                  onClick={() => handleNavigation("/calendar")}
+                  icon={<Calendar className="h-4 w-4" />}
+                  label="Calendar"
+                />
+                 {/* Email Marketing - Operations */}
+                 {!isProductionPartner && (
+                  <NavButton 
+                    active={activeModule === "email-marketing"}
+                    onClick={() => handleNavigation("/dashboard/email-marketing")}
+                    icon={<Mail className="h-4 w-4" />}
+                    label="Email Marketing"
+                  />
+                 )}
+              </AccordionContent>
+            </AccordionItem>
+
+              {/* System Section */}
+              {!isProductionPartner && (
+                <AccordionItem value="system" className="border-none">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    System
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton 
+                      active={activeModule === "notifications"}
+                      onClick={() => handleNavigation("/notifications")}
+                      icon={<Bell className="h-4 w-4" />}
+                      label="Notifications"
+                    />
+                    <NavButton 
+                      active={activeModule === "settings"}
+                      onClick={() => handleNavigation("/settings")}
+                      icon={<Settings className="h-4 w-4" />}
+                      label="Settings"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+            </Accordion>
           </div>
-          
-          {/* Orders - Show for all users */}
-          <NavButton 
-            active={activeModule === "orders"}
-            onClick={() => handleNavigation("orders", "/orders")}
-            icon={<Package className="h-4 w-4" />}
-            label="Orders"
-          />
-          
-          {/* Calendar - Show for all users */}
-          <NavButton 
-            active={activeModule === "calendar"}
-            onClick={() => handleNavigation("calendar", "/calendar")}
-            icon={<Calendar className="h-4 w-4" />}
-            label="Calendar"
-          />
+        </ScrollArea>
 
-          {/* Admin-only additional menu items */}
-          {!isProductionPartner && (
-            <>
-              <div className="pt-4 pb-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                System
-              </div>
-              
-              <NavButton 
-                active={activeModule === "notifications"}
-                onClick={() => handleNavigation("notifications", "/notifications")}
-                icon={<Bell className="h-4 w-4" />}
-                label="Notifications"
-              />
-              
-              <NavButton 
-                active={activeModule === "settings"}
-                onClick={() => handleNavigation("settings", "/settings")}
-                icon={<Settings className="h-4 w-4" />}
-                label="Settings"
-              />
-            </>
-          )}
-        </div>
-
-        {/* User info at bottom */}
+        {/* User info at bottom - Fixed */}
         {user && (
-          <div className="p-4 border-t bg-background/50">
+          <div className="p-4 border-t bg-card/50 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold border border-primary/20">
+              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold border border-primary/20 ring-2 ring-background">
                 {user.email?.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 overflow-hidden">
@@ -206,8 +251,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-slate-50/30 dark:bg-slate-900/30">
-        <div className="p-8 max-w-7xl mx-auto">
+      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-muted/20">
+        <div className="p-8 max-w-7xl mx-auto animate-fade-in">
           {children}
         </div>
       </div>
@@ -224,15 +269,20 @@ interface NavButtonProps {
 
 const NavButton = ({ active, onClick, icon, label }: NavButtonProps) => (
   <button 
-    className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+    className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 group relative ${
       active 
-        ? "bg-primary text-primary-foreground shadow-sm" 
-        : "text-muted-foreground hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-foreground"
+        ? "bg-primary/10 text-primary" 
+        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
     }`}
     onClick={onClick}
   >
-    {icon}
-    <span>{label}</span>
+    {active && (
+      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-primary" />
+    )}
+    <span className="relative z-10 flex items-center gap-3">
+      {icon}
+      <span>{label}</span>
+    </span>
   </button>
 );
 

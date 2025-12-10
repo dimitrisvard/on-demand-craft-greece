@@ -43,6 +43,7 @@ import BlogList from './pages/dashboard/BlogList';
 import BlogEditor from './pages/dashboard/BlogEditor';
 import BlogIndex from './pages/BlogIndex';
 import BlogPost from './pages/BlogPost';
+import EmailMarketing from './pages/dashboard/EmailMarketing';
 
 // Import Dashboard/QuotesPage separately - DO NOT render this component directly in Routes
 // It requires specific props that need to be passed when used
@@ -123,6 +124,8 @@ function AppContent() {
               <Route path="/dashboard/blog" element={<BlogList />} />
               <Route path="/dashboard/blog/new" element={<BlogEditor />} />
               <Route path="/dashboard/blog/edit/:id" element={<BlogEditor />} />
+              <Route path="/dashboard/email-marketing" element={<EmailMarketing />} />
+              <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
               <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
               <Route path="/cookie-policy" element={<CookiePolicy />} />
             </Routes>
