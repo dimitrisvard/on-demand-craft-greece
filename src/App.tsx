@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePageTracking } from './hooks/usePageTracking';
 import AuthProvider from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
@@ -48,6 +49,8 @@ import EmailMarketing from './pages/dashboard/EmailMarketing';
 // Import Dashboard/QuotesPage separately - DO NOT render this component directly in Routes
 // It requires specific props that need to be passed when used
 import QuotesPage from './pages/dashboard/QuotesPage';
+
+const queryClient = new QueryClient();
 
 // Component to handle Google Analytics tracking
 function AppContent() {
@@ -141,9 +144,11 @@ function App() {
   console.log('App rendered');
   return (
     <HelmetProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </QueryClientProvider>
     </HelmetProvider>
   );
 }
