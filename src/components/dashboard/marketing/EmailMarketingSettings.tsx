@@ -109,7 +109,8 @@ const EmailMarketingSettings = () => {
          if (error) throw error;
       }
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
+      console.log('Settings saved successfully. Data:', variables);
       queryClient.invalidateQueries({ queryKey: ['marketing_settings'] });
       toast.success('Settings saved successfully');
     },
