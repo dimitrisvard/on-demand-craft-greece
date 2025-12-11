@@ -26,6 +26,8 @@ interface Campaign {
   sent_count: number;
 }
 
+import CampaignProgress from './CampaignProgress';
+
 const CampaignsTable = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -33,13 +35,17 @@ const CampaignsTable = () => {
   const { data: campaigns, isLoading } = useQuery({
     queryKey: ['campaigns'],
     queryFn: async () => {
+      // Fetch total subscribers count for progress calculation (approx)
+      const { count } = await supabase.from('marketing_subscribers').select('*', { count: 'exact', head: true });
+      const totalSubs = count || 0;
+
       const { data, error } = await supabase
         .from('marketing_campaigns')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data as Campaign[];
+      return data?.map(c => ({ ...c, total_recipients: totalSubs })) as (Campaign & { total_recipients: number })[];
     },
   });
 
@@ -125,18 +131,30 @@ const CampaignsTable = () => {
                 <TableCell className="max-w-[200px] truncate" title={campaign.subject_a}>
                     {campaign.subject_a}
                 </TableCell>
-                <TableCell>
-                  <Badge variant={getStatusColor(campaign.status) as any}>
-                    {campaign.status}
-                  </Badge>
+                <TableCell className="w-[200px]">
+                    {(campaign.status === 'sending' || campaign.status === 'sent') ? (
+                        <CampaignProgress 
+                            campaignId={campaign.id} 
+                            totalRecipients={campaign.total_recipients || 100} // Fallback or assume based on list
+                            initialSentCount={campaign.sent_count}
+                            status={campaign.status}
+                        />
+                    ) : (
+                        <Badge variant={getStatusColor(campaign.status) as any}>
+                            {campaign.status}
+                        </Badge>
+                    )}
                 </TableCell>
                 <TableCell>
                     {campaign.scheduled_at 
                         ? format(new Date(campaign.scheduled_at), 'PPP p') 
-                        : (campaign.status === 'sent' ? 'Sent' : 'Not scheduled')}
+                        : (campaign.status === 'sent' ? 'Completed' : '-')}
                 </TableCell>
                 <TableCell>
-                    {campaign.status === 'sent' ? `${campaign.sent_count} Sent` : '-'}
+                    <div className="flex flex-col text-xs">
+                        <span>{campaign.sent_count} Sent</span>
+                        {/* Can add Open/Click rates here later */}
+                    </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
