@@ -59,6 +59,13 @@ const EmailMarketingSettings = () => {
 
   const form = useForm<SettingsFormValues>({
     resolver: zodResolver(settingsSchema),
+    defaultValues: {
+        daily_limit: 1000,
+        sending_window_start: '09:00',
+        sending_window_end: '17:00',
+        delay_between_emails_seconds: 60,
+        active_days: [1, 2, 3, 4, 5],
+    },
     values: settings ? {
         daily_limit: settings.daily_limit,
         sending_window_start: settings.sending_window_start?.slice(0, 5) || '09:00',
@@ -187,12 +194,13 @@ const EmailMarketingSettings = () => {
                       <div key={day.id} className="flex items-center space-x-2">
                         <Checkbox
                           id={`day-${day.id}`}
-                          checked={field.value.includes(day.id)}
+                          checked={(field.value || []).includes(day.id)}
                           onCheckedChange={(checked) => {
+                            const currentValues = field.value || [];
                             if (checked) {
-                              field.onChange([...field.value, day.id]);
+                              field.onChange([...currentValues, day.id]);
                             } else {
-                              field.onChange(field.value.filter((d) => d !== day.id));
+                              field.onChange(currentValues.filter((d) => d !== day.id));
                             }
                           }}
                         />

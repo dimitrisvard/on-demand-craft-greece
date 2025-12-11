@@ -24,15 +24,18 @@ import {
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Upload, Download, Trash2, Search, Loader2 } from 'lucide-react';
-import Papa from 'papaparse';
+import Papa, { ParseResult } from 'papaparse';
+import AddSubscriberDialog from './AddSubscriberDialog';
 
+// Define the type to match Supabase's generated type for marketing_subscribers
 interface Subscriber {
   id: string;
   email: string;
   name: string | null;
-  tags: string[];
-  status: 'active' | 'unsubscribed';
+  tags: any | null; // Using any for JSON type flexibility
+  status: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 const SubscribersTable = () => {
@@ -61,7 +64,19 @@ const SubscribersTable = () => {
     mutationFn: async (rows: any[]) => {
       // Format data for insertion
       const formattedData = rows.map((row) => {
-        const rowTags = row.tags ? (Array.isArray(row.tags) ? row.tags : row.tags.split(',').map((t: string) => t.trim())) : [];
+        // Handle tags properly - they should be an array of strings for JSONB
+        let rowTags: string[] = [];
+        
+        // Handle CSV tags which might be comma separated string or array
+        const rawTags = row.tags || row.Tags || row.TAGS;
+        
+        if (Array.isArray(rawTags)) {
+            rowTags = rawTags;
+        } else if (typeof rawTags === 'string') {
+            rowTags = rawTags.split(',').map((t: string) => t.trim()).filter(Boolean);
+        }
+
+        // Add list name to tags if provided
         if (listName && !rowTags.includes(listName)) {
             rowTags.push(listName);
         }
@@ -69,7 +84,7 @@ const SubscribersTable = () => {
         return {
             email: row.email || row.Email || row['E-mail'] || row['e-mail'],
             name: row.name || row.Name || row['Full Name'],
-            tags: rowTags,
+            tags: rowTags, // Pass as array, Supabase handles conversion to JSONB
             status: 'active',
         };
       }).filter(row => row.email); // Ensure email exists
@@ -86,6 +101,7 @@ const SubscribersTable = () => {
       setIsImportOpen(false);
       toast.success(`Successfully imported ${count} subscribers`);
       setImporting(false);
+      setListName(''); // Clear list name after successful import
     },
     onError: (error) => {
       console.error('Import error:', error);
@@ -118,11 +134,12 @@ const SubscribersTable = () => {
       header: true,
       skipEmptyLines: true,
       transformHeader: (header) => header.trim(), // Trim headers to avoid mismatch
-      complete: (results) => {
+      complete: (results: ParseResult<any>) => {
         if (results.errors.length > 0) {
             console.warn("CSV Parse Warnings:", results.errors);
             // Filter out duplicate header errors if they are not critical
-            const criticalErrors = results.errors.filter(e => e.code !== 'TooManyFields' && e.code !== 'NotEnoughFields');
+            // Using loose comparison for error codes as types might vary
+            const criticalErrors = results.errors.filter((e: any) => e.code !== 'TooManyFields' && e.code !== 'NotEnoughFields');
             if(criticalErrors.length > 0) {
                  toast.warning(`CSV parsed with ${criticalErrors.length} warnings. check console.`);
             }
@@ -163,6 +180,7 @@ const SubscribersTable = () => {
           />
         </div>
         <div className="flex gap-2">
+          <AddSubscriberDialog />
           <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">
@@ -242,7 +260,7 @@ const SubscribersTable = () => {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {/* Handle JSONB tags which might be string or array */}
-                      {Array.isArray(subscriber.tags) && subscriber.tags.map((tag, i) => (
+                      {Array.isArray(subscriber.tags) && subscriber.tags.map((tag: string, i: number) => (
                         <Badge key={i} variant="outline" className="text-xs">
                           {tag}
                         </Badge>
@@ -276,4 +294,3 @@ const SubscribersTable = () => {
 };
 
 export default SubscribersTable;
-

@@ -113,12 +113,12 @@ const CampaignWizard = () => {
         .insert({
           name: data.name,
           subject_a: data.subject_a,
-          subject_b: data.subject_b,
+          subject_b: data.subject_b || null, // Ensure optional fields are null if empty
           body: data.body,
           scheduled_at: data.scheduled_at ? data.scheduled_at.toISOString() : null,
           status: data.scheduled_at ? 'scheduled' : 'draft',
           target_tags: data.target_tags,
-          follow_up_config: data.follow_up_config, // Ensure your DB has this column or use JSONB
+          follow_up_config: data.follow_up_config, 
           ab_test_config: {
             enabled: data.ab_enabled,
             test_percentage: data.test_percentage,
@@ -339,7 +339,7 @@ const CampaignWizard = () => {
                                                     {...register(`follow_up_config.${index}.delay_days`, { valueAsNumber: true })} 
                                                 />
                                             </div>
-                                            <span className="text-sm text-muted-foreground">days</span>
+                                            <span className="text-sm text-muted-foreground">days from previous email</span>
                                         </div>
                                         <div className="space-y-2">
                                             <Label>Subject</Label>
@@ -389,7 +389,8 @@ const CampaignWizard = () => {
                                                 <Label htmlFor="all-subscribers" className="font-medium">All Subscribers</Label>
                                             </div>
                                             <Separator />
-                                            {availableTags?.map((tag) => (
+                                            {availableTags && availableTags.length > 0 ? (
+                                                availableTags.map((tag) => (
                                                 <div key={tag} className="flex items-center space-x-2">
                                                     <Checkbox 
                                                         id={`tag-${tag}`} 
@@ -405,9 +406,10 @@ const CampaignWizard = () => {
                                                     />
                                                     <Label htmlFor={`tag-${tag}`}>{tag}</Label>
                                                 </div>
-                                            ))}
-                                            {(!availableTags || availableTags.length === 0) && (
-                                                <p className="text-sm text-muted-foreground italic pl-6">No tags/lists found.</p>
+                                            ))) : (
+                                                <p className="text-sm text-muted-foreground italic pl-6">
+                                                    No lists (tags) found. Create lists by importing CSVs with a list name.
+                                                </p>
                                             )}
                                         </div>
                                     </ScrollArea>
