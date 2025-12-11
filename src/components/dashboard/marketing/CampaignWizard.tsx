@@ -222,14 +222,11 @@ const CampaignWizard = () => {
     }
   };
 
-  const nextStep = () => {
+  const nextStep = async () => {
     if (currentStep === 0) {
-        const name = form.trigger('name');
-        const subj = form.trigger('subject_a');
-        // We are not awaiting trigger, so we trust user or check errors?
-        // Let's just proceed for UX smoothness, form submission will validate everything.
-        // But better UX is to block.
-        // For now, let's just proceed.
+        const isNameValid = await form.trigger('name');
+        const isSubjectValid = await form.trigger('subject_a');
+        if (!isNameValid || !isSubjectValid) return;
     }
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
   };
