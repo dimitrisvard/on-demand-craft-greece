@@ -37,15 +37,18 @@ const EmailMarketingSettings = () => {
   const queryClient = useQueryClient();
 
   // Fetch settings
-  const { data: settings, isLoading } = useQuery({
+  const { data: settings, isLoading, error: queryError } = useQuery({
     queryKey: ['marketing_settings'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('marketing_settings')
         .select('*')
-        .single();
+        .maybeSingle(); // Use maybeSingle to avoid error if no row exists yet
       
-      if (error && error.code !== 'PGRST116') throw error; // PGRST116 is "Row not found" which is fine initially
+      if (error) {
+        console.error('Error fetching settings:', error);
+        throw error;
+      }
       
       return data || {
         daily_limit: 1000,
@@ -55,6 +58,7 @@ const EmailMarketingSettings = () => {
         active_days: [1, 2, 3, 4, 5],
       };
     },
+    retry: 1, // Don't retry endlessly on 404
   });
 
   const form = useForm<SettingsFormValues>({

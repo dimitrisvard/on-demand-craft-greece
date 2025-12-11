@@ -82,9 +82,8 @@ const CampaignWizard = () => {
     name: "follow_up_config"
   });
 
-  // Fetch unique tags for audience selection
-  const { data: availableTags } = useQuery({
-    queryKey: ['marketing_tags'],
+  const { data: tagStats } = useQuery({
+    queryKey: ['marketing_tags_stats'],
     queryFn: async () => {
         const { data, error } = await supabase
             .from('marketing_subscribers')
@@ -92,16 +91,97 @@ const CampaignWizard = () => {
         
         if (error) throw error;
         
-        // Flatten and unique
-        const tags = new Set<string>();
+        const stats: Record<string, number> = {
+            'all': data.length
+        };
+
+        // Initialize tags from data
+        const uniqueTags = new Set<string>();
+        
         data?.forEach(sub => {
             if (Array.isArray(sub.tags)) {
-                sub.tags.forEach((t: string) => tags.add(t));
+                sub.tags.forEach((t: string) => {
+                    uniqueTags.add(t);
+                    stats[t] = (stats[t] || 0) + 1;
+                });
             }
         });
-        return Array.from(tags);
+        
+        return { uniqueTags: Array.from(uniqueTags), stats };
     }
   });
+
+  const availableTags = tagStats?.uniqueTags;
+  
+  // Calculate total recipients based on selection
+  const selectedTags = watch('target_tags');
+  const totalRecipients = selectedTags.length === 0 
+    ? (tagStats?.stats['all'] || 0)
+    : selectedTags.reduce((acc, tag) => {
+        // This is an approximation as subscribers might have multiple tags.
+        // For precise count, we'd need to query the DB or filter the full list in memory.
+        // Since we only fetched tags, let's use the stats but be aware of overlap.
+        // Actually, fetching full subscriber list is better for precise count if list is not huge.
+        // For now, let's assume simple sum or just show "Approx". 
+        // OR better: Filter from the fetched data if we store it.
+        return acc; // logic below
+      }, 0);
+
+  // Better approach: Calculate unique subscribers matching the selection
+  const { data: recipientCount } = useQuery({
+    queryKey: ['recipient_count', selectedTags],
+    enabled: !!tagStats, // Only run if we have base data
+    queryFn: async () => {
+        if (selectedTags.length === 0) {
+            return tagStats?.stats['all'] || 0;
+        }
+        
+        // If we want precise count without overlap
+        const { count, error } = await supabase
+            .from('marketing_subscribers')
+            .select('*', { count: 'exact', head: true })
+            .contains('tags', selectedTags); // This checks if tags column contains ALL selected tags (AND logic)
+            // But usually marketing lists are OR logic (send to list A OR list B).
+            // Supabase/Postgres array overlap: tags && ARRAY['tag1', 'tag2']
+            
+        // Complex OR logic with JSONB tags is harder in simple query builder without RPC.
+        // Let's settle for fetching all tags (lightweight) and filtering in memory for this UI estimate.
+        // We already fetched all tags in 'marketing_tags_stats'.
+        
+        // Actually, let's just use the 'marketing_tags_stats' query to return the full tags map
+        // so we can calculate unique count locally.
+        return 0;
+    }
+  });
+
+  // Refactor: Fetch all subscribers' tags to calculate counts locally
+  const { data: subscribersTags } = useQuery({
+    queryKey: ['subscribers_tags_full'],
+    queryFn: async () => {
+        const { data, error } = await supabase
+            .from('marketing_subscribers')
+            .select('id, tags');
+        if (error) throw error;
+        return data;
+    }
+  });
+
+  const calculateRecipientCount = () => {
+      if (!subscribersTags) return 0;
+      if (selectedTags.length === 0) return subscribersTags.length;
+      
+      const uniqueRecipients = new Set();
+      subscribersTags.forEach(sub => {
+          const subTags = Array.isArray(sub.tags) ? sub.tags : [];
+          // OR logic: if subscriber has ANY of the selected tags
+          if (selectedTags.some(tag => subTags.includes(tag))) {
+              uniqueRecipients.add(sub.id);
+          }
+      });
+      return uniqueRecipients.size;
+  };
+
+  const recipientCountValue = calculateRecipientCount();
 
   const onSubmit = async (data: CampaignFormValues) => {
     setIsSubmitting(true);
@@ -391,20 +471,25 @@ const CampaignWizard = () => {
                                             <Separator />
                                             {availableTags && availableTags.length > 0 ? (
                                                 availableTags.map((tag) => (
-                                                <div key={tag} className="flex items-center space-x-2">
-                                                    <Checkbox 
-                                                        id={`tag-${tag}`} 
-                                                        checked={watch('target_tags').includes(tag)}
-                                                        onCheckedChange={(checked) => {
-                                                            const current = watch('target_tags');
-                                                            if (checked) {
-                                                                setValue('target_tags', [...current, tag]);
-                                                            } else {
-                                                                setValue('target_tags', current.filter(t => t !== tag));
-                                                            }
-                                                        }}
-                                                    />
-                                                    <Label htmlFor={`tag-${tag}`}>{tag}</Label>
+                                                <div key={tag} className="flex items-center space-x-2 justify-between">
+                                                    <div className="flex items-center space-x-2">
+                                                        <Checkbox 
+                                                            id={`tag-${tag}`} 
+                                                            checked={watch('target_tags').includes(tag)}
+                                                            onCheckedChange={(checked) => {
+                                                                const current = watch('target_tags');
+                                                                if (checked) {
+                                                                    setValue('target_tags', [...current, tag]);
+                                                                } else {
+                                                                    setValue('target_tags', current.filter(t => t !== tag));
+                                                                }
+                                                            }}
+                                                        />
+                                                        <Label htmlFor={`tag-${tag}`}>{tag}</Label>
+                                                    </div>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        ({tagStats?.stats[tag] || 0})
+                                                    </span>
                                                 </div>
                                             ))) : (
                                                 <p className="text-sm text-muted-foreground italic pl-6">
@@ -437,9 +522,14 @@ const CampaignWizard = () => {
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Audience:</span>
-                                        <span className="font-medium">
-                                            {watch('target_tags').length === 0 ? 'All Subscribers' : watch('target_tags').join(', ')}
-                                        </span>
+                                        <div className="text-right">
+                                            <span className="font-medium block">
+                                                {watch('target_tags').length === 0 ? 'All Subscribers' : watch('target_tags').join(', ')}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground block">
+                                                ~{recipientCountValue} recipients
+                                            </span>
+                                        </div>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Follow-ups:</span>
