@@ -209,9 +209,26 @@ const CampaignWizard = () => {
         .select()
         .single();
 
-      if (error) throw error;
+      // 2. Trigger Sending Function (if not scheduled)
+      if (!data.scheduled_at) {
+          try {
+              const { error: fnError } = await supabase.functions.invoke('send-campaign', {
+                  body: { campaign_id: campaign.id }
+              });
+              if (fnError) {
+                  console.error("Function error:", fnError);
+                  toast.error("Campaign created but failed to start sending.");
+              } else {
+                  toast.success("Campaign sent successfully!");
+              }
+          } catch (invokeError) {
+              console.error("Invoke error:", invokeError);
+              toast.error("Failed to trigger send function.");
+          }
+      } else {
+          toast.success('Campaign scheduled successfully!');
+      }
 
-      toast.success('Campaign saved successfully!');
       navigate('/dashboard/email-marketing');
 
     } catch (error: any) {
