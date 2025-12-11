@@ -38,6 +38,7 @@ import RapidPrototyping from './pages/RapidPrototyping';
 import TestPartnerNotification from './pages/TestPartnerNotification';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import CookiePolicy from './pages/CookiePolicy';
+import ImpressumPage from './pages/ImpressumPage';
 import AnalyticsPage from './pages/dashboard/AnalyticsPage';
 
 import BlogList from './pages/dashboard/BlogList';
@@ -131,6 +132,8 @@ function AppContent() {
               <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
               <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
               <Route path="/cookie-policy" element={<CookiePolicy />} />
+              <Route path="/impressum" element={<ImpressumPage />} />
+              <Route path="/:lang/impressum" element={<ImpressumPage />} />
             </Routes>
           <CookieConsentBanner />
           <Footer />

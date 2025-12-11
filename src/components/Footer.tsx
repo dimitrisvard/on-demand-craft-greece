@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Phone, Mail, MapPin, Facebook, Twitter, Linkedin, Instagram, FileText } from 'lucide-react';
+import { Phone, Mail, MapPin, Facebook, Twitter, Linkedin, Instagram, FileText, Scale } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -70,6 +70,12 @@ const Footer = () => {
               <li className="flex items-center">
                 <FileText size={18} className="mr-2 text-brand-accent" />
                 <span className="text-gray-600">{t('footer_vat_label', 'VAT Number')}: EL137232320</span>
+              </li>
+              <li className="flex items-center">
+                <Scale size={18} className="mr-2 text-brand-accent" />
+                <Link to={getLocalizedPath('/impressum')} className="text-gray-600 hover:text-brand-accent transition-colors">
+                  {t('footer_impressum', 'Legal Notice')}
+                </Link>
               </li>
             </ul>
           </div>
