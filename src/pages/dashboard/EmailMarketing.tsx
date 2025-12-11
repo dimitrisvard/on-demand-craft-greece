@@ -60,6 +60,15 @@ import CampaignWizard from '@/components/dashboard/marketing/CampaignWizard';
 
 // Placeholder components - will be implemented in subsequent steps
 
+import EmailMarketingSettings from '@/components/dashboard/marketing/EmailMarketingSettings';
+
+const SettingsView = () => (
+    <div className="space-y-4">
+        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
+        <EmailMarketingSettings />
+    </div>
+);
+
 const EmailMarketing = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -69,6 +78,7 @@ const EmailMarketing = () => {
     const path = location.pathname;
     if (path.includes('/subscribers')) return 'subscribers';
     if (path.includes('/analytics')) return 'analytics';
+    if (path.includes('/settings')) return 'settings';
     if (path.includes('/campaigns')) return 'campaigns'; // Generic for list
     return 'overview'; // Default to overview/campaigns list
   };
@@ -83,6 +93,9 @@ const EmailMarketing = () => {
         break;
       case 'analytics':
         navigate('/dashboard/email-marketing/analytics');
+        break;
+      case 'settings':
+        navigate('/dashboard/email-marketing/settings');
         break;
       default:
         break;
@@ -114,12 +127,16 @@ const EmailMarketing = () => {
             <TabsTrigger value="analytics" className="flex items-center gap-2">
               <BarChart2 className="h-4 w-4" /> Analytics
             </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <LayoutTemplate className="h-4 w-4" /> Settings
+            </TabsTrigger>
           </TabsList>
 
           <Routes>
             <Route path="/" element={<CampaignsList />} />
             <Route path="/subscribers" element={<SubscribersView />} />
             <Route path="/analytics" element={<AnalyticsView />} />
+            <Route path="/settings" element={<SettingsView />} />
             <Route path="/campaigns/new" element={<CampaignWizard />} />
             {/* Redirect any unknown sub-routes to overview */}
             <Route path="*" element={<Navigate to="/dashboard/email-marketing" replace />} />

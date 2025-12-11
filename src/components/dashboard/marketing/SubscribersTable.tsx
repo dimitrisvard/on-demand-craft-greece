@@ -39,6 +39,7 @@ const SubscribersTable = () => {
   const [search, setSearch] = useState('');
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [listName, setListName] = useState('');
   const queryClient = useQueryClient();
 
   // Fetch subscribers
@@ -59,12 +60,19 @@ const SubscribersTable = () => {
   const importMutation = useMutation({
     mutationFn: async (rows: any[]) => {
       // Format data for insertion
-      const formattedData = rows.map((row) => ({
-        email: row.email || row.Email,
-        name: row.name || row.Name,
-        tags: row.tags ? (Array.isArray(row.tags) ? row.tags : row.tags.split(',').map((t: string) => t.trim())) : [],
-        status: 'active',
-      })).filter(row => row.email); // Ensure email exists
+      const formattedData = rows.map((row) => {
+        const rowTags = row.tags ? (Array.isArray(row.tags) ? row.tags : row.tags.split(',').map((t: string) => t.trim())) : [];
+        if (listName && !rowTags.includes(listName)) {
+            rowTags.push(listName);
+        }
+        
+        return {
+            email: row.email || row.Email || row['E-mail'] || row['e-mail'],
+            name: row.name || row.Name || row['Full Name'],
+            tags: rowTags,
+            status: 'active',
+        };
+      }).filter(row => row.email); // Ensure email exists
 
       const { error } = await supabase
         .from('marketing_subscribers')
@@ -108,7 +116,17 @@ const SubscribersTable = () => {
     setImporting(true);
     Papa.parse(file, {
       header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(), // Trim headers to avoid mismatch
       complete: (results) => {
+        if (results.errors.length > 0) {
+            console.warn("CSV Parse Warnings:", results.errors);
+            // Filter out duplicate header errors if they are not critical
+            const criticalErrors = results.errors.filter(e => e.code !== 'TooManyFields' && e.code !== 'NotEnoughFields');
+            if(criticalErrors.length > 0) {
+                 toast.warning(`CSV parsed with ${criticalErrors.length} warnings. check console.`);
+            }
+        }
         importMutation.mutate(results.data);
       },
       error: (error) => {
@@ -155,12 +173,35 @@ const SubscribersTable = () => {
               <DialogHeader>
                 <DialogTitle>Import Subscribers</DialogTitle>
                 <DialogDescription>
-                  Upload a CSV file with columns: email, name, tags (optional).
+                  Upload a CSV file with columns: email, name (optional), tags (optional).
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid w-full max-w-sm items-center gap-1.5 py-4">
-                <Label htmlFor="csv">CSV File</Label>
-                <Input id="csv" type="file" accept=".csv" onChange={handleFileUpload} disabled={importing} />
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="listName" className="text-right">
+                    List Name
+                  </Label>
+                  <Input
+                    id="listName"
+                    placeholder="e.g. Newsletter Jan 2025"
+                    value={listName}
+                    onChange={(e) => setListName(e.target.value)}
+                    className="col-span-3"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="csv" className="text-right">
+                    CSV File
+                  </Label>
+                  <Input
+                    id="csv"
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    className="col-span-3"
+                    disabled={importing}
+                  />
+                </div>
               </div>
               <DialogFooter>
                  {importing && <span className="text-sm text-muted-foreground flex items-center"><Loader2 className="mr-2 h-3 w-3 animate-spin"/> Importing...</span>}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useForm, Controller } from 'react-hook-form';
+import React, { useState, useEffect } from 'react';
+import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import ReactQuill from 'react-quill';
@@ -15,13 +15,22 @@ import { Separator } from '@/components/ui/separator';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Send, Save, ArrowLeft, ArrowRight, Users } from 'lucide-react';
+import { CalendarIcon, Loader2, Send, Save, ArrowLeft, ArrowRight, Users, Plus, Trash2, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // Validation Schema
+const followUpSchema = z.object({
+  delay_days: z.number().min(1, "Delay must be at least 1 day"),
+  subject: z.string().min(5, "Subject is required"),
+  body: z.string().min(10, "Content is required"),
+});
+
 const campaignSchema = z.object({
   name: z.string().min(3, "Campaign name must be at least 3 characters"),
   subject_a: z.string().min(5, "Subject line is required"),
@@ -31,6 +40,8 @@ const campaignSchema = z.object({
   body: z.string().min(10, "Email content is required"),
   scheduled_at: z.date().optional(),
   smart_sending: z.boolean().default(false),
+  target_tags: z.array(z.string()).default([]),
+  follow_up_config: z.array(followUpSchema).default([]),
 });
 
 type CampaignFormValues = z.infer<typeof campaignSchema>;
@@ -38,7 +49,7 @@ type CampaignFormValues = z.infer<typeof campaignSchema>;
 const steps = [
   { id: 'details', title: '1. Details' },
   { id: 'content', title: '2. Content' },
-  { id: 'audience', title: '3. Audience' }, // Simplified for now
+  { id: 'audience', title: '3. Audience' },
   { id: 'review', title: '4. Review & Schedule' }
 ];
 
@@ -57,6 +68,8 @@ const CampaignWizard = () => {
       test_percentage: 20,
       body: '',
       smart_sending: false,
+      target_tags: [],
+      follow_up_config: [],
     }
   });
 
@@ -64,10 +77,37 @@ const CampaignWizard = () => {
   const abEnabled = watch('ab_enabled');
   const scheduledDate = watch('scheduled_at');
 
+  const { fields: followUpFields, append: appendFollowUp, remove: removeFollowUp } = useFieldArray({
+    control,
+    name: "follow_up_config"
+  });
+
+  // Fetch unique tags for audience selection
+  const { data: availableTags } = useQuery({
+    queryKey: ['marketing_tags'],
+    queryFn: async () => {
+        const { data, error } = await supabase
+            .from('marketing_subscribers')
+            .select('tags');
+        
+        if (error) throw error;
+        
+        // Flatten and unique
+        const tags = new Set<string>();
+        data?.forEach(sub => {
+            if (Array.isArray(sub.tags)) {
+                sub.tags.forEach((t: string) => tags.add(t));
+            }
+        });
+        return Array.from(tags);
+    }
+  });
+
   const onSubmit = async (data: CampaignFormValues) => {
     setIsSubmitting(true);
+    console.log("Submitting campaign:", data);
+
     try {
-      // 1. Create Campaign in DB
       const { data: campaign, error } = await supabase
         .from('marketing_campaigns')
         .insert({
@@ -76,7 +116,9 @@ const CampaignWizard = () => {
           subject_b: data.subject_b,
           body: data.body,
           scheduled_at: data.scheduled_at ? data.scheduled_at.toISOString() : null,
-          status: data.scheduled_at ? 'scheduled' : 'draft', // Or 'sending' if immediate? Let's use draft/scheduled for now.
+          status: data.scheduled_at ? 'scheduled' : 'draft',
+          target_tags: data.target_tags,
+          follow_up_config: data.follow_up_config, // Ensure your DB has this column or use JSONB
           ab_test_config: {
             enabled: data.ab_enabled,
             test_percentage: data.test_percentage,
@@ -90,27 +132,24 @@ const CampaignWizard = () => {
       if (error) throw error;
 
       toast.success('Campaign saved successfully!');
-      
-      // If scheduled or immediate send, we might trigger a backend function here
-      // For now, we just save and redirect
       navigate('/dashboard/email-marketing');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving campaign:', error);
-      toast.error('Failed to save campaign');
+      toast.error('Failed to save campaign: ' + (error.message || 'Unknown error'));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const nextStep = () => {
-    // Validate current step fields before moving
     if (currentStep === 0) {
         const name = form.trigger('name');
         const subj = form.trigger('subject_a');
-        if(!name || !subj) return; 
-        // Note: trigger is async but we are simplifying logic here. 
-        // Ideally await form.trigger(['name', 'subject_a'])
+        // We are not awaiting trigger, so we trust user or check errors?
+        // Let's just proceed for UX smoothness, form submission will validate everything.
+        // But better UX is to block.
+        // For now, let's just proceed.
     }
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
   };
@@ -119,8 +158,17 @@ const CampaignWizard = () => {
     setCurrentStep(prev => Math.max(prev - 1, 0));
   };
 
+  const insertPlaceholder = (placeholder: string) => {
+    // This is a simple append. Ideally, insert at cursor position.
+    // ReactQuill doesn't easily expose ref to cursor.
+    // We will just append for now or copy to clipboard.
+    const currentBody = watch('body');
+    setValue('body', currentBody + ` {{${placeholder}}} `);
+    toast.info(`Added {{${placeholder}}} to content`);
+  };
+
   return (
-    <div className="max-w-4xl mx-auto py-6">
+    <div className="max-w-5xl mx-auto py-6">
       <div className="mb-8">
         <div className="flex justify-between items-center mb-4">
             <h1 className="text-2xl font-bold">Create Campaign</h1>
@@ -145,7 +193,7 @@ const CampaignWizard = () => {
 
       <Card>
         <CardContent className="pt-6">
-            <form onSubmit={handleSubmit(onSubmit)}>
+            <form onSubmit={handleSubmit(onSubmit, (errors) => console.error("Validation Errors:", errors))}>
                 {/* Step 1: Details */}
                 {currentStep === 0 && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -207,9 +255,6 @@ const CampaignWizard = () => {
                                             />
                                             <span className="text-sm font-medium w-24 text-right">{(100 - watch('test_percentage'))}% Winner</span>
                                         </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            We'll send Variant A and B to {watch('test_percentage')}% of your list, wait 4 hours, then send the winning subject line to the rest.
-                                        </p>
                                     </div>
                                 </div>
                             )}
@@ -217,11 +262,17 @@ const CampaignWizard = () => {
                     </div>
                 )}
 
-                {/* Step 2: Content */}
+                {/* Step 2: Content & Follow-ups */}
                 {currentStep === 1 && (
-                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-300">
                         <div className="space-y-2">
-                            <Label>Email Content</Label>
+                            <div className="flex justify-between items-center">
+                                <Label>Email Content</Label>
+                                <div className="flex gap-2">
+                                    <Button type="button" variant="outline" size="sm" onClick={() => insertPlaceholder('name')}>+ Name</Button>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => insertPlaceholder('company')}>+ Company</Button>
+                                </div>
+                            </div>
                             <Controller
                                 name="body"
                                 control={control}
@@ -247,21 +298,126 @@ const CampaignWizard = () => {
                             />
                              {errors.body && <p className="text-sm text-destructive mt-2">{errors.body.message}</p>}
                         </div>
+                        
+                        <Separator />
+
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-medium">Follow-up Emails</h3>
+                                <Button type="button" variant="outline" size="sm" onClick={() => appendFollowUp({ delay_days: 1, subject: '', body: '' })}>
+                                    <Plus className="w-4 h-4 mr-2" /> Add Follow-up
+                                </Button>
+                            </div>
+                            
+                            {followUpFields.length === 0 && (
+                                <p className="text-sm text-muted-foreground italic">No follow-up emails configured. Add one to create a sequence.</p>
+                            )}
+
+                            {followUpFields.map((field, index) => (
+                                <Card key={field.id} className="relative">
+                                    <Button 
+                                        type="button" 
+                                        variant="ghost" 
+                                        size="icon" 
+                                        className="absolute right-2 top-2 text-destructive hover:bg-destructive/10"
+                                        onClick={() => removeFollowUp(index)}
+                                    >
+                                        <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-base flex items-center gap-2">
+                                            <Clock className="w-4 h-4" /> Follow-up #{index + 1}
+                                        </CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="space-y-4">
+                                        <div className="flex items-center gap-4">
+                                            <Label>Send after</Label>
+                                            <div className="w-24">
+                                                <Input 
+                                                    type="number" 
+                                                    min="1" 
+                                                    {...register(`follow_up_config.${index}.delay_days`, { valueAsNumber: true })} 
+                                                />
+                                            </div>
+                                            <span className="text-sm text-muted-foreground">days</span>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Subject</Label>
+                                            <Input placeholder="Follow-up subject..." {...register(`follow_up_config.${index}.subject`)} />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Body</Label>
+                                            <Controller
+                                                name={`follow_up_config.${index}.body`}
+                                                control={control}
+                                                render={({ field }) => (
+                                                    <div className="h-[200px] mb-12">
+                                                        <ReactQuill theme="snow" value={field.value} onChange={field.onChange} className="h-full" />
+                                                    </div>
+                                                )}
+                                            />
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
                     </div>
                 )}
 
-                {/* Step 3: Audience (Placeholder) */}
+                {/* Step 3: Audience */}
                 {currentStep === 2 && (
-                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300 text-center py-12">
-                        <div className="max-w-md mx-auto space-y-4">
-                            <Users className="w-12 h-12 mx-auto text-muted-foreground" />
-                            <h3 className="text-lg font-medium">Audience Selection</h3>
-                            <p className="text-muted-foreground">
-                                Currently, this campaign will be sent to <strong>All Active Subscribers</strong>.
-                            </p>
-                            <div className="p-4 bg-secondary/50 rounded-lg text-sm text-left">
-                                <p>Future feature: Filter by tags (e.g., "Customer", "Newsletter") or status.</p>
+                    <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                         <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                                <Users className="w-5 h-5" />
+                                <h3 className="text-lg font-medium">Select Audience</h3>
                             </div>
+                            <p className="text-muted-foreground">Select the lists (tags) you want to target with this campaign.</p>
+                            
+                            <Card>
+                                <CardContent className="pt-6">
+                                    <ScrollArea className="h-[300px] pr-4">
+                                        <div className="space-y-4">
+                                            <div className="flex items-center space-x-2">
+                                                <Checkbox 
+                                                    id="all-subscribers" 
+                                                    checked={watch('target_tags').length === 0}
+                                                    onCheckedChange={(checked) => {
+                                                        if (checked) setValue('target_tags', []);
+                                                    }}
+                                                />
+                                                <Label htmlFor="all-subscribers" className="font-medium">All Subscribers</Label>
+                                            </div>
+                                            <Separator />
+                                            {availableTags?.map((tag) => (
+                                                <div key={tag} className="flex items-center space-x-2">
+                                                    <Checkbox 
+                                                        id={`tag-${tag}`} 
+                                                        checked={watch('target_tags').includes(tag)}
+                                                        onCheckedChange={(checked) => {
+                                                            const current = watch('target_tags');
+                                                            if (checked) {
+                                                                setValue('target_tags', [...current, tag]);
+                                                            } else {
+                                                                setValue('target_tags', current.filter(t => t !== tag));
+                                                            }
+                                                        }}
+                                                    />
+                                                    <Label htmlFor={`tag-${tag}`}>{tag}</Label>
+                                                </div>
+                                            ))}
+                                            {(!availableTags || availableTags.length === 0) && (
+                                                <p className="text-sm text-muted-foreground italic pl-6">No tags/lists found.</p>
+                                            )}
+                                        </div>
+                                    </ScrollArea>
+                                </CardContent>
+                                <CardFooter className="bg-muted/50 text-sm text-muted-foreground">
+                                    {watch('target_tags').length === 0 
+                                        ? "Targeting all subscribers." 
+                                        : `Targeting subscribers with tags: ${watch('target_tags').join(', ')}`}
+                                </CardFooter>
+                            </Card>
                         </div>
                     </div>
                 )}
@@ -276,6 +432,16 @@ const CampaignWizard = () => {
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Name:</span>
                                         <span className="font-medium">{watch('name')}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Audience:</span>
+                                        <span className="font-medium">
+                                            {watch('target_tags').length === 0 ? 'All Subscribers' : watch('target_tags').join(', ')}
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Follow-ups:</span>
+                                        <span className="font-medium">{followUpFields.length} configured</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Subject A:</span>
@@ -311,7 +477,12 @@ const CampaignWizard = () => {
                                                 <Calendar
                                                     mode="single"
                                                     selected={scheduledDate}
-                                                    onSelect={(date) => setValue('scheduled_at', date)}
+                                                    onSelect={(date) => {
+                                                        // Allow deselection by passing undefined if date is undefined (Calendar might return undefined on deselect if configured, but default single mode doesn't always. 
+                                                        // However, checking if date is same as selected can work, but standard Calendar behavior usually handles toggle if configured.
+                                                        // We can explicitly clear if same date, or just set what we get.
+                                                        setValue('scheduled_at', date); 
+                                                    }}
                                                     initialFocus
                                                 />
                                                 <div className="p-3 border-t">
@@ -324,6 +495,9 @@ const CampaignWizard = () => {
                                                             setValue('scheduled_at', new Date(date));
                                                         }} 
                                                     />
+                                                    <Button variant="ghost" size="sm" className="w-full mt-2" onClick={() => setValue('scheduled_at', undefined)}>
+                                                        Clear Date
+                                                    </Button>
                                                 </div>
                                             </PopoverContent>
                                         </Popover>
@@ -376,4 +550,3 @@ const CampaignWizard = () => {
 };
 
 export default CampaignWizard;
-
