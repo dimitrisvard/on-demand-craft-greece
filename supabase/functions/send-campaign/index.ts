@@ -52,15 +52,23 @@ serve(async (req) => {
     }
 
     // 3. Prepare Batch Sending Logic
-    // Resend supports batch sending, or we can loop. For simplicity and limits, we loop here 
-    // but in production, batching or queues is better. 
-    // Note: Resend Free tier has limits (100 emails/day). 
-    
     let sentCount = 0;
     const errors: any[] = [];
 
+    // Filter subscribers based on target_tags if defined
+    let targetSubscribers = subscribers;
+    if (campaign.target_tags && campaign.target_tags.length > 0) {
+        targetSubscribers = subscribers.filter(sub => {
+            const subTags = Array.isArray(sub.tags) ? sub.tags : [];
+            // Check if subscriber has ANY of the target tags
+            return campaign.target_tags.some((tag: string) => subTags.includes(tag));
+        });
+    }
+
+    console.log(`Sending campaign ${campaign.id} to ${targetSubscribers.length} subscribers (Total active: ${subscribers.length})`);
+
     // Simple loop for now - consider Resend Batch API for higher volume
-    for (const subscriber of subscribers) {
+    for (const subscriber of targetSubscribers) {
         try {
             // Determine Subject (A/B Test Logic can be added here)
             // For now, default to subject_a
@@ -93,6 +101,7 @@ serve(async (req) => {
                     metadata: { error }
                 });
             } else {
+                console.log(`Email sent to ${subscriber.email}, ID: ${data?.id}`);
                 sentCount++;
                 // Log sent event
                 await supabase.from("marketing_events").insert({
