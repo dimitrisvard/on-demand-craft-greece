@@ -61,13 +61,9 @@ const ServiceCard = ({ id, iconName, link, delay = 0, image }: ServiceCardProps)
         <IconRenderer name={iconName} size={28} />
       </div>
       <h3 className="text-xl font-bold mb-2 text-brand-dark break-words whitespace-pre-line text-balance">{t(`service_${id}_title`)}</h3>
-      <h4>{t('home_title')}</h4>
-      <p className="text-gray-600 mb-4 break-words whitespace-pre-line text-balance">{t(`service_${id}_desc`)}</p>
-      <Link to={getLocalizedPath(link)} className="text-brand-teal font-medium inline-flex items-center hover:underline flex-wrap">
-        {t('learn_more', 'Learn More')}
-        <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+      {/* Description removed for cleaner look */}
+      <Link to={getLocalizedPath(link)} className="mt-4 w-full block text-center bg-brand-primary text-white font-bold py-3 rounded hover:bg-brand-dark transition-colors">
+        {t('get_quote_for', 'Get Quote for')} {t(`service_${id}_title`)}
       </Link>
     </div>
   );

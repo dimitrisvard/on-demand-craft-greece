@@ -8,6 +8,7 @@ import ServicesSection from '../components/home/ServicesSection';
 import HowItWorksSection from '../components/home/HowItWorksSection';
 import QuoteSection from '../components/home/QuoteSection';
 import ComparisonTable from '../components/home/ComparisonTable';
+import MeetYourEngineer from '../components/home/MeetYourEngineer';
 import TestimonialsSection from '../components/home/TestimonialsSection';
 import IndustriesSection from '../components/home/IndustriesSection';
 import {
@@ -38,6 +39,7 @@ const Index = () => {
       <HowItWorksSection steps={workflowSteps} />
       <QuoteSection benefits={quoteBenefits} />
       <ComparisonTable />
+      <MeetYourEngineer />
       <TestimonialsSection testimonials={testimonials} />
       <IndustriesSection industries={industries} />
       <CTASection />
