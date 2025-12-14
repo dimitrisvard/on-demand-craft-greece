@@ -13,13 +13,13 @@ const HeroSection: React.FC<HeroSectionProps> = ({ heroImage }) => {
   console.log('HeroSection language:', i18n.language, 'hero_title:', t('hero_title'));
   return (
     <section className="relative h-screen flex items-center">
-      {/* Dark industrial gradient background */}
-      <div className="absolute inset-0 z-0 bg-gradient-to-br from-gray-900 via-slate-900 to-gray-800">
-        <div className="absolute inset-0 bg-black/40"></div>
-        {/* Placeholder for future CNC video */}
-        <div className="absolute inset-0 flex items-center justify-center opacity-10">
-          <span className="text-white text-4xl font-bold tracking-widest">[PLACEHOLDER: Machining Video]</span>
-        </div>
+      {/* Background Image */}
+      <div className="absolute inset-0 bg-cover bg-center z-0" style={{ 
+        backgroundImage: `url(${heroImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center'
+      }}>
+        <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-black/30"></div>
       </div>
       
       <div className="container-custom relative z-10 text-white mt-16">

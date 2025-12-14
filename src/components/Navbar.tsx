@@ -70,7 +70,7 @@ const Navbar = () => {
                     <ListItem to={getLocalizedPath('/services/cnc-machining')} title="5-Axis Milling" icon={<Cog className="h-5 w-5 mb-1" />}>
                       High precision complex parts
                     </ListItem>
-                    <ListItem to={getLocalizedPath('/services/cnc-turning')} title="Turning" icon={<Cog className="h-5 w-5 mb-1 rotate-90" />}>
+                    <ListItem to={getLocalizedPath('/services/cnc-machining')} title="Turning" icon={<Cog className="h-5 w-5 mb-1 rotate-90" />}>
                       Cylindrical parts & threads
                     </ListItem>
                     <ListItem to={getLocalizedPath('/services/sheet-metal')} title="Sheet Metal Bending" icon={<Square className="h-5 w-5 mb-1" />}>
@@ -128,7 +128,7 @@ const Navbar = () => {
           <div className="pl-4 border-l-2 border-gray-100 ml-2 space-y-2">
              <div className="font-medium text-brand-dark py-2">{t('navbar_services', 'Services')}</div>
              <MobileNavLink to={getLocalizedPath('/services/cnc-machining')} label="5-Axis Milling" />
-             <MobileNavLink to={getLocalizedPath('/services/cnc-turning')} label="Turning" />
+             <MobileNavLink to={getLocalizedPath('/services/cnc-machining')} label="Turning" />
              <MobileNavLink to={getLocalizedPath('/services/sheet-metal')} label="Sheet Metal Bending" />
              <MobileNavLink to={getLocalizedPath('/services/3d-printing')} label="3D Printing" />
           </div>

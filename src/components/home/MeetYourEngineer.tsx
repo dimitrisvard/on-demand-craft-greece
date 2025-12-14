@@ -11,10 +11,11 @@ const MeetYourEngineer: React.FC = () => {
           {/* Image Side */}
           <div className="relative">
             <div className="aspect-[4/5] bg-gray-200 rounded-lg overflow-hidden shadow-2xl relative">
-              {/* Placeholder for Engineer Photo */}
-              <div className="absolute inset-0 bg-gray-300 flex items-center justify-center">
-                <span className="text-gray-500 font-bold text-lg">[PLACEHOLDER: Head Engineer Measuring Part]</span>
-              </div>
+              <img 
+                src="/lovable-uploads/engineer-measuring-part.jpg" 
+                alt="microns hub engineer" 
+                className="w-full h-full object-cover brightness-110"
+              />
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6">
                 <p className="text-white font-bold text-xl">Alex K.</p>
                 <p className="text-gray-300 text-sm">Senior Manufacturing Engineer</p>
