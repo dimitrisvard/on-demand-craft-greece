@@ -23,6 +23,19 @@ export default defineConfig(({ mode }) => {
 		preview: {
 			port: 8080,
 		},
+		build: {
+			target: 'es2020',
+			sourcemap: false,
+			minify: 'esbuild',
+			rollupOptions: {
+				output: {
+					manualChunks: {
+						vendor: ['react', 'react-dom', 'react-router-dom'],
+						ui: ['@radix-ui/react-dialog', '@radix-ui/react-slot', '@radix-ui/react-tooltip'],
+					},
+				},
+			},
+		},
 		plugins: [
 			react(),
 		],
