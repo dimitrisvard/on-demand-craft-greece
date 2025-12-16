@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -12,9 +12,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Edit, Trash2, Send, Loader2, Play } from 'lucide-react';
+import { Edit, Trash2, Send, Loader2, Play, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import CampaignDetailsSheet from './CampaignDetailsSheet';
 
 interface Campaign {
   id: string;
@@ -24,6 +25,7 @@ interface Campaign {
   scheduled_at: string | null;
   created_at: string;
   sent_count: number;
+  target_tags?: string[];
 }
 
 import CampaignProgress from './CampaignProgress';
@@ -31,13 +33,15 @@ import CampaignProgress from './CampaignProgress';
 const CampaignsTable = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
 
   const { data: campaigns, isLoading } = useQuery({
     queryKey: ['campaigns'],
     queryFn: async () => {
-      // Fetch total subscribers count for progress calculation (approx)
-      const { count } = await supabase.from('marketing_subscribers').select('*', { count: 'exact', head: true });
-      const totalSubs = count || 0;
+      // Fetch all subscribers to calculate target counts locally
+      const { data: subscribers } = await supabase
+        .from('marketing_subscribers')
+        .select('id, tags, status');
 
       const { data, error } = await supabase
         .from('marketing_campaigns')
@@ -45,7 +49,29 @@ const CampaignsTable = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data?.map(c => ({ ...c, total_recipients: totalSubs })) as (Campaign & { total_recipients: number })[];
+      
+      return data?.map(c => {
+        let recipientCount = 0;
+        const targetTags = c.target_tags || [];
+        
+        if (!subscribers) {
+             recipientCount = 0;
+        } else if (!targetTags || targetTags.length === 0) {
+             // If no tags, assume all active subscribers (or all subscribers depending on logic, usually active)
+             recipientCount = subscribers.filter(s => s.status === 'active').length;
+        } else {
+             recipientCount = subscribers.filter(s => {
+                if (s.status !== 'active') return false;
+                const subTags = Array.isArray(s.tags) ? s.tags : [];
+                return targetTags.some((tag: string) => subTags.includes(tag));
+             }).length;
+        }
+        
+        // Ensure recipient count is at least sent_count to avoid > 100% if subscribers were deleted
+        recipientCount = Math.max(recipientCount, c.sent_count || 0);
+        
+        return { ...c, total_recipients: recipientCount };
+      }) as (Campaign & { total_recipients: number })[];
     },
   });
 
@@ -135,7 +161,7 @@ const CampaignsTable = () => {
                     {(campaign.status === 'sending' || campaign.status === 'sent') ? (
                         <CampaignProgress 
                             campaignId={campaign.id} 
-                            totalRecipients={campaign.total_recipients || 100} // Fallback or assume based on list
+                            totalRecipients={campaign.total_recipients || 100} 
                             initialSentCount={campaign.sent_count}
                             status={campaign.status}
                         />
@@ -158,6 +184,15 @@ const CampaignsTable = () => {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
+                    <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        title="View Details"
+                        onClick={() => setSelectedCampaignId(campaign.id)}
+                    >
+                        <Eye className="h-4 w-4" />
+                    </Button>
+
                     {campaign.status === 'draft' && (
                         <Button 
                             variant="outline" 
@@ -191,9 +226,13 @@ const CampaignsTable = () => {
           )}
         </TableBody>
       </Table>
+
+      <CampaignDetailsSheet 
+        campaignId={selectedCampaignId} 
+        onClose={() => setSelectedCampaignId(null)} 
+      />
     </div>
   );
 };
 
 export default CampaignsTable;
-
