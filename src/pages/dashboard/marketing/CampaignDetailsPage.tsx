@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -16,13 +15,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Loader2, ArrowLeft, Mail, Users, Calendar, BarChart3, Clock, Tag, GitBranch } from 'lucide-react';
+import { Loader2, ArrowLeft, Mail, Users, Calendar, GitBranch } from 'lucide-react';
 import { format } from 'date-fns';
 
 const CampaignDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  // 1. Fetch Campaign Details
   const { data: campaign, isLoading: isLoadingCampaign } = useQuery({
     queryKey: ['campaign', id],
     queryFn: async () => {
@@ -39,11 +39,30 @@ const CampaignDetailsPage = () => {
     enabled: !!id,
   });
 
+  // 2. Fetch Analytics Stats (Opens, Clicks, Bounces)
+  const { data: analytics } = useQuery({
+    queryKey: ['campaign-analytics', id],
+    queryFn: async () => {
+      if (!id) return null;
+      const { data, error } = await supabase
+        .from('marketing_analytics')
+        .select('*')
+        .eq('campaign_id', id)
+        .maybeSingle();
+      
+      if (error) throw error;
+      return data || { opens: 0, clicks: 0, bounces: 0 };
+    },
+    enabled: !!id,
+  });
+
+  // 3. Fetch Subscribers/Recipients
   const { data: subscribers, isLoading: isLoadingSubscribers } = useQuery({
     queryKey: ['campaign-subscribers', id],
     queryFn: async () => {
       if (!id || !campaign) return null;
 
+      // Try to get actual sent events first
       const { data: events } = await supabase
         .from('marketing_events')
         .select('subscriber_id, event_type, created_at, marketing_subscribers(email, name)')
@@ -59,6 +78,7 @@ const CampaignDetailsPage = () => {
         }));
       }
 
+      // Fallback: Calculate based on tags if no events found yet
       const { data: allSubscribers } = await supabase
         .from('marketing_subscribers')
         .select('*');
@@ -114,6 +134,17 @@ const CampaignDetailsPage = () => {
 
   const followUps = Array.isArray(campaign.follow_up_config) ? campaign.follow_up_config : [];
   const abTest = campaign.ab_test_config as any;
+
+  // Metrics Calculations
+  const sentCount = campaign.sent_count || 0;
+  const opens = analytics?.opens || 0;
+  const clicks = analytics?.clicks || 0;
+  const bounces = analytics?.bounces || 0;
+
+  // Avoid division by zero
+  const openRate = sentCount > 0 ? Math.round((opens / sentCount) * 100) : 0;
+  const clickRate = sentCount > 0 ? Math.round((clicks / sentCount) * 100) : 0;
+  const bounceRate = sentCount > 0 ? Math.round((bounces / sentCount) * 100) : 0;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -313,20 +344,25 @@ const CampaignDetailsPage = () => {
                  <div className="grid grid-cols-2 gap-4">
                     <div className="bg-muted/50 p-3 rounded-lg text-center">
                         <span className="text-xs text-muted-foreground uppercase font-bold">Sent</span>
-                        <p className="text-2xl font-bold text-primary">{campaign.sent_count}</p>
+                        <p className="text-2xl font-bold text-primary">{sentCount}</p>
                     </div>
-                    {/* Placeholders for future metrics */}
+                    
                     <div className="bg-muted/50 p-3 rounded-lg text-center">
                         <span className="text-xs text-muted-foreground uppercase font-bold">Open Rate</span>
-                        <p className="text-2xl font-bold text-muted-foreground">-</p>
+                        <p className="text-2xl font-bold text-primary">{openRate}%</p>
+                        <span className="text-xs text-muted-foreground">({opens})</span>
                     </div>
+
                     <div className="bg-muted/50 p-3 rounded-lg text-center">
-                        <span className="text-xs text-muted-foreground uppercase font-bold">Clicks</span>
-                        <p className="text-2xl font-bold text-muted-foreground">-</p>
+                        <span className="text-xs text-muted-foreground uppercase font-bold">Click Rate</span>
+                        <p className="text-2xl font-bold text-primary">{clickRate}%</p>
+                         <span className="text-xs text-muted-foreground">({clicks})</span>
                     </div>
+
                      <div className="bg-muted/50 p-3 rounded-lg text-center">
-                        <span className="text-xs text-muted-foreground uppercase font-bold">Bounce</span>
-                        <p className="text-2xl font-bold text-muted-foreground">-</p>
+                        <span className="text-xs text-muted-foreground uppercase font-bold">Bounce Rate</span>
+                        <p className="text-2xl font-bold text-destructive">{bounceRate}%</p>
+                        <span className="text-xs text-muted-foreground">({bounces})</span>
                     </div>
                  </div>
             </CardContent>
@@ -338,4 +374,3 @@ const CampaignDetailsPage = () => {
 };
 
 export default CampaignDetailsPage;
-

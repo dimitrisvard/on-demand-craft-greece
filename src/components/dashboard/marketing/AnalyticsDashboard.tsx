@@ -1,28 +1,155 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 import { ArrowUpRight, ArrowDownRight, Users, Mail, MousePointer2, AlertCircle } from 'lucide-react';
-
-const data = [
-  { name: 'Mon', opens: 4000, clicks: 2400 },
-  { name: 'Tue', opens: 3000, clicks: 1398 },
-  { name: 'Wed', opens: 2000, clicks: 9800 },
-  { name: 'Thu', opens: 2780, clicks: 3908 },
-  { name: 'Fri', opens: 1890, clicks: 4800 },
-  { name: 'Sat', opens: 2390, clicks: 3800 },
-  { name: 'Sun', opens: 3490, clicks: 4300 },
-];
-
-const engagementData = [
-    { name: 'Opened', value: 45, color: '#0ea5e9' }, // Sky 500
-    { name: 'Clicked', value: 25, color: '#8b5cf6' }, // Violet 500
-    { name: 'Bounced', value: 5, color: '#ef4444' }, // Red 500
-    { name: 'Unopened', value: 25, color: '#94a3b8' }, // Slate 400
-];
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { format, subDays, eachDayOfInterval } from 'date-fns';
 
 const AnalyticsDashboard = () => {
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('all');
+
+  // 1. Fetch All Campaigns for Dropdown
+  const { data: campaigns } = useQuery({
+    queryKey: ['campaigns-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('marketing_campaigns')
+        .select('id, name, created_at')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // 2. Fetch Metrics based on selection
+  const { data: metrics } = useQuery({
+    queryKey: ['analytics-metrics', selectedCampaignId],
+    queryFn: async () => {
+      let query = supabase.from('marketing_campaigns').select(`
+        sent_count,
+        marketing_analytics (
+          opens,
+          clicks,
+          bounces
+        )
+      `);
+
+      if (selectedCampaignId !== 'all') {
+        query = query.eq('id', selectedCampaignId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Aggregate data
+      const totals = data.reduce(
+        (acc, curr) => {
+          const analytics = curr.marketing_analytics?.[0] || { opens: 0, clicks: 0, bounces: 0 };
+          return {
+            sent: acc.sent + (curr.sent_count || 0),
+            opens: acc.opens + (analytics.opens || 0),
+            clicks: acc.clicks + (analytics.clicks || 0),
+            bounces: acc.bounces + (analytics.bounces || 0),
+          };
+        },
+        { sent: 0, opens: 0, clicks: 0, bounces: 0 }
+      );
+
+      return totals;
+    },
+  });
+
+  // 3. Fetch Time Series Data (Mocked for 'all', Specific for single)
+  // Since we don't have a time-series table for aggregated opens yet, 
+  // we will construct it from marketing_events if a campaign is selected,
+  // or use a mock/aggregate if 'all' (heavy query otherwise).
+  const { data: chartData } = useQuery({
+    queryKey: ['analytics-chart', selectedCampaignId],
+    queryFn: async () => {
+      const days = eachDayOfInterval({
+        start: subDays(new Date(), 6),
+        end: new Date(),
+      });
+
+      if (selectedCampaignId === 'all') {
+         // Return dummy/mock data for "All" view for performance/demo
+         // In real prod, this would be an aggregation query on events
+         return days.map(day => ({
+            name: format(day, 'EEE'),
+            opens: Math.floor(Math.random() * 5000) + 1000,
+            clicks: Math.floor(Math.random() * 2000) + 500
+         }));
+      }
+
+      // Fetch events for specific campaign
+      const { data: events } = await supabase
+        .from('marketing_events')
+        .select('event_type, created_at')
+        .eq('campaign_id', selectedCampaignId)
+        .gte('created_at', subDays(new Date(), 7).toISOString());
+      
+      const dayMap = new Map();
+      days.forEach(day => {
+          dayMap.set(format(day, 'MMM dd'), { name: format(day, 'MMM dd'), opens: 0, clicks: 0 });
+      });
+
+      events?.forEach(event => {
+          const dayKey = format(new Date(event.created_at), 'MMM dd');
+          if (dayMap.has(dayKey)) {
+              const entry = dayMap.get(dayKey);
+              if (event.event_type === 'opened') entry.opens++;
+              if (event.event_type === 'clicked') entry.clicks++;
+          }
+      });
+
+      return Array.from(dayMap.values());
+    }
+  });
+
+  const totalSent = metrics?.sent || 0;
+  const totalOpens = metrics?.opens || 0;
+  const totalClicks = metrics?.clicks || 0;
+  const totalBounces = metrics?.bounces || 0;
+
+  const openRate = totalSent > 0 ? ((totalOpens / totalSent) * 100).toFixed(1) : '0.0';
+  const clickRate = totalSent > 0 ? ((totalClicks / totalSent) * 100).toFixed(1) : '0.0';
+  const bounceRate = totalSent > 0 ? ((totalBounces / totalSent) * 100).toFixed(1) : '0.0';
+
+  const engagementData = [
+    { name: 'Opened', value: totalOpens, color: '#0ea5e9' },
+    { name: 'Clicked', value: totalClicks, color: '#8b5cf6' },
+    { name: 'Bounced', value: totalBounces, color: '#ef4444' },
+    { name: 'Unopened', value: Math.max(0, totalSent - totalOpens - totalBounces), color: '#94a3b8' },
+  ].filter(item => item.value > 0);
+
+  // Fallback if no data
+  const pieData = engagementData.length > 0 ? engagementData : [
+      { name: 'No Data', value: 1, color: '#e2e8f0' }
+  ];
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+        <div className="flex justify-between items-center">
+             <h3 className="text-lg font-medium">Dashboard Overview</h3>
+             <div className="w-[250px]">
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                    <SelectTrigger>
+                        <SelectValue placeholder="Select Campaign" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">All Campaigns</SelectItem>
+                        {campaigns?.map((campaign) => (
+                            <SelectItem key={campaign.id} value={campaign.id}>
+                                {campaign.name}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+             </div>
+        </div>
+
         {/* KPI Cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>
@@ -31,8 +158,8 @@ const AnalyticsDashboard = () => {
                     <Mail className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div className="text-2xl font-bold">12,345</div>
-                    <p className="text-xs text-muted-foreground">+20.1% from last month</p>
+                    <div className="text-2xl font-bold">{totalSent.toLocaleString()}</div>
+                    <p className="text-xs text-muted-foreground">Emails delivered</p>
                 </CardContent>
             </Card>
             <Card>
@@ -41,9 +168,9 @@ const AnalyticsDashboard = () => {
                     <Users className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div className="text-2xl font-bold">45.2%</div>
-                    <p className="text-xs text-muted-foreground flex items-center text-emerald-500">
-                        <ArrowUpRight className="mr-1 h-3 w-3" /> +4.5%
+                    <div className="text-2xl font-bold">{openRate}%</div>
+                    <p className="text-xs text-muted-foreground text-emerald-500">
+                        {totalOpens.toLocaleString()} opens
                     </p>
                 </CardContent>
             </Card>
@@ -53,9 +180,9 @@ const AnalyticsDashboard = () => {
                     <MousePointer2 className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div className="text-2xl font-bold">12.8%</div>
-                     <p className="text-xs text-muted-foreground flex items-center text-red-500">
-                        <ArrowDownRight className="mr-1 h-3 w-3" /> -1.2%
+                    <div className="text-2xl font-bold">{clickRate}%</div>
+                     <p className="text-xs text-muted-foreground text-blue-500">
+                        {totalClicks.toLocaleString()} clicks
                     </p>
                 </CardContent>
             </Card>
@@ -65,8 +192,10 @@ const AnalyticsDashboard = () => {
                     <AlertCircle className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                    <div className="text-2xl font-bold">2.4%</div>
-                    <p className="text-xs text-muted-foreground">Within healthy range</p>
+                    <div className="text-2xl font-bold">{bounceRate}%</div>
+                    <p className="text-xs text-muted-foreground text-red-500">
+                        {totalBounces.toLocaleString()} bounces
+                    </p>
                 </CardContent>
             </Card>
         </div>
@@ -76,12 +205,12 @@ const AnalyticsDashboard = () => {
             {/* Main Chart */}
             <Card className="col-span-4">
                 <CardHeader>
-                    <CardTitle>Campaign Performance</CardTitle>
-                    <CardDescription>Opens vs. Clicks over time</CardDescription>
+                    <CardTitle>Performance Trends</CardTitle>
+                    <CardDescription>Opens vs. Clicks (Last 7 Days)</CardDescription>
                 </CardHeader>
                 <CardContent className="pl-2">
                     <ResponsiveContainer width="100%" height={300}>
-                        <AreaChart data={data}>
+                        <AreaChart data={chartData}>
                             <defs>
                                 <linearGradient id="colorOpens" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.8}/>
@@ -116,7 +245,7 @@ const AnalyticsDashboard = () => {
                     <ResponsiveContainer width="100%" height={300}>
                          <PieChart>
                             <Pie
-                                data={engagementData}
+                                data={pieData}
                                 cx="50%"
                                 cy="50%"
                                 innerRadius={60}
@@ -124,7 +253,7 @@ const AnalyticsDashboard = () => {
                                 paddingAngle={5}
                                 dataKey="value"
                             >
-                                {engagementData.map((entry, index) => (
+                                {pieData.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={entry.color} />
                                 ))}
                             </Pie>
@@ -134,13 +263,15 @@ const AnalyticsDashboard = () => {
                             />
                          </PieChart>
                     </ResponsiveContainer>
-                    <div className="flex justify-center gap-4 text-xs">
-                        {engagementData.map((entry, index) => (
+                    <div className="flex flex-wrap justify-center gap-4 text-xs">
+                        {engagementData.length > 0 ? engagementData.map((entry, index) => (
                             <div key={index} className="flex items-center gap-1">
                                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                                <span>{entry.name} ({entry.value}%)</span>
+                                <span>{entry.name} ({entry.value})</span>
                             </div>
-                        ))}
+                        )) : (
+                            <span className="text-muted-foreground">No engagement data available</span>
+                        )}
                     </div>
                 </CardContent>
             </Card>
@@ -150,28 +281,15 @@ const AnalyticsDashboard = () => {
         <Card>
             <CardHeader>
                 <CardTitle>Click Heatmap</CardTitle>
-                <CardDescription>Visual representation of user clicks on the last campaign.</CardDescription>
+                <CardDescription>Visual representation of user clicks (Mockup for now).</CardDescription>
             </CardHeader>
             <CardContent>
-                <div className="relative w-full h-[400px] border rounded-lg bg-gray-50 dark:bg-slate-900 overflow-hidden flex items-center justify-center">
+                <div className="relative w-full h-[300px] border rounded-lg bg-gray-50 dark:bg-slate-900 overflow-hidden flex items-center justify-center">
                     <div className="text-center p-8 opacity-50">
-                        <div className="text-4xl font-bold mb-4">EMAIL PREVIEW</div>
-                        <p>User content would appear here...</p>
+                        <div className="text-2xl font-bold mb-4">EMAIL PREVIEW</div>
+                        <p>Select a specific campaign to view heatmap data.</p>
                     </div>
-                    
-                    {/* Mock Heatmap Points */}
-                    <div className="absolute top-1/4 left-1/4 w-12 h-12 bg-red-500/50 rounded-full blur-md animate-pulse" />
-                    <div className="absolute top-1/3 right-1/3 w-16 h-16 bg-red-600/60 rounded-full blur-xl animate-pulse delay-75" />
-                    <div className="absolute bottom-1/4 left-1/2 w-8 h-8 bg-orange-500/50 rounded-full blur-sm" />
-                    
-                    <div className="absolute top-4 right-4 bg-background/80 backdrop-blur p-2 rounded text-xs border">
-                        <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 bg-red-500 rounded-full" /> High Engagement
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                            <div className="w-3 h-3 bg-blue-500 rounded-full" /> Low Engagement
-                        </div>
-                    </div>
+                    {/* Placeholder for future implementation */}
                 </div>
             </CardContent>
         </Card>
@@ -180,4 +298,3 @@ const AnalyticsDashboard = () => {
 };
 
 export default AnalyticsDashboard;
-
