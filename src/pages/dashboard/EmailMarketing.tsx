@@ -69,6 +69,8 @@ const SettingsView = () => (
     </div>
 );
 
+import CampaignDetailsPage from './marketing/CampaignDetailsPage';
+
 const EmailMarketing = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -138,6 +140,7 @@ const EmailMarketing = () => {
             <Route path="/analytics" element={<AnalyticsView />} />
             <Route path="/settings" element={<SettingsView />} />
             <Route path="/campaigns/new" element={<CampaignWizard />} />
+            <Route path="/campaigns/:id" element={<CampaignDetailsPage />} />
             {/* Redirect any unknown sub-routes to overview */}
             <Route path="*" element={<Navigate to="/dashboard/email-marketing" replace />} />
           </Routes>

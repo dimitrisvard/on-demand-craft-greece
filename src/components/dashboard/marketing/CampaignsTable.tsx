@@ -15,7 +15,6 @@ import { toast } from 'sonner';
 import { Edit, Trash2, Send, Loader2, Play, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import CampaignDetailsSheet from './CampaignDetailsSheet';
 
 interface Campaign {
   id: string;
@@ -33,7 +32,6 @@ import CampaignProgress from './CampaignProgress';
 const CampaignsTable = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
 
   const { data: campaigns, isLoading } = useQuery({
     queryKey: ['campaigns'],
@@ -188,7 +186,7 @@ const CampaignsTable = () => {
                         variant="ghost" 
                         size="icon" 
                         title="View Details"
-                        onClick={() => setSelectedCampaignId(campaign.id)}
+                        onClick={() => navigate(`/dashboard/email-marketing/campaigns/${campaign.id}`)}
                     >
                         <Eye className="h-4 w-4" />
                     </Button>
@@ -226,11 +224,6 @@ const CampaignsTable = () => {
           )}
         </TableBody>
       </Table>
-
-      <CampaignDetailsSheet 
-        campaignId={selectedCampaignId} 
-        onClose={() => setSelectedCampaignId(null)} 
-      />
     </div>
   );
 };
