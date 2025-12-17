@@ -14,7 +14,8 @@ import {
   TrendingUp,
   BookOpen,
   ChevronDown,
-  Mail
+  Mail,
+  Inbox
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -49,6 +50,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/analytics') return 'analytics';
     if (path.startsWith('/dashboard/blog')) return 'blog';
     if (path.startsWith('/dashboard/email-marketing')) return 'email-marketing';
+    if (path.startsWith('/dashboard/email-inbox')) return 'email-inbox';
     if (path === '/customers') return 'customers';
     if (path === '/partners') return 'partners';
     if (path === '/products') return 'products';
@@ -195,12 +197,20 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                 />
                  {/* Email Marketing - Operations */}
                  {!isProductionPartner && (
-                  <NavButton 
-                    active={activeModule === "email-marketing"}
-                    onClick={() => handleNavigation("/dashboard/email-marketing")}
-                    icon={<Mail className="h-4 w-4" />}
-                    label="Email Marketing"
-                  />
+                  <>
+                    <NavButton 
+                      active={activeModule === "email-marketing"}
+                      onClick={() => handleNavigation("/dashboard/email-marketing")}
+                      icon={<Mail className="h-4 w-4" />}
+                      label="Email Marketing"
+                    />
+                    <NavButton 
+                      active={activeModule === "email-inbox"}
+                      onClick={() => handleNavigation("/dashboard/email-inbox")}
+                      icon={<Inbox className="h-4 w-4" />}
+                      label="Email Inbox"
+                    />
+                  </>
                  )}
               </AccordionContent>
             </AccordionItem>
