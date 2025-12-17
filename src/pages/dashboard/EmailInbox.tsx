@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { PersistentDashboardLayout } from '@/components/dashboard/PersistentDashboardLayout';
+import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
 import { EmailInboxSidebar } from '@/components/dashboard/email-inbox/EmailInboxSidebar';
 import { EmailList } from '@/components/dashboard/email-inbox/EmailList';
 import { EmailDetail } from '@/components/dashboard/email-inbox/EmailDetail';

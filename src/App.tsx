@@ -48,6 +48,8 @@ const BlogIndex = lazy(() => import('./pages/BlogIndex'));
 const BlogPost = lazy(() => import('./pages/BlogPost'));
 const EmailMarketing = lazy(() => import('./pages/dashboard/EmailMarketing'));
 const EmailInbox = lazy(() => import('./pages/dashboard/EmailInbox'));
+const NotificationsPage = lazy(() => import('./pages/dashboard/NotificationsPage'));
+const SettingsPage = lazy(() => import('./pages/dashboard/SettingsPage'));
 const QuotesPage = lazy(() => import('./pages/dashboard/QuotesPage'));
 
 // Loading component
@@ -138,6 +140,8 @@ function AppContent() {
                 <Route path="/dashboard/email-inbox" element={<EmailInbox />} />
                 <Route path="/dashboard/email-marketing" element={<EmailMarketing />} />
                 <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 <Route path="/impressum" element={<ImpressumPage />} />
