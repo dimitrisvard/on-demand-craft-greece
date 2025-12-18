@@ -51,6 +51,7 @@ const EmailInbox = lazy(() => import('./pages/dashboard/EmailInbox'));
 const NotificationsPage = lazy(() => import('./pages/dashboard/NotificationsPage'));
 const SettingsPage = lazy(() => import('./pages/dashboard/SettingsPage'));
 const QuotesPage = lazy(() => import('./pages/dashboard/QuotesPage'));
+const AutoBlogDashboard = lazy(() => import('./pages/dashboard/AutoBlogDashboard'));
 
 // Loading component
 const PageLoader = () => (
@@ -137,6 +138,7 @@ function AppContent() {
                 <Route path="/dashboard/blog" element={<BlogList />} />
                 <Route path="/dashboard/blog/new" element={<BlogEditor />} />
                 <Route path="/dashboard/blog/edit/:id" element={<BlogEditor />} />
+                <Route path="/dashboard/auto-blog" element={<AutoBlogDashboard />} />
                 <Route path="/dashboard/email-inbox" element={<EmailInbox />} />
                 <Route path="/dashboard/email-marketing" element={<EmailMarketing />} />
                 <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />

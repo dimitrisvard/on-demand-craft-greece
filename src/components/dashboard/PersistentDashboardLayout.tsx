@@ -15,7 +15,8 @@ import {
   BookOpen,
   ChevronDown,
   Mail,
-  Inbox
+  Inbox,
+  Sparkles
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -49,6 +50,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard' || path === '/') return 'overview';
     if (path === '/dashboard/analytics') return 'analytics';
     if (path.startsWith('/dashboard/blog')) return 'blog';
+    if (path.startsWith('/dashboard/auto-blog')) return 'auto-blog';
     if (path.startsWith('/dashboard/email-marketing')) return 'email-marketing';
     if (path.startsWith('/dashboard/email-inbox')) return 'email-inbox';
     if (path === '/customers') return 'customers';
@@ -165,6 +167,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/blog")}
                       icon={<BookOpen className="h-4 w-4" />}
                       label="Blog Articles"
+                    />
+                    <NavButton 
+                      active={activeModule === "auto-blog"}
+                      onClick={() => handleNavigation("/dashboard/auto-blog")}
+                      icon={<Sparkles className="h-4 w-4" />}
+                      label="Auto-Blog Dashboard"
                     />
                   </AccordionContent>
                 </AccordionItem>
