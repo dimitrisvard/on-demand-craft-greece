@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Plus, Pencil, Trash2, Check, Sparkles, FileText } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, Sparkles, FileText, Settings } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -18,6 +18,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface ArticleTitle {
   id: string;
@@ -42,21 +50,32 @@ interface GenerationLog {
   created_at: string;
 }
 
+interface SiloCategory {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
 const AutoBlogDashboard = () => {
   const [titles, setTitles] = useState<ArticleTitle[]>([]);
   const [logs, setLogs] = useState<GenerationLog[]>([]);
+  const [siloCategories, setSiloCategories] = useState<SiloCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(true);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [newTitle, setNewTitle] = useState("");
   const [newSiloCategory, setNewSiloCategory] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editSiloCategory, setEditSiloCategory] = useState<string>("");
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const { toast } = useToast();
 
   useEffect(() => {
     fetchTitles();
     fetchLogs();
+    fetchCategories();
   }, []);
 
   const fetchTitles = async () => {
@@ -101,6 +120,97 @@ const AutoBlogDashboard = () => {
       });
     } finally {
       setLogsLoading(false);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const { data, error } = await supabase
+        .from("silo_categories")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error) throw error;
+      setSiloCategories(data || []);
+    } catch (error: any) {
+      console.error("Error fetching categories:", error);
+      toast({
+        title: "Error",
+        description: "Failed to load silo categories",
+        variant: "destructive",
+      });
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) {
+      toast({
+        title: "Validation Error",
+        description: "Category name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("silo_categories")
+        .insert([{ name: newCategoryName.trim() }]);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Category created successfully",
+      });
+
+      setNewCategoryName("");
+      fetchCategories();
+    } catch (error: any) {
+      console.error("Error creating category:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create category",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleDeleteCategory = async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete the category "${name}"? This will remove it from all articles using it.`)) return;
+
+    try {
+      // First, remove the category from all articles that use it
+      await supabase
+        .from("article_titles")
+        .update({ silo_category: null })
+        .eq("silo_category", name);
+
+      // Then delete the category
+      const { error } = await supabase
+        .from("silo_categories")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Category deleted successfully",
+      });
+
+      fetchCategories();
+      fetchTitles(); // Refresh titles to update category references
+    } catch (error: any) {
+      console.error("Error deleting category:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete category",
+        variant: "destructive",
+      });
     }
   };
 
@@ -282,16 +392,30 @@ const AutoBlogDashboard = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="silo">Silo Category (Optional)</Label>
-                  <Select value={newSiloCategory || "none"} onValueChange={(value) => setNewSiloCategory(value === "none" ? "" : value)}>
-                    <SelectTrigger id="silo">
-                      <SelectValue placeholder="Select silo category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="Pillar">Pillar</SelectItem>
-                      <SelectItem value="Cluster">Cluster</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-2">
+                    <Select value={newSiloCategory || "none"} onValueChange={(value) => setNewSiloCategory(value === "none" ? "" : value)}>
+                      <SelectTrigger id="silo" className="flex-1">
+                        <SelectValue placeholder="Select silo category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {siloCategories.map((category) => (
+                          <SelectItem key={category.id} value={category.name}>
+                            {category.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsCategoryDialogOpen(true)}
+                      className="flex items-center gap-2"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Manage
+                    </Button>
+                  </div>
                 </div>
                 <Button onClick={handleAddTitle} className="flex items-center gap-2">
                   <Plus className="h-4 w-4" />
@@ -367,8 +491,11 @@ const AutoBlogDashboard = () => {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="none">None</SelectItem>
-                                  <SelectItem value="Pillar">Pillar</SelectItem>
-                                  <SelectItem value="Cluster">Cluster</SelectItem>
+                                  {siloCategories.map((category) => (
+                                    <SelectItem key={category.id} value={category.name}>
+                                      {category.name}
+                                    </SelectItem>
+                                  ))}
                                 </SelectContent>
                               </Select>
                             ) : (
@@ -552,6 +679,72 @@ const AutoBlogDashboard = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Category Management Dialog */}
+        <Dialog open={isCategoryDialogOpen} onOpenChange={setIsCategoryDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Manage Silo Categories</DialogTitle>
+              <DialogDescription>
+                Create and delete silo categories for organizing your articles.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-category">Create New Category</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="new-category"
+                    placeholder="Enter category name..."
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleCreateCategory();
+                      }
+                    }}
+                  />
+                  <Button onClick={handleCreateCategory} className="flex items-center gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Existing Categories</Label>
+                {categoriesLoading ? (
+                  <p className="text-sm text-muted-foreground">Loading categories...</p>
+                ) : siloCategories.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No categories yet. Create your first one above.</p>
+                ) : (
+                  <div className="border rounded-md divide-y">
+                    {siloCategories.map((category) => (
+                      <div
+                        key={category.id}
+                        className="flex items-center justify-between p-3 hover:bg-muted/50"
+                      >
+                        <span className="font-medium">{category.name}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleDeleteCategory(category.id, category.name)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCategoryDialogOpen(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </PersistentDashboardLayout>
   );
