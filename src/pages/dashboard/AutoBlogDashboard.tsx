@@ -282,12 +282,12 @@ const AutoBlogDashboard = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="silo">Silo Category (Optional)</Label>
-                  <Select value={newSiloCategory} onValueChange={setNewSiloCategory}>
+                  <Select value={newSiloCategory || "none"} onValueChange={(value) => setNewSiloCategory(value === "none" ? "" : value)}>
                     <SelectTrigger id="silo">
                       <SelectValue placeholder="Select silo category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">None</SelectItem>
+                      <SelectItem value="none">None</SelectItem>
                       <SelectItem value="Pillar">Pillar</SelectItem>
                       <SelectItem value="Cluster">Cluster</SelectItem>
                     </SelectContent>
@@ -359,14 +359,14 @@ const AutoBlogDashboard = () => {
                           <TableCell>
                             {editingId === title.id ? (
                               <Select
-                                value={editSiloCategory}
-                                onValueChange={setEditSiloCategory}
+                                value={editSiloCategory || "none"}
+                                onValueChange={(value) => setEditSiloCategory(value === "none" ? "" : value)}
                               >
                                 <SelectTrigger className="w-[150px]">
                                   <SelectValue placeholder="None" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  <SelectItem value="">None</SelectItem>
+                                  <SelectItem value="none">None</SelectItem>
                                   <SelectItem value="Pillar">Pillar</SelectItem>
                                   <SelectItem value="Cluster">Cluster</SelectItem>
                                 </SelectContent>
