@@ -44,13 +44,26 @@ interface SiloNeighbor {
 
 /**
  * Get the silo category for today based on rotating schedule
- * Uses day of year modulo 5 to rotate through silos
+ * Uses day of year modulo 5 to rotate through silos in a 5-day cycle
+ * 
+ * Rotation schedule (based on day of year):
+ * - January 1st (day 1) = Advanced CNC Machining Strategy (index 0)
+ * - January 2nd (day 2) = Die Casting & Metal Casting (index 1)
+ * - January 3rd (day 3) = Sheet Metal & Fabrication (index 2)
+ * - January 4th (day 4) = Rapid Tooling & Injection Molding (index 3)
+ * - January 5th (day 5) = Material Science & Surface Engineering (index 4)
+ * - January 6th (day 6) = Advanced CNC Machining Strategy (index 0) - cycle repeats
+ * 
+ * Calculation: (dayOfYear - 1) % 5
+ * This ensures day 1 maps to index 0, day 2 to index 1, etc.
  */
 function getTodaysSilo(): string {
   const now = new Date();
   const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
-  const siloIndex = dayOfYear % SILO_ROTATION.length;
+  // Calculate day of year (1-365/366): January 1st = 1, January 2nd = 2, etc.
+  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  // Convert to 0-based index for array access: day 1 -> index 0, day 2 -> index 1, etc.
+  const siloIndex = (dayOfYear - 1) % SILO_ROTATION.length;
   return SILO_ROTATION[siloIndex];
 }
 

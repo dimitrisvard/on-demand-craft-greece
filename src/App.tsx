@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePageTracking } from './hooks/usePageTracking';
@@ -61,6 +61,29 @@ const PageLoader = () => (
 );
 
 const queryClient = new QueryClient();
+
+// Component to conditionally render Footer (exclude dashboard routes)
+function ConditionalFooter() {
+  const location = useLocation();
+  const path = location.pathname;
+  
+  // Don't show footer on dashboard routes
+  const isDashboardRoute = path.startsWith('/dashboard') || 
+                          path.startsWith('/orders') ||
+                          path.startsWith('/customers') ||
+                          path.startsWith('/partners') ||
+                          path.startsWith('/calendar') ||
+                          path.startsWith('/products') ||
+                          path.startsWith('/rfq') ||
+                          path === '/notifications' ||
+                          path === '/settings';
+  
+  if (isDashboardRoute) {
+    return null;
+  }
+  
+  return <Footer />;
+}
 
 // Component to handle Google Analytics tracking
 function AppContent() {
@@ -151,7 +174,7 @@ function AppContent() {
               </Routes>
             </Suspense>
           <CookieConsentBanner />
-          <Footer />
+          <ConditionalFooter />
         </AuthProvider>
       </LanguageProvider>
     </>
