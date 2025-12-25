@@ -17,6 +17,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// Silo rotation order (5-day cycle)
+const SILO_ROTATION = [
+  "Advanced CNC Machining Strategy",
+  "Die Casting & Metal Casting",
+  "Sheet Metal & Fabrication",
+  "Rapid Tooling & Injection Molding",
+  "Material Science & Surface Engineering",
+];
+
 interface GeminiResponse {
   candidates?: Array<{
     content: {
@@ -34,7 +43,20 @@ interface SiloNeighbor {
 }
 
 /**
+ * Get the silo category for today based on rotating schedule
+ * Uses day of year modulo 5 to rotate through silos
+ */
+function getTodaysSilo(): string {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24));
+  const siloIndex = dayOfYear % SILO_ROTATION.length;
+  return SILO_ROTATION[siloIndex];
+}
+
+/**
  * Fetch related articles from the same silo category for internal linking
+ * Returns empty array if no articles exist yet (first article in silo)
  */
 async function fetchSiloNeighbors(siloCategory: string | null, currentId: string): Promise<SiloNeighbor[]> {
   if (!siloCategory) return [];
@@ -49,10 +71,12 @@ async function fetchSiloNeighbors(siloCategory: string | null, currentId: string
       .limit(5);
 
     if (publishedArticles && publishedArticles.length > 0) {
+      // Filter to same silo if we can determine it
+      // For now, return all published articles as potential links
       return publishedArticles;
     }
 
-    // Fallback: get other titles from the same silo category
+    // Fallback: get other processed titles from the same silo category
     const { data: siloTitles } = await supabase
       .from("article_titles")
       .select("title")
@@ -68,6 +92,7 @@ async function fetchSiloNeighbors(siloCategory: string | null, currentId: string
       }));
     }
 
+    // No articles found - this is the first article in the silo
     return [];
   } catch (error) {
     console.error("Error fetching silo neighbors:", error);
@@ -80,7 +105,7 @@ async function fetchSiloNeighbors(siloCategory: string | null, currentId: string
  */
 function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
   if (neighbors.length === 0) {
-    return "No related articles available yet. Skip silo context links for this article.";
+    return "No related articles available yet. This is the first article in this silo category. Skip silo context links for this article.";
   }
   return neighbors.map(n => `- Title: "${n.title}" (Link: /en/blog/${n.slug})`).join("\n");
 }
@@ -261,6 +286,7 @@ function generateSlug(title: string): string {
 
 /**
  * Main handler - Creates ONLY English article in DRAFT mode
+ * Rotates through silos daily: Day 1-5 cycle through all 5 silos
  * User must manually trigger translations via the dashboard
  */
 serve(async (req) => {
@@ -269,34 +295,57 @@ serve(async (req) => {
   }
 
   try {
-    // 1. Fetch next unprocessed title
-    const { data: titleRecord, error: titleError } = await supabase
+    // 1. Determine today's silo based on rotation schedule
+    const todaysSilo = getTodaysSilo();
+    console.log(`Today's scheduled silo: ${todaysSilo}`);
+
+    // 2. Fetch next unprocessed title from today's silo
+    let { data: titleRecord, error: titleError } = await supabase
       .from("article_titles")
       .select("*")
       .eq("processed", false)
+      .eq("silo_category", todaysSilo)
       .order("created_at", { ascending: true })
       .limit(1)
       .single();
 
+    // 3. If no title found in today's silo, try any unprocessed title (fallback)
     if (titleError || !titleRecord) {
-      return new Response(
-        JSON.stringify({ message: "No unprocessed titles found" }),
-        {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          status: 200,
-        }
-      );
+      console.log(`No unprocessed titles found in ${todaysSilo}, trying any silo...`);
+      const { data: fallbackTitle, error: fallbackError } = await supabase
+        .from("article_titles")
+        .select("*")
+        .eq("processed", false)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .single();
+
+      if (fallbackError || !fallbackTitle) {
+        return new Response(
+          JSON.stringify({ 
+            message: "No unprocessed titles found",
+            scheduled_silo: todaysSilo
+          }),
+          {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+            status: 200,
+          }
+        );
+      }
+
+      titleRecord = fallbackTitle;
+      console.log(`Using fallback title from silo: ${titleRecord.silo_category || 'None'}`);
     }
 
     console.log(`Processing title: ${titleRecord.title}`);
     console.log(`Silo category: ${titleRecord.silo_category || 'None'}`);
 
-    // 2. Fetch silo neighbors for internal linking
+    // 4. Fetch silo neighbors for internal linking
     const siloNeighbors = await fetchSiloNeighbors(titleRecord.silo_category, titleRecord.id);
     const relatedArticlesForPrompt = formatSiloArticlesForPrompt(siloNeighbors);
     console.log(`Found ${siloNeighbors.length} silo neighbors for linking`);
 
-    // 3. Generate master article with high thinking
+    // 5. Generate master article with high thinking
     const masterArticle = await generateMasterArticle(
       titleRecord.title,
       titleRecord.silo_category,
@@ -305,7 +354,7 @@ serve(async (req) => {
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
-    // 4. Create master article in database - DRAFT MODE
+    // 6. Create master article in database - DRAFT MODE
     const { data: masterArticleRecord, error: masterError } = await supabase
       .from("articles")
       .insert([
@@ -330,10 +379,12 @@ serve(async (req) => {
 
     console.log(`Master article created in DRAFT mode: ${masterArticleRecord.id}`);
 
-    // 5. Create generation log
+    // 7. Create generation log
     const summaryData = {
       title: titleRecord.title,
       silo_category: titleRecord.silo_category,
+      scheduled_silo: todaysSilo,
+      matched_scheduled_silo: titleRecord.silo_category === todaysSilo,
       master_article_id: masterArticleRecord.id,
       status: "draft",
       translations_pending: true,
@@ -346,7 +397,7 @@ serve(async (req) => {
       },
     ]);
 
-    // 6. Mark title as processed
+    // 8. Mark title as processed
     await supabase
       .from("article_titles")
       .update({
@@ -361,6 +412,8 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         message: "English article generated in DRAFT mode. Review and click 'Translate' to create translations.",
+        scheduled_silo: todaysSilo,
+        matched_scheduled_silo: titleRecord.silo_category === todaysSilo,
         title: titleRecord.title,
         silo_category: titleRecord.silo_category,
         master_article_id: masterArticleRecord.id,
