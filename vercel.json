@@ -5,16 +5,12 @@
       "destination": "/api/sitemap.xml"
     },
     {
-      "source": "/sitemap-simple.xml",
-      "destination": "/sitemap-simple.xml"
-    },
-    {
-      "source": "/sitemap-complete.xml",
-      "destination": "/sitemap-complete.xml"
+      "source": "/sitemap-index.xml",
+      "destination": "/api/sitemap-index.xml"
     },
     {
       "source": "/sitemap-:lang.xml",
-      "destination": "/sitemap-:lang.xml"
+      "destination": "/api/sitemap-lang.xml"
     },
     {
       "source": "/robots.txt",
