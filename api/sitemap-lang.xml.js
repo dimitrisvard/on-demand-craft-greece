@@ -1,6 +1,9 @@
 // API route to serve language-specific sitemaps from Supabase Storage
 // Accessible at: https://www.micronshub.eu/sitemap-en.xml, /sitemap-de.xml, etc.
 
+// Hardcode the Supabase URL since VITE_ env vars aren't available in Vercel API routes
+const SUPABASE_URL = 'https://cfjrtmtaitwzggzpkhxi.supabase.co';
+
 export default async function handler(req, res) {
   // Set proper headers for XML sitemap
   res.setHeader('Content-Type', 'application/xml');
@@ -19,8 +22,7 @@ export default async function handler(req, res) {
   }
   
   try {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://cfjrtmtaitwzggzpkhxi.supabase.co';
-    const sitemapUrl = `${supabaseUrl}/storage/v1/object/public/sitemaps/sitemap-${lang}.xml`;
+    const sitemapUrl = `${SUPABASE_URL}/storage/v1/object/public/sitemaps/sitemap-${lang}.xml`;
     
     const response = await fetch(sitemapUrl, {
       headers: {
