@@ -314,31 +314,41 @@ This sets up automatic daily article generation using pg_cron.
 
 ### 6.1 Enable pg_cron Extension
 
-1. In Supabase Dashboard, go to **Database** > **Extensions**
-2. Search for **"pg_cron"**
-3. Click **Enable** (or toggle it ON)
-4. Wait for confirmation
+**Status:** ✅ Already enabled via MCP
+
+The `pg_cron` extension has been enabled. This extension allows scheduling SQL commands to run at specified times.
 
 **Verification:**
-- ✅ pg_cron appears in the enabled extensions list
+- ✅ pg_cron extension is enabled (version 1.6)
 
-### 6.2 Enable http Extension (if needed)
+### 6.2 Enable pg_net Extension (for HTTP requests)
 
-1. In the same Extensions page
-2. Search for **"http"** or **"net"**
-3. Enable it if not already enabled
-4. This is needed for making HTTP requests from pg_cron
+**Status:** ✅ Already enabled via MCP
+
+The `pg_net` extension has been enabled. This extension is needed for making HTTP requests from pg_cron to call the edge function.
+
+**Verification:**
+- ✅ pg_net extension is enabled (version 0.14.0)
 
 ### 6.3 Create Scheduled Job
 
+**Project Reference:** `cfjrtmtaitwzggzpkhxi` (already configured)
+
+**Important:** You need to get your **Service Role Key** before creating the scheduled job:
+1. Go to Supabase Dashboard > **Project Settings** > **API**
+2. Find the **"service_role"** key (⚠️ Keep this secret!)
+3. Click **"Reveal"** and copy the key
+4. Use it in the SQL below
+
+**Option A: Using Supabase SQL Editor (Recommended)**
+
 1. Go to **SQL Editor** in Supabase Dashboard
 2. Click **New Query**
-3. Replace the placeholders in this SQL:
+3. Replace `YOUR_SERVICE_ROLE_KEY` in this SQL with your actual service role key:
 
 ```sql
--- Replace YOUR_PROJECT_REF with your Supabase project reference
--- Replace YOUR_SERVICE_ROLE_KEY with your service role key from Step 2.2
--- Adjust the cron schedule as needed
+-- Replace YOUR_SERVICE_ROLE_KEY with your actual service role key from Step 2.2
+-- Project ref is already configured: cfjrtmtaitwzggzpkhxi
 
 SELECT cron.schedule(
   'generate-daily-article',
@@ -346,17 +356,25 @@ SELECT cron.schedule(
   $$
   SELECT
     net.http_post(
-      url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/generate-daily-article',
-      headers := '{"Content-Type": "application/json", "Authorization": "Bearer YOUR_SERVICE_ROLE_KEY"}'::jsonb,
+      url := 'https://cfjrtmtaitwzggzpkhxi.supabase.co/functions/v1/generate-daily-article',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY'
+      ),
       body := '{}'::jsonb
     ) AS request_id;
   $$
 );
 ```
 
-**How to find YOUR_PROJECT_REF:**
-- It's the part before `.supabase.co` in your Project URL
-- Example: If URL is `https://abcdefghijk.supabase.co`, then `abcdefghijk` is your project ref
+**Option B: Using Migration File**
+
+A migration file has been created at: `supabase/migrations/20250121_create_daily_article_cron_job.sql`
+
+1. Open the migration file
+2. Replace `YOUR_SERVICE_ROLE_KEY` with your actual service role key
+3. Uncomment the SQL statement
+4. Run it in Supabase SQL Editor
 
 **Cron Schedule Examples:**
 - `'0 7 * * *'` - 7:00 AM UTC (9:00 AM Greece time, UTC+2)
