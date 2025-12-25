@@ -74,9 +74,7 @@ function ConditionalFooter() {
                           path.startsWith('/partners') ||
                           path.startsWith('/calendar') ||
                           path.startsWith('/products') ||
-                          path.startsWith('/rfq') ||
-                          path === '/notifications' ||
-                          path === '/settings';
+                          path.startsWith('/rfq');
   
   if (isDashboardRoute) {
     return null;
@@ -165,8 +163,8 @@ function AppContent() {
                 <Route path="/dashboard/email-inbox" element={<EmailInbox />} />
                 <Route path="/dashboard/email-marketing" element={<EmailMarketing />} />
                 <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
-                <Route path="/notifications" element={<NotificationsPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/dashboard/notifications" element={<NotificationsPage />} />
+                <Route path="/dashboard/settings" element={<SettingsPage />} />
                 <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 <Route path="/impressum" element={<ImpressumPage />} />

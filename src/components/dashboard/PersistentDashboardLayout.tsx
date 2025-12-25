@@ -59,8 +59,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/rfq-management') return 'quotes';
     if (path === '/orders') return 'orders';
     if (path === '/calendar') return 'calendar';
-    if (path === '/notifications') return 'notifications';
-    if (path === '/settings') return 'settings';
+    if (path === '/dashboard/notifications') return 'notifications';
+    if (path === '/dashboard/settings') return 'settings';
     return 'overview';
   };
 
@@ -232,13 +232,13 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                   <AccordionContent className="pb-0 pt-1 space-y-1">
                     <NavButton 
                       active={activeModule === "notifications"}
-                      onClick={() => handleNavigation("/notifications")}
+                      onClick={() => handleNavigation("/dashboard/notifications")}
                       icon={<Bell className="h-4 w-4" />}
                       label="Notifications"
                     />
                     <NavButton 
                       active={activeModule === "settings"}
-                      onClick={() => handleNavigation("/settings")}
+                      onClick={() => handleNavigation("/dashboard/settings")}
                       icon={<Settings className="h-4 w-4" />}
                       label="Settings"
                     />
