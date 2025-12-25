@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw } from "lucide-react";
+import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Select,
@@ -143,9 +143,14 @@ const BlogList = () => {
         throw new Error(result.error || "Translation failed");
       }
 
+      // Success message with details
+      const successfulTranslations = result.translations || 0;
+      const totalLanguages = result.total_languages || 13;
+      const indexNowStatus = result.indexing?.indexnow ? "✓" : "✗";
+
       toast({
-        title: "Translation Complete",
-        description: `Article translated to ${result.translations} languages and published!`,
+        title: "✅ Translation Successful",
+        description: `Article translated to ${successfulTranslations}/${totalLanguages} languages and published. IndexNow: ${indexNowStatus}`,
       });
 
       // Refresh articles list
@@ -153,8 +158,8 @@ const BlogList = () => {
     } catch (error: any) {
       console.error("Translation error:", error);
       toast({
-        title: "Translation Failed",
-        description: error.message || "Failed to translate article",
+        title: "❌ Translation Failed",
+        description: error.message || "Failed to translate article. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -185,23 +190,37 @@ const BlogList = () => {
         throw new Error(result.error || "Sitemap generation failed");
       }
 
+      // Check if all uploads were successful
+      const uploadedFiles = result.storage?.uploaded || [];
+      const successfulUploads = uploadedFiles.filter((u: any) => u.success);
+      const failedUploads = uploadedFiles.filter((u: any) => u.success === false);
+
+      if (failedUploads.length > 0) {
+        // Partial success
+        toast({
+          title: "⚠️ Sitemap Partially Generated",
+          description: `${successfulUploads.length}/${uploadedFiles.length} sitemaps saved successfully. ${failedUploads.length} failed.`,
+          variant: "destructive",
+        });
+      } else {
+        // Full success
+        toast({
+          title: "✅ Sitemap Generated Successfully",
+          description: `Generated ${successfulUploads.length} sitemaps with ${result.stats.urls} URLs. Accessible at: https://www.micronshub.eu/sitemap.xml`,
+        });
+      }
+
       setSitemapData({
         sitemap: result.sitemap || "",
         stats: result.stats,
         storage: result.storage,
       });
       setSitemapDialogOpen(true);
-
-      const uploadedCount = result.storage?.uploaded?.filter((u: any) => u.success).length || 0;
-      toast({
-        title: "Sitemap Generated & Saved",
-        description: `Generated ${uploadedCount} sitemaps with ${result.stats.urls} URLs. Auto-saved to storage!`,
-      });
     } catch (error: any) {
       console.error("Sitemap error:", error);
       toast({
-        title: "Sitemap Generation Failed",
-        description: error.message || "Failed to generate sitemap",
+        title: "❌ Sitemap Generation Failed",
+        description: error.message || "Failed to generate sitemap. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -294,7 +313,7 @@ const BlogList = () => {
               ) : (
                 <Map className="h-4 w-4" />
               )}
-              Generate Sitemap
+              {generatingSitemap ? "Generating..." : "Generate / Update Sitemap"}
             </Button>
             <Button onClick={() => navigate('/dashboard/blog/new')} className="flex items-center gap-2">
               <PlusCircle className="h-4 w-4" />
@@ -468,41 +487,46 @@ const BlogList = () => {
             </DialogDescription>
           </DialogHeader>
           
-          {/* Public URLs */}
-          {sitemapData?.storage?.publicUrls && (
-            <Card className="border-green-200 bg-green-50/50">
+          {/* Success/Fail Status */}
+          {sitemapData?.storage?.uploaded && (
+            <Card className={`border-2 ${
+              sitemapData.storage.uploaded.every((u: any) => u.success)
+                ? 'border-green-200 bg-green-50/50'
+                : 'border-yellow-200 bg-yellow-50/50'
+            }`}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2 text-green-700">
-                  <Globe className="h-4 w-4" />
-                  Sitemaps Auto-Saved to Storage
+                <CardTitle className={`text-sm flex items-center gap-2 ${
+                  sitemapData.storage.uploaded.every((u: any) => u.success)
+                    ? 'text-green-700'
+                    : 'text-yellow-700'
+                }`}>
+                  {sitemapData.storage.uploaded.every((u: any) => u.success) ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    <XCircle className="h-4 w-4" />
+                  )}
+                  {sitemapData.storage.uploaded.every((u: any) => u.success)
+                    ? 'All Sitemaps Saved Successfully'
+                    : 'Some Sitemaps Failed to Save'}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="text-sm">
-                  <span className="font-medium">Main Sitemap:</span>
-                  <a 
-                    href={sitemapData.storage.publicUrls.sitemap} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="ml-2 text-blue-600 hover:underline break-all"
-                  >
-                    {sitemapData.storage.publicUrls.sitemap}
-                  </a>
+              <CardContent>
+                <div className="text-sm space-y-1">
+                  <div>
+                    <span className="font-medium">Domain URL:</span>
+                    <a 
+                      href="https://www.micronshub.eu/sitemap.xml" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="ml-2 text-blue-600 hover:underline break-all"
+                    >
+                      https://www.micronshub.eu/sitemap.xml
+                    </a>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Submit this URL to Google Search Console and Bing Webmaster Tools.
+                  </p>
                 </div>
-                <div className="text-sm">
-                  <span className="font-medium">Sitemap Index:</span>
-                  <a 
-                    href={sitemapData.storage.publicUrls.sitemapIndex} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="ml-2 text-blue-600 hover:underline break-all"
-                  >
-                    {sitemapData.storage.publicUrls.sitemapIndex}
-                  </a>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Submit these URLs to Google Search Console and Bing Webmaster Tools.
-                </p>
               </CardContent>
             </Card>
           )}
@@ -515,11 +539,14 @@ const BlogList = () => {
                 {sitemapData.storage.uploaded.map((file: any, index: number) => (
                   <div key={index} className="text-xs flex items-center gap-2">
                     {file.success ? (
-                      <Badge variant="default" className="text-xs">✓</Badge>
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
                     ) : (
-                      <Badge variant="destructive" className="text-xs">✗</Badge>
+                      <XCircle className="h-3 w-3 text-red-500" />
                     )}
                     <span className="font-mono">{file.filename}</span>
+                    {file.error && (
+                      <span className="text-red-500 text-xs">({file.error})</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -528,18 +555,7 @@ const BlogList = () => {
 
           <DialogFooter className="gap-2">
             <Button 
-              variant="outline" 
-              onClick={() => {
-                if (sitemapData?.storage?.publicUrls?.sitemap) {
-                  navigator.clipboard.writeText(sitemapData.storage.publicUrls.sitemap);
-                  toast({ title: "Copied", description: "Sitemap URL copied to clipboard" });
-                }
-              }}
-            >
-              Copy URL
-            </Button>
-            <Button 
-              onClick={() => window.open(sitemapData?.storage?.publicUrls?.sitemap, '_blank')}
+              onClick={() => window.open('https://www.micronshub.eu/sitemap.xml', '_blank')}
               className="flex items-center gap-2"
             >
               <Globe className="h-4 w-4" />

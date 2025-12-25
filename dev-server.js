@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import sendRfqEmailsHandler from './api/send-rfq-emails.js';
+import sitemapHandler from './api/sitemap.xml.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,12 @@ async function createServer() {
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: 'spa'
+  });
+
+  // Sitemap route - must be before other routes
+  app.get('/sitemap.xml', async (req, res) => {
+    console.log('[API] GET /sitemap.xml hit');
+    await sitemapHandler(req, res);
   });
 
   // API routes - register BEFORE Vite middleware to prevent SPA routing

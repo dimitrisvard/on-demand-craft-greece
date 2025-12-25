@@ -296,33 +296,7 @@ async function submitToIndexNow(urls: string[]): Promise<boolean> {
   }
 }
 
-/**
- * Trigger sitemap regeneration after translations
- */
-async function regenerateSitemap(): Promise<boolean> {
-  try {
-    const response = await fetch(
-      `${supabaseUrl}/functions/v1/generate-sitemap?type=all`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-        },
-      }
-    );
-    
-    if (response.ok) {
-      console.log("Sitemap regenerated successfully");
-      return true;
-    } else {
-      console.error("Sitemap regeneration failed:", await response.text());
-      return false;
-    }
-  } catch (error) {
-    console.error("Sitemap regeneration error:", error);
-    return false;
-  }
-}
+// Sitemap regeneration removed - user must manually trigger via dashboard button
 
 /**
  * Main handler - Translates an English article to all languages
@@ -450,10 +424,7 @@ serve(async (req) => {
     // 5. Submit to IndexNow
     const indexNowResult = await submitToIndexNow(articleUrls);
 
-    // 6. Regenerate sitemap automatically
-    const sitemapResult = await regenerateSitemap();
-
-    // 7. Update generation log
+    // 6. Update generation log (sitemap is NOT auto-regenerated - user must click button)
     const { data: existingLog } = await supabase
       .from("article_generation_logs")
       .select("*")
@@ -466,7 +437,6 @@ serve(async (req) => {
         translations,
         translations_pending: false,
         indexing: { indexnow: indexNowResult },
-        sitemap_updated: sitemapResult,
         article_urls: articleUrls,
         translated_at: new Date().toISOString(),
       };
@@ -489,7 +459,6 @@ serve(async (req) => {
         translations: successfulTranslations,
         total_languages: LANGUAGES.length,
         indexing: { indexnow: indexNowResult },
-        sitemap_updated: sitemapResult,
         article_urls: articleUrls,
         details: translations,
       }),
