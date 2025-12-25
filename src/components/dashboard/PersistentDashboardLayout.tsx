@@ -269,8 +269,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-muted/20">
-        <div className="p-8 max-w-7xl mx-auto animate-fade-in">
+      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-muted/20 relative z-0">
+        <div className="p-8 max-w-7xl mx-auto animate-fade-in w-full min-h-full">
           {children}
         </div>
       </div>
