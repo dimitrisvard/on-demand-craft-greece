@@ -195,10 +195,10 @@ Add each secret by clicking **"Add new secret"**:
 
 #### Optional Secrets (for advanced features):
 
-**3. INDEXNOW_KEY** (Optional)
+**3. INDEXNOW_KEY** (Optional - Recommended)
 - **Name:** `INDEXNOW_KEY`
-- **Value:** A random 32-character string (or leave empty for auto-generation)
-- **Note:** If not set, the system will auto-generate one
+- **Value:** `3cbbdcec514448448e83e3bda8be819a` (already configured in `public/indexnow_key.txt`)
+- **Note:** This key is already set in the repository. Make sure to set it in Supabase Edge Functions secrets to match the file.
 
 **4. GOOGLE_INDEXING_API_KEY** (Optional - Advanced)
 - **Name:** `GOOGLE_INDEXING_API_KEY`
@@ -264,10 +264,10 @@ IndexNow allows automatic submission of new articles to search engines (Bing, Ya
 - If you didn't set `INDEXNOW_KEY` in Step 3, the system will auto-generate one
 - Check the edge function logs after first run to see the generated key
 
-**Option B: Generate Your Own Key**
-- Generate a random 32-character alphanumeric string
-- Example: `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6`
-- Set it as `INDEXNOW_KEY` in Step 3.2
+**Option B: Use the Configured Key**
+- The IndexNow key is already configured: `3cbbdcec514448448e83e3bda8be819a`
+- This key is set in `public/indexnow_key.txt` file
+- Make sure to set the same key as `INDEXNOW_KEY` in Supabase Edge Functions secrets (Step 3.2)
 
 ### 5.2 Create indexnow_key.txt File
 
