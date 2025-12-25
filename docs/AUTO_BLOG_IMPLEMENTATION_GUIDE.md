@@ -219,9 +219,19 @@ Add each secret by clicking **"Add new secret"**:
 Check that the edge function file exists:
 - Path: `supabase/functions/generate-daily-article/index.ts`
 
+**Status:** ✅ Edge function file exists locally
+
 ### 4.2 Deploy Edge Function
 
-**Option A: Using Supabase CLI (Recommended)**
+**Option A: Using Supabase MCP Tools (If Available)**
+
+The edge function can be deployed using Supabase MCP tools. This has already been done:
+- ✅ Function deployed: `generate-daily-article`
+- ✅ Status: ACTIVE
+- ✅ Version: 1
+- ✅ JWT Verification: Disabled (for pg_cron access)
+
+**Option B: Using Supabase CLI**
 
 ```bash
 # Make sure you're logged in
@@ -234,7 +244,7 @@ supabase link --project-ref your-project-ref
 supabase functions deploy generate-daily-article
 ```
 
-**Option B: Using Supabase Dashboard**
+**Option C: Using Supabase Dashboard**
 
 1. Go to **Edge Functions** in the left sidebar
 2. If the function doesn't exist, you'll need to deploy via CLI
@@ -242,7 +252,7 @@ supabase functions deploy generate-daily-article
 
 ### 4.3 Verify Deployment
 
-1. Go to **Edge Functions** > **generate-daily-article**
+1. Go to **Edge Functions** > **generate-daily-article** in Supabase Dashboard
 2. You should see:
    - Function name: `generate-daily-article`
    - Status: Active
@@ -251,6 +261,7 @@ supabase functions deploy generate-daily-article
 **Expected Result:**
 - ✅ Function appears in the Edge Functions list
 - ✅ Status shows as "Active" or "Deployed"
+- ✅ Function URL: `https://cfjrtmtaitwzggzpkhxi.supabase.co/functions/v1/generate-daily-article`
 
 ---
 
