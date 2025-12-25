@@ -1,14 +1,95 @@
+import { useState } from 'react';
 import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Settings } from 'lucide-react';
+import { Settings, Globe, RefreshCw, CheckCircle, ExternalLink, FileText, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { Badge } from '@/components/ui/badge';
+
+interface SitemapResult {
+  stats: {
+    type: string;
+    urls: number;
+    languages: number;
+    articles: number;
+  };
+  storage: {
+    uploaded: Array<{
+      filename: string;
+      publicUrl: string | null;
+      success: boolean;
+    }>;
+  };
+}
 
 const SettingsPage = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const [generatingSitemap, setGeneratingSitemap] = useState(false);
+  const [sitemapResult, setSitemapResult] = useState<SitemapResult | null>(null);
+
+  const handleGenerateSitemap = async () => {
+    setGeneratingSitemap(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) {
+        throw new Error("You must be logged in to generate sitemaps");
+      }
+
+      // Generate ALL sitemaps (complete + index + per-language) and save to storage
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=all`,
+        {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+          },
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Sitemap generation failed");
+      }
+
+      // Check if all uploads were successful
+      const uploadedFiles = result.storage?.uploaded || [];
+      const successfulUploads = uploadedFiles.filter((u: any) => u.success);
+      const failedUploads = uploadedFiles.filter((u: any) => u.success === false);
+
+      setSitemapResult(result);
+
+      if (failedUploads.length > 0) {
+        toast({
+          title: "⚠️ Sitemap Partially Generated",
+          description: `${successfulUploads.length}/${uploadedFiles.length} sitemaps saved successfully. ${failedUploads.length} failed.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "✅ Sitemap Generated Successfully",
+          description: `Generated ${successfulUploads.length} sitemaps with ${result.stats.urls} URLs.`,
+        });
+      }
+    } catch (error: any) {
+      console.error("Sitemap generation error:", error);
+      toast({
+        title: "❌ Sitemap Generation Failed",
+        description: error.message || "Failed to generate sitemap. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingSitemap(false);
+    }
+  };
 
   return (
     <PersistentDashboardLayout>
@@ -22,8 +103,9 @@ const SettingsPage = () => {
         </div>
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="account">Account</TabsTrigger>
+            <TabsTrigger value="seo">SEO & Sitemap</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
@@ -46,6 +128,127 @@ const SettingsPage = () => {
                   <Input id="role" value={user?.role?.replace('_', ' ') || 'User'} disabled />
                 </div>
                 <Button>Save Changes</Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="seo" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Globe className="h-5 w-5" />
+                  Sitemap Management
+                </CardTitle>
+                <CardDescription>
+                  Generate and update your XML sitemaps to help search engines discover your content.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Generate All Sitemaps</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Creates the main sitemap, sitemap index, and per-language sitemaps. Uploads them to storage automatically.
+                      </p>
+                    </div>
+                    <Button 
+                      onClick={handleGenerateSitemap} 
+                      disabled={generatingSitemap}
+                      className="shrink-0"
+                    >
+                      {generatingSitemap ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Generate & Update Sitemap
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {sitemapResult && (
+                    <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-5 w-5 text-green-500" />
+                        <span className="font-medium">Last Generation Result</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground">Total URLs</p>
+                          <p className="text-lg font-semibold">{sitemapResult.stats.urls}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Languages</p>
+                          <p className="text-lg font-semibold">{sitemapResult.stats.languages}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Articles</p>
+                          <p className="text-lg font-semibold">{sitemapResult.stats.articles}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Files Generated</p>
+                          <p className="text-lg font-semibold">{sitemapResult.storage.uploaded.length}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Generated Files:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {sitemapResult.storage.uploaded.map((file, index) => (
+                            <Badge 
+                              key={index} 
+                              variant={file.success ? "default" : "destructive"}
+                              className="flex items-center gap-1"
+                            >
+                              {file.success ? (
+                                <CheckCircle className="h-3 w-3" />
+                              ) : (
+                                <AlertCircle className="h-3 w-3" />
+                              )}
+                              {file.filename}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="border-t pt-4">
+                    <h4 className="font-medium mb-2">Sitemap URLs</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <a 
+                          href="https://www.micronshub.eu/sitemap.xml" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline flex items-center gap-1"
+                        >
+                          https://www.micronshub.eu/sitemap.xml
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <a 
+                          href="https://www.micronshub.eu/sitemap-index.xml" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline flex items-center gap-1"
+                        >
+                          https://www.micronshub.eu/sitemap-index.xml
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
