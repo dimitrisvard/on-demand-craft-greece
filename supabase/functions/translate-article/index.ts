@@ -112,9 +112,12 @@ async function generateWithGemini(
 
 /**
  * Generate translation using "Localization & Link Processor" Prompt
+ * - Translates: title, content, excerpt, meta title, meta description
+ * - KEEPS UNCHANGED: URL slug (always English for SEO consistency)
  */
 async function generateTranslation(
   originalJsonData: {
+    title: string;
     content: string;
     excerpt: string;
     metaTitle: string;
@@ -122,8 +125,10 @@ async function generateTranslation(
   },
   targetLanguage: string,
   langCode: string,
+  articleSlug: string,
   thoughtSignature: string
 ): Promise<{
+  title: string;
   content: string;
   excerpt: string;
   metaTitle: string;
@@ -134,6 +139,7 @@ Task: Translate the following manufacturing blog data into ${targetLanguage}.
 
 Input Data:
 {
+  "title": ${JSON.stringify(originalJsonData.title)},
   "content": ${JSON.stringify(originalJsonData.content)},
   "excerpt": ${JSON.stringify(originalJsonData.excerpt)},
   "metaTitle": ${JSON.stringify(originalJsonData.metaTitle)},
@@ -141,25 +147,49 @@ Input Data:
 }
 
 ---
-### TRANSLATION & LOCALIZATION RULES
-1.  **Brand Safety:** NEVER translate "${BRAND_NAME}". Keep it exactly as "${BRAND_NAME}".
-2.  **Technical Terminology:** Use industry-standard terms for ${targetLanguage} (e.g., English "Stainless Steel" -> German "Edelstahl", NOT "Rostfreier Stahl" if "Edelstahl" is the industry norm).
-3.  **HTML Structure:** Preserve ALL HTML tags, classes, and IDs exactly. Only translate the text *between* the tags.
+### CRITICAL TRANSLATION RULES
 
-### SMART LINK LOCALIZATION (Crucial)
-You must rewrite all internal links to match the target language sub-folder structure:
-* **Quote Page:** Convert href="/en/quote" to href="/${langCode}/quote"
-* **Service Page:** Convert href="/en/services" to href="/${langCode}/services"
-* **Blog Links:** Convert href="/en/blog/article-slug" to href="/${langCode}/blog/article-slug" (Preserve the slug)
-* **Anchor Text:** Translate the visible anchor text naturally to ${targetLanguage}.
+#### 1. BRAND SAFETY
+NEVER translate "${BRAND_NAME}". Keep it exactly as "${BRAND_NAME}" in all fields.
 
+#### 2. URL SLUGS - DO NOT TRANSLATE
+The article URL slug is "${articleSlug}" and must NEVER be translated or changed.
+This slug will remain the same across all language versions for SEO consistency.
+Only update the language prefix in links (e.g., /en/blog/${articleSlug} → /${langCode}/blog/${articleSlug})
+
+#### 3. META TITLE TRANSLATION
+Translate the metaTitle to ${targetLanguage} but:
+- Keep "${BRAND_NAME}" unchanged
+- Keep it under 60 characters
+- Maintain SEO keywords in the target language
+Example: "CNC Machining Guide | ${BRAND_NAME}" → "Guide d'usinage CNC | ${BRAND_NAME}" (French)
+
+#### 4. META DESCRIPTION TRANSLATION
+Translate the metaDescription to ${targetLanguage} but:
+- Keep it under 160 characters
+- Make it compelling and include a call-to-action
+- Use industry-standard technical terms
+
+#### 5. CONTENT TRANSLATION
+- Use industry-standard terms for ${targetLanguage} (e.g., "Stainless Steel" → German "Edelstahl")
+- Preserve ALL HTML tags, classes, and IDs exactly
+- Only translate the text *between* the tags
+
+#### 6. SMART LINK LOCALIZATION (Crucial)
+Rewrite all internal links to match the target language sub-folder structure:
+* href="/en/quote" → href="/${langCode}/quote"
+* href="/en/services" → href="/${langCode}/services"  
+* href="/en/blog/any-slug" → href="/${langCode}/blog/any-slug" (KEEP THE SLUG UNCHANGED!)
+* Translate the visible anchor text naturally
+
+---
 ### OUTPUT FORMAT (JSON - No markdown fencing!)
-Return the exact same JSON structure as the input, but with localized content:
 {
-  "content": "<translated HTML with updated hrefs>",
-  "excerpt": "<translated excerpt>",
-  "metaTitle": "<translated meta title>",
-  "metaDescription": "<translated meta description>"
+  "title": "<translated article title>",
+  "content": "<translated HTML with updated link hrefs>",
+  "excerpt": "<translated excerpt - max 160 chars>",
+  "metaTitle": "<translated meta title - max 60 chars> | ${BRAND_NAME}",
+  "metaDescription": "<translated meta description - max 160 chars>"
 }`;
 
   const response = await generateWithGemini(prompt, thoughtSignature);
@@ -180,20 +210,48 @@ Return the exact same JSON structure as the input, but with localized content:
     
     const parsed = JSON.parse(jsonText);
 
+    // Validate and fix meta lengths
+    let metaTitle = parsed.metaTitle || originalJsonData.metaTitle;
+    let metaDescription = parsed.metaDescription || originalJsonData.metaDescription;
+    
+    // Ensure brand name is present in meta title
+    if (!metaTitle.includes(BRAND_NAME)) {
+      metaTitle = `${metaTitle} | ${BRAND_NAME}`;
+    }
+    
+    // Truncate if too long
+    if (metaTitle.length > 70) {
+      metaTitle = metaTitle.substring(0, 67) + "...";
+    }
+    if (metaDescription.length > 160) {
+      metaDescription = metaDescription.substring(0, 157) + "...";
+    }
+
+    // Ensure links are properly localized (fallback regex replacement)
+    let content = parsed.content || originalJsonData.content;
+    content = content
+      .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
+      .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
+      .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+
     return {
-      content: parsed.content || response,
+      title: parsed.title || originalJsonData.title,
+      content: content,
       excerpt: parsed.excerpt || originalJsonData.excerpt,
-      metaTitle: parsed.metaTitle || originalJsonData.metaTitle,
-      metaDescription: parsed.metaDescription || originalJsonData.metaDescription,
+      metaTitle: metaTitle,
+      metaDescription: metaDescription,
     };
   } catch (error) {
     console.error(`Failed to parse translation for ${targetLanguage}:`, error);
     
     // Fallback: return original with basic link replacement
     let fallbackContent = originalJsonData.content
-      .replace(/href="\/en\//g, `href="/${langCode}/`);
+      .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
+      .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
+      .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
     
     return {
+      title: originalJsonData.title,
       content: fallbackContent,
       excerpt: originalJsonData.excerpt,
       metaTitle: originalJsonData.metaTitle,
@@ -239,6 +297,34 @@ async function submitToIndexNow(urls: string[]): Promise<boolean> {
 }
 
 /**
+ * Trigger sitemap regeneration after translations
+ */
+async function regenerateSitemap(): Promise<boolean> {
+  try {
+    const response = await fetch(
+      `${supabaseUrl}/functions/v1/generate-sitemap?type=all`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+      }
+    );
+    
+    if (response.ok) {
+      console.log("Sitemap regenerated successfully");
+      return true;
+    } else {
+      console.error("Sitemap regeneration failed:", await response.text());
+      return false;
+    }
+  } catch (error) {
+    console.error("Sitemap regeneration error:", error);
+    return false;
+  }
+}
+
+/**
  * Main handler - Translates an English article to all languages
  * Expects: { article_id: "uuid" }
  */
@@ -279,9 +365,11 @@ serve(async (req) => {
     }
 
     console.log(`Translating article: ${masterArticle.title}`);
+    console.log(`Article slug (will remain unchanged): ${masterArticle.slug}`);
 
     // 2. Prepare original data for translation
     const originalJsonData = {
+      title: masterArticle.title,
       content: masterArticle.content,
       excerpt: masterArticle.excerpt || "",
       metaTitle: masterArticle.meta_title || masterArticle.title,
@@ -302,24 +390,25 @@ serve(async (req) => {
           originalJsonData,
           lang.name,
           lang.code,
+          masterArticle.slug, // Pass slug for reference (it stays unchanged)
           thoughtSignature
         );
 
-        // Use same slug for all languages
+        // URL slug ALWAYS stays the same as English version (SEO best practice)
         const translatedSlug = masterArticle.slug;
 
         const { data: translatedArticle, error: transError } = await supabase
           .from("articles")
           .insert([
             {
-              title: translation.metaTitle.replace(` | ${BRAND_NAME}`, ''),
-              slug: translatedSlug,
+              title: translation.title, // Translated title
+              slug: translatedSlug, // SAME slug as English
               content: translation.content,
               excerpt: translation.excerpt,
               language: lang.code,
-              status: "published", // Translations are published immediately
-              meta_title: translation.metaTitle,
-              meta_description: translation.metaDescription,
+              status: "published",
+              meta_title: translation.metaTitle, // Translated meta title
+              meta_description: translation.metaDescription, // Translated meta description
               translation_id: masterArticle.translation_id,
             },
           ])
@@ -336,6 +425,9 @@ serve(async (req) => {
           translations[lang.code] = {
             success: true,
             article_id: translatedArticle.id,
+            title: translation.title,
+            metaTitle: translation.metaTitle,
+            slug: translatedSlug,
             url: `${siteUrl}/${lang.code}/blog/${translatedSlug}`,
           };
           articleUrls.push(`${siteUrl}/${lang.code}/blog/${translatedSlug}`);
@@ -358,7 +450,10 @@ serve(async (req) => {
     // 5. Submit to IndexNow
     const indexNowResult = await submitToIndexNow(articleUrls);
 
-    // 6. Update generation log
+    // 6. Regenerate sitemap automatically
+    const sitemapResult = await regenerateSitemap();
+
+    // 7. Update generation log
     const { data: existingLog } = await supabase
       .from("article_generation_logs")
       .select("*")
@@ -371,6 +466,7 @@ serve(async (req) => {
         translations,
         translations_pending: false,
         indexing: { indexnow: indexNowResult },
+        sitemap_updated: sitemapResult,
         article_urls: articleUrls,
         translated_at: new Date().toISOString(),
       };
@@ -389,9 +485,11 @@ serve(async (req) => {
         success: true,
         message: `Article translated to ${successfulTranslations} languages and published`,
         master_article_id: article_id,
+        slug: masterArticle.slug, // Same slug for all languages
         translations: successfulTranslations,
         total_languages: LANGUAGES.length,
         indexing: { indexnow: indexNowResult },
+        sitemap_updated: sitemapResult,
         article_urls: articleUrls,
         details: translations,
       }),
@@ -411,4 +509,3 @@ serve(async (req) => {
     );
   }
 });
-

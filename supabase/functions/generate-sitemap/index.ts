@@ -228,9 +228,47 @@ ${sitemaps}
 }
 
 /**
+ * Upload sitemap to Supabase Storage (auto-replaces existing)
+ */
+async function uploadSitemapToStorage(
+  filename: string,
+  content: string
+): Promise<{ success: boolean; publicUrl: string | null; error?: string }> {
+  try {
+    const blob = new Blob([content], { type: "application/xml" });
+    
+    // Upload to storage bucket (upsert = replace if exists)
+    const { data, error } = await supabase.storage
+      .from("sitemaps")
+      .upload(filename, blob, {
+        contentType: "application/xml",
+        upsert: true, // Replace existing file
+        cacheControl: "3600", // Cache for 1 hour
+      });
+
+    if (error) {
+      console.error(`Storage upload error for ${filename}:`, error);
+      return { success: false, publicUrl: null, error: error.message };
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from("sitemaps")
+      .getPublicUrl(filename);
+
+    console.log(`Sitemap uploaded: ${filename} -> ${urlData.publicUrl}`);
+    return { success: true, publicUrl: urlData.publicUrl };
+  } catch (error: any) {
+    console.error(`Upload exception for ${filename}:`, error);
+    return { success: false, publicUrl: null, error: error.message };
+  }
+}
+
+/**
  * Main handler
  * Query params:
  * - type: "complete" (default), "index", or specific language code (e.g., "en", "de")
+ * - save: "true" to auto-save to storage (default for complete sitemap)
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -240,19 +278,63 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const type = url.searchParams.get("type") || "complete";
+    const shouldSave = url.searchParams.get("save") !== "false"; // Default to true
 
     let sitemap: string;
     let stats = { type: "", urls: 0, languages: 0, articles: 0 };
+    const uploadResults: Array<{ filename: string; publicUrl: string | null; success: boolean }> = [];
 
     if (type === "index") {
       // Generate sitemap index pointing to language-specific sitemaps
       sitemap = generateSitemapIndex();
       stats = { type: "index", urls: LANGUAGES.length, languages: LANGUAGES.length, articles: 0 };
+      
+      if (shouldSave) {
+        const result = await uploadSitemapToStorage("sitemap-index.xml", sitemap);
+        uploadResults.push({ filename: "sitemap-index.xml", ...result });
+      }
+    } else if (type === "all") {
+      // Generate and save ALL sitemaps (complete + index + per-language)
+      
+      // 1. Generate and save complete sitemap
+      sitemap = await generateSitemap();
+      const completeResult = await uploadSitemapToStorage("sitemap.xml", sitemap);
+      uploadResults.push({ filename: "sitemap.xml", ...completeResult });
+      
+      // 2. Generate and save sitemap index
+      const indexSitemap = generateSitemapIndex();
+      const indexResult = await uploadSitemapToStorage("sitemap-index.xml", indexSitemap);
+      uploadResults.push({ filename: "sitemap-index.xml", ...indexResult });
+      
+      // 3. Generate and save per-language sitemaps
+      for (const lang of LANGUAGES) {
+        const langSitemap = await generateLanguageSitemap(lang);
+        const langResult = await uploadSitemapToStorage(`sitemap-${lang}.xml`, langSitemap);
+        uploadResults.push({ filename: `sitemap-${lang}.xml`, ...langResult });
+      }
+      
+      const urlCount = (sitemap.match(/<url>/g) || []).length;
+      const { count } = await supabase
+        .from("articles")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "published");
+        
+      stats = { 
+        type: "all", 
+        urls: urlCount, 
+        languages: LANGUAGES.length, 
+        articles: count || 0 
+      };
     } else if (LANGUAGES.includes(type)) {
       // Generate language-specific sitemap
       sitemap = await generateLanguageSitemap(type);
       const urlCount = (sitemap.match(/<url>/g) || []).length;
       stats = { type: `language-${type}`, urls: urlCount, languages: 1, articles: urlCount - STATIC_PAGES.length };
+      
+      if (shouldSave) {
+        const result = await uploadSitemapToStorage(`sitemap-${type}.xml`, sitemap);
+        uploadResults.push({ filename: `sitemap-${type}.xml`, ...result });
+      }
     } else {
       // Generate complete sitemap with all languages and hreflang
       sitemap = await generateSitemap();
@@ -270,17 +352,32 @@ serve(async (req) => {
         languages: LANGUAGES.length, 
         articles: count || 0 
       };
+      
+      if (shouldSave) {
+        const result = await uploadSitemapToStorage("sitemap.xml", sitemap);
+        uploadResults.push({ filename: "sitemap.xml", ...result });
+      }
     }
 
     console.log(`Generated ${stats.type} sitemap with ${stats.urls} URLs`);
+
+    // Construct public URLs for the sitemaps
+    const storageBaseUrl = `${supabaseUrl}/storage/v1/object/public/sitemaps`;
 
     // Return both the sitemap XML and stats
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Sitemap generated successfully`,
+        message: `Sitemap generated and saved successfully`,
         stats,
-        sitemap,
+        storage: {
+          uploaded: uploadResults,
+          publicUrls: {
+            sitemap: `${storageBaseUrl}/sitemap.xml`,
+            sitemapIndex: `${storageBaseUrl}/sitemap-index.xml`,
+          }
+        },
+        sitemap: type !== "all" ? sitemap : undefined, // Don't include full sitemap in "all" response
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -298,4 +395,3 @@ serve(async (req) => {
     );
   }
 });
-

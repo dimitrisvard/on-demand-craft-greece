@@ -63,7 +63,7 @@ const BlogList = () => {
   const [translatingId, setTranslatingId] = useState<string | null>(null);
   const [generatingSitemap, setGeneratingSitemap] = useState(false);
   const [sitemapDialogOpen, setSitemapDialogOpen] = useState(false);
-  const [sitemapData, setSitemapData] = useState<{ sitemap: string; stats: any } | null>(null);
+  const [sitemapData, setSitemapData] = useState<{ sitemap: string; stats: any; storage?: any } | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -168,8 +168,9 @@ const BlogList = () => {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
 
+      // Generate ALL sitemaps (complete + index + per-language) and save to storage
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=complete`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=all`,
         {
           method: "GET",
           headers: {
@@ -185,14 +186,16 @@ const BlogList = () => {
       }
 
       setSitemapData({
-        sitemap: result.sitemap,
+        sitemap: result.sitemap || "",
         stats: result.stats,
+        storage: result.storage,
       });
       setSitemapDialogOpen(true);
 
+      const uploadedCount = result.storage?.uploaded?.filter((u: any) => u.success).length || 0;
       toast({
-        title: "Sitemap Generated",
-        description: `Generated sitemap with ${result.stats.urls} URLs across ${result.stats.languages} languages`,
+        title: "Sitemap Generated & Saved",
+        description: `Generated ${uploadedCount} sitemaps with ${result.stats.urls} URLs. Auto-saved to storage!`,
       });
     } catch (error: any) {
       console.error("Sitemap error:", error);
@@ -454,7 +457,7 @@ const BlogList = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Map className="h-5 w-5" />
-              Generated Sitemap
+              Sitemap Generated & Saved
             </DialogTitle>
             <DialogDescription>
               {sitemapData?.stats && (
@@ -465,20 +468,82 @@ const BlogList = () => {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="border rounded-md p-4 bg-muted/50 max-h-[400px] overflow-auto">
-            <pre className="text-xs whitespace-pre-wrap font-mono">
-              {sitemapData?.sitemap?.substring(0, 5000)}
-              {sitemapData?.sitemap && sitemapData.sitemap.length > 5000 && '...\n(truncated for display)'}
-            </pre>
-          </div>
+          {/* Public URLs */}
+          {sitemapData?.storage?.publicUrls && (
+            <Card className="border-green-200 bg-green-50/50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2 text-green-700">
+                  <Globe className="h-4 w-4" />
+                  Sitemaps Auto-Saved to Storage
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="text-sm">
+                  <span className="font-medium">Main Sitemap:</span>
+                  <a 
+                    href={sitemapData.storage.publicUrls.sitemap} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="ml-2 text-blue-600 hover:underline break-all"
+                  >
+                    {sitemapData.storage.publicUrls.sitemap}
+                  </a>
+                </div>
+                <div className="text-sm">
+                  <span className="font-medium">Sitemap Index:</span>
+                  <a 
+                    href={sitemapData.storage.publicUrls.sitemapIndex} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="ml-2 text-blue-600 hover:underline break-all"
+                  >
+                    {sitemapData.storage.publicUrls.sitemapIndex}
+                  </a>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Submit these URLs to Google Search Console and Bing Webmaster Tools.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Uploaded files list */}
+          {sitemapData?.storage?.uploaded && (
+            <div className="border rounded-md p-4 bg-muted/50 max-h-[200px] overflow-auto">
+              <p className="text-sm font-medium mb-2">Uploaded Files:</p>
+              <div className="space-y-1">
+                {sitemapData.storage.uploaded.map((file: any, index: number) => (
+                  <div key={index} className="text-xs flex items-center gap-2">
+                    {file.success ? (
+                      <Badge variant="default" className="text-xs">✓</Badge>
+                    ) : (
+                      <Badge variant="destructive" className="text-xs">✗</Badge>
+                    )}
+                    <span className="font-mono">{file.filename}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={handleCopySitemap}>
-              Copy to Clipboard
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                if (sitemapData?.storage?.publicUrls?.sitemap) {
+                  navigator.clipboard.writeText(sitemapData.storage.publicUrls.sitemap);
+                  toast({ title: "Copied", description: "Sitemap URL copied to clipboard" });
+                }
+              }}
+            >
+              Copy URL
             </Button>
-            <Button onClick={handleDownloadSitemap} className="flex items-center gap-2">
-              <Download className="h-4 w-4" />
-              Download sitemap.xml
+            <Button 
+              onClick={() => window.open(sitemapData?.storage?.publicUrls?.sitemap, '_blank')}
+              className="flex items-center gap-2"
+            >
+              <Globe className="h-4 w-4" />
+              View Live Sitemap
             </Button>
           </DialogFooter>
         </DialogContent>
