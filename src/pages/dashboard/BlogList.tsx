@@ -25,6 +25,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { format as dateFormat } from "date-fns";
+import { Calendar, Clock, ArrowLeft, X } from "lucide-react";
 
 interface Article {
   id: string;
@@ -54,6 +66,15 @@ const LANGUAGES = [
   { code: "nb", label: "Norwegian" },
 ];
 
+interface FullArticle extends Article {
+  content?: string;
+  excerpt?: string;
+  featured_image?: string;
+  featured_image_alt?: string;
+  meta_title?: string;
+  meta_description?: string;
+}
+
 const BlogList = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,6 +85,14 @@ const BlogList = () => {
   const [generatingSitemap, setGeneratingSitemap] = useState(false);
   const [sitemapDialogOpen, setSitemapDialogOpen] = useState(false);
   const [sitemapData, setSitemapData] = useState<{ sitemap: string; stats: any; storage?: any } | null>(null);
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [articleToDelete, setArticleToDelete] = useState<Article | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // Preview dialog state
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewArticle, setPreviewArticle] = useState<FullArticle | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -93,22 +122,30 @@ const BlogList = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this article?")) return;
+  const handleDeleteClick = (article: Article) => {
+    setArticleToDelete(article);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!articleToDelete) return;
 
     try {
+      setDeleting(true);
       const { error } = await supabase
         .from('articles')
         .delete()
-        .eq('id', id);
+        .eq('id', articleToDelete.id);
 
       if (error) throw error;
 
-      setArticles(articles.filter(a => a.id !== id));
+      setArticles(articles.filter(a => a.id !== articleToDelete.id));
       toast({
         title: "Success",
         description: "Article deleted successfully",
       });
+      setDeleteDialogOpen(false);
+      setArticleToDelete(null);
     } catch (error: any) {
       console.error('Error deleting article:', error);
       toast({
@@ -116,6 +153,35 @@ const BlogList = () => {
         description: "Failed to delete article",
         variant: "destructive",
       });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handlePreviewClick = async (article: Article) => {
+    setLoadingPreview(true);
+    setPreviewDialogOpen(true);
+    
+    try {
+      // Fetch full article content for preview
+      const { data, error } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('id', article.id)
+        .single();
+
+      if (error) throw error;
+      setPreviewArticle(data);
+    } catch (error: any) {
+      console.error('Error fetching article for preview:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load article preview",
+        variant: "destructive",
+      });
+      setPreviewDialogOpen(false);
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
@@ -433,12 +499,13 @@ const BlogList = () => {
                               )}
                             </Button>
                           )}
+                          {/* Preview button - works for both draft and published articles */}
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            onClick={() => window.open(`/${article.language}/blog/${article.slug}`, '_blank')}
-                            disabled={article.status !== 'published'}
-                            title="View Live"
+                            onClick={() => handlePreviewClick(article)}
+                            title={article.status === 'published' ? "Preview Article" : "Preview Draft"}
+                            className="text-purple-500 hover:text-purple-700 hover:bg-purple-50"
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -454,7 +521,7 @@ const BlogList = () => {
                             variant="ghost" 
                             size="sm"
                             className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => handleDelete(article.id)}
+                            onClick={() => handleDeleteClick(article)}
                             title="Delete"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -560,6 +627,162 @@ const BlogList = () => {
             >
               <Globe className="h-4 w-4" />
               View Live Sitemap
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Article</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the article{" "}
+              <span className="font-semibold">"{articleToDelete?.title}"</span>?
+              <br />
+              <span className="text-red-500 mt-2 block">
+                This action cannot be undone.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Article Preview Dialog */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <Eye className="h-5 w-5" />
+                Article Preview
+                {previewArticle?.status === 'draft' && (
+                  <Badge variant="secondary" className="ml-2">Draft</Badge>
+                )}
+                {previewArticle?.status === 'published' && (
+                  <Badge variant="default" className="ml-2">Published</Badge>
+                )}
+              </DialogTitle>
+            </div>
+            <DialogDescription>
+              Preview how this article will look when published
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto mt-4">
+            {loadingPreview ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : previewArticle ? (
+              <div className="bg-white rounded-lg border p-6">
+                {/* Article Header */}
+                <div className="space-y-4 mb-6">
+                  <div className="flex items-center space-x-4 text-sm text-muted-foreground">
+                    <span className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-1" />
+                      {dateFormat(new Date(previewArticle.created_at), 'MMMM dd, yyyy')}
+                    </span>
+                    {previewArticle.content && (
+                      <span className="flex items-center">
+                        <Clock className="h-4 w-4 mr-1" />
+                        {Math.max(1, Math.ceil(previewArticle.content.replace(/<[^>]*>/g, '').split(' ').length / 200))} min read
+                      </span>
+                    )}
+                    <Badge variant="outline" className="flex items-center gap-1">
+                      <span>{getLanguageFlag(previewArticle.language)}</span>
+                      <span className="uppercase text-xs">{previewArticle.language}</span>
+                    </Badge>
+                  </div>
+
+                  <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-900 leading-tight">
+                    {previewArticle.title}
+                  </h1>
+
+                  {previewArticle.excerpt && (
+                    <p className="text-lg text-muted-foreground italic">
+                      {previewArticle.excerpt}
+                    </p>
+                  )}
+                </div>
+
+                {/* Featured Image */}
+                {previewArticle.featured_image && (
+                  <div className="mb-8 rounded-xl overflow-hidden shadow-md">
+                    <img 
+                      src={previewArticle.featured_image} 
+                      alt={previewArticle.featured_image_alt || previewArticle.title} 
+                      className="w-full h-auto object-cover max-h-[400px]"
+                    />
+                  </div>
+                )}
+
+                {/* Article Content */}
+                {previewArticle.content && (
+                  <div 
+                    className="prose prose-lg prose-blue max-w-none"
+                    dangerouslySetInnerHTML={{ __html: previewArticle.content }}
+                  />
+                )}
+
+                {/* SEO Preview Section */}
+                <div className="mt-8 pt-6 border-t">
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3">SEO Preview</h3>
+                  <div className="bg-slate-50 rounded-lg p-4 space-y-2">
+                    <div className="text-blue-600 text-lg hover:underline cursor-pointer">
+                      {previewArticle.meta_title || previewArticle.title}
+                    </div>
+                    <div className="text-green-700 text-sm">
+                      {window.location.origin}/{previewArticle.language}/blog/{previewArticle.slug}
+                    </div>
+                    <div className="text-gray-600 text-sm">
+                      {previewArticle.meta_description || previewArticle.excerpt || 'No description available'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                Failed to load article preview
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-shrink-0 gap-2 mt-4">
+            {previewArticle?.status === 'published' && (
+              <Button 
+                onClick={() => window.open(`/${previewArticle.language}/blog/${previewArticle.slug}`, '_blank')}
+                className="flex items-center gap-2"
+              >
+                <Globe className="h-4 w-4" />
+                View Live
+              </Button>
+            )}
+            <Button 
+              variant="outline"
+              onClick={() => previewArticle && navigate(`/dashboard/blog/edit/${previewArticle.id}`)}
+              className="flex items-center gap-2"
+            >
+              <Pencil className="h-4 w-4" />
+              Edit Article
             </Button>
           </DialogFooter>
         </DialogContent>
