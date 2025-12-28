@@ -8,7 +8,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
+import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw, CheckCircle2, XCircle, ChevronDown, MoreHorizontal } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Select,
@@ -80,6 +89,7 @@ const BlogList = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [languageFilter, setLanguageFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [dateSort, setDateSort] = useState("newest");
   const [translatingId, setTranslatingId] = useState<string | null>(null);
   const [generatingSitemap, setGeneratingSitemap] = useState(false);
@@ -93,6 +103,11 @@ const BlogList = () => {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewArticle, setPreviewArticle] = useState<FullArticle | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  // Selection state for bulk actions
+  const [selectedArticles, setSelectedArticles] = useState<Set<string>>(new Set());
+  // Bulk delete confirmation dialog
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -322,14 +337,71 @@ const BlogList = () => {
       .filter(article => {
         const matchesSearch = article.title.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesLanguage = languageFilter === "all" || article.language === languageFilter;
-        return matchesSearch && matchesLanguage;
+        const matchesStatus = statusFilter === "all" || article.status === statusFilter;
+        return matchesSearch && matchesLanguage && matchesStatus;
       })
       .sort((a, b) => {
         const dateA = new Date(a.created_at).getTime();
         const dateB = new Date(b.created_at).getTime();
         return dateSort === "newest" ? dateB - dateA : dateA - dateB;
       });
-  }, [articles, searchQuery, languageFilter, dateSort]);
+  }, [articles, searchQuery, languageFilter, statusFilter, dateSort]);
+
+  // Selection handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedArticles(new Set(filteredArticles.map(a => a.id)));
+    } else {
+      setSelectedArticles(new Set());
+    }
+  };
+
+  const handleSelectArticle = (articleId: string, checked: boolean) => {
+    const newSelected = new Set(selectedArticles);
+    if (checked) {
+      newSelected.add(articleId);
+    } else {
+      newSelected.delete(articleId);
+    }
+    setSelectedArticles(newSelected);
+  };
+
+  const isAllSelected = filteredArticles.length > 0 && filteredArticles.every(a => selectedArticles.has(a.id));
+  const isSomeSelected = selectedArticles.size > 0 && !isAllSelected;
+
+  // Bulk delete handler
+  const handleBulkDelete = async () => {
+    if (selectedArticles.size === 0) return;
+
+    try {
+      setBulkDeleting(true);
+      const idsToDelete = Array.from(selectedArticles);
+      
+      const { error } = await supabase
+        .from('articles')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (error) throw error;
+
+      setArticles(articles.filter(a => !selectedArticles.has(a.id)));
+      toast({
+        title: "Success",
+        description: `${selectedArticles.size} article(s) deleted successfully`,
+      });
+      setSelectedArticles(new Set());
+      setBulkDeleteDialogOpen(false);
+    } catch (error: any) {
+      console.error('Error deleting articles:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete articles",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   // Check if an article has translations
   const hasTranslations = (article: Article) => {
@@ -400,7 +472,26 @@ const BlogList = () => {
             />
           </div>
           
-          <div className="flex gap-4 w-full sm:w-auto">
+          <div className="flex flex-wrap gap-4 w-full sm:w-auto">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Filter by Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="draft">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">Draft</Badge>
+                  </div>
+                </SelectItem>
+                <SelectItem value="published">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="default" className="text-xs">Published</Badge>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
             <Select value={languageFilter} onValueChange={setLanguageFilter}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Filter by Language" />
@@ -427,11 +518,58 @@ const BlogList = () => {
           </div>
         </div>
 
+        {/* Bulk Actions Bar - shows when articles are selected */}
+        {selectedArticles.size > 0 && (
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-blue-700">
+                {selectedArticles.size} article{selectedArticles.size > 1 ? 's' : ''} selected
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedArticles(new Set())}
+                className="text-blue-600 hover:text-blue-800"
+              >
+                Clear selection
+              </Button>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <MoreHorizontal className="h-4 w-4" />
+                  Actions
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Bulk Actions</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-red-600 focus:text-red-600 focus:bg-red-50"
+                  onClick={() => setBulkDeleteDialogOpen(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Selected ({selectedArticles.size})
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
         <Card className="shadow-sm border">
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[50px]">
+                    <Checkbox
+                      checked={isAllSelected}
+                      onCheckedChange={handleSelectAll}
+                      aria-label="Select all articles"
+                      className={isSomeSelected ? "data-[state=checked]:bg-blue-600" : ""}
+                    />
+                  </TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Language</TableHead>
                   <TableHead>Status</TableHead>
@@ -442,13 +580,13 @@ const BlogList = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       Loading articles...
                     </TableCell>
                   </TableRow>
                 ) : filteredArticles.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       <div className="flex flex-col items-center justify-center">
                         <FileText className="h-12 w-12 mb-2 opacity-20" />
                         <p>No articles found matching your filters.</p>
@@ -457,7 +595,17 @@ const BlogList = () => {
                   </TableRow>
                 ) : (
                   filteredArticles.map((article) => (
-                    <TableRow key={article.id}>
+                    <TableRow 
+                      key={article.id}
+                      className={selectedArticles.has(article.id) ? "bg-blue-50" : ""}
+                    >
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedArticles.has(article.id)}
+                          onCheckedChange={(checked) => handleSelectArticle(article.id, checked as boolean)}
+                          aria-label={`Select ${article.title}`}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {article.title}
@@ -660,6 +808,39 @@ const BlogList = () => {
                 </>
               ) : (
                 "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedArticles.size} Article{selectedArticles.size > 1 ? 's' : ''}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <span className="font-semibold">{selectedArticles.size} article{selectedArticles.size > 1 ? 's' : ''}</span>?
+              <br />
+              <span className="text-red-500 mt-2 block">
+                This action cannot be undone. All selected articles will be permanently deleted.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              {bulkDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                `Delete ${selectedArticles.size} Article${selectedArticles.size > 1 ? 's' : ''}`
               )}
             </AlertDialogAction>
           </AlertDialogFooter>

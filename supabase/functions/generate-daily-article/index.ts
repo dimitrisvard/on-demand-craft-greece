@@ -205,6 +205,14 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 4.  **Formatting:** Return ONLY valid JSON. No markdown fencing (\`\`\`json) around the response.
 
 ---
+### EUROPEAN LOCALIZATION (MANDATORY)
+**Target Audience: European manufacturers and engineers. Follow these rules strictly:**
+1.  **Currency:** Always use Euro (€) for ALL prices. NEVER use Dollar ($). Example: "Starting from €500" not "$500".
+2.  **Measurements:** Use METRIC ONLY - centimeters (cm) and millimeters (mm). NEVER use inches or feet. Example: "tolerance of ±0.05 mm" not "±0.002 inches".
+3.  **Decimal Notation:** Use comma for decimals in measurements when contextually appropriate (e.g., "2,5 mm" is acceptable, but "2.5 mm" is also fine for technical content).
+4.  **Weight:** Use kilograms (kg) and grams (g), NEVER pounds (lb) or ounces (oz).
+
+---
 ### LINKING STRATEGY (Dynamic Insertion)
 You must insert 3 specific types of links naturally into the flow of the text:
 1.  **Silo Context Link:** Choose 1-2 relevant articles from this list:
@@ -224,12 +232,17 @@ ${relatedArticles}
     * **Deep Dive (H2/H3):** Detailed process, tolerances, material selection, and cost drivers.
     * **Comparison Table:** ALWAYS include an HTML table (<table>) comparing materials or processes relevant to the topic.
     * **Visual Q&A:** A visible H2 section titled "Frequently Asked Questions" at the bottom with 5-7 questions using <h3> for each question.
-3.  **FAQ Schema:** Generate Google-compliant JSON-LD for the FAQ section.
+4.  **FAQ Schema:** Generate Google-compliant JSON-LD for the FAQ section.
+5.  **Readability & Spacing:** 
+    * Each paragraph should have proper spacing (wrap each in <p> tags).
+    * Add a blank line/spacing between paragraphs for visual breathing room.
+    * Keep paragraphs concise (3-5 sentences max) for better readability.
+    * Use <br><br> between major sections if needed for visual separation.
 
 ---
 ### OUTPUT FORMAT (JSON - No markdown fencing!)
 {
-  "content": "<div class='blog-post'>...full HTML content with proper tags...</div>",
+  "content": "<div class='blog-post'>...full HTML content with proper tags and spacing...</div>",
   "excerpt": "A 160-character technical summary optimized for CTR.",
   "metaTitle": "SEO Title (Max 60 chars) | ${BRAND_NAME}",
   "metaDescription": "SEO Description (Max 160 chars) with primary keyword.",

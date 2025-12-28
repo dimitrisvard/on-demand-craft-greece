@@ -1,4 +1,6 @@
-/* Add to src/styles/blog-content.css */
+/* Blog content styling - works with both .blog-content and .prose classes */
+
+/* Base blog content styles */
 .blog-content {
     line-height: 1.8;
     color: var(--foreground);
@@ -53,5 +55,117 @@
 .blog-content a:hover {
     color: hsl(var(--primary));
     opacity: 0.8;
+}
+
+/* Prose class overrides for proper styling */
+.prose a {
+    color: hsl(217, 65%, 35%) !important;
+    text-decoration: underline !important;
+    text-underline-offset: 3px;
+    font-weight: 500;
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.prose a:hover {
+    color: hsl(217, 65%, 25%) !important;
+    opacity: 0.9;
+}
+
+/* Ensure bullet points and list markers are visible */
+.prose ul {
+    list-style-type: disc !important;
+    padding-left: 1.5em !important;
+    margin-bottom: 1.5em !important;
+}
+
+.prose ol {
+    list-style-type: decimal !important;
+    padding-left: 1.5em !important;
+    margin-bottom: 1.5em !important;
+}
+
+.prose ul > li,
+.prose ol > li {
+    padding-left: 0.5em !important;
+    margin-bottom: 0.75em !important;
+    position: relative;
+}
+
+.prose ul > li::marker {
+    color: hsl(217, 65%, 35%);
+    font-size: 1em;
+}
+
+.prose ol > li::marker {
+    color: hsl(217, 65%, 35%);
+    font-weight: 600;
+}
+
+/* Nested lists */
+.prose ul ul,
+.prose ol ul {
+    list-style-type: circle !important;
+    margin-top: 0.5em !important;
+    margin-bottom: 0.5em !important;
+}
+
+.prose ul ul ul,
+.prose ol ul ul {
+    list-style-type: square !important;
+}
+
+/* Paragraph spacing for better readability */
+.prose p {
+    margin-bottom: 1.5em !important;
+    line-height: 1.8 !important;
+}
+
+/* Headings spacing */
+.prose h2 {
+    margin-top: 2em !important;
+    margin-bottom: 1em !important;
+}
+
+.prose h3 {
+    margin-top: 1.75em !important;
+    margin-bottom: 0.75em !important;
+}
+
+/* Table styling */
+.prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2em 0;
+}
+
+.prose th,
+.prose td {
+    border: 1px solid hsl(var(--border));
+    padding: 0.75em 1em;
+    text-align: left;
+}
+
+.prose th {
+    background-color: hsl(var(--muted));
+    font-weight: 600;
+}
+
+.prose tr:nth-child(even) {
+    background-color: hsl(var(--muted) / 0.3);
+}
+
+/* FAQ section styling */
+.prose .faq-section h3,
+.prose h3:has(+ p) {
+    color: hsl(217, 65%, 35%);
+}
+
+/* Key takeaways box */
+.prose .key-takeaways,
+.prose ul:first-of-type {
+    background-color: hsl(var(--muted) / 0.5);
+    padding: 1em 1.5em;
+    border-radius: 0.5rem;
+    border-left: 4px solid hsl(217, 65%, 35%);
 }
 

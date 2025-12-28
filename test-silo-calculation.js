@@ -23,3 +23,5 @@ console.log(`Day of year: ${dayOfYear}`);
 console.log(`Silo index: ${siloIndex}`);
 console.log(`Today's silo: ${silos[siloIndex]}`);
 
+
+
