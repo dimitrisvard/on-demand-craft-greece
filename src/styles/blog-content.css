@@ -134,6 +134,7 @@
 /* Table styling - comprehensive fix for proper display */
 .prose table,
 .blog-content table,
+.editor-table,
 table {
     width: 100% !important;
     max-width: 100% !important;
@@ -147,7 +148,8 @@ table {
 
 /* Table wrapper for horizontal scroll on mobile */
 .prose > table,
-.blog-content > table {
+.blog-content > table,
+.blog-editor-container table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -157,6 +159,8 @@ table {
 .prose td,
 .blog-content th,
 .blog-content td,
+.editor-table th,
+.editor-table td,
 table th,
 table td {
     border: 1px solid #e2e8f0 !important;
@@ -169,6 +173,7 @@ table td {
 
 .prose th,
 .blog-content th,
+.editor-table th,
 table th {
     background-color: #f1f5f9 !important;
     font-weight: 600 !important;
@@ -178,12 +183,14 @@ table th {
 
 .prose tr:nth-child(even),
 .blog-content tr:nth-child(even),
+.editor-table tr:nth-child(even),
 table tr:nth-child(even) {
     background-color: #f8fafc !important;
 }
 
 .prose tr:nth-child(odd),
 .blog-content tr:nth-child(odd),
+.editor-table tr:nth-child(odd),
 table tr:nth-child(odd) {
     background-color: #ffffff !important;
 }
@@ -247,5 +254,81 @@ table caption {
     padding: 1em 1.5em;
     border-radius: 0.5rem;
     border-left: 4px solid hsl(217, 65%, 35%);
+}
+
+/* Editor Specific Styles to match the view */
+.ql-editor {
+    font-family: inherit;
+    font-size: 1.125rem; /* text-lg */
+    line-height: 1.8;
+    color: var(--foreground);
+    min-height: 400px;
+    padding: 2rem !important;
+}
+
+.ql-editor p {
+    margin-bottom: 1.5em !important;
+}
+
+.ql-editor h1, .ql-editor h2, .ql-editor h3 {
+    margin-top: 2em !important;
+    margin-bottom: 1em !important;
+    font-weight: 700 !important;
+    line-height: 1.3 !important;
+}
+
+.ql-editor ul, .ql-editor ol {
+    margin-bottom: 1.5em !important;
+    padding-left: 1.5em !important;
+}
+
+.ql-editor li {
+    margin-bottom: 0.5em !important;
+}
+
+.ql-editor a {
+    color: hsl(217, 65%, 35%) !important;
+    text-decoration: underline !important;
+}
+
+/* Make tables visible in the editor */
+.ql-editor table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin: 1.5em 0 !important;
+    border: 1px solid #e2e8f0 !important;
+}
+
+.ql-editor th, .ql-editor td {
+    border: 1px solid #e2e8f0 !important;
+    padding: 0.75em 1em !important;
+    text-align: left !important;
+    min-width: 50px;
+}
+
+.ql-editor th {
+    background-color: #f1f5f9 !important;
+    font-weight: 600 !important;
+}
+
+.ql-editor tr:nth-child(even) {
+    background-color: #f8fafc !important;
+}
+
+/* Custom styles for Quill toolbar tooltips */
+.ql-toolbar button:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 8px;
+    background: #333;
+    color: white;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    pointer-events: none;
 }
 

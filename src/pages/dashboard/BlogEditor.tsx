@@ -443,26 +443,26 @@ const BlogEditor = () => {
     const range = quill.getSelection();
     const index = range ? range.index : quill.getLength();
 
-    // Create a well-formatted table with proper styling
+    // Create a well-formatted table using classes that are styled in our CSS
     const tableHTML = `
-      <table style="width: 100%; border-collapse: collapse; margin: 1.5em 0; border: 1px solid #e2e8f0;">
+      <table class="editor-table">
         <thead>
           <tr>
-            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 1</th>
-            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 2</th>
-            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 3</th>
+            <th>Column 1</th>
+            <th>Column 2</th>
+            <th>Column 3</th>
           </tr>
         </thead>
         <tbody>
-          <tr style="background-color: #ffffff;">
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 1</td>
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 2</td>
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 3</td>
+          <tr>
+            <td>Row 1, Cell 1</td>
+            <td>Row 1, Cell 2</td>
+            <td>Row 1, Cell 3</td>
           </tr>
-          <tr style="background-color: #f8fafc;">
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 1</td>
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 2</td>
-            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 3</td>
+          <tr>
+            <td>Row 2, Cell 1</td>
+            <td>Row 2, Cell 2</td>
+            <td>Row 2, Cell 3</td>
           </tr>
         </tbody>
       </table>
@@ -473,6 +473,52 @@ const BlogEditor = () => {
     // Move cursor after the table
     quill.setSelection(index + tableHTML.length);
   }, []);
+
+  // Add tooltips to Quill toolbar
+  useEffect(() => {
+    const toolbar = document.querySelector('.ql-toolbar');
+    if (toolbar) {
+      const tooltips: Record<string, string> = {
+        'ql-header': 'Heading Level',
+        'ql-bold': 'Bold (Ctrl+B)',
+        'ql-italic': 'Italic (Ctrl+I)',
+        'ql-underline': 'Underline (Ctrl+U)',
+        'ql-strike': 'Strikethrough',
+        'ql-blockquote': 'Blockquote',
+        'ql-list[value="ordered"]': 'Numbered List',
+        'ql-list[value="bullet"]': 'Bullet List',
+        'ql-indent[value="-1"]': 'Decrease Indent',
+        'ql-indent[value="+1"]': 'Increase Indent',
+        'ql-link': 'Insert Link',
+        'ql-image': 'Insert Image from Library',
+        'ql-video': 'Insert Video',
+        'ql-table': 'Insert Comparison Table',
+        'ql-clean': 'Remove Formatting',
+        'ql-align': 'Text Alignment',
+        'ql-color': 'Text Color',
+        'ql-background': 'Background Color',
+        'ql-code-block': 'Code Block',
+        'ql-script[value="sub"]': 'Subscript',
+        'ql-script[value="super"]': 'Superscript'
+      };
+
+      Object.entries(tooltips).forEach(([className, text]) => {
+        const buttons = toolbar.querySelectorAll(`.${className}`);
+        buttons.forEach(btn => {
+          (btn as HTMLElement).setAttribute('title', text);
+        });
+      });
+
+      // Special case for dropdowns (pickers)
+      const pickers = toolbar.querySelectorAll('.ql-picker');
+      pickers.forEach(picker => {
+        if (picker.classList.contains('ql-header')) picker.setAttribute('title', 'Heading Level');
+        if (picker.classList.contains('ql-color')) picker.setAttribute('title', 'Text Color');
+        if (picker.classList.contains('ql-background')) picker.setAttribute('title', 'Background Color');
+        if (picker.classList.contains('ql-align')) picker.setAttribute('title', 'Text Alignment');
+      });
+    }
+  }, [loading]);
 
   const quillModules = useMemo(() => {
     // Get Quill instance to register custom table button
@@ -490,12 +536,15 @@ const BlogEditor = () => {
       toolbar: {
         container: [
           [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
-          ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-          [{ 'list': 'ordered' }, { 'list': 'bullet' }, { 'indent': '-1' }, { 'indent': '+1' }],
-          ['link', 'image', 'table'],
-          ['clean'],
+          ['bold', 'italic', 'underline', 'strike'],
+          ['blockquote', 'code-block'],
+          [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+          [{ 'script': 'sub' }, { 'script': 'super' }],
+          [{ 'indent': '-1' }, { 'indent': '+1' }],
           [{ 'align': [] }],
-          [{ 'color': [] }, { 'background': [] }]
+          ['link', 'image', 'video', 'table'],
+          [{ 'color': [] }, { 'background': [] }],
+          ['clean']
         ],
         handlers: {
           image: imageHandler,
@@ -579,7 +628,7 @@ const BlogEditor = () => {
                 
                 <div className="space-y-2">
                   <Label>Content</Label>
-                  <div className="h-[500px] pb-12">
+                  <div className="h-[600px] pb-12 blog-editor-container">
                     <ReactQuill 
                       ref={quillRef}
                       theme="snow" 
