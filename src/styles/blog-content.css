@@ -131,27 +131,107 @@
     margin-bottom: 0.75em !important;
 }
 
-/* Table styling */
-.prose table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 2em 0;
+/* Table styling - comprehensive fix for proper display */
+.prose table,
+.blog-content table,
+table {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-collapse: collapse !important;
+    margin: 2em 0 !important;
+    display: table !important;
+    table-layout: auto !important;
+    overflow-x: auto !important;
+    font-size: 0.9em;
+}
+
+/* Table wrapper for horizontal scroll on mobile */
+.prose > table,
+.blog-content > table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .prose th,
-.prose td {
-    border: 1px solid hsl(var(--border));
-    padding: 0.75em 1em;
-    text-align: left;
+.prose td,
+.blog-content th,
+.blog-content td,
+table th,
+table td {
+    border: 1px solid #e2e8f0 !important;
+    padding: 0.75em 1em !important;
+    text-align: left !important;
+    vertical-align: top !important;
+    word-wrap: break-word !important;
+    min-width: 100px;
 }
 
-.prose th {
-    background-color: hsl(var(--muted));
-    font-weight: 600;
+.prose th,
+.blog-content th,
+table th {
+    background-color: #f1f5f9 !important;
+    font-weight: 600 !important;
+    color: #1e293b !important;
+    white-space: nowrap;
 }
 
-.prose tr:nth-child(even) {
-    background-color: hsl(var(--muted) / 0.3);
+.prose tr:nth-child(even),
+.blog-content tr:nth-child(even),
+table tr:nth-child(even) {
+    background-color: #f8fafc !important;
+}
+
+.prose tr:nth-child(odd),
+.blog-content tr:nth-child(odd),
+table tr:nth-child(odd) {
+    background-color: #ffffff !important;
+}
+
+/* Table row hover effect */
+.prose tr:hover,
+.blog-content tr:hover,
+table tr:hover {
+    background-color: #e2e8f0 !important;
+}
+
+/* Ensure table headers stay visible */
+.prose thead,
+.blog-content thead,
+table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+/* Table caption styling */
+.prose caption,
+.blog-content caption,
+table caption {
+    caption-side: bottom;
+    padding: 0.75em;
+    font-size: 0.875em;
+    color: #64748b;
+    font-style: italic;
+}
+
+/* Responsive table adjustments */
+@media (max-width: 768px) {
+    .prose table,
+    .blog-content table,
+    table {
+        font-size: 0.8em;
+    }
+    
+    .prose th,
+    .prose td,
+    .blog-content th,
+    .blog-content td,
+    table th,
+    table td {
+        padding: 0.5em 0.75em !important;
+        min-width: 80px;
+    }
 }
 
 /* FAQ section styling */

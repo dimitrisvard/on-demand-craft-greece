@@ -299,6 +299,46 @@ async function submitToIndexNow(urls: string[]): Promise<boolean> {
 // Sitemap regeneration removed - user must manually trigger via dashboard button
 
 /**
+ * Delay helper to avoid API rate limiting
+ * Gemini API has rate limits, so we add delays between translation requests
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry wrapper with exponential backoff for API calls
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 2000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check if it's a rate limit error (429)
+      if (error.message?.includes('429') || error.message?.includes('Too Many Requests')) {
+        const waitTime = baseDelay * Math.pow(2, attempt); // Exponential backoff
+        console.log(`Rate limited. Waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}...`);
+        await delay(waitTime);
+        continue;
+      }
+      
+      // For other errors, throw immediately
+      throw error;
+    }
+  }
+  
+  throw lastError || new Error('Max retries exceeded');
+}
+
+/**
  * Main handler - Translates an English article to all languages
  * Expects: { article_id: "uuid" }
  */
@@ -352,20 +392,30 @@ serve(async (req) => {
 
     const thoughtSignature = `Article about ${masterArticle.title} by ${BRAND_NAME} - Technical manufacturing focus`;
 
-    // 3. Generate translations
+    // 3. Generate translations with rate limiting protection
     const translations: Record<string, any> = {};
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
+    
+    // Delay between translations to avoid rate limiting (2.5 seconds)
+    const DELAY_BETWEEN_TRANSLATIONS = 2500;
 
-    for (const lang of LANGUAGES) {
+    for (let i = 0; i < LANGUAGES.length; i++) {
+      const lang = LANGUAGES[i];
+      
       try {
-        console.log(`Translating to ${lang.name} (${lang.code})...`);
+        console.log(`Translating to ${lang.name} (${lang.code})... [${i + 1}/${LANGUAGES.length}]`);
         
-        const translation = await generateTranslation(
-          originalJsonData,
-          lang.name,
-          lang.code,
-          masterArticle.slug, // Pass slug for reference (it stays unchanged)
-          thoughtSignature
+        // Use retry wrapper to handle rate limits with exponential backoff
+        const translation = await withRetry(
+          () => generateTranslation(
+            originalJsonData,
+            lang.name,
+            lang.code,
+            masterArticle.slug, // Pass slug for reference (it stays unchanged)
+            thoughtSignature
+          ),
+          3, // Max 3 retries
+          3000 // Base delay of 3 seconds for retries
         );
 
         // URL slug ALWAYS stays the same as English version (SEO best practice)
@@ -405,6 +455,7 @@ serve(async (req) => {
             url: `${siteUrl}/${lang.code}/blog/${translatedSlug}`,
           };
           articleUrls.push(`${siteUrl}/${lang.code}/blog/${translatedSlug}`);
+          console.log(`✓ ${lang.name} translation complete`);
         }
       } catch (error: any) {
         console.error(`Translation error for ${lang.code}:`, error);
@@ -412,6 +463,13 @@ serve(async (req) => {
           success: false,
           error: error.message,
         };
+      }
+      
+      // Add delay between translations to avoid hitting rate limits
+      // Skip delay after the last translation
+      if (i < LANGUAGES.length - 1) {
+        console.log(`Waiting ${DELAY_BETWEEN_TRANSLATIONS}ms before next translation...`);
+        await delay(DELAY_BETWEEN_TRANSLATIONS);
       }
     }
 
