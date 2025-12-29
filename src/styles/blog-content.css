@@ -149,7 +149,8 @@ table {
 /* Table wrapper for horizontal scroll on mobile */
 .prose > table,
 .blog-content > table,
-.blog-editor-container table {
+.blog-editor-container table,
+.ql-editor table {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
@@ -161,6 +162,8 @@ table {
 .blog-content td,
 .editor-table th,
 .editor-table td,
+.ql-editor th,
+.ql-editor td,
 table th,
 table td {
     border: 1px solid #e2e8f0 !important;
@@ -174,6 +177,7 @@ table td {
 .prose th,
 .blog-content th,
 .editor-table th,
+.ql-editor th,
 table th {
     background-color: #f1f5f9 !important;
     font-weight: 600 !important;
@@ -184,6 +188,7 @@ table th {
 .prose tr:nth-child(even),
 .blog-content tr:nth-child(even),
 .editor-table tr:nth-child(even),
+.ql-editor tr:nth-child(even),
 table tr:nth-child(even) {
     background-color: #f8fafc !important;
 }
@@ -191,6 +196,7 @@ table tr:nth-child(even) {
 .prose tr:nth-child(odd),
 .blog-content tr:nth-child(odd),
 .editor-table tr:nth-child(odd),
+.ql-editor tr:nth-child(odd),
 table tr:nth-child(odd) {
     background-color: #ffffff !important;
 }

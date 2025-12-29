@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles } from "lucide-react";
+import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye } from "lucide-react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
@@ -48,6 +48,7 @@ const BlogEditor = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingTranslations, setGeneratingTranslations] = useState(false);
+  const [isSourceView, setIsSourceView] = useState(false);
   const quillRef = useRef<ReactQuill>(null);
 
   // Media Library State
@@ -435,6 +436,11 @@ const BlogEditor = () => {
     setMediaLibraryOpen(true);
   }, []);
 
+  // Toggle Source View
+  const toggleSourceView = () => {
+    setIsSourceView(!isSourceView);
+  };
+
   // Table handler for ReactQuill - creates a properly formatted table
   const tableHandler = useCallback(() => {
     const quill = quillRef.current?.getEditor();
@@ -476,49 +482,55 @@ const BlogEditor = () => {
 
   // Add tooltips to Quill toolbar
   useEffect(() => {
-    const toolbar = document.querySelector('.ql-toolbar');
-    if (toolbar) {
-      const tooltips: Record<string, string> = {
-        'ql-header': 'Heading Level',
-        'ql-bold': 'Bold (Ctrl+B)',
-        'ql-italic': 'Italic (Ctrl+I)',
-        'ql-underline': 'Underline (Ctrl+U)',
-        'ql-strike': 'Strikethrough',
-        'ql-blockquote': 'Blockquote',
-        'ql-list[value="ordered"]': 'Numbered List',
-        'ql-list[value="bullet"]': 'Bullet List',
-        'ql-indent[value="-1"]': 'Decrease Indent',
-        'ql-indent[value="+1"]': 'Increase Indent',
-        'ql-link': 'Insert Link',
-        'ql-image': 'Insert Image from Library',
-        'ql-video': 'Insert Video',
-        'ql-table': 'Insert Comparison Table',
-        'ql-clean': 'Remove Formatting',
-        'ql-align': 'Text Alignment',
-        'ql-color': 'Text Color',
-        'ql-background': 'Background Color',
-        'ql-code-block': 'Code Block',
-        'ql-script[value="sub"]': 'Subscript',
-        'ql-script[value="super"]': 'Superscript'
-      };
+    if (isSourceView) return; // Don't run if in source view
 
-      Object.entries(tooltips).forEach(([className, text]) => {
-        const buttons = toolbar.querySelectorAll(`.${className}`);
-        buttons.forEach(btn => {
-          (btn as HTMLElement).setAttribute('title', text);
+    const timer = setTimeout(() => {
+      const toolbar = document.querySelector('.ql-toolbar');
+      if (toolbar) {
+        const tooltips: Record<string, string> = {
+          'ql-header': 'Heading Level',
+          'ql-bold': 'Bold (Ctrl+B)',
+          'ql-italic': 'Italic (Ctrl+I)',
+          'ql-underline': 'Underline (Ctrl+U)',
+          'ql-strike': 'Strikethrough',
+          'ql-blockquote': 'Blockquote',
+          'ql-list[value="ordered"]': 'Numbered List',
+          'ql-list[value="bullet"]': 'Bullet List',
+          'ql-indent[value="-1"]': 'Decrease Indent',
+          'ql-indent[value="+1"]': 'Increase Indent',
+          'ql-link': 'Insert Link',
+          'ql-image': 'Insert Image from Library',
+          'ql-video': 'Insert Video',
+          'ql-table': 'Insert Comparison Table',
+          'ql-clean': 'Remove Formatting',
+          'ql-align': 'Text Alignment',
+          'ql-color': 'Text Color',
+          'ql-background': 'Background Color',
+          'ql-code-block': 'Code Block',
+          'ql-script[value="sub"]': 'Subscript',
+          'ql-script[value="super"]': 'Superscript'
+        };
+
+        Object.entries(tooltips).forEach(([className, text]) => {
+          const buttons = toolbar.querySelectorAll(`.${className}`);
+          buttons.forEach(btn => {
+            (btn as HTMLElement).setAttribute('title', text);
+          });
         });
-      });
 
-      // Special case for dropdowns (pickers)
-      const pickers = toolbar.querySelectorAll('.ql-picker');
-      pickers.forEach(picker => {
-        if (picker.classList.contains('ql-header')) picker.setAttribute('title', 'Heading Level');
-        if (picker.classList.contains('ql-color')) picker.setAttribute('title', 'Text Color');
-        if (picker.classList.contains('ql-background')) picker.setAttribute('title', 'Background Color');
-        if (picker.classList.contains('ql-align')) picker.setAttribute('title', 'Text Alignment');
-      });
-    }
-  }, [loading]);
+        // Special case for dropdowns (pickers)
+        const pickers = toolbar.querySelectorAll('.ql-picker');
+        pickers.forEach(picker => {
+          if (picker.classList.contains('ql-header')) picker.setAttribute('title', 'Heading Level');
+          if (picker.classList.contains('ql-color')) picker.setAttribute('title', 'Text Color');
+          if (picker.classList.contains('ql-background')) picker.setAttribute('title', 'Background Color');
+          if (picker.classList.contains('ql-align')) picker.setAttribute('title', 'Text Alignment');
+        });
+      }
+    }, 500); // Small delay to ensure Quill is rendered
+
+    return () => clearTimeout(timer);
+  }, [loading, isSourceView]);
 
   const quillModules = useMemo(() => {
     // Get Quill instance to register custom table button
@@ -627,16 +639,46 @@ const BlogEditor = () => {
                 </div>
                 
                 <div className="space-y-2">
-                  <Label>Content</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>Content</Label>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={toggleSourceView}
+                      className="h-8 gap-2 text-xs text-muted-foreground hover:text-primary"
+                      title={isSourceView ? "Switch to Visual Editor" : "Switch to HTML Source View"}
+                    >
+                      {isSourceView ? (
+                        <>
+                          <Eye className="h-3 w-3" />
+                          Visual Editor
+                        </>
+                      ) : (
+                        <>
+                          <Code className="h-3 w-3" />
+                          HTML Source
+                        </>
+                      )}
+                    </Button>
+                  </div>
                   <div className="h-[600px] pb-12 blog-editor-container">
-                    <ReactQuill 
-                      ref={quillRef}
-                      theme="snow" 
-                      value={formData.content} 
-                      onChange={(value) => handleChange('content', value)}
-                      modules={quillModules}
-                      className="h-full"
-                    />
+                    {isSourceView ? (
+                      <Textarea
+                        value={formData.content}
+                        onChange={(e) => handleChange('content', e.target.value)}
+                        className="h-full font-mono text-sm p-4 resize-none focus-visible:ring-1"
+                        placeholder="Paste or write your HTML code here..."
+                      />
+                    ) : (
+                      <ReactQuill 
+                        ref={quillRef}
+                        theme="snow" 
+                        value={formData.content} 
+                        onChange={(value) => handleChange('content', value)}
+                        modules={quillModules}
+                        className="h-full"
+                      />
+                    )}
                   </div>
                 </div>
 
