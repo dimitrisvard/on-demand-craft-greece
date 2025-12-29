@@ -592,6 +592,17 @@ const BlogEditor = () => {
             <h1 className="text-2xl font-bold">{id ? 'Edit Article' : 'New Article'}</h1>
           </div>
           <div className="flex items-center gap-3">
+            {id && formData.slug && (
+              <Button
+                variant="outline"
+                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank')}
+                className="flex items-center gap-2 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800"
+                title="View live article or draft preview"
+              >
+                <Eye className="h-4 w-4" />
+                View
+              </Button>
+            )}
             <Button 
               variant="outline" 
               onClick={() => handleSave()}
