@@ -16,25 +16,20 @@ const corsHeaders = {
 // All supported languages
 const LANGUAGES = ["en", "de", "fr", "es", "it", "nl", "pl", "sv", "da", "fi", "cs", "hu", "pt", "nb"];
 
-// Static pages that exist for all languages
+// Static pages that exist for all languages (matching old sitemap format)
 const STATIC_PAGES = [
-  { path: "", priority: "1.0", changefreq: "daily" },
-  { path: "/services", priority: "0.9", changefreq: "weekly" },
-  { path: "/services/cnc-machining", priority: "0.8", changefreq: "weekly" },
-  { path: "/services/sheet-metal", priority: "0.8", changefreq: "weekly" },
-  { path: "/services/3d-printing", priority: "0.8", changefreq: "weekly" },
-  { path: "/services/injection-molding", priority: "0.8", changefreq: "weekly" },
-  { path: "/services/surface-finish", priority: "0.8", changefreq: "weekly" },
-  { path: "/services/rapid-prototyping", priority: "0.8", changefreq: "weekly" },
+  { path: "", priority: "1.0", changefreq: "weekly" },
+  { path: "/services", priority: "0.9", changefreq: "monthly" },
+  { path: "/cnc-machining", priority: "0.8", changefreq: "monthly" },
+  { path: "/sheet-metal", priority: "0.8", changefreq: "monthly" },
+  { path: "/3d-printing", priority: "0.8", changefreq: "monthly" },
+  { path: "/injection-molding", priority: "0.8", changefreq: "monthly" },
+  { path: "/surface-finish", priority: "0.8", changefreq: "monthly" },
+  { path: "/rapid-prototyping", priority: "0.8", changefreq: "monthly" },
   { path: "/about", priority: "0.7", changefreq: "monthly" },
-  { path: "/contact", priority: "0.7", changefreq: "monthly" },
-  { path: "/quote", priority: "0.9", changefreq: "weekly" },
   { path: "/industries", priority: "0.7", changefreq: "monthly" },
-  { path: "/industries/automotive", priority: "0.7", changefreq: "monthly" },
-  { path: "/industries/aerospace", priority: "0.7", changefreq: "monthly" },
-  { path: "/industries/medical", priority: "0.7", changefreq: "monthly" },
-  { path: "/industries/industrial", priority: "0.7", changefreq: "monthly" },
-  { path: "/blog", priority: "0.8", changefreq: "daily" },
+  { path: "/contact", priority: "0.7", changefreq: "monthly" },
+  { path: "/quote", priority: "0.9", changefreq: "monthly" },
 ];
 
 interface Article {
@@ -53,39 +48,47 @@ function formatDate(dateString: string): string {
 }
 
 /**
- * Generate XML for a single URL entry with hreflang alternates
+ * Generate XML for a single URL entry (simple format for Google Search Console compatibility)
  */
 function generateUrlEntry(
   url: string, 
   lastmod: string, 
   changefreq: string, 
-  priority: string,
-  alternates?: Array<{ lang: string; url: string }>
+  priority: string
 ): string {
-  let entry = `  <url>
-    <loc>${url}</loc>
-    <lastmod>${lastmod}</lastmod>
-    <changefreq>${changefreq}</changefreq>
-    <priority>${priority}</priority>`;
-
-  if (alternates && alternates.length > 0) {
-    entry += `\n`;
-    for (const alt of alternates) {
-      entry += `    <xhtml:link rel="alternate" hreflang="${alt.lang}" href="${alt.url}" />\n`;
-    }
-    // Add x-default pointing to English version
-    const enVersion = alternates.find(a => a.lang === 'en');
-    if (enVersion) {
-      entry += `    <xhtml:link rel="alternate" hreflang="x-default" href="${enVersion.url}" />\n`;
-    }
-  }
-
-  entry += `  </url>`;
-  return entry;
+  return `<url>
+<loc>${url}</loc>
+<lastmod>${lastmod}</lastmod>
+<changefreq>${changefreq}</changefreq>
+<priority>${priority}</priority>
+</url>`;
 }
 
 /**
- * Generate the complete sitemap XML
+ * Get language display name for comments
+ */
+function getLanguageName(lang: string): string {
+  const names: Record<string, string> = {
+    en: "English",
+    de: "German",
+    fr: "French",
+    es: "Spanish",
+    it: "Italian",
+    nl: "Dutch",
+    pl: "Polish",
+    sv: "Swedish",
+    da: "Danish",
+    fi: "Finnish",
+    cs: "Czech",
+    hu: "Hungarian",
+    pt: "Portuguese",
+    nb: "Norwegian",
+  };
+  return names[lang] || lang.toUpperCase();
+}
+
+/**
+ * Generate the complete sitemap XML (simple format compatible with Google Search Console)
  */
 async function generateSitemap(): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
@@ -93,8 +96,9 @@ async function generateSitemap(): Promise<string> {
   // Fetch all published articles
   const { data: articles, error } = await supabase
     .from("articles")
-    .select("slug, language, updated_at, translation_id")
+    .select("slug, language, updated_at")
     .eq("status", "published")
+    .order("language", { ascending: true })
     .order("updated_at", { ascending: false });
 
   if (error) {
@@ -102,66 +106,50 @@ async function generateSitemap(): Promise<string> {
     throw new Error(`Failed to fetch articles: ${error.message}`);
   }
 
-  // Group articles by translation_id for hreflang
-  const articlesByTranslation: Record<string, Article[]> = {};
+  // Group articles by language
+  const articlesByLanguage: Record<string, Article[]> = {};
   for (const article of articles || []) {
-    if (!articlesByTranslation[article.translation_id]) {
-      articlesByTranslation[article.translation_id] = [];
+    if (!articlesByLanguage[article.language]) {
+      articlesByLanguage[article.language] = [];
     }
-    articlesByTranslation[article.translation_id].push(article);
+    articlesByLanguage[article.language].push(article);
   }
 
   let urlEntries: string[] = [];
 
-  // 1. Generate entries for static pages (all languages)
-  for (const page of STATIC_PAGES) {
-    for (const lang of LANGUAGES) {
-      const url = `${siteUrl}/${lang}${page.path}`;
-      
-      // Generate alternates for all languages
-      const alternates = LANGUAGES.map(l => ({
-        lang: l,
-        url: `${siteUrl}/${l}${page.path}`
-      }));
+  // Generate sitemap organized by language sections (matching old format)
+  for (const lang of LANGUAGES) {
+    // Add language section comment
+    urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
 
+    // 1. Static pages for this language
+    for (const page of STATIC_PAGES) {
+      const url = `${siteUrl}/${lang}${page.path}`;
       urlEntries.push(generateUrlEntry(
         url,
         today,
         page.changefreq,
-        page.priority,
-        alternates
+        page.priority
       ));
+    }
+
+    // 2. Blog articles for this language
+    if (articlesByLanguage[lang]) {
+      for (const article of articlesByLanguage[lang]) {
+        const url = `${siteUrl}/${lang}/blog/${article.slug}`;
+        const lastmod = formatDate(article.updated_at);
+        urlEntries.push(generateUrlEntry(
+          url,
+          lastmod,
+          "weekly",
+          "0.7"
+        ));
+      }
     }
   }
 
-  // 2. Generate entries for blog articles with hreflang
-  for (const translationId of Object.keys(articlesByTranslation)) {
-    const translatedArticles = articlesByTranslation[translationId];
-    
-    // Generate alternates for this article group
-    const alternates = translatedArticles.map(a => ({
-      lang: a.language,
-      url: `${siteUrl}/${a.language}/blog/${a.slug}`
-    }));
-
-    for (const article of translatedArticles) {
-      const url = `${siteUrl}/${article.language}/blog/${article.slug}`;
-      const lastmod = formatDate(article.updated_at);
-
-      urlEntries.push(generateUrlEntry(
-        url,
-        lastmod,
-        "weekly",
-        "0.7",
-        alternates
-      ));
-    }
-  }
-
-  // Build the complete sitemap
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  // Build the complete sitemap (simple format without namespaces)
+  const sitemap = `<urlset>
 ${urlEntries.join('\n')}
 </urlset>`;
 
@@ -169,7 +157,7 @@ ${urlEntries.join('\n')}
 }
 
 /**
- * Generate language-specific sitemap
+ * Generate language-specific sitemap (simple format)
  */
 async function generateLanguageSitemap(lang: string): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
@@ -189,6 +177,9 @@ async function generateLanguageSitemap(lang: string): Promise<string> {
 
   let urlEntries: string[] = [];
 
+  // Add language section comment
+  urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
+
   // Static pages for this language
   for (const page of STATIC_PAGES) {
     const url = `${siteUrl}/${lang}${page.path}`;
@@ -202,8 +193,7 @@ async function generateLanguageSitemap(lang: string): Promise<string> {
     urlEntries.push(generateUrlEntry(url, lastmod, "weekly", "0.7"));
   }
 
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  const sitemap = `<urlset>
 ${urlEntries.join('\n')}
 </urlset>`;
 
