@@ -230,7 +230,14 @@ ${relatedArticles}
     * **H1:** The Title.
     * **Executive Summary:** A "Key Takeaways" bullet list (3-4 points) right after the intro using <ul><li> tags.
     * **Deep Dive (H2/H3):** Detailed process, tolerances, material selection, and cost drivers.
-    * **Comparison Table:** ALWAYS include an HTML table (<table>) comparing materials or processes relevant to the topic.
+    * **Comparison Tables (MANDATORY):** 
+      - ALWAYS create HTML tables (<table>) when comparing materials, processes, properties, specifications, or any data that benefits from side-by-side comparison.
+      - Use tables for: material properties (tensile strength, hardness, cost), process comparisons (CNC vs 3D printing), tolerance ranges, pricing tiers, material grades, surface finish options, etc.
+      - Format tables with proper HTML structure: <table><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>
+      - Include inline styles for borders and spacing: style="border: 1px solid #ddd; padding: 8px; border-collapse: collapse; width: 100%;"
+      - Use <th> for header cells with background color: style="background-color: #f1f5f9; font-weight: 600;"
+      - Make tables responsive and readable with proper column alignment.
+      - Example: When comparing aluminum 6061-T6 vs 7075-T6, create a table with columns for Property, 6061-T6, 7075-T6, and rows for Yield Strength, Tensile Strength, Hardness, Cost, etc.
     * **Visual Q&A:** A visible H2 section titled "Frequently Asked Questions" at the bottom with 5-7 questions using <h3> for each question.
 4.  **FAQ Schema:** Generate Google-compliant JSON-LD for the FAQ section.
 5.  **Readability & Spacing:** 

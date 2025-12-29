@@ -373,7 +373,7 @@ const BlogEditor = () => {
         updated_at: new Date().toISOString()
       };
 
-      let error;
+      let result;
       
       if (id) {
         // Update existing
@@ -381,23 +381,32 @@ const BlogEditor = () => {
           .from('articles')
           .update(articleData)
           .eq('id', id);
-        error = updateError;
+        if (updateError) throw updateError;
       } else {
         // Create new
-        const { error: insertError } = await supabase
+        const { data: newArticle, error: insertError } = await supabase
           .from('articles')
-          .insert([articleData]);
-        error = insertError;
+          .insert([articleData])
+          .select()
+          .single();
+        if (insertError) throw insertError;
+        result = newArticle;
       }
 
-      if (error) throw error;
-
+      const action = status ? (status === 'published' ? 'published' : 'saved as draft') : 'saved';
       toast({
         title: "Success",
-        description: `Article ${status === 'published' ? 'published' : 'saved'} successfully`,
+        description: `Article ${action} successfully`,
       });
       
-      navigate('/dashboard/blog');
+      // Only navigate away if publishing, otherwise stay on page for continued editing
+      if (status === 'published') {
+        navigate('/dashboard/blog');
+      } else if (!id && result) {
+        // If it's a new article and we just saved it, navigate to edit page with the new ID
+        navigate(`/dashboard/blog/edit/${result.id}`);
+      }
+      // If updating existing article without status change, stay on page
     } catch (error: any) {
       console.error('Error saving article:', error);
       toast({
@@ -426,22 +435,75 @@ const BlogEditor = () => {
     setMediaLibraryOpen(true);
   }, []);
 
-  const quillModules = useMemo(() => ({
-    toolbar: {
-      container: [
-        [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
-        ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-        [{ 'list': 'ordered' }, { 'list': 'bullet' }, { 'indent': '-1' }, { 'indent': '+1' }],
-        ['link', 'image'],
-        ['clean'],
-        [{ 'align': [] }],
-        [{ 'color': [] }, { 'background': [] }]
-      ],
-      handlers: {
-        image: imageHandler
+  // Table handler for ReactQuill - creates a properly formatted table
+  const tableHandler = useCallback(() => {
+    const quill = quillRef.current?.getEditor();
+    if (!quill) return;
+
+    const range = quill.getSelection();
+    const index = range ? range.index : quill.getLength();
+
+    // Create a well-formatted table with proper styling
+    const tableHTML = `
+      <table style="width: 100%; border-collapse: collapse; margin: 1.5em 0; border: 1px solid #e2e8f0;">
+        <thead>
+          <tr>
+            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 1</th>
+            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 2</th>
+            <th style="border: 1px solid #e2e8f0; padding: 0.75em 1em; text-align: left; background-color: #f1f5f9; font-weight: 600;">Column 3</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background-color: #ffffff;">
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 1</td>
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 2</td>
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 1, Cell 3</td>
+          </tr>
+          <tr style="background-color: #f8fafc;">
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 1</td>
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 2</td>
+            <td style="border: 1px solid #e2e8f0; padding: 0.75em 1em;">Row 2, Cell 3</td>
+          </tr>
+        </tbody>
+      </table>
+      <p><br></p>
+    `;
+    
+    quill.clipboard.dangerouslyPasteHTML(index, tableHTML);
+    // Move cursor after the table
+    quill.setSelection(index + tableHTML.length);
+  }, []);
+
+  const quillModules = useMemo(() => {
+    // Get Quill instance to register custom table button
+    const Quill = (ReactQuill as any).Quill || (window as any).Quill;
+    
+    if (Quill) {
+      // Register table icon
+      const icons = Quill.import('ui/icons');
+      if (icons && !icons.table) {
+        icons.table = '<svg viewBox="0 0 18 18"><rect class="ql-stroke" height="12" width="12" x="3" y="3"></rect><line class="ql-stroke" x1="9" x2="9" y1="3" y2="15"></line><line class="ql-stroke" x1="3" x2="15" y1="9" y2="9"></line></svg>';
       }
-    },
-  }), [imageHandler]);
+    }
+
+    return {
+      toolbar: {
+        container: [
+          [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
+          ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+          [{ 'list': 'ordered' }, { 'list': 'bullet' }, { 'indent': '-1' }, { 'indent': '+1' }],
+          ['link', 'image', 'table'],
+          ['clean'],
+          [{ 'align': [] }],
+          [{ 'color': [] }, { 'background': [] }]
+        ],
+        handlers: {
+          image: imageHandler,
+          table: tableHandler
+        }
+      },
+    };
+  }, [imageHandler, tableHandler]);
 
   const openFeaturedImageLibrary = () => {
     setMediaLibraryCallback(() => (url: string) => handleChange('featured_image', url));
@@ -471,10 +533,23 @@ const BlogEditor = () => {
           <div className="flex items-center gap-3">
             <Button 
               variant="outline" 
+              onClick={() => handleSave()}
+              disabled={saving}
+              className="flex items-center gap-2"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save
+            </Button>
+            <Button 
+              variant="outline" 
               onClick={() => handleSave('draft')}
               disabled={saving}
             >
-              Save Draft
+              Save as Draft
             </Button>
             <Button 
               onClick={() => handleSave('published')}
