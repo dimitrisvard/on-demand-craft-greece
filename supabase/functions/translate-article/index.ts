@@ -48,6 +48,7 @@ interface GeminiResponse {
 
 interface TranslateRequest {
   article_id: string;
+  target_languages?: string[]; // Optional: specific language codes to translate to (e.g., ["de", "fr"])
 }
 
 /**
@@ -348,7 +349,7 @@ serve(async (req) => {
   }
 
   try {
-    const { article_id }: TranslateRequest = await req.json();
+    const { article_id, target_languages }: TranslateRequest = await req.json();
 
     if (!article_id) {
       return new Response(
@@ -396,14 +397,22 @@ serve(async (req) => {
     const translations: Record<string, any> = {};
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
-    // Delay between translations to avoid rate limiting (2.5 seconds)
-    const DELAY_BETWEEN_TRANSLATIONS = 2500;
+    // Delay between translations to avoid rate limiting
+    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (very safe margin)
+    const DELAY_BETWEEN_TRANSLATIONS = 8000;
 
-    for (let i = 0; i < LANGUAGES.length; i++) {
-      const lang = LANGUAGES[i];
+    // Filter languages if target_languages is specified
+    const languagesToTranslate = target_languages && target_languages.length > 0
+      ? LANGUAGES.filter(l => target_languages.includes(l.code))
+      : LANGUAGES;
+    
+    console.log(`Translating to ${languagesToTranslate.length} language(s): ${languagesToTranslate.map(l => l.code).join(', ')}`);
+
+    for (let i = 0; i < languagesToTranslate.length; i++) {
+      const lang = languagesToTranslate[i];
       
       try {
-        console.log(`Translating to ${lang.name} (${lang.code})... [${i + 1}/${LANGUAGES.length}]`);
+        console.log(`Translating to ${lang.name} (${lang.code})... [${i + 1}/${languagesToTranslate.length}]`);
         
         // Use retry wrapper to handle rate limits with exponential backoff
         const translation = await withRetry(
@@ -415,7 +424,7 @@ serve(async (req) => {
             thoughtSignature
           ),
           3, // Max 3 retries
-          3000 // Base delay of 3 seconds for retries
+          5000 // Base delay of 5 seconds for retries (free tier safe)
         );
 
         // URL slug ALWAYS stays the same as English version (SEO best practice)
@@ -467,17 +476,19 @@ serve(async (req) => {
       
       // Add delay between translations to avoid hitting rate limits
       // Skip delay after the last translation
-      if (i < LANGUAGES.length - 1) {
+      if (i < languagesToTranslate.length - 1) {
         console.log(`Waiting ${DELAY_BETWEEN_TRANSLATIONS}ms before next translation...`);
         await delay(DELAY_BETWEEN_TRANSLATIONS);
       }
     }
 
-    // 4. Update master article status to published
-    await supabase
-      .from("articles")
-      .update({ status: "published" })
-      .eq("id", article_id);
+    // 4. Update master article status to published (only if translating all languages)
+    if (!target_languages || target_languages.length === 0) {
+      await supabase
+        .from("articles")
+        .update({ status: "published" })
+        .eq("id", article_id);
+    }
 
     // 5. Submit to IndexNow
     const indexNowResult = await submitToIndexNow(articleUrls);
@@ -506,16 +517,16 @@ serve(async (req) => {
     }
 
     const successfulTranslations = Object.values(translations).filter((t: any) => t.success).length;
-    console.log(`Translation complete. ${successfulTranslations}/${LANGUAGES.length} translations successful.`);
+    console.log(`Translation complete. ${successfulTranslations}/${languagesToTranslate.length} translations successful.`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Article translated to ${successfulTranslations} languages and published`,
+        message: `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`,
         master_article_id: article_id,
         slug: masterArticle.slug, // Same slug for all languages
         translations: successfulTranslations,
-        total_languages: LANGUAGES.length,
+        total_languages: languagesToTranslate.length,
         indexing: { indexnow: indexNowResult },
         article_urls: articleUrls,
         details: translations,

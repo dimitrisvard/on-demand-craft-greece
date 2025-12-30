@@ -21,7 +21,6 @@ import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, 
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
-import { translateArticle } from "@/utils/translateArticle";
 
 // Available languages matching the rest of the app
 const LANGUAGES = [
@@ -198,47 +197,50 @@ const BlogEditor = () => {
       return;
     }
 
+    // Must be an English article to translate from
+    if (formData.language !== 'en') {
+      toast({ 
+        title: "English Article Required", 
+        description: "Translations can only be created from English articles.",
+        variant: "destructive" 
+      });
+      return;
+    }
+
     setGeneratingTranslations(true);
     try {
-      const user = (await supabase.auth.getUser()).data.user;
-      if (!user) throw new Error("User not authenticated");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      // 2. Translate Content (Stub for now)
-      const translatedData = await translateArticle({
-        title: formData.title,
-        content: formData.content,
-        excerpt: formData.excerpt,
-        altText: formData.featured_image_alt,
-        targetLanguage: targetLang
-      });
+      if (!token) throw new Error("User not authenticated");
 
-      // 3. Create new article linked to same translation_id
-      const newArticle = {
-        title: translatedData.title,
-        content: translatedData.content,
-        excerpt: translatedData.excerpt,
-        slug: `${formData.slug}-${targetLang}`, // Simple suffix for uniqueness
-        language: targetLang,
-        status: 'draft', // Always start as draft
-        translation_id: formData.translation_id,
-        author_id: user.id,
-        featured_image: formData.featured_image, // Copy image
-        featured_image_alt: translatedData.altText,
-        meta_title: translatedData.title,
-        meta_description: translatedData.excerpt
-      };
+      // Call the Edge Function with specific target language
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ 
+            article_id: id,
+            target_languages: [targetLang] // Single language
+          }),
+        }
+      );
 
-      const { data, error } = await supabase
-        .from('articles')
-        .insert([newArticle])
-        .select()
-        .single();
+      const result = await response.json();
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error(result.error || "Translation failed");
+      }
 
+      const langName = LANGUAGES.find(l => l.code === targetLang)?.name || targetLang.toUpperCase();
+      
       toast({ 
-        title: "Translation Created", 
-        description: `Created ${targetLang.toUpperCase()} translation successfully.` 
+        title: "✅ Translation Created", 
+        description: `Successfully translated to ${langName}.` 
       });
       
       // Refresh list
@@ -247,8 +249,8 @@ const BlogEditor = () => {
     } catch (error: any) {
       console.error('Error creating translation:', error);
       toast({ 
-        title: "Error", 
-        description: "Failed to create translation.",
+        title: "❌ Translation Failed", 
+        description: error.message || "Failed to create translation.",
         variant: "destructive" 
       });
     } finally {
@@ -266,9 +268,19 @@ const BlogEditor = () => {
       return;
     }
 
+    // Must be an English article to translate from
+    if (formData.language !== 'en') {
+      toast({ 
+        title: "English Article Required", 
+        description: "Translations can only be created from English articles.",
+        variant: "destructive" 
+      });
+      return;
+    }
+
     // Filter languages that don't have a translation yet
     const languagesToCreate = LANGUAGES.filter(l => 
-      l.code !== formData.language && 
+      l.code !== 'en' && 
       !availableTranslations.some(t => t.language === l.code)
     );
 
@@ -277,61 +289,55 @@ const BlogEditor = () => {
       return;
     }
 
-    if (!confirm(`This will create ${languagesToCreate.length} new draft articles. Continue?`)) return;
+    if (!confirm(`This will translate the article to ${languagesToCreate.length} languages using AI. This may take a few minutes. Continue?`)) return;
 
     setGeneratingTranslations(true);
-    let successCount = 0;
 
     try {
-      const user = (await supabase.auth.getUser()).data.user;
-      if (!user) throw new Error("User not authenticated");
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      // Process in parallel or batch? Parallel for speed, but limit concurrency if needed.
-      // For now, sequential to avoid hitting rate limits on simulated API
-      for (const lang of languagesToCreate) {
-        try {
-          const translatedData = await translateArticle({
-            title: formData.title,
-            content: formData.content,
-            excerpt: formData.excerpt,
-            altText: formData.featured_image_alt,
-            targetLanguage: lang.code
-          });
+      if (!token) throw new Error("User not authenticated");
 
-          const newArticle = {
-            title: translatedData.title,
-            content: translatedData.content,
-            excerpt: translatedData.excerpt,
-            slug: `${formData.slug}-${lang.code}`,
-            language: lang.code,
-            status: 'draft',
-            translation_id: formData.translation_id,
-            author_id: user.id,
-            featured_image: formData.featured_image,
-            featured_image_alt: translatedData.altText,
-            meta_title: translatedData.title,
-            meta_description: translatedData.excerpt
-          };
-
-          const { error } = await supabase.from('articles').insert([newArticle]);
-          if (error) throw error;
-          
-          successCount++;
-        } catch (err) {
-          console.error(`Failed to create ${lang.code} translation:`, err);
+      // Call the Edge Function to translate to all missing languages
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ 
+            article_id: id,
+            target_languages: languagesToCreate.map(l => l.code) // Only missing languages
+          }),
         }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Translation failed");
       }
 
+      const successfulTranslations = result.translations || 0;
+      const totalLanguages = result.total_languages || languagesToCreate.length;
+
       toast({ 
-        title: "Batch Creation Complete", 
-        description: `Successfully created ${successCount} translations.` 
+        title: "✅ Batch Translation Complete", 
+        description: `Successfully translated to ${successfulTranslations}/${totalLanguages} languages.` 
       });
       
       fetchTranslations(formData.translation_id, id);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Batch translation error:', error);
-      toast({ title: "Error", description: "Batch process failed", variant: "destructive" });
+      toast({ 
+        title: "❌ Translation Failed", 
+        description: error.message || "Batch translation process failed.",
+        variant: "destructive" 
+      });
     } finally {
       setGeneratingTranslations(false);
     }
@@ -592,17 +598,6 @@ const BlogEditor = () => {
             <h1 className="text-2xl font-bold">{id ? 'Edit Article' : 'New Article'}</h1>
           </div>
           <div className="flex items-center gap-3">
-            {id && formData.slug && (
-              <Button
-                variant="outline"
-                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank')}
-                className="flex items-center gap-2 border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800"
-                title="View live article or draft preview"
-              >
-                <Eye className="h-4 w-4" />
-                View
-              </Button>
-            )}
             <Button 
               variant="outline" 
               onClick={() => handleSave()}
