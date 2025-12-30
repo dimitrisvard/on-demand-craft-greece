@@ -112,9 +112,26 @@ async function generateWithGemini(
 }
 
 /**
+ * Generate slug from title (URL-friendly format)
+ * Handles accented characters and special characters common in European languages
+ */
+function generateSlug(title: string): string {
+  // Normalize accented characters (é → e, ü → u, etc.)
+  const normalized = title
+    .normalize("NFD") // Decompose characters (é → e + ´)
+    .replace(/[\u0300-\u036f]/g, ""); // Remove diacritical marks
+  
+  return normalized
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "") // Remove special characters except spaces and hyphens
+    .replace(/\s+/g, "-") // Replace spaces with hyphens
+    .replace(/-+/g, "-") // Replace multiple hyphens with single hyphen
+    .replace(/(^-|-$)+/g, ""); // Remove leading/trailing hyphens
+}
+
+/**
  * Generate translation using "Localization & Link Processor" Prompt
- * - Translates: title, content, excerpt, meta title, meta description
- * - KEEPS UNCHANGED: URL slug (always English for SEO consistency)
+ * - Translates: title, content, excerpt, meta title, meta description, slug
  */
 async function generateTranslation(
   originalJsonData: {
@@ -134,6 +151,7 @@ async function generateTranslation(
   excerpt: string;
   metaTitle: string;
   metaDescription: string;
+  slug: string;
 }> {
   const prompt = `Role: Native Technical Translator & ISO Standard Specialist.
 Task: Translate the following manufacturing blog data into ${targetLanguage}.
@@ -153,10 +171,14 @@ Input Data:
 #### 1. BRAND SAFETY
 NEVER translate "${BRAND_NAME}". Keep it exactly as "${BRAND_NAME}" in all fields.
 
-#### 2. URL SLUGS - DO NOT TRANSLATE
-The article URL slug is "${articleSlug}" and must NEVER be translated or changed.
-This slug will remain the same across all language versions for SEO consistency.
-Only update the language prefix in links (e.g., /en/blog/${articleSlug} → /${langCode}/blog/${articleSlug})
+#### 2. URL SLUG TRANSLATION
+Translate the article URL slug based on the translated title. 
+- Current English slug: "${articleSlug}"
+- Generate a new slug from the translated title that is:
+  * URL-friendly (lowercase, hyphens instead of spaces, no special characters)
+  * SEO-optimized for ${targetLanguage}
+  * Reflects the translated title meaning
+  * Example: "cnc-machining-guide" (English) → "guide-usinage-cnc" (French)
 
 #### 3. META TITLE TRANSLATION
 Translate the metaTitle to ${targetLanguage} but:
@@ -180,13 +202,14 @@ Translate the metaDescription to ${targetLanguage} but:
 Rewrite all internal links to match the target language sub-folder structure:
 * href="/en/quote" → href="/${langCode}/quote"
 * href="/en/services" → href="/${langCode}/services"  
-* href="/en/blog/any-slug" → href="/${langCode}/blog/any-slug" (KEEP THE SLUG UNCHANGED!)
+* href="/en/blog/any-slug" → href="/${langCode}/blog/translated-slug" (use translated slugs in links)
 * Translate the visible anchor text naturally
 
 ---
 ### OUTPUT FORMAT (JSON - No markdown fencing!)
 {
   "title": "<translated article title>",
+  "slug": "<translated-url-friendly-slug-based-on-title>",
   "content": "<translated HTML with updated link hrefs>",
   "excerpt": "<translated excerpt - max 160 chars>",
   "metaTitle": "<translated meta title - max 60 chars> | ${BRAND_NAME}",
@@ -235,8 +258,18 @@ Rewrite all internal links to match the target language sub-folder structure:
       .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
       .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
 
+    // Generate slug from translated title if not provided
+    let translatedSlug = parsed.slug;
+    if (!translatedSlug && parsed.title) {
+      translatedSlug = generateSlug(parsed.title);
+    } else if (!translatedSlug) {
+      // Fallback to English slug if translation fails
+      translatedSlug = articleSlug;
+    }
+
     return {
       title: parsed.title || originalJsonData.title,
+      slug: translatedSlug,
       content: content,
       excerpt: parsed.excerpt || originalJsonData.excerpt,
       metaTitle: metaTitle,
@@ -253,6 +286,7 @@ Rewrite all internal links to match the target language sub-folder structure:
     
     return {
       title: originalJsonData.title,
+      slug: articleSlug, // Fallback to English slug on error
       content: fallbackContent,
       excerpt: originalJsonData.excerpt,
       metaTitle: originalJsonData.metaTitle,
@@ -380,7 +414,7 @@ serve(async (req) => {
     }
 
     console.log(`Translating article: ${masterArticle.title}`);
-    console.log(`Article slug (will remain unchanged): ${masterArticle.slug}`);
+    console.log(`Original English slug: ${masterArticle.slug}`);
 
     // 2. Prepare original data for translation
     const originalJsonData = {
@@ -428,15 +462,15 @@ serve(async (req) => {
           5000 // Base delay of 5 seconds for retries (free tier safe)
         );
 
-        // URL slug ALWAYS stays the same as English version (SEO best practice)
-        const translatedSlug = masterArticle.slug;
+        // Use translated slug from the translation result
+        const translatedSlug = translation.slug || generateSlug(translation.title);
 
         const { data: translatedArticle, error: transError } = await supabase
           .from("articles")
           .insert([
             {
               title: translation.title, // Translated title
-              slug: translatedSlug, // SAME slug as English
+              slug: translatedSlug, // Translated slug
               content: translation.content,
               excerpt: translation.excerpt,
               language: lang.code,
