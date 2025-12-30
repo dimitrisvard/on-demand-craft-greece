@@ -444,6 +444,9 @@ serve(async (req) => {
               meta_title: translation.metaTitle, // Translated meta title
               meta_description: translation.metaDescription, // Translated meta description
               translation_id: masterArticle.translation_id,
+              // Copy featured image from master article (same S3 URL, no duplication)
+              featured_image: masterArticle.featured_image,
+              featured_image_alt: masterArticle.featured_image_alt,
             },
           ])
           .select()
