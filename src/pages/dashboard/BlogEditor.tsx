@@ -429,6 +429,23 @@ const BlogEditor = () => {
           .update(articleData)
           .eq('id', id);
         if (updateError) throw updateError;
+
+        // If this is an English article, sync featured image to all translations
+        if (formData.language === 'en' && formData.translation_id) {
+          const { error: translationUpdateError } = await supabase
+            .from('articles')
+            .update({
+              featured_image: formData.featured_image,
+              featured_image_alt: formData.featured_image_alt
+            })
+            .eq('translation_id', formData.translation_id)
+            .neq('id', id); // Don't update the English article itself
+          
+          if (translationUpdateError) {
+            console.error('Error updating translation featured images:', translationUpdateError);
+            // Don't throw - main article save succeeded, just log the error
+          }
+        }
       } else {
         // Create new
         const { data: newArticle, error: insertError } = await supabase
