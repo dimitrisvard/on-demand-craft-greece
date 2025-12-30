@@ -398,8 +398,9 @@ serve(async (req) => {
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
     // Delay between translations to avoid rate limiting
-    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (very safe margin)
-    const DELAY_BETWEEN_TRANSLATIONS = 8000;
+    // Free tier limit: ~15 RPM, so 5 seconds = ~12 RPM (safe margin)
+    // Batches of 3 languages keep total time under 60s Edge Function timeout
+    const DELAY_BETWEEN_TRANSLATIONS = 5000;
 
     // Filter languages if target_languages is specified
     const languagesToTranslate = target_languages && target_languages.length > 0

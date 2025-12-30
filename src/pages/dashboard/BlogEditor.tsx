@@ -289,7 +289,7 @@ const BlogEditor = () => {
       return;
     }
 
-    if (!confirm(`This will translate the article to ${languagesToCreate.length} languages using AI. This may take a few minutes. Continue?`)) return;
+    if (!confirm(`This will translate the article to ${languagesToCreate.length} languages using AI. This may take several minutes as translations are processed in batches. Continue?`)) return;
 
     setGeneratingTranslations(true);
 
@@ -299,35 +299,75 @@ const BlogEditor = () => {
 
       if (!token) throw new Error("User not authenticated");
 
-      // Call the Edge Function to translate to all missing languages
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({ 
-            article_id: id,
-            target_languages: languagesToCreate.map(l => l.code) // Only missing languages
-          }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || "Translation failed");
+      // Process in batches of 3 languages to avoid Edge Function timeout (60 seconds)
+      const BATCH_SIZE = 3;
+      const langCodes = languagesToCreate.map(l => l.code);
+      const batches: string[][] = [];
+      
+      for (let i = 0; i < langCodes.length; i += BATCH_SIZE) {
+        batches.push(langCodes.slice(i, i + BATCH_SIZE));
       }
 
-      const successfulTranslations = result.translations || 0;
-      const totalLanguages = result.total_languages || languagesToCreate.length;
+      let totalSuccessful = 0;
+      let totalFailed = 0;
 
-      toast({ 
-        title: "✅ Batch Translation Complete", 
-        description: `Successfully translated to ${successfulTranslations}/${totalLanguages} languages.` 
-      });
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const batchLangNames = batch.map(code => LANGUAGES.find(l => l.code === code)?.name || code).join(', ');
+        
+        toast({
+          title: `🔄 Translating batch ${batchIndex + 1}/${batches.length}`,
+          description: `Processing: ${batchLangNames}...`,
+        });
+
+        try {
+          const response = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+              },
+              body: JSON.stringify({ 
+                article_id: id,
+                target_languages: batch
+              }),
+            }
+          );
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            console.error(`Batch ${batchIndex + 1} failed:`, result.error);
+            totalFailed += batch.length;
+          } else {
+            totalSuccessful += result.translations || 0;
+            console.log(`Batch ${batchIndex + 1} completed: ${result.translations} translations`);
+          }
+        } catch (batchError: any) {
+          console.error(`Batch ${batchIndex + 1} error:`, batchError);
+          totalFailed += batch.length;
+        }
+
+        // Wait 3 seconds between batches to be safe with rate limits
+        if (batchIndex < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+      }
+
+      if (totalSuccessful > 0) {
+        toast({ 
+          title: "✅ Batch Translation Complete", 
+          description: `Successfully translated to ${totalSuccessful}/${languagesToCreate.length} languages.${totalFailed > 0 ? ` (${totalFailed} failed)` : ''}` 
+        });
+      } else {
+        toast({ 
+          title: "❌ Translation Failed", 
+          description: "All translation batches failed. Please try again.",
+          variant: "destructive" 
+        });
+      }
       
       fetchTranslations(formData.translation_id, id);
 
