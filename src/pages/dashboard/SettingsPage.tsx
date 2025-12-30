@@ -226,42 +226,22 @@ const SettingsPage = () => {
                       <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900">
                         <FileText className="h-4 w-4 text-green-600" />
                         <a 
-                          href="https://www.micronshub.eu/sitemap.xml" 
+                          href="https://www.micronshub.eu/sitemap-complete.xml" 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="text-green-700 dark:text-green-400 hover:underline flex items-center gap-1 font-medium"
                         >
-                          https://www.micronshub.eu/sitemap.xml
+                          https://www.micronshub.eu/sitemap-complete.xml
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>
                     </div>
 
                     <div>
-                      <h4 className="font-medium mb-2 text-muted-foreground">Other Sitemaps (Optional)</h4>
-                      <p className="text-xs text-muted-foreground mb-2">
-                        These are auto-generated but you don't need to submit them separately.
+                      <p className="text-xs text-muted-foreground">
+                        The sitemap is automatically updated after new articles are translated. 
+                        You can also manually regenerate it using the button above.
                       </p>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                          <a 
-                            href="https://www.micronshub.eu/sitemap-index.xml" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-primary hover:underline flex items-center gap-1"
-                          >
-                            sitemap-index.xml (index of per-language sitemaps)
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-muted-foreground">
-                            sitemap-en.xml, sitemap-de.xml, etc. (per-language sitemaps)
-                          </span>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>

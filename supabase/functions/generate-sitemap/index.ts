@@ -106,6 +106,11 @@ async function generateSitemap(): Promise<string> {
     throw new Error(`Failed to fetch articles: ${error.message}`);
   }
 
+  console.log(`Found ${articles?.length || 0} published articles for sitemap`);
+  if (articles && articles.length > 0) {
+    console.log(`Sample articles:`, articles.slice(0, 3).map(a => `${a.language}/${a.slug}`));
+  }
+
   // Group articles by language
   const articlesByLanguage: Record<string, Article[]> = {};
   for (const article of articles || []) {
@@ -135,6 +140,7 @@ async function generateSitemap(): Promise<string> {
 
     // 2. Blog articles for this language
     if (articlesByLanguage[lang]) {
+      console.log(`Adding ${articlesByLanguage[lang].length} blog articles for ${lang}`);
       for (const article of articlesByLanguage[lang]) {
         const url = `${siteUrl}/${lang}/blog/${article.slug}`;
         const lastmod = formatDate(article.updated_at);
@@ -145,6 +151,8 @@ async function generateSitemap(): Promise<string> {
           "0.7"
         ));
       }
+    } else {
+      console.log(`No blog articles found for language: ${lang}`);
     }
   }
 

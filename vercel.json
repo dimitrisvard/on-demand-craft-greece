@@ -5,6 +5,10 @@
       "destination": "/api/sitemap.xml"
     },
     {
+      "source": "/sitemap-complete.xml",
+      "destination": "/api/sitemap-complete.xml"
+    },
+    {
       "source": "/sitemap-index.xml",
       "destination": "/api/sitemap-index.xml"
     },

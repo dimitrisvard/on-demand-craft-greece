@@ -387,7 +387,7 @@ serve(async (req) => {
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
-    // 6. Create master article in database - DRAFT MODE
+    // 6. Create master article in database - PUBLISHED MODE
     const { data: masterArticleRecord, error: masterError } = await supabase
       .from("articles")
       .insert([
@@ -397,7 +397,7 @@ serve(async (req) => {
           content: masterArticle.content,
           excerpt: masterArticle.excerpt,
           language: "en",
-          status: "draft", // DRAFT MODE - user reviews before publishing
+          status: "published", // PUBLISHED MODE - auto-publish for SEO
           meta_title: masterArticle.metaTitle,
           meta_description: masterArticle.metaDescription,
           translation_id: translationId,
@@ -410,7 +410,7 @@ serve(async (req) => {
       throw new Error(`Failed to create master article: ${masterError?.message}`);
     }
 
-    console.log(`Master article created in DRAFT mode: ${masterArticleRecord.id}`);
+    console.log(`Master article created in PUBLISHED mode: ${masterArticleRecord.id}`);
 
     // 7. Create generation log
     const summaryData = {
@@ -419,7 +419,7 @@ serve(async (req) => {
       scheduled_silo: todaysSilo,
       matched_scheduled_silo: titleRecord.silo_category === todaysSilo,
       master_article_id: masterArticleRecord.id,
-      status: "draft",
+      status: "published",
       translations_pending: true,
       silo_neighbors_used: siloNeighbors.length,
     };
@@ -451,7 +451,7 @@ serve(async (req) => {
         silo_category: titleRecord.silo_category,
         master_article_id: masterArticleRecord.id,
         slug: masterSlug,
-        status: "draft",
+        status: "published",
         translation_id: translationId,
         silo_neighbors_used: siloNeighbors.length,
       }),
