@@ -254,9 +254,9 @@ const BlogList = () => {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
 
-      // Generate ALL sitemaps (complete + index + per-language) and save to storage
+      // Generate single complete sitemap (SEO-perfect format) and save to storage
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=all`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=complete`,
         {
           method: "GET",
           headers: {
@@ -276,18 +276,17 @@ const BlogList = () => {
       const successfulUploads = uploadedFiles.filter((u: any) => u.success);
       const failedUploads = uploadedFiles.filter((u: any) => u.success === false);
 
-      if (failedUploads.length > 0) {
-        // Partial success
-        toast({
-          title: "⚠️ Sitemap Partially Generated",
-          description: `${successfulUploads.length}/${uploadedFiles.length} sitemaps saved successfully. ${failedUploads.length} failed.`,
-          variant: "destructive",
-        });
-      } else {
-        // Full success
+      if (result.storage?.uploaded?.[0]?.success) {
+        const publicUrl = result.storage.uploaded[0].publicUrl || `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/sitemaps/sitemap-complete.xml`;
         toast({
           title: "✅ Sitemap Generated Successfully",
-          description: `Generated ${successfulUploads.length} sitemaps with ${result.stats.urls} URLs. Accessible at: https://www.micronshub.eu/sitemap.xml`,
+          description: `Generated sitemap-complete.xml with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
+        });
+      } else {
+        toast({
+          title: "❌ Sitemap Generation Failed",
+          description: result.error || "Failed to generate and save sitemap.",
+          variant: "destructive",
         });
       }
 

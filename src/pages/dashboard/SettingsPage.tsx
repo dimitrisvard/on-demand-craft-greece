@@ -43,9 +43,9 @@ const SettingsPage = () => {
         throw new Error("You must be logged in to generate sitemaps");
       }
 
-      // Generate ALL sitemaps (complete + index + per-language) and save to storage
+      // Generate single complete sitemap (SEO-perfect format) and save to storage
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=all`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-sitemap?type=complete`,
         {
           method: "GET",
           headers: {
@@ -60,23 +60,18 @@ const SettingsPage = () => {
         throw new Error(result.error || "Sitemap generation failed");
       }
 
-      // Check if all uploads were successful
-      const uploadedFiles = result.storage?.uploaded || [];
-      const successfulUploads = uploadedFiles.filter((u: any) => u.success);
-      const failedUploads = uploadedFiles.filter((u: any) => u.success === false);
-
       setSitemapResult(result);
 
-      if (failedUploads.length > 0) {
+      if (result.storage?.uploaded?.[0]?.success) {
         toast({
-          title: "⚠️ Sitemap Partially Generated",
-          description: `${successfulUploads.length}/${uploadedFiles.length} sitemaps saved successfully. ${failedUploads.length} failed.`,
-          variant: "destructive",
+          title: "✅ Sitemap Generated Successfully",
+          description: `Generated sitemap-complete.xml with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
         });
       } else {
         toast({
-          title: "✅ Sitemap Generated Successfully",
-          description: `Generated ${successfulUploads.length} sitemaps with ${result.stats.urls} URLs.`,
+          title: "❌ Sitemap Generation Failed",
+          description: result.error || "Failed to generate and save sitemap.",
+          variant: "destructive",
         });
       }
     } catch (error: any) {
@@ -147,9 +142,9 @@ const SettingsPage = () => {
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                     <div>
-                      <h4 className="font-medium">Generate All Sitemaps</h4>
+                      <h4 className="font-medium">Generate Complete Sitemap</h4>
                       <p className="text-sm text-muted-foreground">
-                        Creates the main sitemap, sitemap index, and per-language sitemaps. Uploads them to storage automatically.
+                        Creates a single SEO-optimized sitemap-complete.xml file with all languages and pages. Google Search Console compatible format.
                       </p>
                     </div>
                     <Button 
