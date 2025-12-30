@@ -239,6 +239,7 @@
   "quote_form_position": "positie",
   "quote_form_email": "E-mailadres",
   "quote_form_phone": "Telefoonnummer",
+  "quote_form_contact_info_message": "Deze contactgegevens worden gebruikt om uw offerte te versturen en voor eventuele vervolgcommunicatie. U wordt ook per e-mail en SMS op de hoogte gesteld wanneer uw offerteaanvraag klaar is.",
   "quote_form_parts_configuration_title": "Gedeeltelijke configuratie",
   "quote_form_part_name_id": "Onderdeelnaam of ID",
   "quote_form_quantity": "Menigte",

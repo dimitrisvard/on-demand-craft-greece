@@ -239,6 +239,7 @@
   "quote_form_position": "Pozycja",
   "quote_form_email": "Adres e-mail",
   "quote_form_phone": "Numer telefonu",
+  "quote_form_contact_info_message": "Te dane kontaktowe zostaną wykorzystane do przesłania Ci wyceny oraz do dalszej komunikacji. Zostaniesz również powiadomiony e-mailem i SMS-em, gdy Twoje zapytanie ofertowe będzie gotowe.",
   "quote_form_parts_configuration_title": "Częściowa konfiguracja",
   "quote_form_part_name_id": "Nazwa części lub identyfikator",
   "quote_form_quantity": "Tłum",

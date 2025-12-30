@@ -245,6 +245,7 @@
   "quote_form_position": "sijainti",
   "quote_form_email": "Sähköpostiosoite",
   "quote_form_phone": "Puhelinnumero",
+  "quote_form_contact_info_message": "Näitä yhteystietoja käytetään tarjouksen lähettämiseen ja mahdolliseen jatkoviestintään. Saat myös ilmoituksen sähköpostitse ja tekstiviestillä, kun tarjouspyyntösi on valmis.",
   "quote_form_parts_configuration_title": "Osittainen kokoonpano",
   "quote_form_part_name_id": "Osan nimi tai tunnus",
   "quote_form_quantity": "Väkijoukko",

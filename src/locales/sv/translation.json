@@ -239,6 +239,7 @@
   "quote_form_position": "placera",
   "quote_form_email": "E-postadress",
   "quote_form_phone": "Telefonnummer",
+  "quote_form_contact_info_message": "Dessa kontaktuppgifter kommer att användas för att skicka din offert och för eventuell uppföljningskommunikation. Du kommer också att meddelas via e-post och SMS när din offertförfrågan är klar.",
   "quote_form_parts_configuration_title": "Partiell konfiguration",
   "quote_form_part_name_id": "Delnamn eller ID",
   "quote_form_quantity": "Trång",

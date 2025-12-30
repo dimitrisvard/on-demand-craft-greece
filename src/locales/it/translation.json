@@ -239,6 +239,7 @@
   "quote_form_position": "posizione",
   "quote_form_email": "Indirizzo e-mail",
   "quote_form_phone": "Numero di telefono",
+  "quote_form_contact_info_message": "Queste informazioni di contatto saranno utilizzate per inviarti il preventivo e per qualsiasi comunicazione successiva. Sarai inoltre notificato via email e SMS quando la tua richiesta di preventivo sarà pronta.",
   "quote_form_parts_configuration_title": "Configurazione parziale",
   "quote_form_part_name_id": "Nome della parte o ID",
   "quote_form_quantity": "Folla",

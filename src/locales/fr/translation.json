@@ -208,6 +208,7 @@
   "quote_form_position": "position",
   "quote_form_email": "Adresse email",
   "quote_form_phone": "Numéro de téléphone",
+  "quote_form_contact_info_message": "Ces coordonnées seront utilisées pour vous envoyer votre devis et pour toute communication de suivi. Vous serez également notifié par e-mail et SMS lorsque votre demande de devis sera prête.",
   "quote_form_parts_configuration_title": "Configuration partielle",
   "quote_form_part_name_id": "Nom de la pièce ou pièce d'identité",
   "quote_form_quantity": "Foule",

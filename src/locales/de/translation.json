@@ -248,6 +248,7 @@
   "quote_form_position": "Position",
   "quote_form_email": "E-Mail-Adresse",
   "quote_form_phone": "Telefonnummer",
+  "quote_form_contact_info_message": "Diese Kontaktinformationen werden verwendet, um Ihnen Ihr Angebot zu senden und für jede weitere Kommunikation. Sie werden auch per E-Mail und SMS benachrichtigt, wenn Ihre Angebotsanfrage fertig ist.",
   "quote_form_parts_configuration_title": "Teilekonfiguration",
   "quote_form_part_name_id": "Teilname oder ID",
   "quote_form_quantity": "Menge",

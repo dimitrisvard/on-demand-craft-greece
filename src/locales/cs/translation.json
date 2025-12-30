@@ -244,6 +244,7 @@
   "quote_form_position": "pozice",
   "quote_form_email": "E-mailová adresa",
   "quote_form_phone": "Telefonní číslo",
+  "quote_form_contact_info_message": "Tyto kontaktní údaje budou použity k zaslání vaší nabídky a pro veškerou následnou komunikaci. Budete také informováni e-mailem a SMS, jakmile bude vaše poptávka připravena.",
   "quote_form_parts_configuration_title": "Částečná konfigurace",
   "quote_form_part_name_id": "Název dílu nebo ID",
   "quote_form_quantity": "Dav",

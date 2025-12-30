@@ -239,6 +239,7 @@
   "quote_form_position": "posição",
   "quote_form_email": "Endereço de email",
   "quote_form_phone": "Número de telefone",
+  "quote_form_contact_info_message": "Estas informações de contacto serão utilizadas para enviar o seu orçamento e para qualquer comunicação de acompanhamento. Também será notificado por e-mail e SMS quando o seu pedido de orçamento estiver pronto.",
   "quote_form_parts_configuration_title": "Configuração parcial",
   "quote_form_part_name_id": "Nome da peça ou ID",
   "quote_form_quantity": "Multidão",

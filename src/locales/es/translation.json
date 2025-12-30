@@ -245,6 +245,7 @@
   "quote_form_position": "posición",
   "quote_form_email": "Dirección de correo electrónico",
   "quote_form_phone": "Número telefónico",
+  "quote_form_contact_info_message": "Esta información de contacto se utilizará para enviarle su cotización y para cualquier comunicación de seguimiento. También será notificado por correo electrónico y SMS cuando su solicitud de cotización esté lista.",
   "quote_form_parts_configuration_title": "Configuración parcial",
   "quote_form_part_name_id": "Nombre o identificación de la parte",
   "quote_form_quantity": "Multitud",

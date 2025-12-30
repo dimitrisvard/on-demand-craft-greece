@@ -306,6 +306,7 @@
   "quote_form_position": "stilling",
   "quote_form_email": "E-postadresse",
   "quote_form_phone": "Telefonnummer",
+  "quote_form_contact_info_message": "Denne kontaktinformasjonen vil bli brukt til å sende deg tilbudet ditt og for eventuell oppfølgingskommunikasjon. Du vil også bli varslet via e-post og SMS når tilbudsforespørselen din er klar.",
   "quote_form_parts_configuration_title": "Delvis konfigurasjon",
   "quote_form_part_name_id": "Delnavn eller ID",
   "quote_form_quantity": "Mengde",

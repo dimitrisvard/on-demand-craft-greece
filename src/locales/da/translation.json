@@ -245,6 +245,7 @@
   "quote_form_position": "position",
   "quote_form_email": "E-mail-adresse",
   "quote_form_phone": "Telefonnummer",
+  "quote_form_contact_info_message": "Disse kontaktoplysninger vil blive brugt til at sende dit tilbud og til eventuel opfølgende kommunikation. Du vil også blive underrettet via e-mail og SMS, når din tilbudsanmodning er klar.",
   "quote_form_parts_configuration_title": "Delvis konfiguration",
   "quote_form_part_name_id": "Delnavn eller ID",
   "quote_form_quantity": "Publikum",

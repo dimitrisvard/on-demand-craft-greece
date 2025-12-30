@@ -306,6 +306,7 @@
   "quote_form_position": "pozíció",
   "quote_form_email": "E-mail cím",
   "quote_form_phone": "Telefonszám",
+  "quote_form_contact_info_message": "Ezeket az elérhetőségeket az árajánlat elküldéséhez és a további kommunikációhoz használjuk. E-mailben és SMS-ben is értesítést kap, amikor az ajánlatkérése elkészül.",
   "quote_form_parts_configuration_title": "Részleges konfiguráció",
   "quote_form_part_name_id": "Alkatrész neve vagy azonosítója",
   "quote_form_quantity": "Tömeg",
