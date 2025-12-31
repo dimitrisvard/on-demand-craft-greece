@@ -111,16 +111,40 @@ async function generateSitemap(): Promise<string> {
     console.log(`Sample articles:`, articles.slice(0, 3).map(a => `${a.language}/${a.slug}`));
   }
 
-  // Group articles by language
+  // Normalize and group articles by language
+  // Normalize: trim whitespace and convert to lowercase for consistent matching
   const articlesByLanguage: Record<string, Article[]> = {};
+  const languageNormalizationMap: Record<string, string> = {}; // Maps normalized -> original
+  
   for (const article of articles || []) {
-    if (!articlesByLanguage[article.language]) {
-      articlesByLanguage[article.language] = [];
+    // Normalize language code: trim and lowercase
+    const normalizedLang = (article.language || '').trim().toLowerCase();
+    
+    // Store original language for reference
+    if (!languageNormalizationMap[normalizedLang]) {
+      languageNormalizationMap[normalizedLang] = article.language;
     }
-    articlesByLanguage[article.language].push(article);
+    
+    if (!articlesByLanguage[normalizedLang]) {
+      articlesByLanguage[normalizedLang] = [];
+    }
+    articlesByLanguage[normalizedLang].push(article);
+  }
+
+  // Log all languages found in articles
+  const foundLanguages = Object.keys(articlesByLanguage);
+  console.log(`Languages found in articles: ${foundLanguages.join(', ')}`);
+  console.log(`Languages to process: ${LANGUAGES.join(', ')}`);
+  
+  // Check for languages in articles that aren't in LANGUAGES array
+  const missingLanguages = foundLanguages.filter(lang => !LANGUAGES.includes(lang));
+  if (missingLanguages.length > 0) {
+    console.warn(`⚠️ Articles found with languages not in LANGUAGES array: ${missingLanguages.join(', ')}`);
+    console.warn(`These articles will be included if their normalized language matches a language in LANGUAGES array`);
   }
 
   let urlEntries: string[] = [];
+  let totalArticlesAdded = 0;
 
   // Generate sitemap organized by language sections (matching old format)
   for (const lang of LANGUAGES) {
@@ -139,9 +163,14 @@ async function generateSitemap(): Promise<string> {
     }
 
     // 2. Blog articles for this language
-    if (articlesByLanguage[lang]) {
-      console.log(`Adding ${articlesByLanguage[lang].length} blog articles for ${lang}`);
-      for (const article of articlesByLanguage[lang]) {
+    // Check both exact match and normalized match
+    const normalizedLang = lang.toLowerCase().trim();
+    if (articlesByLanguage[lang] || articlesByLanguage[normalizedLang]) {
+      const articlesForLang = articlesByLanguage[lang] || articlesByLanguage[normalizedLang] || [];
+      console.log(`Adding ${articlesForLang.length} blog articles for ${lang}`);
+      totalArticlesAdded += articlesForLang.length;
+      
+      for (const article of articlesForLang) {
         const url = `${siteUrl}/${lang}/blog/${article.slug}`;
         const lastmod = formatDate(article.updated_at);
         urlEntries.push(generateUrlEntry(
@@ -154,6 +183,13 @@ async function generateSitemap(): Promise<string> {
     } else {
       console.log(`No blog articles found for language: ${lang}`);
     }
+  }
+
+  // Log summary
+  console.log(`Total articles added to sitemap: ${totalArticlesAdded} out of ${articles?.length || 0} published articles`);
+  if (totalArticlesAdded < (articles?.length || 0)) {
+    const missing = (articles?.length || 0) - totalArticlesAdded;
+    console.warn(`⚠️ ${missing} articles were not included in sitemap. Check language codes match LANGUAGES array.`);
   }
 
   // Build the complete sitemap (correct XML format with namespace for Google)
@@ -170,19 +206,28 @@ ${urlEntries.join('\n')}
  */
 async function generateLanguageSitemap(lang: string): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
+  const normalizedLang = lang.toLowerCase().trim();
 
   // Fetch articles for this language
+  // First try exact match, then filter for normalized matches
   const { data: articles, error } = await supabase
     .from("articles")
     .select("slug, language, updated_at")
     .eq("status", "published")
-    .eq("language", lang)
     .order("updated_at", { ascending: false });
 
   if (error) {
-    console.error(`Error fetching ${lang} articles:`, error);
-    throw new Error(`Failed to fetch ${lang} articles: ${error.message}`);
+    console.error(`Error fetching articles:`, error);
+    throw new Error(`Failed to fetch articles: ${error.message}`);
   }
+
+  // Filter articles by normalized language code (case-insensitive)
+  const filteredArticles = (articles || []).filter(article => {
+    const articleLang = (article.language || '').trim().toLowerCase();
+    return articleLang === normalizedLang || articleLang === lang.toLowerCase();
+  });
+
+  console.log(`Found ${filteredArticles.length} articles for language ${lang} (from ${articles?.length || 0} total published)`);
 
   let urlEntries: string[] = [];
 
@@ -196,7 +241,7 @@ async function generateLanguageSitemap(lang: string): Promise<string> {
   }
 
   // Blog articles for this language
-  for (const article of articles || []) {
+  for (const article of filteredArticles) {
     const url = `${siteUrl}/${lang}/blog/${article.slug}`;
     const lastmod = formatDate(article.updated_at);
     urlEntries.push(generateUrlEntry(url, lastmod, "weekly", "0.7"));

@@ -124,7 +124,7 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
 }
 
 /**
- * Generate article using Gemini 3 Pro with specified thinking level
+ * Generate article using Gemini 2.0 Flash with specified thinking level
  */
 async function generateWithGemini(
   prompt: string,
@@ -308,6 +308,9 @@ ${relatedArticles}
       content = String(content);
     }
     
+    // ADD HTML CLEANUP: Clean HTML content to remove excessive newlines and fix formatting
+    content = cleanHtmlContent(content);
+    
     // Remove any duplicate title if it appears at the start
     // Check if content starts with an H1 that matches the title
     const titleH1Pattern = new RegExp(`^<h1[^>]*>\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h1>\\s*`, 'i');
@@ -337,6 +340,67 @@ ${relatedArticles}
     console.error("Raw response preview:", response.substring(0, 500));
     throw new Error(`Failed to parse article JSON: ${error.message}`);
   }
+}
+
+/**
+ * Clean and normalize HTML content
+ * - Removes excessive newlines and whitespace
+ * - Fixes table structures
+ * - Normalizes spacing between HTML tags
+ */
+function cleanHtmlContent(html: string): string {
+  if (!html) return "";
+  
+  // Remove excessive newlines (more than 2 consecutive)
+  html = html.replace(/\n{3,}/g, '\n\n');
+  
+  // Normalize whitespace between HTML tags (but preserve intentional spacing)
+  // Replace newlines between closing and opening tags with single newline
+  html = html.replace(/>\s*\n\s*</g, '>\n<');
+  
+  // Clean up table cells - remove excessive whitespace in table cells
+  // Pattern: empty cells with just whitespace/newlines
+  html = html.replace(/(<td[^>]*>)\s*\n\s*\n+(<\/td>)/g, '$1 $2');
+  html = html.replace(/(<th[^>]*>)\s*\n\s*\n+(<\/th>)/g, '$1 $2');
+  
+  // Remove leading/trailing whitespace from content inside tags (but preserve pre/code)
+  html = html.replace(/(>)([^<]+?)(<)/g, (match, open, content, close) => {
+    // Check if we're inside a pre or code tag by looking backwards
+    const beforeMatch = html.substring(0, html.indexOf(match));
+    const lastPre = beforeMatch.lastIndexOf('<pre');
+    const lastCode = beforeMatch.lastIndexOf('<code');
+    const lastPreClose = beforeMatch.lastIndexOf('</pre>');
+    const lastCodeClose = beforeMatch.lastIndexOf('</code>');
+    
+    const insidePre = lastPre > lastPreClose && lastPre !== -1;
+    const insideCode = lastCode > lastCodeClose && lastCode !== -1;
+    
+    if (insidePre || insideCode) return match;
+    
+    // Trim content but preserve single newlines
+    const trimmed = content.trim();
+    return trimmed ? open + trimmed + close : match;
+  });
+  
+  // Fix multiple consecutive spaces in text (but preserve in pre/code)
+  html = html.replace(/([^>])\s{2,}([^<])/g, (match, before, after, offset) => {
+    const beforeMatch = html.substring(0, offset);
+    const lastPre = beforeMatch.lastIndexOf('<pre');
+    const lastCode = beforeMatch.lastIndexOf('<code');
+    const lastPreClose = beforeMatch.lastIndexOf('</pre>');
+    const lastCodeClose = beforeMatch.lastIndexOf('</code>');
+    
+    const insidePre = lastPre > lastPreClose && lastPre !== -1;
+    const insideCode = lastCode > lastCodeClose && lastCode !== -1;
+    
+    if (insidePre || insideCode) return match;
+    return before + ' ' + after;
+  });
+  
+  // Remove newlines at the very start/end
+  html = html.trim();
+  
+  return html;
 }
 
 /**
