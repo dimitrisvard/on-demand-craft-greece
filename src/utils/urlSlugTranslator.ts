@@ -1,0 +1,144 @@
+/**
+ * URL Slug Translator
+ * Maps English URL slugs to their translated versions in different languages
+ * Used for SEO-friendly multilingual URLs (e.g., /en/services → /de/dienstleistungen)
+ */
+
+import { TFunction } from 'i18next';
+
+// English slug to translation key mapping
+// This maps the English URL segment to the translation key that contains the translated slug
+export const SLUG_TRANSLATION_KEYS: Record<string, string> = {
+  'services': 'url_slug_services',
+  'about': 'url_slug_about',
+  'contact': 'url_slug_contact',
+  'quote': 'url_slug_quote',
+  'industries': 'url_slug_industries',
+  'our-work': 'url_slug_our_work',
+  'blog': 'url_slug_blog',
+  'cnc-machining': 'url_slug_cnc_machining',
+  'sheet-metal': 'url_slug_sheet_metal',
+  '3d-printing': 'url_slug_3d_printing',
+  'injection-molding': 'url_slug_injection_molding',
+  'surface-finishes': 'url_slug_surface_finishes',
+  'rapid-prototyping': 'url_slug_rapid_prototyping',
+};
+
+/**
+ * Translate a URL slug from English to the current language
+ * @param englishSlug - The English URL slug (e.g., 'services')
+ * @param language - Target language code (e.g., 'de')
+ * @param t - Translation function from i18next
+ * @returns Translated slug (e.g., 'dienstleistungen') or original slug if translation not found
+ */
+export function translateUrlSlug(
+  englishSlug: string,
+  language: string,
+  t: TFunction
+): string {
+  // If English, return as-is
+  if (language === 'en') {
+    return englishSlug;
+  }
+
+  // Get translation key for this slug
+  const translationKey = SLUG_TRANSLATION_KEYS[englishSlug];
+  if (!translationKey) {
+    // No translation key found, return original
+    return englishSlug;
+  }
+
+  // Get translated slug with fallback to English slug
+  const translatedSlug = t(translationKey, { defaultValue: englishSlug });
+  
+  // If translation returned the key (meaning it wasn't found), use English slug
+  if (translatedSlug === translationKey || !translatedSlug) {
+    return englishSlug;
+  }
+
+  return translatedSlug;
+}
+
+/**
+ * Reverse translate a URL slug from any language back to English
+ * @param slug - The slug in any language
+ * @param language - Source language code
+ * @param t - Translation function from i18next
+ * @returns English slug
+ */
+export function reverseTranslateUrlSlug(
+  slug: string,
+  language: string,
+  t: TFunction
+): string {
+  // If English, return as-is
+  if (language === 'en') {
+    return slug;
+  }
+
+  // Check each translation key to find which one matches this slug
+  for (const [englishSlug, translationKey] of Object.entries(SLUG_TRANSLATION_KEYS)) {
+    const translatedSlug = t(translationKey, { defaultValue: englishSlug });
+    if (translatedSlug === slug) {
+      return englishSlug;
+    }
+  }
+
+  // Not found, assume it's already English
+  return slug;
+}
+
+/**
+ * Translate a full URL path
+ * @param englishPath - English path like '/services' or '/services/cnc-machining'
+ * @param language - Target language code
+ * @param t - Translation function
+ * @returns Translated path like '/dienstleistungen' or '/dienstleistungen/cnc-fraesen'
+ */
+export function translateUrlPath(
+  englishPath: string,
+  language: string,
+  t: TFunction
+): string {
+  if (englishPath === '/' || englishPath === '') {
+    return '/';
+  }
+
+  // Remove leading slash and split into segments
+  const segments = englishPath.split('/').filter(Boolean);
+  
+  // Translate each segment
+  const translatedSegments = segments.map(segment => 
+    translateUrlSlug(segment, language, t)
+  );
+
+  return '/' + translatedSegments.join('/');
+}
+
+/**
+ * Reverse translate a full URL path back to English
+ * @param path - Path in any language
+ * @param language - Source language code
+ * @param t - Translation function
+ * @returns English path
+ */
+export function reverseTranslateUrlPath(
+  path: string,
+  language: string,
+  t: TFunction
+): string {
+  if (path === '/' || path === '') {
+    return '/';
+  }
+
+  // Remove leading slash and split into segments
+  const segments = path.split('/').filter(Boolean);
+  
+  // Reverse translate each segment
+  const englishSegments = segments.map(segment => 
+    reverseTranslateUrlSlug(segment, language, t)
+  );
+
+  return '/' + englishSegments.join('/');
+}
+

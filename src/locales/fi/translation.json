@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Työportfoliomme",
   "seo_our_work_description": "Katso valmistusprojektien portfoliomme. Esimerkkejä CNC-koneistuksesta, levynkäsittelystä, ruiskumuovauksesta ja enemmän.",
   "seo_quote_title": "Hanki valmistustarjous",
-  "seo_quote_description": "Lataa CAD-tiedostosi ja saat yksityiskohtaisen valmistustarjouksen 24 tunnin kuluessa. Asiantuntijatiimimme on valmis tuomaan suunnittelusi eloon."
+  "seo_quote_description": "Lataa CAD-tiedostosi ja saat yksityiskohtaisen valmistustarjouksen 24 tunnin kuluessa. Asiantuntijatiimimme on valmis tuomaan suunnittelusi eloon.",
+  "url_slug_services": "palvelut",
+  "url_slug_about": "meista",
+  "url_slug_contact": "yhteys",
+  "url_slug_quote": "tarjous",
+  "url_slug_industries": "toimialat",
+  "url_slug_our_work": "tyomme",
+  "url_slug_blog": "blogi",
+  "url_slug_cnc_machining": "cnc-työstö",
+  "url_slug_sheet_metal": "levytyöstö",
+  "url_slug_3d_printing": "3d-tulostus",
+  "url_slug_injection_molding": "ruiskupuristus",
+  "url_slug_surface_finishes": "pinnan-viimeistely",
+  "url_slug_rapid_prototyping": "nopea-prototyyppaus"
 }

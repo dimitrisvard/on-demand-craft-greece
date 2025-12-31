@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Nuestro portafolio de trabajos",
   "seo_our_work_description": "Vea nuestro portafolio de proyectos de fabricación. Ejemplos de mecanizado CNC, fabricación de chapa metálica, moldeo por inyección y más.",
   "seo_quote_title": "Obtenga su cotización de fabricación",
-  "seo_quote_description": "Cargue sus archivos CAD y obtenga una cotización de fabricación detallada en 24 horas. Nuestro equipo de expertos está listo para dar vida a sus diseños."
+  "seo_quote_description": "Cargue sus archivos CAD y obtenga una cotización de fabricación detallada en 24 horas. Nuestro equipo de expertos está listo para dar vida a sus diseños.",
+  "url_slug_services": "servicios",
+  "url_slug_about": "sobre-nosotros",
+  "url_slug_contact": "contacto",
+  "url_slug_quote": "cotizacion",
+  "url_slug_industries": "industrias",
+  "url_slug_our_work": "nuestro-trabajo",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "mecanizado-cnc",
+  "url_slug_sheet_metal": "chapa-metalica",
+  "url_slug_3d_printing": "impresion-3d",
+  "url_slug_injection_molding": "moldeo-por-inyeccion",
+  "url_slug_surface_finishes": "acabados-superficie",
+  "url_slug_rapid_prototyping": "prototipado-rapido"
 }

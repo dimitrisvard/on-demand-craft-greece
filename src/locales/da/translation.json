@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Vores arbejdsportfolio",
   "seo_our_work_description": "Se vores portfolio af produktionsprojekter. Eksempler på CNC-bearbejdning, pladebearbejdning, sprøjtestøbning og mere.",
   "seo_quote_title": "Få dit produktionsbud",
-  "seo_quote_description": "Upload dine CAD-filer og få et detaljeret produktionsbud inden for 24 timer. Vores team af eksperter er klar til at bringe dine designs til live."
+  "seo_quote_description": "Upload dine CAD-filer og få et detaljeret produktionsbud inden for 24 timer. Vores team af eksperter er klar til at bringe dine designs til live.",
+  "url_slug_services": "tjenester",
+  "url_slug_about": "om-os",
+  "url_slug_contact": "kontakt",
+  "url_slug_quote": "tilbud",
+  "url_slug_industries": "brancher",
+  "url_slug_our_work": "vores-arbejde",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "cnc-bearbejdning",
+  "url_slug_sheet_metal": "pladearbejde",
+  "url_slug_3d_printing": "3d-printing",
+  "url_slug_injection_molding": "sproejtestoebning",
+  "url_slug_surface_finishes": "overfladebehandling",
+  "url_slug_rapid_prototyping": "hurtig-prototypering"
 }

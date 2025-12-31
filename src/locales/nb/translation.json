@@ -1086,5 +1086,18 @@
   "seo_our_work_title": "Vårt arbeidsportfolio",
   "seo_our_work_description": "Se vårt portfolio av produksjonsprosjekter. Eksempler på CNC-bearbeiding, platebearbeiding, injeksjonsstøping og mer.",
   "seo_quote_title": "Få ditt produksjonstilbud",
-  "seo_quote_description": "Last opp CAD-filene dine og få et detaljert produksjonstilbud innen 24 timer. Teamet vårt av eksperter er klart til å bringe designene dine til live."
+  "seo_quote_description": "Last opp CAD-filene dine og få et detaljert produksjonstilbud innen 24 timer. Teamet vårt av eksperter er klart til å bringe designene dine til live.",
+  "url_slug_services": "tjenester",
+  "url_slug_about": "om-oss",
+  "url_slug_contact": "kontakt",
+  "url_slug_quote": "tilbud",
+  "url_slug_industries": "bransjer",
+  "url_slug_our_work": "vårt-arbeid",
+  "url_slug_blog": "blogg",
+  "url_slug_cnc_machining": "cnc-bearbeiding",
+  "url_slug_sheet_metal": "platarbeid",
+  "url_slug_3d_printing": "3d-printing",
+  "url_slug_injection_molding": "sproyetestoping",
+  "url_slug_surface_finishes": "overflatebehandling",
+  "url_slug_rapid_prototyping": "rask-prototyping"
 }

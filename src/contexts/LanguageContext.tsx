@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { translateUrlPath, reverseTranslateUrlPath } from '@/utils/urlSlugTranslator';
 
 // Supported languages
 export const SUPPORTED_LANGUAGES = {
@@ -40,6 +41,7 @@ interface LanguageContextType {
   supportedLanguages: typeof SUPPORTED_LANGUAGES;
   getLocalizedPath: (path: string) => string;
   getPathWithoutLanguage: (path: string) => string;
+  getEnglishPath: (path: string, language: string) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -58,7 +60,7 @@ interface LanguageProviderProps {
 
 export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) => {
   const [currentLanguage, setCurrentLanguage] = useState(DEFAULT_LANGUAGE);
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -177,20 +179,31 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
       : currentLanguage;
     
     // Clean the path first to remove any existing language prefixes
-    const cleanPathValue = cleanPath(path);
+    let cleanPathValue = cleanPath(path);
+    
+    // If not English, translate the URL slug using the target language's translations
+    if (effectiveLanguage !== 'en' && cleanPathValue !== '/') {
+      const tForLanguage = i18n.getFixedT(effectiveLanguage);
+      cleanPathValue = translateUrlPath(cleanPathValue, effectiveLanguage, tForLanguage);
+    }
+    
     const result = buildLanguagePath(effectiveLanguage, cleanPathValue);
     
-    // Debug logging
-    console.log('getLocalizedPath:', {
-      inputPath: path,
-      currentLanguage,
-      langFromUrl,
-      effectiveLanguage,
-      cleanPathValue,
-      result
-    });
-    
     return result;
+  };
+  
+  // Get English path from any language path (for routing)
+  const getEnglishPath = (path: string, language: string) => {
+    // Clean path (remove language prefix)
+    let cleanPathValue = cleanPath(path);
+    
+    // If not English, reverse translate to English using source language's translations
+    if (language !== 'en' && cleanPathValue !== '/') {
+      const tForLanguage = i18n.getFixedT(language);
+      cleanPathValue = reverseTranslateUrlPath(cleanPathValue, language, tForLanguage);
+    }
+    
+    return cleanPathValue;
   };
 
   // Remove language prefix from path
@@ -203,7 +216,8 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
     setLanguage,
     supportedLanguages: SUPPORTED_LANGUAGES,
     getLocalizedPath,
-    getPathWithoutLanguage
+    getPathWithoutLanguage,
+    getEnglishPath
   };
 
   return (

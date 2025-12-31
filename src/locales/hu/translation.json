@@ -1086,5 +1086,18 @@
   "seo_our_work_title": "Munkaportfóliónk",
   "seo_our_work_description": "Tekintse meg gyártási projektek portfólióját. Példák CNC megmunkálásra, lemezmegmunkálásra, fröccsöntésre és még több.",
   "seo_quote_title": "Szerezzen gyártási árajánlatot",
-  "seo_quote_description": "Töltse fel CAD fájljait és kapjon részletes gyártási árajánlatot 24 órán belül. Szakértői csapatunk készen áll, hogy életre keltsék terveit."
+  "seo_quote_description": "Töltse fel CAD fájljait és kapjon részletes gyártási árajánlatot 24 órán belül. Szakértői csapatunk készen áll, hogy életre keltsék terveit.",
+  "url_slug_services": "szolgaltatasok",
+  "url_slug_about": "rolunk",
+  "url_slug_contact": "kapcsolat",
+  "url_slug_quote": "ajanlat",
+  "url_slug_industries": "iparagak",
+  "url_slug_our_work": "munkaink",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "cnc-megmunkalas",
+  "url_slug_sheet_metal": "lemezfeldolgozas",
+  "url_slug_3d_printing": "3d-nyomtas",
+  "url_slug_injection_molding": "frccsnyomas",
+  "url_slug_surface_finishes": "feluletkezeles",
+  "url_slug_rapid_prototyping": "gyors-prototipus"
 }

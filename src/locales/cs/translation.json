@@ -1084,5 +1084,18 @@
   "seo_our_work_title": "Naše portfolio prací",
   "seo_our_work_description": "Prohlédněte si naše portfolio výrobních projektů. Příklady CNC obrábění, zpracování plechu, vstřikování plastů a další.",
   "seo_quote_title": "Získejte výrobní nabídku",
-  "seo_quote_description": "Nahrajte své CAD soubory a získejte podrobnou výrobní nabídku do 24 hodin. Náš tým odborníků je připraven oživit vaše návrhy."
+  "seo_quote_description": "Nahrajte své CAD soubory a získejte podrobnou výrobní nabídku do 24 hodin. Náš tým odborníků je připraven oživit vaše návrhy.",
+  "url_slug_services": "sluzby",
+  "url_slug_about": "o-nas",
+  "url_slug_contact": "kontakt",
+  "url_slug_quote": "nabidka",
+  "url_slug_industries": "prumysl",
+  "url_slug_our_work": "nase-prace",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "cnc-obrabeni",
+  "url_slug_sheet_metal": "obrabeni-plechu",
+  "url_slug_3d_printing": "3d-tisk",
+  "url_slug_injection_molding": "vstrekovani",
+  "url_slug_surface_finishes": "uprava-povrchu",
+  "url_slug_rapid_prototyping": "rychle-prototypovani"
 }

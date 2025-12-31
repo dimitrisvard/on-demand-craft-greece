@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Ons werkportfolio",
   "seo_our_work_description": "Bekijk ons portfolio van productieprojecten. Voorbeelden van CNC-bewerking, plaatmetaalbewerking, spuitgieten en meer.",
   "seo_quote_title": "Krijg uw productieofferte",
-  "seo_quote_description": "Upload uw CAD-bestanden en ontvang binnen 24 uur een gedetailleerde productieofferte. Ons team van experts staat klaar om uw ontwerpen tot leven te brengen."
+  "seo_quote_description": "Upload uw CAD-bestanden en ontvang binnen 24 uur een gedetailleerde productieofferte. Ons team van experts staat klaar om uw ontwerpen tot leven te brengen.",
+  "url_slug_services": "diensten",
+  "url_slug_about": "over-ons",
+  "url_slug_contact": "contact",
+  "url_slug_quote": "offerte",
+  "url_slug_industries": "branches",
+  "url_slug_our_work": "ons-werk",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "cnc-bewerking",
+  "url_slug_sheet_metal": "plaatbewerking",
+  "url_slug_3d_printing": "3d-printen",
+  "url_slug_injection_molding": "spuitgieten",
+  "url_slug_surface_finishes": "oppervlakteafwerking",
+  "url_slug_rapid_prototyping": "rapid-prototyping"
 }

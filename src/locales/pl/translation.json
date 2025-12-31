@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Nasze portfolio prac",
   "seo_our_work_description": "Zobacz nasze portfolio projektów produkcyjnych. Przykłady obróbki CNC, obróbki blachy, wtryskiwania tworzyw i więcej.",
   "seo_quote_title": "Otrzymaj wycenę produkcyjną",
-  "seo_quote_description": "Prześlij swoje pliki CAD i otrzymaj szczegółową wycenę produkcyjną w ciągu 24 godzin. Nasz zespół ekspertów jest gotowy, aby ożywić Twoje projekty."
+  "seo_quote_description": "Prześlij swoje pliki CAD i otrzymaj szczegółową wycenę produkcyjną w ciągu 24 godzin. Nasz zespół ekspertów jest gotowy, aby ożywić Twoje projekty.",
+  "url_slug_services": "uslugi",
+  "url_slug_about": "o-nas",
+  "url_slug_contact": "kontakt",
+  "url_slug_quote": "wycena",
+  "url_slug_industries": "branze",
+  "url_slug_our_work": "nasza-praca",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "obrobka-cnc",
+  "url_slug_sheet_metal": "obrobka-bluzy",
+  "url_slug_3d_printing": "druk-3d",
+  "url_slug_injection_molding": "wtrysk-tworzywa",
+  "url_slug_surface_finishes": "wykończenie-powierzchni",
+  "url_slug_rapid_prototyping": "szybkie-prototypowanie"
 }

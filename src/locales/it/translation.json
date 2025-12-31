@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Il nostro portfolio di lavori",
   "seo_our_work_description": "Visualizza il nostro portfolio di progetti di produzione. Esempi di lavorazione CNC, lavorazione lamiera, stampaggio a iniezione e altro ancora.",
   "seo_quote_title": "Ottieni il tuo preventivo di produzione",
-  "seo_quote_description": "Carica i tuoi file CAD e ottieni un preventivo di produzione dettagliato entro 24 ore. Il nostro team di esperti è pronto a dare vita ai tuoi progetti."
+  "seo_quote_description": "Carica i tuoi file CAD e ottieni un preventivo di produzione dettagliato entro 24 ore. Il nostro team di esperti è pronto a dare vita ai tuoi progetti.",
+  "url_slug_services": "servizi",
+  "url_slug_about": "chi-siamo",
+  "url_slug_contact": "contatto",
+  "url_slug_quote": "preventivo",
+  "url_slug_industries": "settori",
+  "url_slug_our_work": "i-nostri-lavori",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "lavorazione-cnc",
+  "url_slug_sheet_metal": "lavorazione-lamiera",
+  "url_slug_3d_printing": "stampa-3d",
+  "url_slug_injection_molding": "stampaggio-iniezione",
+  "url_slug_surface_finishes": "finitura-superficie",
+  "url_slug_rapid_prototyping": "prototipazione-rapida"
 }

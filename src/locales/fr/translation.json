@@ -1098,5 +1098,18 @@
   "seo_our_work_title": "Notre portfolio de travaux",
   "seo_our_work_description": "Consultez notre portfolio de projets de fabrication. Exemples d'usinage CNC, de fabrication de tôle, de moulage par injection et plus encore.",
   "seo_quote_title": "Obtenez votre devis de fabrication",
-  "seo_quote_description": "Téléchargez vos fichiers CAO et obtenez un devis de fabrication détaillé dans les 24 heures. Notre équipe d'experts est prête à donner vie à vos conceptions."
+  "seo_quote_description": "Téléchargez vos fichiers CAO et obtenez un devis de fabrication détaillé dans les 24 heures. Notre équipe d'experts est prête à donner vie à vos conceptions.",
+  "url_slug_services": "services",
+  "url_slug_about": "a-propos",
+  "url_slug_contact": "contact",
+  "url_slug_quote": "devis",
+  "url_slug_industries": "secteurs",
+  "url_slug_our_work": "notre-travail",
+  "url_slug_blog": "blog",
+  "url_slug_cnc_machining": "usinage-cnc",
+  "url_slug_sheet_metal": "tolerie",
+  "url_slug_3d_printing": "impression-3d",
+  "url_slug_injection_molding": "injection-plastique",
+  "url_slug_surface_finishes": "finition-surface",
+  "url_slug_rapid_prototyping": "prototypage-rapide"
 }

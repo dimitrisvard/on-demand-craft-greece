@@ -1135,5 +1135,18 @@
   "seo_our_work_title": "Vårt arbetsportfolio",
   "seo_our_work_description": "Se vårt portfolio av tillverkningsprojekt. Exempel på CNC-bearbetning, plåtbearbetning, formsprutning och mer.",
   "seo_quote_title": "Få din tillverkningsofferte",
-  "seo_quote_description": "Ladda upp dina CAD-filer och få en detaljerad tillverkningsofferte inom 24 timmar. Vårt team av experter är redo att ge liv åt dina design."
+  "seo_quote_description": "Ladda upp dina CAD-filer och få en detaljerad tillverkningsofferte inom 24 timmar. Vårt team av experter är redo att ge liv åt dina design.",
+  "url_slug_services": "tjanster",
+  "url_slug_about": "om-oss",
+  "url_slug_contact": "kontakt",
+  "url_slug_quote": "offert",
+  "url_slug_industries": "branscher",
+  "url_slug_our_work": "vart-arbete",
+  "url_slug_blog": "blogg",
+  "url_slug_cnc_machining": "cnc-bearbetning",
+  "url_slug_sheet_metal": "platarbe",
+  "url_slug_3d_printing": "3d-skrivning",
+  "url_slug_injection_molding": "sprutgjutning",
+  "url_slug_surface_finishes": "ytbehandling",
+  "url_slug_rapid_prototyping": "snabb-prototypering"
 }
