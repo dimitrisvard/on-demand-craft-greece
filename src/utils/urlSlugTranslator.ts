@@ -90,10 +90,10 @@ export function reverseTranslateUrlSlug(
 
 /**
  * Translate a full URL path
- * @param englishPath - English path like '/services' or '/services/cnc-machining'
+ * @param englishPath - English path like '/services' or '/services/cnc-machining' or '/blog/article-slug'
  * @param language - Target language code
  * @param t - Translation function
- * @returns Translated path like '/dienstleistungen' or '/dienstleistungen/cnc-fraesen'
+ * @returns Translated path like '/dienstleistungen' or '/dienstleistungen/cnc-fraesen' or '/blog/article-slug' (blog slugs are NOT translated)
  */
 export function translateUrlPath(
   englishPath: string,
@@ -107,7 +107,16 @@ export function translateUrlPath(
   // Remove leading slash and split into segments
   const segments = englishPath.split('/').filter(Boolean);
   
-  // Translate each segment
+  // Special handling for blog paths: only translate '/blog', keep article slug unchanged
+  // Blog posts have manually-entered slugs that should NOT be auto-translated
+  if (segments.length >= 2 && segments[0] === 'blog') {
+    // Translate 'blog' part only, keep the rest (article slug) as-is
+    const translatedBlog = translateUrlSlug('blog', language, t);
+    const articleSlug = segments.slice(1).join('/'); // Everything after 'blog'
+    return `/${translatedBlog}/${articleSlug}`;
+  }
+  
+  // Translate each segment for all other paths
   const translatedSegments = segments.map(segment => 
     translateUrlSlug(segment, language, t)
   );
@@ -134,7 +143,21 @@ export function reverseTranslateUrlPath(
   // Remove leading slash and split into segments
   const segments = path.split('/').filter(Boolean);
   
-  // Reverse translate each segment
+  // Special handling for blog paths: only reverse-translate '/blog', keep article slug unchanged
+  // Blog posts have manually-entered slugs that should NOT be reverse-translated
+  if (segments.length >= 2) {
+    const firstSegment = segments[0];
+    // Check if first segment is a translated version of 'blog'
+    const translatedBlog = t('url_slug_blog', { defaultValue: 'blog' });
+    if (firstSegment === translatedBlog || firstSegment === 'blog') {
+      // Reverse translate 'blog' part only, keep the rest (article slug) as-is
+      const englishBlog = reverseTranslateUrlSlug(firstSegment, language, t);
+      const articleSlug = segments.slice(1).join('/'); // Everything after 'blog'
+      return `/${englishBlog}/${articleSlug}`;
+    }
+  }
+  
+  // Reverse translate each segment for all other paths
   const englishSegments = segments.map(segment => 
     reverseTranslateUrlSlug(segment, language, t)
   );
