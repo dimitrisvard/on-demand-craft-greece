@@ -179,7 +179,7 @@ async function generateWithGemini(
 
 /**
  * Generate master article with high thinking level - "Master Engineer" Prompt
- * Creates ONLY the English version in DRAFT mode
+ * Creates ONLY the English version in PUBLISHED mode
  */
 async function generateMasterArticle(
   title: string,
@@ -224,8 +224,14 @@ ${relatedArticles}
 
 ---
 ### CONTENT REQUIREMENTS
-1.  **Length:** Minimum 1600 words of "meaty" content.
-2.  **Silo Category:** This article belongs to the "${siloCategory || 'General'}" content silo.
+1.  **Length:** Minimum 2500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 300-400 words per major section).
+2.  **Depth & Detail:** 
+    * Provide detailed explanations, not just surface-level information
+    * Include specific technical values, ranges, and specifications
+    * Explain the "why" behind recommendations, not just the "what"
+    * Add practical examples and real-world applications
+    * Include nuanced comparisons and trade-offs
+3.  **Silo Category:** This article belongs to the "${siloCategory || 'General'}" content silo.
 3.  **Structure:**
     * **H1:** The Title.
     * **Executive Summary:** A "Key Takeaways" bullet list (3-4 points) right after the intro using <ul><li> tags.
@@ -272,38 +278,64 @@ ${relatedArticles}
   const response = await generateWithGemini(prompt, "high");
   
   try {
-    let jsonText = response;
-    const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/) || 
-                     response.match(/```\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1];
-    }
+    // Clean the response: remove markdown code fences if present
+    let jsonText = response.trim();
     
+    // Remove markdown code fences
+    jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    
+    // Find the JSON object boundaries
     const jsonStartIndex = jsonText.indexOf('{');
     const jsonEndIndex = jsonText.lastIndexOf('}');
-    if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
-      jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    
+    if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
+      throw new Error("Could not find valid JSON boundaries");
     }
     
+    jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    
+    // Parse JSON (this will automatically handle escaped newlines \n)
     const parsed = JSON.parse(jsonText);
 
+    // Extract and validate content
+    let content = parsed.content || "";
+    let excerpt = parsed.excerpt || "";
+    let metaTitle = parsed.metaTitle || `${title} | ${BRAND_NAME}`;
+    let metaDescription = parsed.metaDescription || excerpt || "";
+    
+    // Clean up content: ensure it's a string and doesn't contain the JSON wrapper
+    if (typeof content !== 'string') {
+      content = String(content);
+    }
+    
+    // Remove any duplicate title if it appears at the start
+    // Check if content starts with an H1 that matches the title
+    const titleH1Pattern = new RegExp(`^<h1[^>]*>\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h1>\\s*`, 'i');
+    content = content.replace(titleH1Pattern, '');
+    
+    // Clean excerpt and metaDescription: remove any JSON artifacts
+    excerpt = excerpt.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    metaDescription = metaDescription.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    
+    // Ensure excerpt doesn't contain the full JSON response
+    if (excerpt.includes('"content":') || excerpt.includes('```json')) {
+      excerpt = excerpt.substring(0, 160).split('\n')[0].trim();
+    }
+    if (metaDescription.includes('"content":') || metaDescription.includes('```json')) {
+      metaDescription = metaDescription.substring(0, 160).split('\n')[0].trim();
+    }
+
     return {
-      content: parsed.content || response,
-      excerpt: parsed.excerpt || "",
-      metaTitle: parsed.metaTitle || `${title} | ${BRAND_NAME}`,
-      metaDescription: parsed.metaDescription || parsed.excerpt || "",
+      content: content,
+      excerpt: excerpt.substring(0, 160), // Ensure max 160 chars
+      metaTitle: metaTitle.substring(0, 80), // Ensure max 80 chars (60 + brand name space)
+      metaDescription: metaDescription.substring(0, 160), // Ensure max 160 chars
       faqSchema: parsed.faqSchema || null,
     };
   } catch (error) {
     console.error("Failed to parse Gemini response as JSON:", error);
-    console.error("Raw response:", response.substring(0, 500));
-    return {
-      content: response,
-      excerpt: response.substring(0, 160) + "...",
-      metaTitle: `${title} | ${BRAND_NAME}`,
-      metaDescription: response.substring(0, 160),
-      faqSchema: null,
-    };
+    console.error("Raw response preview:", response.substring(0, 500));
+    throw new Error(`Failed to parse article JSON: ${error.message}`);
   }
 }
 
@@ -318,9 +350,9 @@ function generateSlug(title: string): string {
 }
 
 /**
- * Main handler - Creates ONLY English article in DRAFT mode
+ * Main handler - Creates ONLY English article in PUBLISHED mode
  * Rotates through silos daily: Day 1-5 cycle through all 5 silos
- * User must manually trigger translations via the dashboard
+ * Auto-translation will occur 2 hours after article creation via cron job
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -444,7 +476,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: "English article generated in DRAFT mode. Review and click 'Translate' to create translations.",
+        message: "English article generated and published. Auto-translation will occur in 2 hours.",
         scheduled_silo: todaysSilo,
         matched_scheduled_silo: titleRecord.silo_category === todaysSilo,
         title: titleRecord.title,

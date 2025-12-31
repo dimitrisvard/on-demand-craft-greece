@@ -204,6 +204,9 @@ Rewrite all internal links to match the target language sub-folder structure:
 * href="/en/services" → href="/${langCode}/services"  
 * href="/en/blog/any-slug" → href="/${langCode}/blog/translated-slug" (use translated slugs in links)
 * Translate the visible anchor text naturally
+* CRITICAL: Links must use proper HTML format: <a href="/${langCode}/path">text</a>
+* NEVER include quotes inside the href attribute value - use: href="/path" NOT href=""path""
+* Ensure all href values start with "/" and contain no spaces or extra quotes
 
 ---
 ### OUTPUT FORMAT (JSON - No markdown fencing!)
@@ -219,20 +222,37 @@ Rewrite all internal links to match the target language sub-folder structure:
   const response = await generateWithGemini(prompt, thoughtSignature);
 
   try {
-    let jsonText = response;
-    const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/) || 
-                     response.match(/```\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonText = jsonMatch[1];
-    }
+    // Clean the response: remove markdown code fences if present
+    let jsonText = response.trim();
     
+    // Remove markdown code fences
+    jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    
+    // Find the JSON object boundaries
     const jsonStartIndex = jsonText.indexOf('{');
     const jsonEndIndex = jsonText.lastIndexOf('}');
-    if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
-      jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    
+    if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
+      throw new Error("Could not find valid JSON boundaries");
     }
     
+    jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    
+    // Parse JSON (this will automatically handle escaped newlines \n)
     const parsed = JSON.parse(jsonText);
+    
+    // Ensure content is a string and clean it
+    if (typeof parsed.content !== 'string') {
+      parsed.content = String(parsed.content || '');
+    }
+    
+    // Clean excerpt and metaDescription: remove any JSON artifacts
+    if (parsed.excerpt) {
+      parsed.excerpt = String(parsed.excerpt).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    }
+    if (parsed.metaDescription) {
+      parsed.metaDescription = String(parsed.metaDescription).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    }
 
     // Validate and fix meta lengths
     let metaTitle = parsed.metaTitle || originalJsonData.metaTitle;
@@ -251,12 +271,25 @@ Rewrite all internal links to match the target language sub-folder structure:
       metaDescription = metaDescription.substring(0, 157) + "...";
     }
 
-    // Ensure links are properly localized (fallback regex replacement)
+    // Ensure links are properly localized and fix any malformed links
     let content = parsed.content || originalJsonData.content;
+    
+    // Fix malformed links with quotes inside href (e.g., href=""path"" → href="/path")
+    content = content.replace(/href="+([^"]+)"+/g, 'href="$1"'); // Remove duplicate quotes
+    content = content.replace(/href="([^"]*)"([^"]*)"([^"]*)"/g, 'href="$1$2$3"'); // Fix nested quotes
+    
+    // Ensure all internal links use the correct language code
     content = content
       .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
       .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
       .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+    
+    // Clean up any remaining malformed links (href with quotes in the middle)
+    // Pattern: href="/something"something" → href="/somethingsomething"
+    content = content.replace(/href="([^"]*)"([^/][^"]*)"/g, (match, p1, p2) => {
+      // If there's a quote in the middle of the href value, remove it
+      return `href="${p1}${p2.replace(/"/g, '')}"`;
+    });
 
     // Generate slug from translated title if not provided
     let translatedSlug = parsed.slug;
@@ -279,7 +312,11 @@ Rewrite all internal links to match the target language sub-folder structure:
     console.error(`Failed to parse translation for ${targetLanguage}:`, error);
     
     // Fallback: return original with basic link replacement
-    let fallbackContent = originalJsonData.content
+    let fallbackContent = originalJsonData.content;
+    
+    // Fix malformed links
+    fallbackContent = fallbackContent.replace(/href="+([^"]+)"+/g, 'href="$1"');
+    fallbackContent = fallbackContent
       .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
       .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
       .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
@@ -455,7 +492,7 @@ serve(async (req) => {
             originalJsonData,
             lang.name,
             lang.code,
-            masterArticle.slug, // Pass slug for reference (it stays unchanged)
+            masterArticle.slug, // Pass original slug for reference (will be translated)
             thoughtSignature
           ),
           3, // Max 3 retries
@@ -562,7 +599,7 @@ serve(async (req) => {
         success: true,
         message: `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`,
         master_article_id: article_id,
-        slug: masterArticle.slug, // Same slug for all languages
+        slug: masterArticle.slug, // Original English slug
         translations: successfulTranslations,
         total_languages: languagesToTranslate.length,
         indexing: { indexnow: indexNowResult },
