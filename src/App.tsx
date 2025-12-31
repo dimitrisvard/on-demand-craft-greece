@@ -9,6 +9,7 @@ import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import CookieConsentBanner from './components/CookieConsentBanner';
+import TranslatedRouteMatcher from './components/TranslatedRouteMatcher';
 
 // Lazy load pages to reduce initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -100,12 +101,20 @@ function AppContent() {
                 
                 {/* Language-specific routes */}
                 <Route path="/:lang" element={<Index />} />
+                
+                {/* Blog routes - use specific pattern, slug is not translated */}
                 <Route path="/:lang/blog" element={<BlogIndex />} />
                 <Route path="/:lang/blog/:slug" element={<BlogPost />} />
+                
+                {/* Static routes - support both English and translated slugs */}
                 <Route path="/:lang/login" element={<Login />} />
+                
+                {/* Quote routes */}
                 <Route path="/:lang/quote" element={<Quote />} />
                 <Route path="/:lang/quote/success" element={<QuoteSuccess />} />
                 <Route path="/:lang/quote-request" element={<QuoteRequestForm />} />
+                
+                {/* Keep English routes FIRST for exact matching (better performance and SEO) */}
                 <Route path="/:lang/services" element={<Services />} />
                 <Route path="/:lang/industries" element={<Industries />} />
                 <Route path="/:lang/our-work" element={<OurWork />} />
@@ -119,6 +128,11 @@ function AppContent() {
                 <Route path="/:lang/services/3d-printing" element={<ThreeDPrinting />} />
                 <Route path="/:lang/services/injection-molding" element={<InjectionMolding />} />
                 <Route path="/:lang/services/rapid-prototyping" element={<RapidPrototyping />} />
+                
+                {/* Catch-all routes for translated URLs - placed AFTER specific English routes */}
+                {/* These will match translated slugs like /de/dienstleistungen and reverse-translate them */}
+                <Route path="/:lang/:slug/:subslug" element={<TranslatedRouteMatcher />} />
+                <Route path="/:lang/:slug" element={<TranslatedRouteMatcher />} />
 
                 {/* Legacy routes (without language prefix) - for backward compatibility */}
                 <Route path="/login" element={<Login />} />
