@@ -73,7 +73,8 @@ const TranslatedRouteMatcher: React.FC<TranslatedRouteMatcherProps> = ({ slug, s
         </Suspense>
       );
     }
-    return null; // No match - let React Router continue
+    // No match - show 404 (this shouldn't happen if routes are ordered correctly)
+    return <NotFound />;
   }
   
   // For non-English, reverse translate the current path to English
@@ -89,8 +90,8 @@ const TranslatedRouteMatcher: React.FC<TranslatedRouteMatcherProps> = ({ slug, s
     );
   }
   
-  // No match found - let React Router continue to next route
-  return null;
+  // No match found - show 404 page
+  return <NotFound />;
 };
 
 export default TranslatedRouteMatcher;
