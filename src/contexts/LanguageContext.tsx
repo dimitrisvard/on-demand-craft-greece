@@ -182,6 +182,9 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
     let cleanPathValue = cleanPath(path);
     
     // If not English, translate the URL slug using the target language's translations
+    // NOTE: This generates translated URLs (e.g., /de/dienstleistungen)
+    // Routes in App.tsx currently use English paths, so this will cause routing issues
+    // until routes are updated to handle both English and translated slugs
     if (effectiveLanguage !== 'en' && cleanPathValue !== '/') {
       const tForLanguage = i18n.getFixedT(effectiveLanguage);
       cleanPathValue = translateUrlPath(cleanPathValue, effectiveLanguage, tForLanguage);
