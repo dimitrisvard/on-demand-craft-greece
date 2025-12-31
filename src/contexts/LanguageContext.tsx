@@ -153,11 +153,32 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
 
   const setLanguage = (lang: string) => {
     if (SUPPORTED_LANGUAGES[lang as keyof typeof SUPPORTED_LANGUAGES]) {
+      // Get the current language from URL before changing
+      const pathSegments = location.pathname.split('/');
+      const currentLangFromUrl = pathSegments[1];
+      const currentLangValid = SUPPORTED_LANGUAGES[currentLangFromUrl as keyof typeof SUPPORTED_LANGUAGES];
+      const fromLanguage = currentLangValid ? currentLangFromUrl : currentLanguage;
+      
       setCurrentLanguage(lang);
       
       // Only update URL if current route should have language prefix
       if (shouldHaveLanguagePrefix(location.pathname)) {
-        const cleanCurrentPath = cleanPath(location.pathname);
+        // Step 1: Clean path (remove language prefix)
+        let cleanCurrentPath = cleanPath(location.pathname);
+        
+        // Step 2: Reverse-translate from current language to English
+        if (fromLanguage !== 'en' && cleanCurrentPath !== '/') {
+          const tFromLanguage = i18n.getFixedT(fromLanguage);
+          cleanCurrentPath = reverseTranslateUrlPath(cleanCurrentPath, fromLanguage, tFromLanguage);
+        }
+        
+        // Step 3: Translate from English to new language
+        if (lang !== 'en' && cleanCurrentPath !== '/') {
+          const tToLanguage = i18n.getFixedT(lang);
+          cleanCurrentPath = translateUrlPath(cleanCurrentPath, lang, tToLanguage);
+        }
+        
+        // Step 4: Build and navigate to new path
         const newPath = buildLanguagePath(lang, cleanCurrentPath);
         navigate(newPath);
       }
