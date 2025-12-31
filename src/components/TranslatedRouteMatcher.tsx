@@ -5,10 +5,11 @@
  */
 
 import React from 'react';
-import { useParams, useLocation, Navigate } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
+import NotFound from '../pages/NotFound';
 
 // Lazy load page components (code-splitting)
 const Services = lazy(() => import('../pages/Services'));
