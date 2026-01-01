@@ -299,8 +299,9 @@ const BlogEditor = () => {
 
       if (!token) throw new Error("User not authenticated");
 
-      // Process in batches of 3 languages to avoid Edge Function timeout (60 seconds)
-      const BATCH_SIZE = 3;
+      // Process in batches of 2 languages to avoid Edge Function timeout (60 seconds)
+      // Reduced from 3 to 2 due to increased article length (3000 words) requiring more processing time
+      const BATCH_SIZE = 2;
       const langCodes = languagesToCreate.map(l => l.code);
       const batches: string[][] = [];
       
