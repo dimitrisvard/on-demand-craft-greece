@@ -272,11 +272,11 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 You must insert 4 specific types of links naturally into the flow of the text:
 1.  **Silo Context Link:** Choose 1-2 relevant articles from this list:
 ${relatedArticles}
-    Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here">anchor text</a>
-2.  **Specific Service Page Link (ROTATION):** You MUST include ONE link to the ${selectedService.name} service page. Only include this link if it naturally fits the article content. If the article discusses ${selectedService.name.toLowerCase()} or related processes, insert a natural link: <a href="${selectedService.url}">${selectedService.anchor}</a>. If it doesn't fit naturally, skip this link.
-3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services">our manufacturing services</a>
+    Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here"> anchor text </a> (always include spaces before and after the link tag)
+2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link with proper spacing: <a href="${selectedService.url}"> ${selectedService.anchor} </a>. Always include spaces before and after the link tag to prevent text from sticking together.
+3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services"> our manufacturing services </a> (always include spaces before and after the link tag)
 4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
-    * Use this exact format: "For high-precision results, <a href="/en/quote">${selectedQuoteText}</a> from ${BRAND_NAME}."
+    * Use this exact format: "For high-precision results, <a href="/en/quote"> ${selectedQuoteText} </a> from ${BRAND_NAME}." (always include spaces before and after the link tag)
 
 ---
 ### CONTENT REQUIREMENTS
@@ -288,8 +288,8 @@ ${relatedArticles}
     * Add practical examples and real-world applications
     * Include nuanced comparisons and trade-offs
 3.  **Silo Category:** This article belongs to the "${siloCategory || 'General'}" content silo.
-3.  **Structure:**
-    * **H1:** The Title.
+4.  **Structure:**
+    * **DO NOT include an H1 title in the content** - the title is already provided and will be displayed separately. Start directly with the introduction paragraph or Executive Summary.
     * **Executive Summary:** A "Key Takeaways" bullet list (3-4 points) right after the intro using <ul><li> tags.
     * **Deep Dive (H2/H3):** Detailed process, tolerances, material selection, and cost drivers.
     * **Comparison Tables (MANDATORY):** 
@@ -368,10 +368,14 @@ ${relatedArticles}
     // ADD HTML CLEANUP: Clean HTML content to remove excessive newlines and fix formatting
     content = cleanHtmlContent(content);
     
-    // Remove any duplicate title if it appears at the start
-    // Check if content starts with an H1 that matches the title
-    const titleH1Pattern = new RegExp(`^<h1[^>]*>\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h1>\\s*`, 'i');
+    // Remove any H1 title tags from content (title is already stored separately)
+    // Remove H1 tags at the start, middle, or end of content
+    content = content.replace(/<h1[^>]*>.*?<\/h1>/gi, '');
+    // Also remove any H1 that might match the article title specifically
+    const titleH1Pattern = new RegExp(`<h1[^>]*>\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h1>\\s*`, 'gi');
     content = content.replace(titleH1Pattern, '');
+    // Clean up any double spaces or newlines left after H1 removal
+    content = content.replace(/\s{3,}/g, ' ').replace(/\n{3,}/g, '\n\n');
     
     // Clean excerpt and metaDescription: remove any JSON artifacts
     excerpt = excerpt.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -414,6 +418,11 @@ function cleanHtmlContent(html: string): string {
   // Normalize whitespace between HTML tags (but preserve intentional spacing)
   // Replace newlines between closing and opening tags with single newline
   html = html.replace(/>\s*\n\s*</g, '>\n<');
+  
+  // Ensure links have proper spacing - add space before opening <a> and after closing </a> if missing
+  // Pattern: text<a href=...>link</a>text should become text <a href=...>link</a> text
+  html = html.replace(/([^\s>])(<a\s+href)/g, '$1 $2'); // Space before <a>
+  html = html.replace(/(<\/a>)([^\s<])/g, '$1 $2'); // Space after </a>
   
   // Clean up table cells - remove excessive whitespace in table cells
   // Pattern: empty cells with just whitespace/newlines
@@ -485,19 +494,58 @@ serve(async (req) => {
     const todaysSilo = getTodaysSilo();
     console.log(`Today's scheduled silo: ${todaysSilo}`);
 
-    // 2. Fetch next unprocessed title from today's silo
+    // 2. Count articles created today to rotate through silos for manual creation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStart = today.toISOString();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const todayEnd = tomorrow.toISOString();
+    
+    const { count: articlesTodayCount } = await supabase
+      .from("articles")
+      .select("*", { count: "exact", head: true })
+      .eq("language", "en")
+      .gte("created_at", todayStart)
+      .lt("created_at", todayEnd);
+    
+    const articlesToday = articlesTodayCount || 0;
+    // Rotate through silos based on articles created today (for manual creation)
+    const rotationIndex = articlesToday % SILO_ROTATION.length;
+    const rotationSilo = SILO_ROTATION[rotationIndex];
+    console.log(`Articles created today: ${articlesToday}, rotation silo: ${rotationSilo}`);
+
+    // 3. Try to fetch from rotation silo first (for manual creation variety), then today's silo, then any
     let { data: titleRecord, error: titleError } = await supabase
       .from("article_titles")
       .select("*")
       .eq("processed", false)
-      .eq("silo_category", todaysSilo)
+      .eq("silo_category", rotationSilo)
       .order("created_at", { ascending: true })
       .limit(1)
       .single();
 
-    // 3. If no title found in today's silo, try any unprocessed title (fallback)
+    // 4. If no title found in rotation silo, try today's scheduled silo
     if (titleError || !titleRecord) {
-      console.log(`No unprocessed titles found in ${todaysSilo}, trying any silo...`);
+      console.log(`No unprocessed titles found in ${rotationSilo}, trying today's silo ${todaysSilo}...`);
+      const { data: todaysSiloTitle, error: todaysSiloError } = await supabase
+        .from("article_titles")
+        .select("*")
+        .eq("processed", false)
+        .eq("silo_category", todaysSilo)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .single();
+      
+      if (!todaysSiloError && todaysSiloTitle) {
+        titleRecord = todaysSiloTitle;
+        console.log(`Using title from today's scheduled silo: ${todaysSilo}`);
+      }
+    }
+
+    // 5. If still no title found, try any unprocessed title (fallback)
+    if (titleError || !titleRecord) {
+      console.log(`No unprocessed titles found in rotation or scheduled silos, trying any silo...`);
       const { data: fallbackTitle, error: fallbackError } = await supabase
         .from("article_titles")
         .select("*")
@@ -510,7 +558,8 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ 
             message: "No unprocessed titles found",
-            scheduled_silo: todaysSilo
+            scheduled_silo: todaysSilo,
+            rotation_silo: rotationSilo
           }),
           {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -526,18 +575,18 @@ serve(async (req) => {
     console.log(`Processing title: ${titleRecord.title}`);
     console.log(`Silo category: ${titleRecord.silo_category || 'None'}`);
 
-    // 4. Fetch silo neighbors for internal linking
+    // 6. Fetch silo neighbors for internal linking
     const siloNeighbors = await fetchSiloNeighbors(titleRecord.silo_category, titleRecord.id);
     const relatedArticlesForPrompt = formatSiloArticlesForPrompt(siloNeighbors);
     console.log(`Found ${siloNeighbors.length} silo neighbors for linking`);
 
-    // 5. Get rotation indices for service pages and quote text
+    // 7. Get rotation indices for service pages and quote text
     const { serviceIndex, quoteIndex } = await getRotationIndex();
     const serviceNames = ["CNC Machining", "Sheet Metal Fabrication", "Injection Molding"];
     console.log(`Service rotation: ${serviceNames[serviceIndex]} (index ${serviceIndex})`);
     console.log(`Quote text rotation: index ${quoteIndex}`);
 
-    // 6. Generate master article with high thinking
+    // 8. Generate master article with high thinking
     const masterArticle = await generateMasterArticle(
       titleRecord.title,
       titleRecord.silo_category,
@@ -548,7 +597,7 @@ serve(async (req) => {
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
-    // 7. Create master article in database - PUBLISHED MODE
+    // 9. Create master article in database - PUBLISHED MODE
     const { data: masterArticleRecord, error: masterError } = await supabase
       .from("articles")
       .insert([
@@ -573,7 +622,7 @@ serve(async (req) => {
 
     console.log(`Master article created in PUBLISHED mode: ${masterArticleRecord.id}`);
 
-    // 8. Create generation log
+    // 10. Create generation log
     const summaryData = {
       title: titleRecord.title,
       silo_category: titleRecord.silo_category,
@@ -591,7 +640,7 @@ serve(async (req) => {
       },
     ]);
 
-    // 9. Mark title as processed
+    // 11. Mark title as processed
     await supabase
       .from("article_titles")
       .update({
