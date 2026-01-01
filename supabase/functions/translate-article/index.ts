@@ -325,7 +325,8 @@ Rewrite all internal links to match the target language sub-folder structure:
   const response = await generateWithGemini(prompt, thoughtSignature);
   
   console.log(`Gemini response received for ${targetLanguage}, length: ${response.length}`);
-  console.log(`Response preview (first 1000 chars): ${response.substring(0, 1000)}`);
+  console.log(`Response preview (first 2000 chars): ${response.substring(0, 2000)}`);
+  console.log(`Response preview (last 1000 chars): ${response.substring(Math.max(0, response.length - 1000))}`);
 
   try {
     // Multiple strategies to extract JSON from response
@@ -339,22 +340,46 @@ Rewrite all internal links to match the target language sub-folder structure:
       .replace(/\s*```$/i, '')
       .replace(/^```json\n/gi, '')
       .replace(/\n```$/gi, '')
+      .replace(/^```json\r\n/gi, '')
+      .replace(/\r\n```$/gi, '')
       .trim();
     
-    // Strategy 2: Find JSON object boundaries (handle nested objects)
+    // Strategy 2: Find JSON object boundaries (handle nested objects) - improved brace counting
     let jsonStartIndex = jsonText.indexOf('{');
     let jsonEndIndex = -1;
     
     if (jsonStartIndex !== -1) {
-      // Find matching closing brace by counting braces
+      // Find matching closing brace by counting braces (handles nested objects and arrays)
       let braceCount = 0;
+      let inString = false;
+      let escapeNext = false;
+      
       for (let i = jsonStartIndex; i < jsonText.length; i++) {
-        if (jsonText[i] === '{') braceCount++;
-        if (jsonText[i] === '}') {
-          braceCount--;
-          if (braceCount === 0) {
-            jsonEndIndex = i;
-            break;
+        const char = jsonText[i];
+        
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+        
+        if (char === '\\') {
+          escapeNext = true;
+          continue;
+        }
+        
+        if (char === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+        }
+        
+        if (!inString) {
+          if (char === '{') braceCount++;
+          if (char === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              jsonEndIndex = i;
+              break;
+            }
           }
         }
       }
@@ -366,7 +391,7 @@ Rewrite all internal links to match the target language sub-folder structure:
       
       try {
         parsed = JSON.parse(jsonText);
-        console.log(`Successfully parsed JSON for ${targetLanguage} using boundary extraction`);
+        console.log(`✓ Successfully parsed JSON for ${targetLanguage} using boundary extraction`);
       } catch (parseError: any) {
         console.warn(`Boundary extraction parse failed: ${parseError.message}`);
         parsed = null;
@@ -376,29 +401,127 @@ Rewrite all internal links to match the target language sub-folder structure:
     // Strategy 4: If parsing failed, try to find JSON using regex (more aggressive)
     if (!parsed) {
       console.log(`Trying regex-based JSON extraction for ${targetLanguage}...`);
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsed = JSON.parse(jsonMatch[0]);
-          console.log(`Successfully parsed JSON for ${targetLanguage} using regex extraction`);
-        } catch (parseError: any) {
-          console.warn(`Regex extraction parse failed: ${parseError.message}`);
+      // Try to match the largest JSON object
+      const jsonMatches = response.match(/\{[\s\S]*\}/g);
+      if (jsonMatches && jsonMatches.length > 0) {
+        // Try the largest match first
+        const sortedMatches = jsonMatches.sort((a, b) => b.length - a.length);
+        for (const match of sortedMatches) {
+          try {
+            parsed = JSON.parse(match);
+            console.log(`✓ Successfully parsed JSON for ${targetLanguage} using regex extraction`);
+            break;
+          } catch (parseError: any) {
+            // Try next match
+          }
         }
       }
     }
     
-    // Strategy 5: Last resort - try parsing the entire cleaned response
+    // Strategy 5: Try to fix common JSON issues and parse
+    if (!parsed) {
+      console.log(`Trying to fix and parse JSON for ${targetLanguage}...`);
+      try {
+        // Remove trailing commas before closing braces/brackets
+        let fixedJson = jsonText.replace(/,(\s*[}\]])/g, '$1');
+        // Remove comments (though JSON shouldn't have them)
+        fixedJson = fixedJson.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+        parsed = JSON.parse(fixedJson);
+        console.log(`✓ Successfully parsed JSON for ${targetLanguage} after fixing`);
+      } catch (parseError: any) {
+        console.warn(`Fixed JSON parse failed: ${parseError.message}`);
+      }
+    }
+    
+    // Strategy 6: Last resort - try parsing the entire cleaned response
     if (!parsed) {
       console.log(`Trying direct parse of cleaned response for ${targetLanguage}...`);
       try {
         parsed = JSON.parse(jsonText);
-        console.log(`Successfully parsed JSON for ${targetLanguage} using direct parse`);
+        console.log(`✓ Successfully parsed JSON for ${targetLanguage} using direct parse`);
       } catch (parseError: any) {
-        console.error(`All JSON extraction strategies failed for ${targetLanguage}`);
+        console.error(`❌ All JSON extraction strategies failed for ${targetLanguage}`);
         console.error(`Response length: ${response.length}`);
-        console.error(`Response preview (first 2000 chars): ${response.substring(0, 2000)}`);
-        console.error(`Cleaned text preview (first 2000 chars): ${jsonText.substring(0, 2000)}`);
-        throw new Error(`Could not extract valid JSON from Gemini response. Response may contain markdown or extra text.`);
+        console.error(`Response first 3000 chars: ${response.substring(0, 3000)}`);
+        console.error(`Response last 3000 chars: ${response.substring(Math.max(0, response.length - 3000))}`);
+        console.error(`Cleaned text first 3000 chars: ${jsonText.substring(0, 3000)}`);
+        console.error(`Cleaned text last 3000 chars: ${jsonText.substring(Math.max(0, jsonText.length - 3000))}`);
+        
+        // Save raw response to help debug - try to extract partial data
+        const partialMatch = response.match(/"title"\s*:\s*"([^"]+)"/);
+        if (partialMatch) {
+          console.warn(`Found partial title in response: ${partialMatch[1]}`);
+        }
+        
+        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. This may indicate the response was truncated or contains invalid JSON.`);
+      }
+    }
+    
+    // Strategy 7: If still no luck, try to extract fields individually (handles truncated responses)
+    if (!parsed) {
+      console.log(`Trying individual field extraction for ${targetLanguage}...`);
+      try {
+        // Extract each field by finding the key and then the value
+        const extractField = (fieldName: string): string | null => {
+          const fieldIndex = response.indexOf(`"${fieldName}"`);
+          if (fieldIndex === -1) return null;
+          
+          const colonIndex = response.indexOf(':', fieldIndex);
+          if (colonIndex === -1) return null;
+          
+          // Skip whitespace after colon
+          let valueStart = colonIndex + 1;
+          while (valueStart < response.length && /\s/.test(response[valueStart])) {
+            valueStart++;
+          }
+          
+          // If value starts with quote, extract string value
+          if (response[valueStart] === '"') {
+            let valueEnd = valueStart + 1;
+            let escaped = false;
+            while (valueEnd < response.length) {
+              if (response[valueEnd] === '\\' && !escaped) {
+                escaped = true;
+                valueEnd++;
+                continue;
+              }
+              if (response[valueEnd] === '"' && !escaped) {
+                const rawValue = response.substring(valueStart + 1, valueEnd);
+                // Unescape common sequences
+                return rawValue
+                  .replace(/\\"/g, '"')
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\\\/g, '\\');
+              }
+              escaped = false;
+              valueEnd++;
+            }
+          }
+          return null;
+        };
+        
+        const extractedTitle = extractField('title');
+        const extractedSlug = extractField('slug');
+        const extractedContent = extractField('content');
+        const extractedExcerpt = extractField('excerpt');
+        const extractedMetaTitle = extractField('metaTitle');
+        const extractedMetaDesc = extractField('metaDescription');
+        
+        if (extractedTitle || extractedContent) {
+          parsed = {
+            title: extractedTitle || originalJsonData.title,
+            slug: extractedSlug || (extractedTitle ? generateSlug(extractedTitle) : articleSlug),
+            content: extractedContent || originalJsonData.content,
+            excerpt: extractedExcerpt || originalJsonData.excerpt,
+            metaTitle: extractedMetaTitle || originalJsonData.metaTitle,
+            metaDescription: extractedMetaDesc || originalJsonData.metaDescription,
+          };
+          console.log(`✓ Successfully extracted fields individually for ${targetLanguage}`);
+        }
+      } catch (extractError: any) {
+        console.warn(`Individual field extraction failed: ${extractError.message}`);
       }
     }
     
