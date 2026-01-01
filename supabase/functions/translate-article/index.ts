@@ -312,7 +312,14 @@ Rewrite all internal links to match the target language sub-folder structure:
 * IMPORTANT: Service page links must use the correct translated slugs for the target language
 
 ---
-### OUTPUT FORMAT (JSON - No markdown fencing!)
+### OUTPUT FORMAT (CRITICAL - READ CAREFULLY)
+You MUST return ONLY valid JSON. Do NOT include:
+- Markdown code fences (```json or ```)
+- Explanatory text before or after the JSON
+- Comments or notes
+- Any text outside the JSON object
+
+Return ONLY this JSON structure, nothing else:
 {
   "title": "<translated article title>",
   "slug": "<translated-url-friendly-slug-based-on-title>",
@@ -320,7 +327,9 @@ Rewrite all internal links to match the target language sub-folder structure:
   "excerpt": "<translated excerpt - max 160 chars>",
   "metaTitle": "<translated meta title - max 60 chars> | ${BRAND_NAME}",
   "metaDescription": "<translated meta description - max 160 chars>"
-}`;
+}
+
+IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
   const response = await generateWithGemini(prompt, thoughtSignature);
   
