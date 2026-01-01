@@ -475,13 +475,24 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       }
     }
     
-    // Strategy 6: Handle truncated JSON responses (missing closing brace) - CHECK THIS BEFORE FINAL ERROR
+    // Strategy 6: Handle truncated JSON responses (missing closing brace OR truncated field values)
     const hasOpeningBrace = response.includes('{');
     const hasClosingBrace = response.includes('}');
     const openingBraceCount = (response.match(/\{/g) || []).length;
     const closingBraceCount = (response.match(/\}/g) || []).length;
     
-    if (!parsed && hasOpeningBrace && !hasClosingBrace && openingBraceCount > closingBraceCount) {
+    // Check if JSON parsing failed even though braces match (indicates truncated field value)
+    let jsonParseFailed = false;
+    if (hasOpeningBrace && hasClosingBrace && openingBraceCount === closingBraceCount && !parsed) {
+      try {
+        JSON.parse(jsonText);
+      } catch (e) {
+        jsonParseFailed = true; // Braces match but JSON is invalid - likely truncated field
+      }
+    }
+    
+    // Run extraction if: missing closing brace OR braces match but JSON is invalid
+    if (!parsed && ((hasOpeningBrace && !hasClosingBrace && openingBraceCount > closingBraceCount) || jsonParseFailed)) {
       console.warn(`⚠️ Response appears truncated for ${targetLanguage} (${openingBraceCount} opening braces, ${closingBraceCount} closing braces)`);
       console.warn(`Attempting to extract partial data and complete JSON structure...`);
       
@@ -513,18 +524,43 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
                 while (quoteStart < response.length && /\s/.test(response[quoteStart])) {
                   quoteStart++;
                 }
-                // If we found an opening quote, extract everything from there to the end
+                // If we found an opening quote, extract the content
                 if (response[quoteStart] === '"') {
-                  // Extract everything from first quote to end (it's truncated, so no closing quote)
-                  // But we need to handle escaped quotes properly
-                  let content = response.substring(quoteStart + 1);
-                  // Unescape the content
-                  content = content
+                  // Try to find the closing quote, handling escaped quotes
+                  let quoteEnd = quoteStart + 1;
+                  let escaped = false;
+                  let foundClosingQuote = false;
+                  
+                  while (quoteEnd < response.length) {
+                    if (response[quoteEnd] === '\\' && !escaped) {
+                      escaped = true;
+                      quoteEnd++;
+                      continue;
+                    }
+                    if (response[quoteEnd] === '"' && !escaped) {
+                      foundClosingQuote = true;
+                      break;
+                    }
+                    escaped = false;
+                    quoteEnd++;
+                  }
+                  
+                  // Extract content (either complete or truncated)
+                  const contentValue = response.substring(quoteStart + 1, foundClosingQuote ? quoteEnd : response.length);
+                  
+                  // Unescape the content (handles Polish characters and special chars)
+                  let content = contentValue
                     .replace(/\\"/g, '"')
                     .replace(/\\n/g, '\n')
                     .replace(/\\r/g, '\r')
                     .replace(/\\t/g, '\t')
-                    .replace(/\\\\/g, '\\');
+                    .replace(/\\\\/g, '\\')
+                    .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16))); // Handle Unicode escapes
+                  
+                  if (!foundClosingQuote) {
+                    console.warn(`⚠️ Content field appears truncated (no closing quote found)`);
+                  }
+                  
                   return content;
                 }
               }
@@ -637,19 +673,20 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
               }
               if (response[valueEnd] === '"' && !escaped) {
                 const rawValue = response.substring(valueStart + 1, valueEnd);
-                // Unescape common sequences
+                // Unescape common sequences and Unicode (for Polish characters)
                 return rawValue
                   .replace(/\\"/g, '"')
                   .replace(/\\n/g, '\n')
                   .replace(/\\r/g, '\r')
                   .replace(/\\t/g, '\t')
-                  .replace(/\\\\/g, '\\');
+                  .replace(/\\\\/g, '\\')
+                  .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
               }
               escaped = false;
               valueEnd++;
             }
             // If we reached the end without finding closing quote, the response is truncated
-            // Return what we have
+            // Return what we have (especially important for long content fields)
             if (valueEnd >= response.length) {
               const rawValue = response.substring(valueStart + 1);
               return rawValue
@@ -657,7 +694,8 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
                 .replace(/\\n/g, '\n')
                 .replace(/\\r/g, '\r')
                 .replace(/\\t/g, '\t')
-                .replace(/\\\\/g, '\\');
+                .replace(/\\\\/g, '\\')
+                .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => String.fromCharCode(parseInt(hex, 16))); // Handle Unicode escapes (Polish chars)
             }
           }
           return null;
