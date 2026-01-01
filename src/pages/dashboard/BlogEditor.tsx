@@ -299,9 +299,9 @@ const BlogEditor = () => {
 
       if (!token) throw new Error("User not authenticated");
 
-      // Process in batches of 2 languages to avoid Edge Function timeout (60 seconds)
-      // Reduced from 3 to 2 due to increased article length (3000 words) requiring more processing time
-      const BATCH_SIZE = 2;
+      // Process in batches of 1 language to avoid rate limiting with 3000-word articles
+      // With retry logic and longer articles, batches of 2+ can trigger Gemini API rate limits
+      const BATCH_SIZE = 1;
       const langCodes = languagesToCreate.map(l => l.code);
       const batches: string[][] = [];
       
@@ -371,9 +371,10 @@ const BlogEditor = () => {
           totalFailed += batch.length;
         }
 
-        // Wait 3 seconds between batches to be safe with rate limits
+        // Wait 10 seconds between batches to be safe with Gemini API rate limits
+        // The free tier has strict RPM limits, especially with large articles
         if (batchIndex < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          await new Promise(resolve => setTimeout(resolve, 10000));
         }
       }
 

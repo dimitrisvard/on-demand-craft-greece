@@ -570,9 +570,9 @@ serve(async (req) => {
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
     // Delay between translations to avoid rate limiting
-    // Free tier limit: ~15 RPM, so 5 seconds = ~12 RPM (safe margin)
-    // Batches of 3 languages keep total time under 60s Edge Function timeout
-    const DELAY_BETWEEN_TRANSLATIONS = 5000;
+    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (safe margin for 3000-word articles)
+    // With batch size of 1 from frontend, each call processes 1 language
+    const DELAY_BETWEEN_TRANSLATIONS = 8000;
 
     // Filter languages if target_languages is specified
     const languagesToTranslate = target_languages && target_languages.length > 0
@@ -610,6 +610,7 @@ serve(async (req) => {
         }
         
         // Use retry wrapper to handle rate limits with exponential backoff
+        // Increased delays due to Gemini free tier rate limiting with 3000-word articles
         const translation = await withRetry(
           () => generateTranslation(
             originalJsonData,
@@ -618,8 +619,8 @@ serve(async (req) => {
             masterArticle.slug, // Pass original slug for reference (will be translated)
             thoughtSignature
           ),
-          3, // Max 3 retries
-          5000 // Base delay of 5 seconds for retries (free tier safe)
+          4, // Max 4 retries for better rate limit handling
+          8000 // Base delay of 8 seconds for retries (free tier safe)
         );
 
         // Validate translation result
@@ -788,19 +789,30 @@ serve(async (req) => {
       );
     }
 
+    // Build response with error details if any translations failed
+    const responseBody: any = {
+      success: successfulTranslations > 0,
+      message: successfulTranslations > 0 
+        ? `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`
+        : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Gemini API rate limiting.`,
+      master_article_id: article_id,
+      slug: masterArticle.slug, // Original English slug
+      translations: successfulTranslations,
+      total_languages: languagesToTranslate.length,
+      failed_count: failedTranslations.length,
+      indexing: { indexnow: indexNowResult },
+      article_urls: articleUrls,
+      details: translations,
+    };
+
+    // Add error field for failed responses
+    if (successfulTranslations === 0) {
+      const firstFailure = failedTranslations[0] as any;
+      responseBody.error = firstFailure?.error || 'Translation failed. Please wait a few minutes and try again.';
+    }
+
     return new Response(
-      JSON.stringify({
-        success: successfulTranslations > 0,
-        message: `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`,
-        master_article_id: article_id,
-        slug: masterArticle.slug, // Original English slug
-        translations: successfulTranslations,
-        total_languages: languagesToTranslate.length,
-        failed_count: failedTranslations.length,
-        indexing: { indexnow: indexNowResult },
-        article_urls: articleUrls,
-        details: translations,
-      }),
+      JSON.stringify(responseBody),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: successfulTranslations > 0 ? 200 : 500,
