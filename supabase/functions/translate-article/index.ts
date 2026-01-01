@@ -165,6 +165,7 @@ async function generateWithGemini(
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 65536, // Increased for 3000-word articles (gemini-2.0-flash-exp supports up to 65536)
+      responseMimeType: "application/json", // Force JSON output format
     },
   };
 
@@ -491,11 +492,23 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
         // Log detailed response for manual inspection (truncated to avoid log limits)
         console.error(`=== RESPONSE ANALYSIS FOR ${targetLanguage} ===`);
         console.error(`Response length: ${response.length}`);
-        console.error(`First 100 chars: ${response.substring(0, 100)}`);
-        console.error(`Last 100 chars: ${response.substring(Math.max(0, response.length - 100))}`);
+        console.error(`First 500 chars: ${response.substring(0, 500)}`);
+        console.error(`Last 500 chars: ${response.substring(Math.max(0, response.length - 500))}`);
         console.error(`Has opening brace: ${response.includes('{')}`);
         console.error(`Has closing brace: ${response.includes('}')}`);
-        console.error(`Brace count: ${(response.match(/\{/g) || []).length} opening, ${(response.match(/\}/g) || []).length} closing`);
+        const openingBraces = (response.match(/\{/g) || []).length;
+        const closingBraces = (response.match(/\}/g) || []).length;
+        console.error(`Brace count: ${openingBraces} opening, ${closingBraces} closing`);
+        
+        // Try to find where the JSON might be
+        const firstBrace = response.indexOf('{');
+        const lastBrace = response.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          console.error(`First brace at position: ${firstBrace}`);
+          console.error(`Last brace at position: ${lastBrace}`);
+          console.error(`Text before first brace: ${response.substring(0, Math.min(200, firstBrace))}`);
+          console.error(`Text after last brace: ${response.substring(lastBrace + 1, Math.min(lastBrace + 201, response.length))}`);
+        }
         console.error(`=== END RESPONSE ANALYSIS ===`);
         
         // Save raw response to help debug - try to extract partial data
@@ -504,7 +517,12 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
           console.warn(`Found partial title in response: ${partialMatch[1]}`);
         }
         
-        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. This may indicate the response was truncated or contains invalid JSON.`);
+        // Include response snippet in error for debugging
+        const responseSnippet = response.length > 1000 
+          ? `${response.substring(0, 500)}... [${response.length - 1000} chars omitted] ...${response.substring(response.length - 500)}`
+          : response;
+        
+        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. Opening braces: ${openingBraces}, Closing braces: ${closingBraces}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
       }
     }
     
