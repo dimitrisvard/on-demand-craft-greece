@@ -397,8 +397,8 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // Strategy 3: If we found valid boundaries, extract JSON
     if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
-      jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
-      
+    jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    
       try {
         parsed = JSON.parse(jsonText);
         console.log(`✓ Successfully parsed JSON for ${targetLanguage} using boundary extraction`);
@@ -475,73 +475,22 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       }
     }
     
-    // Strategy 6: Last resort - try parsing the entire cleaned response
-    if (!parsed) {
-      console.log(`Trying direct parse of cleaned response for ${targetLanguage}...`);
-      try {
-        parsed = JSON.parse(jsonText);
-        console.log(`✓ Successfully parsed JSON for ${targetLanguage} using direct parse`);
-      } catch (parseError: any) {
-        console.error(`❌ All JSON extraction strategies failed for ${targetLanguage}`);
-        console.error(`Response length: ${response.length}`);
-        console.error(`Response first 5000 chars: ${response.substring(0, 5000)}`);
-        console.error(`Response last 5000 chars: ${response.substring(Math.max(0, response.length - 5000))}`);
-        console.error(`Cleaned text first 5000 chars: ${jsonText.substring(0, 5000)}`);
-        console.error(`Cleaned text last 5000 chars: ${jsonText.substring(Math.max(0, jsonText.length - 5000))}`);
-        
-        // Log detailed response for manual inspection (truncated to avoid log limits)
-        console.error(`=== RESPONSE ANALYSIS FOR ${targetLanguage} ===`);
-        console.error(`Response length: ${response.length}`);
-        console.error(`First 500 chars: ${response.substring(0, 500)}`);
-        console.error(`Last 500 chars: ${response.substring(Math.max(0, response.length - 500))}`);
-        console.error(`Has opening brace: ${response.includes('{')}`);
-        console.error(`Has closing brace: ${response.includes('}')}`);
-        const openingBraces = (response.match(/\{/g) || []).length;
-        const closingBraces = (response.match(/\}/g) || []).length;
-        console.error(`Brace count: ${openingBraces} opening, ${closingBraces} closing`);
-        
-        // Try to find where the JSON might be
-        const firstBrace = response.indexOf('{');
-        const lastBrace = response.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1) {
-          console.error(`First brace at position: ${firstBrace}`);
-          console.error(`Last brace at position: ${lastBrace}`);
-          console.error(`Text before first brace: ${response.substring(0, Math.min(200, firstBrace))}`);
-          console.error(`Text after last brace: ${response.substring(lastBrace + 1, Math.min(lastBrace + 201, response.length))}`);
-        }
-        console.error(`=== END RESPONSE ANALYSIS ===`);
-        
-        // Save raw response to help debug - try to extract partial data
-        const partialMatch = response.match(/"title"\s*:\s*"([^"]+)"/);
-        if (partialMatch) {
-          console.warn(`Found partial title in response: ${partialMatch[1]}`);
-        }
-        
-        // Include response snippet in error for debugging
-        const responseSnippet = response.length > 1000 
-          ? `${response.substring(0, 500)}... [${response.length - 1000} chars omitted] ...${response.substring(response.length - 500)}`
-          : response;
-        
-        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. Opening braces: ${openingBraces}, Closing braces: ${closingBraces}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
-      }
-    }
-    
-    // Strategy 7: Handle truncated JSON responses (missing closing brace)
-    // If we have opening brace but no closing brace, the response was truncated
+    // Strategy 6: Handle truncated JSON responses (missing closing brace) - CHECK THIS BEFORE FINAL ERROR
     const hasOpeningBrace = response.includes('{');
     const hasClosingBrace = response.includes('}');
     const openingBraceCount = (response.match(/\{/g) || []).length;
     const closingBraceCount = (response.match(/\}/g) || []).length;
     
-    if (hasOpeningBrace && !hasClosingBrace && openingBraceCount > closingBraceCount) {
+    if (!parsed && hasOpeningBrace && !hasClosingBrace && openingBraceCount > closingBraceCount) {
       console.warn(`⚠️ Response appears truncated for ${targetLanguage} (${openingBraceCount} opening braces, ${closingBraceCount} closing braces)`);
       console.warn(`Attempting to extract partial data and complete JSON structure...`);
       
       try {
-        // Try to extract fields from truncated JSON
+        // Try to extract fields from truncated JSON using regex
         const extractFieldFromTruncated = (fieldName: string): string | null => {
-          const fieldPattern = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*(?:\\\\.[^"]*)*)"`, 'g');
-          const match = fieldPattern.exec(response);
+          // Try to find the field value, handling escaped quotes
+          const fieldPattern = new RegExp(`"${fieldName}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, 'g');
+          let match = fieldPattern.exec(response);
           if (match && match[1]) {
             return match[1]
               .replace(/\\"/g, '"')
@@ -551,22 +500,33 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
               .replace(/\\\\/g, '\\');
           }
           
-          // Try a more lenient approach for content field (might be very long)
+          // For content field, try a more lenient approach (might be very long and truncated)
           if (fieldName === 'content') {
-            const contentStart = response.indexOf('"content"');
+            const contentKey = '"content"';
+            const contentStart = response.indexOf(contentKey);
             if (contentStart !== -1) {
-              const valueStart = response.indexOf(':', contentStart) + 1;
-              const firstQuote = response.indexOf('"', valueStart);
-              if (firstQuote !== -1) {
-                // Extract everything from first quote to end (it's truncated, so no closing quote)
-                const content = response.substring(firstQuote + 1);
-                // Remove any trailing incomplete content
-                return content
-                  .replace(/\\"/g, '"')
-                  .replace(/\\n/g, '\n')
-                  .replace(/\\r/g, '\r')
-                  .replace(/\\t/g, '\t')
-                  .replace(/\\\\/g, '\\');
+              // Find the colon after "content"
+              const colonIndex = response.indexOf(':', contentStart + contentKey.length);
+              if (colonIndex !== -1) {
+                // Skip whitespace after colon
+                let quoteStart = colonIndex + 1;
+                while (quoteStart < response.length && /\s/.test(response[quoteStart])) {
+                  quoteStart++;
+                }
+                // If we found an opening quote, extract everything from there to the end
+                if (response[quoteStart] === '"') {
+                  // Extract everything from first quote to end (it's truncated, so no closing quote)
+                  // But we need to handle escaped quotes properly
+                  let content = response.substring(quoteStart + 1);
+                  // Unescape the content
+                  content = content
+                    .replace(/\\"/g, '"')
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\r/g, '\r')
+                    .replace(/\\t/g, '\t')
+                    .replace(/\\\\/g, '\\');
+                  return content;
+                }
               }
             }
           }
@@ -591,10 +551,59 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
             metaDescription: extractedMetaDesc || originalJsonData.metaDescription,
           };
           console.log(`✓ Successfully extracted partial data from truncated response for ${targetLanguage}`);
-          console.warn(`⚠️ Content may be incomplete (response was truncated)`);
+          console.warn(`⚠️ Content may be incomplete (response was truncated at ${response.length} chars)`);
         }
       } catch (truncatedError: any) {
         console.warn(`Truncated response extraction failed: ${truncatedError.message}`);
+      }
+    }
+    
+    // Strategy 7: Last resort - try parsing the entire cleaned response
+    if (!parsed) {
+      console.log(`Trying direct parse of cleaned response for ${targetLanguage}...`);
+      try {
+        parsed = JSON.parse(jsonText);
+        console.log(`✓ Successfully parsed JSON for ${targetLanguage} using direct parse`);
+      } catch (parseError: any) {
+        console.error(`❌ All JSON extraction strategies failed for ${targetLanguage}`);
+        console.error(`Response length: ${response.length}`);
+        console.error(`Response first 5000 chars: ${response.substring(0, 5000)}`);
+        console.error(`Response last 5000 chars: ${response.substring(Math.max(0, response.length - 5000))}`);
+        console.error(`Cleaned text first 5000 chars: ${jsonText.substring(0, 5000)}`);
+        console.error(`Cleaned text last 5000 chars: ${jsonText.substring(Math.max(0, jsonText.length - 5000))}`);
+        
+        // Log detailed response for manual inspection (truncated to avoid log limits)
+        console.error(`=== RESPONSE ANALYSIS FOR ${targetLanguage} ===`);
+        console.error(`Response length: ${response.length}`);
+        console.error(`First 500 chars: ${response.substring(0, 500)}`);
+        console.error(`Last 500 chars: ${response.substring(Math.max(0, response.length - 500))}`);
+        console.error(`Has opening brace: ${response.includes('{')}`);
+        console.error(`Has closing brace: ${response.includes('}')}`);
+        console.error(`Brace count: ${openingBraceCount} opening, ${closingBraceCount} closing`);
+        
+        // Try to find where the JSON might be
+        const firstBrace = response.indexOf('{');
+        const lastBrace = response.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          console.error(`First brace at position: ${firstBrace}`);
+          console.error(`Last brace at position: ${lastBrace}`);
+          console.error(`Text before first brace: ${response.substring(0, Math.min(200, firstBrace))}`);
+          console.error(`Text after last brace: ${response.substring(lastBrace + 1, Math.min(lastBrace + 201, response.length))}`);
+        }
+        console.error(`=== END RESPONSE ANALYSIS ===`);
+        
+        // Save raw response to help debug - try to extract partial data
+        const partialMatch = response.match(/"title"\s*:\s*"([^"]+)"/);
+        if (partialMatch) {
+          console.warn(`Found partial title in response: ${partialMatch[1]}`);
+        }
+        
+        // Include response snippet in error for debugging
+        const responseSnippet = response.length > 1000 
+          ? `${response.substring(0, 500)}... [${response.length - 1000} chars omitted] ...${response.substring(response.length - 500)}`
+          : response;
+        
+        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. Opening braces: ${openingBraceCount}, Closing braces: ${closingBraceCount}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
       }
     }
     
@@ -1106,8 +1115,8 @@ serve(async (req) => {
     // If single language translation and it failed, return error status
     if (target_languages && target_languages.length === 1 && failedTranslations.length > 0) {
       const failedLang = failedTranslations[0] as any;
-      return new Response(
-        JSON.stringify({
+    return new Response(
+      JSON.stringify({
           success: false,
           error: failedLang.error || 'Translation failed',
           errorType: failedLang.errorType,
@@ -1129,14 +1138,14 @@ serve(async (req) => {
       message: successfulTranslations > 0 
         ? `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`
         : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Gemini API rate limiting.`,
-      master_article_id: article_id,
-      slug: masterArticle.slug, // Original English slug
-      translations: successfulTranslations,
-      total_languages: languagesToTranslate.length,
+        master_article_id: article_id,
+        slug: masterArticle.slug, // Original English slug
+        translations: successfulTranslations,
+        total_languages: languagesToTranslate.length,
       failed_count: failedTranslations.length,
-      indexing: { indexnow: indexNowResult },
-      article_urls: articleUrls,
-      details: translations,
+        indexing: { indexnow: indexNowResult },
+        article_urls: articleUrls,
+        details: translations,
     };
 
     // Add error field for failed responses
