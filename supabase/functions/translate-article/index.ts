@@ -35,6 +35,95 @@ const LANGUAGES = [
   { code: "nb", name: "Norwegian" }
 ];
 
+// Service page slug translations for all languages
+// Maps: language -> English slug -> translated slug
+const SERVICE_SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
+  en: {
+    "services": "services",
+    "cnc-machining": "cnc-machining",
+    "sheet-metal": "sheet-metal",
+    "injection-molding": "injection-molding",
+  },
+  de: {
+    "services": "dienstleistungen",
+    "cnc-machining": "cnc-bearbeitung",
+    "sheet-metal": "blechbearbeitung",
+    "injection-molding": "spritzguss",
+  },
+  fr: {
+    "services": "services",
+    "cnc-machining": "usinage-cnc",
+    "sheet-metal": "tolerie",
+    "injection-molding": "moulage-par-injection",
+  },
+  es: {
+    "services": "servicios",
+    "cnc-machining": "mecanizado-cnc",
+    "sheet-metal": "chapa-metalica",
+    "injection-molding": "moldeo-por-inyeccion",
+  },
+  it: {
+    "services": "servizi",
+    "cnc-machining": "lavorazione-cnc",
+    "sheet-metal": "lavorazione-lamiera",
+    "injection-molding": "stampaggio-ad-iniezione",
+  },
+  nl: {
+    "services": "diensten",
+    "cnc-machining": "cnc-bewerking",
+    "sheet-metal": "plaatbewerking",
+    "injection-molding": "spuitgieten",
+  },
+  pl: {
+    "services": "uslugi",
+    "cnc-machining": "obrobka-cnc",
+    "sheet-metal": "obrobka-blaszek",
+    "injection-molding": "formowanie-wtryskowe",
+  },
+  sv: {
+    "services": "tjanster",
+    "cnc-machining": "cnc-bearbetning",
+    "sheet-metal": "platarbe",
+    "injection-molding": "spjutsgjutning",
+  },
+  da: {
+    "services": "tjenester",
+    "cnc-machining": "cnc-bearbejdning",
+    "sheet-metal": "pladearbejde",
+    "injection-molding": "spjutsgodsning",
+  },
+  fi: {
+    "services": "palvelut",
+    "cnc-machining": "cnc-koneistus",
+    "sheet-metal": "levytyo",
+    "injection-molding": "ruiskumuovaus",
+  },
+  cs: {
+    "services": "sluzby",
+    "cnc-machining": "cnc-obrabeni",
+    "sheet-metal": "obrabeni-plechu",
+    "injection-molding": "vstrikovani",
+  },
+  hu: {
+    "services": "szolgaltatasok",
+    "cnc-machining": "cnc-megmunkalas",
+    "sheet-metal": "lemezfeldolgozas",
+    "injection-molding": "frccsnyomas",
+  },
+  pt: {
+    "services": "servicos",
+    "cnc-machining": "usinagem-cnc",
+    "sheet-metal": "chapa-metalica",
+    "injection-molding": "moldagem-por-injecao",
+  },
+  nb: {
+    "services": "tjenester",
+    "cnc-machining": "cnc-bearbeiding",
+    "sheet-metal": "platarbeid",
+    "injection-molding": "sproyetestoping",
+  },
+};
+
 interface GeminiResponse {
   candidates?: Array<{
     content: {
@@ -201,12 +290,16 @@ Translate the metaDescription to ${targetLanguage} but:
 #### 6. SMART LINK LOCALIZATION (Crucial)
 Rewrite all internal links to match the target language sub-folder structure:
 * href="/en/quote" → href="/${langCode}/quote"
-* href="/en/services" → href="/${langCode}/services"  
+* href="/en/services" → href="/${langCode}/[translated-services-slug]"  
+* href="/en/services/cnc-machining" → href="/${langCode}/[translated-services-slug]/[translated-cnc-slug]"
+* href="/en/services/sheet-metal" → href="/${langCode}/[translated-services-slug]/[translated-sheet-metal-slug]"
+* href="/en/services/injection-molding" → href="/${langCode}/[translated-services-slug]/[translated-injection-molding-slug]"
 * href="/en/blog/any-slug" → href="/${langCode}/blog/translated-slug" (use translated slugs in links)
 * Translate the visible anchor text naturally
 * CRITICAL: Links must use proper HTML format: <a href="/${langCode}/path">text</a>
 * NEVER include quotes inside the href attribute value - use: href="/path" NOT href=""path""
 * Ensure all href values start with "/" and contain no spaces or extra quotes
+* IMPORTANT: Service page links must use the correct translated slugs for the target language
 
 ---
 ### OUTPUT FORMAT (JSON - No markdown fencing!)
@@ -278,10 +371,19 @@ Rewrite all internal links to match the target language sub-folder structure:
     content = content.replace(/href="+([^"]+)"+/g, 'href="$1"'); // Remove duplicate quotes
     content = content.replace(/href="([^"]*)"([^"]*)"([^"]*)"/g, 'href="$1$2$3"'); // Fix nested quotes
     
-    // Ensure all internal links use the correct language code
+    // Get translated service slugs for the target language
+    const servicesSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.services || "services";
+    const cncSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["cnc-machining"] || "cnc-machining";
+    const sheetMetalSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["sheet-metal"] || "sheet-metal";
+    const injectionMoldingSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["injection-molding"] || "injection-molding";
+    
+    // Ensure all internal links use the correct language code and translated slugs
     content = content
       .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
-      .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
+      .replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`)
+      .replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`)
+      .replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`)
+      .replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`)
       .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
     
     // Clean up any remaining malformed links (href with quotes in the middle)
@@ -316,9 +418,19 @@ Rewrite all internal links to match the target language sub-folder structure:
     
     // Fix malformed links
     fallbackContent = fallbackContent.replace(/href="+([^"]+)"+/g, 'href="$1"');
+    
+    // Get translated service slugs for the target language
+    const servicesSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.services || "services";
+    const cncSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["cnc-machining"] || "cnc-machining";
+    const sheetMetalSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["sheet-metal"] || "sheet-metal";
+    const injectionMoldingSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["injection-molding"] || "injection-molding";
+    
     fallbackContent = fallbackContent
       .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
-      .replace(/href="\/en\/services"/g, `href="/${langCode}/services"`)
+      .replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`)
+      .replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`)
+      .replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`)
+      .replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`)
       .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
     
     return {
