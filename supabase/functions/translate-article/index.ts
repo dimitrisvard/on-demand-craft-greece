@@ -526,7 +526,79 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       }
     }
     
-    // Strategy 7: If still no luck, try to extract fields individually (handles truncated responses)
+    // Strategy 7: Handle truncated JSON responses (missing closing brace)
+    // If we have opening brace but no closing brace, the response was truncated
+    const hasOpeningBrace = response.includes('{');
+    const hasClosingBrace = response.includes('}');
+    const openingBraceCount = (response.match(/\{/g) || []).length;
+    const closingBraceCount = (response.match(/\}/g) || []).length;
+    
+    if (hasOpeningBrace && !hasClosingBrace && openingBraceCount > closingBraceCount) {
+      console.warn(`⚠️ Response appears truncated for ${targetLanguage} (${openingBraceCount} opening braces, ${closingBraceCount} closing braces)`);
+      console.warn(`Attempting to extract partial data and complete JSON structure...`);
+      
+      try {
+        // Try to extract fields from truncated JSON
+        const extractFieldFromTruncated = (fieldName: string): string | null => {
+          const fieldPattern = new RegExp(`"${fieldName}"\\s*:\\s*"([^"]*(?:\\\\.[^"]*)*)"`, 'g');
+          const match = fieldPattern.exec(response);
+          if (match && match[1]) {
+            return match[1]
+              .replace(/\\"/g, '"')
+              .replace(/\\n/g, '\n')
+              .replace(/\\r/g, '\r')
+              .replace(/\\t/g, '\t')
+              .replace(/\\\\/g, '\\');
+          }
+          
+          // Try a more lenient approach for content field (might be very long)
+          if (fieldName === 'content') {
+            const contentStart = response.indexOf('"content"');
+            if (contentStart !== -1) {
+              const valueStart = response.indexOf(':', contentStart) + 1;
+              const firstQuote = response.indexOf('"', valueStart);
+              if (firstQuote !== -1) {
+                // Extract everything from first quote to end (it's truncated, so no closing quote)
+                const content = response.substring(firstQuote + 1);
+                // Remove any trailing incomplete content
+                return content
+                  .replace(/\\"/g, '"')
+                  .replace(/\\n/g, '\n')
+                  .replace(/\\r/g, '\r')
+                  .replace(/\\t/g, '\t')
+                  .replace(/\\\\/g, '\\');
+              }
+            }
+          }
+          return null;
+        };
+        
+        const extractedTitle = extractFieldFromTruncated('title');
+        const extractedSlug = extractFieldFromTruncated('slug');
+        const extractedContent = extractFieldFromTruncated('content');
+        const extractedExcerpt = extractFieldFromTruncated('excerpt');
+        const extractedMetaTitle = extractFieldFromTruncated('metaTitle');
+        const extractedMetaDesc = extractFieldFromTruncated('metaDescription');
+        
+        // If we got at least title and some content, use it (even if truncated)
+        if (extractedTitle && extractedContent) {
+          parsed = {
+            title: extractedTitle,
+            slug: extractedSlug || generateSlug(extractedTitle),
+            content: extractedContent, // Use truncated content - better than nothing
+            excerpt: extractedExcerpt || originalJsonData.excerpt,
+            metaTitle: extractedMetaTitle || `${extractedTitle} | ${BRAND_NAME}`,
+            metaDescription: extractedMetaDesc || originalJsonData.metaDescription,
+          };
+          console.log(`✓ Successfully extracted partial data from truncated response for ${targetLanguage}`);
+          console.warn(`⚠️ Content may be incomplete (response was truncated)`);
+        }
+      } catch (truncatedError: any) {
+        console.warn(`Truncated response extraction failed: ${truncatedError.message}`);
+      }
+    }
+    
+    // Strategy 8: If still no luck, try to extract fields individually (handles other edge cases)
     if (!parsed) {
       console.log(`Trying individual field extraction for ${targetLanguage}...`);
       try {
@@ -566,6 +638,17 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
               }
               escaped = false;
               valueEnd++;
+            }
+            // If we reached the end without finding closing quote, the response is truncated
+            // Return what we have
+            if (valueEnd >= response.length) {
+              const rawValue = response.substring(valueStart + 1);
+              return rawValue
+                .replace(/\\"/g, '"')
+                .replace(/\\n/g, '\n')
+                .replace(/\\r/g, '\r')
+                .replace(/\\t/g, '\t')
+                .replace(/\\\\/g, '\\');
             }
           }
           return null;
