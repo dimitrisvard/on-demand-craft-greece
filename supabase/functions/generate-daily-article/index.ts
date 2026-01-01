@@ -133,8 +133,8 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
 }
 
 /**
- * Generate article using Claude Opus 4
- * Claude Opus 4 provides superior reasoning and writing quality for technical content
+ * Generate article using Claude Sonnet 4
+ * Claude Sonnet 4 provides excellent writing quality with fast response times
  */
 async function generateWithClaude(
   prompt: string,
@@ -144,7 +144,7 @@ async function generateWithClaude(
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  const model = "claude-opus-4-20250514";
+  const model = "claude-sonnet-4-20250514";
   const url = "https://api.anthropic.com/v1/messages";
 
   const requestBody = {
