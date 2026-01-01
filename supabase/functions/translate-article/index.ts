@@ -184,7 +184,17 @@ async function generateWithGemini(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    console.error(`Gemini API error response: ${response.status}`, errorText);
+    // Parse error to check for specific issues
+    try {
+      const errorJson = JSON.parse(errorText);
+      if (errorJson.error?.message) {
+        throw new Error(`Gemini API error ${response.status}: ${errorJson.error.message}`);
+      }
+    } catch (parseErr) {
+      // If can't parse, use raw text
+    }
+    throw new Error(`Gemini API error: ${response.status} ${errorText.substring(0, 500)}`);
   }
 
   const data: GeminiResponse = await response.json();
@@ -610,7 +620,7 @@ serve(async (req) => {
         }
         
         // Use retry wrapper to handle rate limits with exponential backoff
-        // Increased delays due to Gemini free tier rate limiting with 3000-word articles
+        // Reduced retries to return faster with actual error message
         const translation = await withRetry(
           () => generateTranslation(
             originalJsonData,
@@ -619,8 +629,8 @@ serve(async (req) => {
             masterArticle.slug, // Pass original slug for reference (will be translated)
             thoughtSignature
           ),
-          4, // Max 4 retries for better rate limit handling
-          8000 // Base delay of 8 seconds for retries (free tier safe)
+          2, // Max 2 retries to return faster with error
+          5000 // Base delay of 5 seconds for retries
         );
 
         // Validate translation result
