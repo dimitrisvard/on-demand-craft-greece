@@ -325,36 +325,85 @@ Rewrite all internal links to match the target language sub-folder structure:
   const response = await generateWithGemini(prompt, thoughtSignature);
   
   console.log(`Gemini response received for ${targetLanguage}, length: ${response.length}`);
-  console.log(`Response preview (first 500 chars): ${response.substring(0, 500)}`);
+  console.log(`Response preview (first 1000 chars): ${response.substring(0, 1000)}`);
 
   try {
-    // Clean the response: remove markdown code fences if present
+    // Multiple strategies to extract JSON from response
     let jsonText = response.trim();
+    let parsed: any = null;
     
-    // Remove markdown code fences
-    jsonText = jsonText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+    // Strategy 1: Remove markdown code fences (multiple patterns)
+    jsonText = jsonText
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/^```json\n/gi, '')
+      .replace(/\n```$/gi, '')
+      .trim();
     
-    // Find the JSON object boundaries
-    const jsonStartIndex = jsonText.indexOf('{');
-    const jsonEndIndex = jsonText.lastIndexOf('}');
+    // Strategy 2: Find JSON object boundaries (handle nested objects)
+    let jsonStartIndex = jsonText.indexOf('{');
+    let jsonEndIndex = -1;
     
-    if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
-      console.error(`Invalid JSON structure for ${targetLanguage}. Start: ${jsonStartIndex}, End: ${jsonEndIndex}`);
-      console.error(`Response text: ${jsonText.substring(0, 1000)}`);
-      throw new Error("Could not find valid JSON boundaries in Gemini response");
+    if (jsonStartIndex !== -1) {
+      // Find matching closing brace by counting braces
+      let braceCount = 0;
+      for (let i = jsonStartIndex; i < jsonText.length; i++) {
+        if (jsonText[i] === '{') braceCount++;
+        if (jsonText[i] === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            jsonEndIndex = i;
+            break;
+          }
+        }
+      }
     }
     
-    jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+    // Strategy 3: If we found valid boundaries, extract JSON
+    if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
+      jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+      
+      try {
+        parsed = JSON.parse(jsonText);
+        console.log(`Successfully parsed JSON for ${targetLanguage} using boundary extraction`);
+      } catch (parseError: any) {
+        console.warn(`Boundary extraction parse failed: ${parseError.message}`);
+        parsed = null;
+      }
+    }
     
-    // Parse JSON (this will automatically handle escaped newlines \n)
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonText);
-      console.log(`Successfully parsed JSON for ${targetLanguage}`);
-    } catch (parseError: any) {
-      console.error(`JSON parse error for ${targetLanguage}:`, parseError.message);
-      console.error(`JSON text (first 1000 chars): ${jsonText.substring(0, 1000)}`);
-      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+    // Strategy 4: If parsing failed, try to find JSON using regex (more aggressive)
+    if (!parsed) {
+      console.log(`Trying regex-based JSON extraction for ${targetLanguage}...`);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[0]);
+          console.log(`Successfully parsed JSON for ${targetLanguage} using regex extraction`);
+        } catch (parseError: any) {
+          console.warn(`Regex extraction parse failed: ${parseError.message}`);
+        }
+      }
+    }
+    
+    // Strategy 5: Last resort - try parsing the entire cleaned response
+    if (!parsed) {
+      console.log(`Trying direct parse of cleaned response for ${targetLanguage}...`);
+      try {
+        parsed = JSON.parse(jsonText);
+        console.log(`Successfully parsed JSON for ${targetLanguage} using direct parse`);
+      } catch (parseError: any) {
+        console.error(`All JSON extraction strategies failed for ${targetLanguage}`);
+        console.error(`Response length: ${response.length}`);
+        console.error(`Response preview (first 2000 chars): ${response.substring(0, 2000)}`);
+        console.error(`Cleaned text preview (first 2000 chars): ${jsonText.substring(0, 2000)}`);
+        throw new Error(`Could not extract valid JSON from Gemini response. Response may contain markdown or extra text.`);
+      }
+    }
+    
+    if (!parsed) {
+      throw new Error("All JSON extraction strategies failed");
     }
     
     // Ensure content is a string and clean it
