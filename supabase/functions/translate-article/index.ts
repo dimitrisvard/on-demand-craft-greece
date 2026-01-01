@@ -435,10 +435,42 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
         let fixedJson = jsonText.replace(/,(\s*[}\]])/g, '$1');
         // Remove comments (though JSON shouldn't have them)
         fixedJson = fixedJson.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+        // Try to fix unescaped control characters
+        fixedJson = fixedJson.replace(/[\x00-\x1F\x7F]/g, '');
         parsed = JSON.parse(fixedJson);
         console.log(`✓ Successfully parsed JSON for ${targetLanguage} after fixing`);
       } catch (parseError: any) {
         console.warn(`Fixed JSON parse failed: ${parseError.message}`);
+        // Try to get the position of the error and fix it
+        const errorMatch = parseError.message.match(/position (\d+)/);
+        if (errorMatch) {
+          const errorPos = parseInt(errorMatch[1]);
+          console.warn(`JSON parse error at position ${errorPos}`);
+          console.warn(`Context around error: ${jsonText.substring(Math.max(0, errorPos - 100), errorPos + 100)}`);
+        }
+      }
+    }
+    
+    // Strategy 5b: Try to extract JSON by finding the largest valid JSON substring
+    if (!parsed) {
+      console.log(`Trying to find largest valid JSON substring for ${targetLanguage}...`);
+      try {
+        // Start from the first { and try progressively smaller substrings
+        const firstBrace = jsonText.indexOf('{');
+        if (firstBrace !== -1) {
+          for (let endPos = jsonText.length; endPos > firstBrace + 100; endPos -= 100) {
+            try {
+              const candidate = jsonText.substring(firstBrace, endPos);
+              parsed = JSON.parse(candidate);
+              console.log(`✓ Successfully parsed JSON for ${targetLanguage} using substring (length: ${endPos - firstBrace})`);
+              break;
+            } catch (e) {
+              // Try next position
+            }
+          }
+        }
+      } catch (substrError: any) {
+        console.warn(`Substring extraction failed: ${substrError.message}`);
       }
     }
     
@@ -451,10 +483,20 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       } catch (parseError: any) {
         console.error(`❌ All JSON extraction strategies failed for ${targetLanguage}`);
         console.error(`Response length: ${response.length}`);
-        console.error(`Response first 3000 chars: ${response.substring(0, 3000)}`);
-        console.error(`Response last 3000 chars: ${response.substring(Math.max(0, response.length - 3000))}`);
-        console.error(`Cleaned text first 3000 chars: ${jsonText.substring(0, 3000)}`);
-        console.error(`Cleaned text last 3000 chars: ${jsonText.substring(Math.max(0, jsonText.length - 3000))}`);
+        console.error(`Response first 5000 chars: ${response.substring(0, 5000)}`);
+        console.error(`Response last 5000 chars: ${response.substring(Math.max(0, response.length - 5000))}`);
+        console.error(`Cleaned text first 5000 chars: ${jsonText.substring(0, 5000)}`);
+        console.error(`Cleaned text last 5000 chars: ${jsonText.substring(Math.max(0, jsonText.length - 5000))}`);
+        
+        // Log detailed response for manual inspection (truncated to avoid log limits)
+        console.error(`=== RESPONSE ANALYSIS FOR ${targetLanguage} ===`);
+        console.error(`Response length: ${response.length}`);
+        console.error(`First 100 chars: ${response.substring(0, 100)}`);
+        console.error(`Last 100 chars: ${response.substring(Math.max(0, response.length - 100))}`);
+        console.error(`Has opening brace: ${response.includes('{')}`);
+        console.error(`Has closing brace: ${response.includes('}')}`);
+        console.error(`Brace count: ${(response.match(/\{/g) || []).length} opening, ${(response.match(/\}/g) || []).length} closing`);
+        console.error(`=== END RESPONSE ANALYSIS ===`);
         
         // Save raw response to help debug - try to extract partial data
         const partialMatch = response.match(/"title"\s*:\s*"([^"]+)"/);
