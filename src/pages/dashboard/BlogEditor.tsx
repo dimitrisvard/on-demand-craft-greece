@@ -339,11 +339,31 @@ const BlogEditor = () => {
 
           const result = await response.json();
 
-          if (!response.ok) {
-            console.error(`Batch ${batchIndex + 1} failed:`, result.error);
-            totalFailed += batch.length;
+          if (!response.ok || result.success === false) {
+            // Handle both error formats: result.error or result.message
+            const errorMessage = result.error || result.message || 'Unknown error';
+            console.error(`Batch ${batchIndex + 1} failed:`, errorMessage);
+            console.error(`Full response:`, result);
+            
+            // Count actual failures from details if available
+            if (result.details) {
+              const detailsArray = Object.values(result.details);
+              const successCount = detailsArray.filter((d: any) => d.success).length;
+              const failCount = detailsArray.filter((d: any) => !d.success).length;
+              totalSuccessful += successCount;
+              totalFailed += failCount;
+            } else {
+              totalFailed += batch.length;
+            }
+            
+            toast({
+              title: `⚠️ Batch ${batchIndex + 1} had issues`,
+              description: errorMessage,
+              variant: "destructive"
+            });
           } else {
             totalSuccessful += result.translations || 0;
+            totalFailed += result.failed_count || 0;
             console.log(`Batch ${batchIndex + 1} completed: ${result.translations} translations`);
           }
         } catch (batchError: any) {
