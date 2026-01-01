@@ -314,7 +314,7 @@ Rewrite all internal links to match the target language sub-folder structure:
 ---
 ### OUTPUT FORMAT (CRITICAL - READ CAREFULLY)
 You MUST return ONLY valid JSON. Do NOT include:
-- Markdown code fences (```json or ```)
+- Markdown code fences (triple backticks with json or without)
 - Explanatory text before or after the JSON
 - Comments or notes
 - Any text outside the JSON object
