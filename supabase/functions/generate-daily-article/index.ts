@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
 const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 
 // Brand name - NEVER translate or alter this
@@ -26,13 +26,22 @@ const SILO_ROTATION = [
   "Material Science & Surface Engineering",
 ];
 
-interface GeminiResponse {
-  candidates?: Array<{
-    content: {
-      parts: Array<{ text: string }>;
-    };
+interface ClaudeResponse {
+  id: string;
+  type: string;
+  role: string;
+  content: Array<{
+    type: string;
+    text: string;
   }>;
+  model: string;
+  stop_reason: string;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
   error?: {
+    type: string;
     message: string;
   };
 }
@@ -124,57 +133,65 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
 }
 
 /**
- * Generate article using Gemini 2.0 Flash with specified thinking level
+ * Generate article using Claude Opus 4
+ * Claude Opus 4 provides superior reasoning and writing quality for technical content
  */
-async function generateWithGemini(
+async function generateWithClaude(
   prompt: string,
   thinkingLevel: "high" | "low" = "high"
 ): Promise<string> {
-  if (!geminiApiKey) {
-    throw new Error("GEMINI_API_KEY not configured");
+  if (!anthropicApiKey) {
+    throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  const model = "gemini-2.0-flash-exp";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+  const model = "claude-opus-4-20250514";
+  const url = "https://api.anthropic.com/v1/messages";
 
-  const requestBody: any = {
-    contents: [
+  const requestBody = {
+    model: model,
+    max_tokens: 8192,
+    messages: [
       {
-        parts: [{ text: prompt }],
+        role: "user",
+        content: prompt,
       },
     ],
-    generationConfig: {
-      temperature: thinkingLevel === "high" ? 0.7 : 0.5,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 8192,
-    },
   };
 
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "x-api-key": anthropicApiKey,
+      "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+    throw new Error(`Claude API error: ${response.status} ${errorText}`);
   }
 
-  const data: GeminiResponse = await response.json();
+  const data: ClaudeResponse = await response.json();
 
   if (data.error) {
-    throw new Error(`Gemini API error: ${data.error.message}`);
+    throw new Error(`Claude API error: ${data.error.message}`);
   }
 
-  if (!data.candidates || data.candidates.length === 0) {
-    throw new Error("No response from Gemini API");
+  if (!data.content || data.content.length === 0) {
+    throw new Error("No response from Claude API");
   }
 
-  return data.candidates[0].content.parts[0].text;
+  // Find the text content in the response
+  const textContent = data.content.find(c => c.type === "text");
+  if (!textContent) {
+    throw new Error("No text content in Claude API response");
+  }
+
+  console.log(`Claude API usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+
+  return textContent.text;
 }
 
 /**
@@ -275,7 +292,7 @@ ${relatedArticles}
   }
 }`;
 
-  const response = await generateWithGemini(prompt, "high");
+  const response = await generateWithClaude(prompt, "high");
   
   try {
     // Clean the response: remove markdown code fences if present
@@ -336,7 +353,7 @@ ${relatedArticles}
       faqSchema: parsed.faqSchema || null,
     };
   } catch (error) {
-    console.error("Failed to parse Gemini response as JSON:", error);
+    console.error("Failed to parse Claude response as JSON:", error);
     console.error("Raw response preview:", response.substring(0, 500));
     throw new Error(`Failed to parse article JSON: ${error.message}`);
   }
