@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Plus, Pencil, Trash2, Check, Sparkles, FileText, Settings } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, Sparkles, FileText, Settings, Play, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -70,6 +70,7 @@ const AutoBlogDashboard = () => {
   const [editSiloCategory, setEditSiloCategory] = useState<string>("");
   const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -211,6 +212,75 @@ const AutoBlogDashboard = () => {
         description: error.message || "Failed to delete category",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleGenerateArticleNow = async () => {
+    // Check if there are unprocessed titles
+    const pendingTitles = titles.filter(t => !t.processed);
+    if (pendingTitles.length === 0) {
+      toast({
+        title: "No Pending Titles",
+        description: "Add at least one unprocessed title before generating an article.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    toast({
+      title: "Generating Article",
+      description: "This may take 1-2 minutes. Please wait...",
+    });
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-daily-article`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken ? { "Authorization": `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({}),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to generate article");
+      }
+
+      if (result.message === "No unprocessed titles found") {
+        toast({
+          title: "No Titles Available",
+          description: `No unprocessed titles found. Scheduled silo: ${result.scheduled_silo}`,
+          variant: "destructive",
+        });
+      } else if (result.success) {
+        toast({
+          title: "Article Generated Successfully!",
+          description: `"${result.title}" has been published. Translations will follow in 2 hours.`,
+        });
+        // Refresh the lists
+        fetchTitles();
+        fetchLogs();
+      } else {
+        throw new Error(result.error || "Unknown error occurred");
+      }
+    } catch (error: any) {
+      console.error("Error generating article:", error);
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Failed to generate article. Check the logs for details.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -359,6 +429,23 @@ const AutoBlogDashboard = () => {
               Manage article titles and view automated generation reports.
             </p>
           </div>
+          <Button 
+            onClick={handleGenerateArticleNow} 
+            disabled={isGenerating}
+            className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 mr-2" />
+                Generate Article Now
+              </>
+            )}
+          </Button>
         </div>
 
         <Tabs defaultValue="titles" className="space-y-4">
