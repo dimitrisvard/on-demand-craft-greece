@@ -16,7 +16,7 @@ const corsHeaders = {
 // All supported languages
 const LANGUAGES = ["en", "de", "fr", "es", "it", "nl", "pl", "sv", "da", "fi", "cs", "hu", "pt", "nb"];
 
-// Static pages that exist for all languages (matching old sitemap format)
+// Static pages that exist for all languages (English paths - will be translated)
 const STATIC_PAGES = [
   { path: "", priority: "1.0", changefreq: "weekly" },
   { path: "/services", priority: "0.9", changefreq: "monthly" },
@@ -32,11 +32,256 @@ const STATIC_PAGES = [
   { path: "/quote", priority: "0.9", changefreq: "monthly" },
 ];
 
+// URL slug translations for each language
+// Maps: language -> English slug -> translated slug
+const SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
+  en: {
+    "services": "services",
+    "about": "about",
+    "contact": "contact",
+    "quote": "quote",
+    "industries": "industries",
+    "our-work": "our-work",
+    "blog": "blog",
+    "cnc-machining": "cnc-machining",
+    "sheet-metal": "sheet-metal",
+    "3d-printing": "3d-printing",
+    "injection-molding": "injection-molding",
+    "surface-finish": "surface-finish",
+    "rapid-prototyping": "rapid-prototyping",
+  },
+  de: {
+    "services": "dienstleistungen",
+    "about": "ueber-uns",
+    "contact": "kontakt",
+    "quote": "angebot",
+    "industries": "branchen",
+    "our-work": "unsere-arbeit",
+    "blog": "blog",
+    "cnc-machining": "cnc-bearbeitung",
+    "sheet-metal": "blechbearbeitung",
+    "3d-printing": "3d-druck",
+    "injection-molding": "spritzguss",
+    "surface-finish": "oberflaechenveredelung",
+    "rapid-prototyping": "rapid-prototyping",
+  },
+  fr: {
+    "services": "services",
+    "about": "a-propos",
+    "contact": "contact",
+    "quote": "devis",
+    "industries": "industries",
+    "our-work": "notre-travail",
+    "blog": "blog",
+    "cnc-machining": "usinage-cnc",
+    "sheet-metal": "tolerie",
+    "3d-printing": "impression-3d",
+    "injection-molding": "moulage-par-injection",
+    "surface-finish": "finition-de-surface",
+    "rapid-prototyping": "prototypage-rapide",
+  },
+  es: {
+    "services": "servicios",
+    "about": "acerca-de",
+    "contact": "contacto",
+    "quote": "cotizacion",
+    "industries": "industrias",
+    "our-work": "nuestro-trabajo",
+    "blog": "blog",
+    "cnc-machining": "mecanizado-cnc",
+    "sheet-metal": "chapa-metalica",
+    "3d-printing": "impresion-3d",
+    "injection-molding": "moldeo-por-inyeccion",
+    "surface-finish": "acabado-de-superficie",
+    "rapid-prototyping": "prototipado-rapido",
+  },
+  it: {
+    "services": "servizi",
+    "about": "chi-siamo",
+    "contact": "contatto",
+    "quote": "preventivo",
+    "industries": "settori",
+    "our-work": "il-nostro-lavoro",
+    "blog": "blog",
+    "cnc-machining": "lavorazione-cnc",
+    "sheet-metal": "lavorazione-lamiera",
+    "3d-printing": "stampa-3d",
+    "injection-molding": "stampaggio-ad-iniezione",
+    "surface-finish": "finitura-superficiale",
+    "rapid-prototyping": "prototipazione-rapida",
+  },
+  nl: {
+    "services": "diensten",
+    "about": "over-ons",
+    "contact": "contact",
+    "quote": "offerte",
+    "industries": "industrieen",
+    "our-work": "ons-werk",
+    "blog": "blog",
+    "cnc-machining": "cnc-bewerking",
+    "sheet-metal": "plaatbewerking",
+    "3d-printing": "3d-printen",
+    "injection-molding": "spuitgieten",
+    "surface-finish": "oppervlakteafwerking",
+    "rapid-prototyping": "rapid-prototyping",
+  },
+  pl: {
+    "services": "uslugi",
+    "about": "o-nas",
+    "contact": "kontakt",
+    "quote": "wycena",
+    "industries": "branze",
+    "our-work": "nasza-praca",
+    "blog": "blog",
+    "cnc-machining": "obrobka-cnc",
+    "sheet-metal": "obrobka-blaszek",
+    "3d-printing": "drukowanie-3d",
+    "injection-molding": "formowanie-wtryskowe",
+    "surface-finish": "wykończenie-powierzchni",
+    "rapid-prototyping": "szybkie-prototypowanie",
+  },
+  sv: {
+    "services": "tjanster",
+    "about": "om-oss",
+    "contact": "kontakt",
+    "quote": "offert",
+    "industries": "branscher",
+    "our-work": "vart-arbete",
+    "blog": "blog",
+    "cnc-machining": "cnc-bearbetning",
+    "sheet-metal": "platarbe",
+    "3d-printing": "3d-utskrift",
+    "injection-molding": "spjutsgjutning",
+    "surface-finish": "ytbehandling",
+    "rapid-prototyping": "snabbprototypning",
+  },
+  da: {
+    "services": "tjenester",
+    "about": "om-os",
+    "contact": "kontakt",
+    "quote": "tilbud",
+    "industries": "brancher",
+    "our-work": "vores-arbejde",
+    "blog": "blog",
+    "cnc-machining": "cnc-bearbejdning",
+    "sheet-metal": "pladearbejde",
+    "3d-printing": "3d-print",
+    "injection-molding": "spjutsgodsning",
+    "surface-finish": "overfladebehandling",
+    "rapid-prototyping": "hurtig-prototypning",
+  },
+  fi: {
+    "services": "palvelut",
+    "about": "meista",
+    "contact": "yhteystiedot",
+    "quote": "tarjous",
+    "industries": "toimialat",
+    "our-work": "tyomme",
+    "blog": "blog",
+    "cnc-machining": "cnc-koneistus",
+    "sheet-metal": "levytyo",
+    "3d-printing": "3d-tulostus",
+    "injection-molding": "ruiskumuovaus",
+    "surface-finish": "pintakasittely",
+    "rapid-prototyping": "nopea-prototyypointi",
+  },
+  cs: {
+    "services": "sluzby",
+    "about": "o-nas",
+    "contact": "kontakt",
+    "quote": "nabidka",
+    "industries": "odvetvi",
+    "our-work": "nase-prace",
+    "blog": "blog",
+    "cnc-machining": "cnc-obrabeni",
+    "sheet-metal": "obrabeni-plechu",
+    "3d-printing": "3d-tisk",
+    "injection-molding": "vstrikovani",
+    "surface-finish": "uprava-povrchu",
+    "rapid-prototyping": "rychle-prototypovani",
+  },
+  hu: {
+    "services": "szolgaltatasok",
+    "about": "rolunk",
+    "contact": "kapcsolat",
+    "quote": "ajanlat",
+    "industries": "iparagak",
+    "our-work": "munkank",
+    "blog": "blog",
+    "cnc-machining": "cnc-megmunkalas",
+    "sheet-metal": "lemezfeldolgozas",
+    "3d-printing": "3d-nyomtatas",
+    "injection-molding": "injekcios-ontes",
+    "surface-finish": "feluletkezeles",
+    "rapid-prototyping": "gyors-prototipus",
+  },
+  pt: {
+    "services": "servicos",
+    "about": "sobre-nos",
+    "contact": "contato",
+    "quote": "orcamento",
+    "industries": "industrias",
+    "our-work": "nosso-trabalho",
+    "blog": "blog",
+    "cnc-machining": "usinagem-cnc",
+    "sheet-metal": "chapa-metalica",
+    "3d-printing": "impressao-3d",
+    "injection-molding": "moldagem-por-injecao",
+    "surface-finish": "acabamento-de-superficie",
+    "rapid-prototyping": "prototipagem-rapida",
+  },
+  nb: {
+    "services": "tjenester",
+    "about": "om-oss",
+    "contact": "kontakt",
+    "quote": "tilbud",
+    "industries": "bransjer",
+    "our-work": "vart-arbeid",
+    "blog": "blog",
+    "cnc-machining": "cnc-bearbeiding",
+    "sheet-metal": "platearbeid",
+    "3d-printing": "3d-utskrift",
+    "injection-molding": "spjutsgjetting",
+    "surface-finish": "overflatebehandling",
+    "rapid-prototyping": "rask-prototyping",
+  },
+};
+
+/**
+ * Translate a URL path from English to the target language
+ */
+function translatePath(path: string, language: string): string {
+  if (!path || path === "/" || path === "") {
+    return "";
+  }
+
+  // Remove leading slash
+  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
+  
+  // Split into segments
+  const segments = cleanPath.split("/").filter(Boolean);
+  
+  // Get translations for this language (fallback to English if not found)
+  const translations = SLUG_TRANSLATIONS[language] || SLUG_TRANSLATIONS.en;
+  
+  // Translate each segment
+  const translatedSegments = segments.map(segment => {
+    // Check if this segment has a translation
+    if (translations[segment]) {
+      return translations[segment];
+    }
+    // No translation found, keep original (e.g., blog article slugs)
+    return segment;
+  });
+  
+  return "/" + translatedSegments.join("/");
+}
+
 interface Article {
   slug: string;
   language: string;
   updated_at: string;
-  translation_id: string;
+  translation_id?: string;
 }
 
 /**
@@ -96,7 +341,7 @@ async function generateSitemap(): Promise<string> {
   // Fetch all published articles
   const { data: articles, error } = await supabase
     .from("articles")
-    .select("slug, language, updated_at")
+    .select("slug, language, updated_at, translation_id")
     .eq("status", "published")
     .order("language", { ascending: true })
     .order("updated_at", { ascending: false });
@@ -108,7 +353,16 @@ async function generateSitemap(): Promise<string> {
 
   console.log(`Found ${articles?.length || 0} published articles for sitemap`);
   if (articles && articles.length > 0) {
-    console.log(`Sample articles:`, articles.slice(0, 3).map(a => `${a.language}/${a.slug}`));
+    console.log(`Sample articles:`, articles.slice(0, 5).map(a => `${a.language}/${a.slug}`));
+    // Log language distribution
+    const langCounts: Record<string, number> = {};
+    for (const article of articles) {
+      const lang = (article.language || '').trim().toLowerCase();
+      langCounts[lang] = (langCounts[lang] || 0) + 1;
+    }
+    console.log(`Article language distribution:`, langCounts);
+  } else {
+    console.warn("⚠️ No published articles found in database. Check if articles exist and have status='published'");
   }
 
   // Normalize and group articles by language
@@ -151,9 +405,11 @@ async function generateSitemap(): Promise<string> {
     // Add language section comment
     urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
 
-    // 1. Static pages for this language
+    // 1. Static pages for this language (with translated slugs)
     for (const page of STATIC_PAGES) {
-      const url = `${siteUrl}/${lang}${page.path}`;
+      // Translate the path for this language
+      const translatedPath = translatePath(page.path, lang);
+      const url = `${siteUrl}/${lang}${translatedPath}`;
       urlEntries.push(generateUrlEntry(
         url,
         today,
@@ -165,13 +421,17 @@ async function generateSitemap(): Promise<string> {
     // 2. Blog articles for this language
     // Check both exact match and normalized match
     const normalizedLang = lang.toLowerCase().trim();
-    if (articlesByLanguage[lang] || articlesByLanguage[normalizedLang]) {
-      const articlesForLang = articlesByLanguage[lang] || articlesByLanguage[normalizedLang] || [];
+    const articlesForLang = articlesByLanguage[lang] || articlesByLanguage[normalizedLang] || [];
+    
+    if (articlesForLang.length > 0) {
       console.log(`Adding ${articlesForLang.length} blog articles for ${lang}`);
       totalArticlesAdded += articlesForLang.length;
       
+      // Translate "blog" slug for this language
+      const blogSlug = SLUG_TRANSLATIONS[lang]?.blog || "blog";
+      
       for (const article of articlesForLang) {
-        const url = `${siteUrl}/${lang}/blog/${article.slug}`;
+        const url = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
         const lastmod = formatDate(article.updated_at);
         urlEntries.push(generateUrlEntry(
           url,
@@ -181,7 +441,7 @@ async function generateSitemap(): Promise<string> {
         ));
       }
     } else {
-      console.log(`No blog articles found for language: ${lang}`);
+      console.log(`No blog articles found for language: ${lang} (checked keys: ${lang}, ${normalizedLang})`);
     }
   }
 
@@ -234,15 +494,20 @@ async function generateLanguageSitemap(lang: string): Promise<string> {
   // Add language section comment
   urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
 
-  // Static pages for this language
+  // Static pages for this language (with translated slugs)
   for (const page of STATIC_PAGES) {
-    const url = `${siteUrl}/${lang}${page.path}`;
+    // Translate the path for this language
+    const translatedPath = translatePath(page.path, lang);
+    const url = `${siteUrl}/${lang}${translatedPath}`;
     urlEntries.push(generateUrlEntry(url, today, page.changefreq, page.priority));
   }
 
   // Blog articles for this language
+  // Translate "blog" slug for this language
+  const blogSlug = SLUG_TRANSLATIONS[lang]?.blog || "blog";
+  
   for (const article of filteredArticles) {
-    const url = `${siteUrl}/${lang}/blog/${article.slug}`;
+    const url = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
     const lastmod = formatDate(article.updated_at);
     urlEntries.push(generateUrlEntry(url, lastmod, "weekly", "0.7"));
   }
