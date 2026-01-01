@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Plus, Pencil, Trash2, Check, Sparkles, FileText, Settings, Play, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, Sparkles, FileText, Settings, Play, Loader2, RotateCcw, X } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -111,7 +111,7 @@ const AutoBlogDashboard = () => {
         .limit(20);
 
       if (error) throw error;
-      setLogs(data || []);
+      setLogs((data || []) as GenerationLog[]);
     } catch (error: any) {
       console.error("Error fetching logs:", error);
       toast({
@@ -392,6 +392,70 @@ const AutoBlogDashboard = () => {
     }
   };
 
+  const handleResetTitleStatus = async (id: string) => {
+    if (!window.confirm("Are you sure you want to reset this title status to pending? This will remove the processed date.")) return;
+
+    try {
+      const { error } = await supabase
+        .from("article_titles")
+        .update({
+          processed: false,
+          processed_at: null,
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Title status reset to pending",
+      });
+
+      fetchTitles();
+    } catch (error: any) {
+      console.error("Error resetting title status:", error);
+      toast({
+        title: "Error",
+        description: "Failed to reset title status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm("Are you sure you want to clear all generation logs? This action cannot be undone.")) return;
+
+    try {
+      // Delete all logs by selecting all IDs first, then deleting
+      const { data: allLogs } = await supabase
+        .from("article_generation_logs")
+        .select("id");
+
+      if (allLogs && allLogs.length > 0) {
+        const { error } = await supabase
+          .from("article_generation_logs")
+          .delete()
+          .in("id", allLogs.map(log => log.id));
+
+        if (error) throw error;
+      }
+
+      toast({
+        title: "Success",
+        description: "All logs cleared successfully",
+      });
+
+      fetchLogs();
+    } catch (error: any) {
+      console.error("Error clearing logs:", error);
+      toast({
+        title: "Error",
+        description: "Failed to clear logs",
+        variant: "destructive",
+      });
+    }
+  };
+
   const getLanguageFlag = (lang: string) => {
     const flags: Record<string, string> = {
       en: "🇬🇧",
@@ -629,7 +693,17 @@ const AutoBlogDashboard = () => {
                               </div>
                             ) : (
                               <div className="flex justify-end gap-2">
-                                {!title.processed && (
+                                {title.processed ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                    onClick={() => handleResetTitleStatus(title.id)}
+                                    title="Reset to Pending"
+                                  >
+                                    <RotateCcw className="h-4 w-4" />
+                                  </Button>
+                                ) : (
                                   <>
                                     <Button
                                       variant="ghost"
@@ -665,10 +739,25 @@ const AutoBlogDashboard = () => {
           <TabsContent value="logs" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Daily Generation Summary</CardTitle>
-                <CardDescription>
-                  Recent automated article generation runs and their status.
-                </CardDescription>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>Daily Generation Summary</CardTitle>
+                    <CardDescription>
+                      Recent automated article generation runs and their status.
+                    </CardDescription>
+                  </div>
+                  {logs.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleClearLogs}
+                      className="flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      <X className="h-4 w-4" />
+                      Clear History
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <Table>
