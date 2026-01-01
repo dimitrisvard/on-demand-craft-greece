@@ -313,6 +313,9 @@ Rewrite all internal links to match the target language sub-folder structure:
 }`;
 
   const response = await generateWithGemini(prompt, thoughtSignature);
+  
+  console.log(`Gemini response received for ${targetLanguage}, length: ${response.length}`);
+  console.log(`Response preview (first 500 chars): ${response.substring(0, 500)}`);
 
   try {
     // Clean the response: remove markdown code fences if present
@@ -326,13 +329,23 @@ Rewrite all internal links to match the target language sub-folder structure:
     const jsonEndIndex = jsonText.lastIndexOf('}');
     
     if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
-      throw new Error("Could not find valid JSON boundaries");
+      console.error(`Invalid JSON structure for ${targetLanguage}. Start: ${jsonStartIndex}, End: ${jsonEndIndex}`);
+      console.error(`Response text: ${jsonText.substring(0, 1000)}`);
+      throw new Error("Could not find valid JSON boundaries in Gemini response");
     }
     
     jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
     
     // Parse JSON (this will automatically handle escaped newlines \n)
-    const parsed = JSON.parse(jsonText);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+      console.log(`Successfully parsed JSON for ${targetLanguage}`);
+    } catch (parseError: any) {
+      console.error(`JSON parse error for ${targetLanguage}:`, parseError.message);
+      console.error(`JSON text (first 1000 chars): ${jsonText.substring(0, 1000)}`);
+      throw new Error(`Failed to parse JSON: ${parseError.message}`);
+    }
     
     // Ensure content is a string and clean it
     if (typeof parsed.content !== 'string') {
@@ -598,6 +611,28 @@ serve(async (req) => {
       try {
         console.log(`Translating to ${lang.name} (${lang.code})... [${i + 1}/${languagesToTranslate.length}]`);
         
+        // Check if translation already exists
+        const { data: existingTranslation } = await supabase
+          .from("articles")
+          .select("id, title, slug")
+          .eq("translation_id", masterArticle.translation_id)
+          .eq("language", lang.code)
+          .single();
+        
+        if (existingTranslation) {
+          console.log(`Translation for ${lang.code} already exists, skipping...`);
+          translations[lang.code] = {
+            success: true,
+            article_id: existingTranslation.id,
+            title: existingTranslation.title,
+            slug: existingTranslation.slug,
+            url: `${siteUrl}/${lang.code}/blog/${existingTranslation.slug}`,
+            skipped: true,
+          };
+          articleUrls.push(`${siteUrl}/${lang.code}/blog/${existingTranslation.slug}`);
+          continue; // Skip to next language
+        }
+        
         // Use retry wrapper to handle rate limits with exponential backoff
         const translation = await withRetry(
           () => generateTranslation(
@@ -611,8 +646,15 @@ serve(async (req) => {
           5000 // Base delay of 5 seconds for retries (free tier safe)
         );
 
+        // Validate translation result
+        if (!translation || !translation.title || !translation.content) {
+          throw new Error(`Invalid translation response: missing required fields`);
+        }
+
         // Use translated slug from the translation result
         const translatedSlug = translation.slug || generateSlug(translation.title);
+        
+        console.log(`Inserting translation for ${lang.code} with slug: ${translatedSlug}`);
 
         const { data: translatedArticle, error: transError } = await supabase
           .from("articles")
@@ -635,11 +677,45 @@ serve(async (req) => {
           .select()
           .single();
 
-        if (transError || !translatedArticle) {
+        if (transError) {
           console.error(`Translation insert error for ${lang.code}:`, transError);
+          console.error(`Error details:`, JSON.stringify(transError, null, 2));
+          
+          // Check if it's a duplicate key error (translation already exists)
+          if (transError.code === '23505' || transError.message?.includes('duplicate') || transError.message?.includes('unique')) {
+            console.log(`Translation for ${lang.code} already exists (duplicate key), fetching existing...`);
+            const { data: existing } = await supabase
+              .from("articles")
+              .select("id, title, slug")
+              .eq("translation_id", masterArticle.translation_id)
+              .eq("language", lang.code)
+              .single();
+            
+            if (existing) {
+              translations[lang.code] = {
+                success: true,
+                article_id: existing.id,
+                title: existing.title,
+                slug: existing.slug,
+                url: `${siteUrl}/${lang.code}/blog/${existing.slug}`,
+                skipped: true,
+              };
+              articleUrls.push(`${siteUrl}/${lang.code}/blog/${existing.slug}`);
+              console.log(`✓ ${lang.name} translation found (already existed)`);
+              continue;
+            }
+          }
+          
           translations[lang.code] = {
             success: false,
-            error: transError?.message,
+            error: transError.message || 'Database insertion failed',
+            errorCode: transError.code,
+          };
+        } else if (!translatedArticle) {
+          console.error(`Translation insert returned no data for ${lang.code}`);
+          translations[lang.code] = {
+            success: false,
+            error: 'Database insertion returned no data',
           };
         } else {
           translations[lang.code] = {
@@ -651,13 +727,15 @@ serve(async (req) => {
             url: `${siteUrl}/${lang.code}/blog/${translatedSlug}`,
           };
           articleUrls.push(`${siteUrl}/${lang.code}/blog/${translatedSlug}`);
-          console.log(`✓ ${lang.name} translation complete`);
+          console.log(`✓ ${lang.name} translation complete and saved`);
         }
       } catch (error: any) {
         console.error(`Translation error for ${lang.code}:`, error);
+        console.error(`Error stack:`, error.stack);
         translations[lang.code] = {
           success: false,
-          error: error.message,
+          error: error.message || 'Unknown error occurred',
+          errorType: error.name || 'Error',
         };
       }
       
@@ -704,23 +782,52 @@ serve(async (req) => {
     }
 
     const successfulTranslations = Object.values(translations).filter((t: any) => t.success).length;
+    const failedTranslations = Object.values(translations).filter((t: any) => !t.success);
+    
     console.log(`Translation complete. ${successfulTranslations}/${languagesToTranslate.length} translations successful.`);
+    if (failedTranslations.length > 0) {
+      console.error(`Failed translations:`, failedTranslations.map((t: any) => ({
+        language: Object.keys(translations).find(key => translations[key] === t),
+        error: t.error
+      })));
+    }
+
+    // If single language translation and it failed, return error status
+    if (target_languages && target_languages.length === 1 && failedTranslations.length > 0) {
+      const failedLang = failedTranslations[0] as any;
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: failedLang.error || 'Translation failed',
+          errorType: failedLang.errorType,
+          errorCode: failedLang.errorCode,
+          message: `Failed to translate to ${target_languages[0]}: ${failedLang.error || 'Unknown error'}`,
+          master_article_id: article_id,
+          details: translations,
+        }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 500,
+        }
+      );
+    }
 
     return new Response(
       JSON.stringify({
-        success: true,
+        success: successfulTranslations > 0,
         message: `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`,
         master_article_id: article_id,
         slug: masterArticle.slug, // Original English slug
         translations: successfulTranslations,
         total_languages: languagesToTranslate.length,
+        failed_count: failedTranslations.length,
         indexing: { indexnow: indexNowResult },
         article_urls: articleUrls,
         details: translations,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 200,
+        status: successfulTranslations > 0 ? 200 : 500,
       }
     );
   } catch (error: any) {
