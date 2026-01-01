@@ -195,13 +195,34 @@ async function generateWithClaude(
 }
 
 /**
+ * Get rotation index for service pages and quote text
+ * Rotates through: CNC Machining (0), Sheet Metal (1), Injection Molding (2)
+ */
+async function getRotationIndex(): Promise<{ serviceIndex: number; quoteIndex: number }> {
+  // Count published articles to determine rotation
+  const { count } = await supabase
+    .from("articles")
+    .select("*", { count: "exact", head: true })
+    .eq("language", "en")
+    .eq("status", "published");
+  
+  const articleCount = count || 0;
+  const serviceIndex = articleCount % 3; // Rotate through 3 services
+  const quoteIndex = articleCount % 5; // Rotate through 5 quote variations
+  
+  return { serviceIndex, quoteIndex };
+}
+
+/**
  * Generate master article with high thinking level - "Master Engineer" Prompt
  * Creates ONLY the English version in PUBLISHED mode
  */
 async function generateMasterArticle(
   title: string,
   siloCategory: string | null,
-  relatedArticles: string
+  relatedArticles: string,
+  serviceIndex: number,
+  quoteIndex: number
 ): Promise<{
   content: string;
   excerpt: string;
@@ -209,6 +230,23 @@ async function generateMasterArticle(
   metaDescription: string;
   faqSchema: any;
 }> {
+  // Service page rotation mapping
+  const servicePages = [
+    { name: "CNC Machining", url: "/en/services/cnc-machining", anchor: "precision CNC machining services" },
+    { name: "Sheet Metal Fabrication", url: "/en/services/sheet-metal", anchor: "sheet metal fabrication services" },
+    { name: "Injection Molding", url: "/en/services/injection-molding", anchor: "injection molding services" }
+  ];
+  const selectedService = servicePages[serviceIndex];
+  
+  // Quote link text variations (rotating)
+  const quoteTexts = [
+    "Get an instant quote in 24 hours",
+    "Receive a detailed quote within 24 hours",
+    "Request a free quote and get pricing in 24 hours",
+    "Get your custom quote delivered in 24 hours",
+    "Submit your project for a 24-hour quote"
+  ];
+  const selectedQuoteText = quoteTexts[quoteIndex];
   const prompt = `Role: Senior Manufacturing Engineer & Technical SEO Specialist (20+ years exp).
 Author Persona: Write as the lead engineer for ${BRAND_NAME}. Tone is authoritative, precise, and helpful—never salesy or generic.
 
@@ -231,13 +269,14 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 
 ---
 ### LINKING STRATEGY (Dynamic Insertion)
-You must insert 3 specific types of links naturally into the flow of the text:
+You must insert 4 specific types of links naturally into the flow of the text:
 1.  **Silo Context Link:** Choose 1-2 relevant articles from this list:
 ${relatedArticles}
     Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here">anchor text</a>
-2.  **Service Page Link:** When mentioning a process (e.g., "CNC Milling"), link to the general service path using: <a href="/en/services">our manufacturing services</a>
-3.  **Commercial Intent (Quote):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph:
-    * "For high-precision results, upload your CAD files to the <a href="/en/quote">${BRAND_NAME} instant quote engine</a>."
+2.  **Specific Service Page Link (ROTATION):** You MUST include ONE link to the ${selectedService.name} service page. Only include this link if it naturally fits the article content. If the article discusses ${selectedService.name.toLowerCase()} or related processes, insert a natural link: <a href="${selectedService.url}">${selectedService.anchor}</a>. If it doesn't fit naturally, skip this link.
+3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services">our manufacturing services</a>
+4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
+    * Use this exact format: "For high-precision results, <a href="/en/quote">${selectedQuoteText}</a> from ${BRAND_NAME}."
 
 ---
 ### CONTENT REQUIREMENTS
@@ -263,7 +302,8 @@ ${relatedArticles}
       - Example: When comparing aluminum 6061-T6 vs 7075-T6, create a table with columns for Property, 6061-T6, 7075-T6, and rows for Yield Strength, Tensile Strength, Hardness, Cost, etc.
     * **Visual Q&A:** A visible H2 section titled "Frequently Asked Questions" at the bottom with 5-7 questions using <h3> for each question.
 4.  **FAQ Schema:** Generate Google-compliant JSON-LD for the FAQ section.
-5.  **Readability & Spacing:** 
+5.  **Microns Hub Benefits Paragraph (MANDATORY):** Near the 75% mark of the article, insert a dedicated paragraph (2-3 sentences) highlighting the advantages of ordering from ${BRAND_NAME} versus marketplaces. Mention benefits such as superior quality control, competitive pricing, direct manufacturer relationship, personalized service, and technical expertise. Make it natural and contextual to the article content. Example format: "When ordering from ${BRAND_NAME}, you benefit from direct manufacturer relationships that ensure superior quality control and competitive pricing compared to marketplace platforms. Our technical expertise and personalized service approach means every project receives the attention to detail it deserves."
+6.  **Readability & Spacing:** 
     * Each paragraph should have proper spacing (wrap each in <p> tags).
     * Add a blank line/spacing between paragraphs for visual breathing room.
     * Keep paragraphs concise (3-5 sentences max) for better readability.
@@ -491,16 +531,24 @@ serve(async (req) => {
     const relatedArticlesForPrompt = formatSiloArticlesForPrompt(siloNeighbors);
     console.log(`Found ${siloNeighbors.length} silo neighbors for linking`);
 
-    // 5. Generate master article with high thinking
+    // 5. Get rotation indices for service pages and quote text
+    const { serviceIndex, quoteIndex } = await getRotationIndex();
+    const serviceNames = ["CNC Machining", "Sheet Metal Fabrication", "Injection Molding"];
+    console.log(`Service rotation: ${serviceNames[serviceIndex]} (index ${serviceIndex})`);
+    console.log(`Quote text rotation: index ${quoteIndex}`);
+
+    // 6. Generate master article with high thinking
     const masterArticle = await generateMasterArticle(
       titleRecord.title,
       titleRecord.silo_category,
-      relatedArticlesForPrompt
+      relatedArticlesForPrompt,
+      serviceIndex,
+      quoteIndex
     );
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
-    // 6. Create master article in database - PUBLISHED MODE
+    // 7. Create master article in database - PUBLISHED MODE
     const { data: masterArticleRecord, error: masterError } = await supabase
       .from("articles")
       .insert([
@@ -525,7 +573,7 @@ serve(async (req) => {
 
     console.log(`Master article created in PUBLISHED mode: ${masterArticleRecord.id}`);
 
-    // 7. Create generation log
+    // 8. Create generation log
     const summaryData = {
       title: titleRecord.title,
       silo_category: titleRecord.silo_category,
@@ -543,7 +591,7 @@ serve(async (req) => {
       },
     ]);
 
-    // 8. Mark title as processed
+    // 9. Mark title as processed
     await supabase
       .from("article_titles")
       .update({
