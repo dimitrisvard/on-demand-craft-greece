@@ -299,7 +299,7 @@ const BlogEditor = () => {
 
       if (!token) throw new Error("User not authenticated");
 
-      // Process in batches of 1 language to avoid rate limiting with 3000-word articles
+      // Process in batches of 1 language to avoid rate limiting with 2500-word articles
       // With retry logic and longer articles, batches of 2+ can trigger Gemini API rate limits
       const BATCH_SIZE = 1;
       const langCodes = languagesToCreate.map(l => l.code);

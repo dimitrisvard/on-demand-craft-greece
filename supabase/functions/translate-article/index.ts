@@ -164,7 +164,7 @@ async function generateWithGemini(
       temperature: 0.5,
       topK: 40,
       topP: 0.95,
-      maxOutputTokens: 65536, // Increased for 3000-word articles (gemini-2.0-flash-exp supports up to 65536)
+      maxOutputTokens: 65536, // Increased for 2500-word articles (gemini-2.0-flash-exp supports up to 65536)
       responseMimeType: "application/json", // Force JSON output format
     },
   };
@@ -913,7 +913,7 @@ serve(async (req) => {
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
     // Delay between translations to avoid rate limiting
-    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (safe margin for 3000-word articles)
+    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (safe margin for 2500-word articles)
     // With batch size of 1 from frontend, each call processes 1 language
     const DELAY_BETWEEN_TRANSLATIONS = 8000;
 
