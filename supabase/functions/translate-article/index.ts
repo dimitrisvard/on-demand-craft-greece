@@ -164,7 +164,7 @@ async function generateWithGemini(
       temperature: 0.5,
       topK: 40,
       topP: 0.95,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 65536, // Increased for 3000-word articles (gemini-2.0-flash-exp supports up to 65536)
     },
   };
 
@@ -425,35 +425,11 @@ Rewrite all internal links to match the target language sub-folder structure:
     };
   } catch (error) {
     console.error(`Failed to parse translation for ${targetLanguage}:`, error);
+    console.error(`This translation will NOT be saved - throwing error to prevent English content being stored.`);
     
-    // Fallback: return original with basic link replacement
-    let fallbackContent = originalJsonData.content;
-    
-    // Fix malformed links
-    fallbackContent = fallbackContent.replace(/href="+([^"]+)"+/g, 'href="$1"');
-    
-    // Get translated service slugs for the target language
-    const servicesSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.services || "services";
-    const cncSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["cnc-machining"] || "cnc-machining";
-    const sheetMetalSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["sheet-metal"] || "sheet-metal";
-    const injectionMoldingSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["injection-molding"] || "injection-molding";
-    
-    fallbackContent = fallbackContent
-      .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
-      .replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`)
-      .replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`)
-      .replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`)
-      .replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`)
-      .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
-    
-    return {
-      title: originalJsonData.title,
-      slug: articleSlug, // Fallback to English slug on error
-      content: fallbackContent,
-      excerpt: originalJsonData.excerpt,
-      metaTitle: originalJsonData.metaTitle,
-      metaDescription: originalJsonData.metaDescription,
-    };
+    // DO NOT use fallback - throw error instead to prevent saving English content
+    // The retry logic or manual re-translation will handle this
+    throw new Error(`Translation parsing failed for ${targetLanguage}: ${error.message}. The response may have been truncated.`);
   }
 }
 
