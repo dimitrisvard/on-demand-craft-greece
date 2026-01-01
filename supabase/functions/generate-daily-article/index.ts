@@ -241,7 +241,7 @@ ${relatedArticles}
 
 ---
 ### CONTENT REQUIREMENTS
-1.  **Length:** Minimum 2500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 300-400 words per major section).
+1.  **Length:** Minimum 3000 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 300-400 words per major section).
 2.  **Depth & Detail:** 
     * Provide detailed explanations, not just surface-level information
     * Include specific technical values, ranges, and specifications
