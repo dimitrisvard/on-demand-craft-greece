@@ -653,25 +653,6 @@ const BlogEditor = () => {
       if (icons && !icons.table) {
         icons.table = '<svg viewBox="0 0 18 18"><rect class="ql-stroke" height="12" width="12" x="3" y="3"></rect><line class="ql-stroke" x1="9" x2="9" y1="3" y2="15"></line><line class="ql-stroke" x1="3" x2="15" y1="9" y2="9"></line></svg>';
       }
-
-      // Configure clipboard to preserve table HTML
-      const Clipboard = Quill.import('modules/clipboard');
-      if (Clipboard) {
-        // Add custom matcher for tables that preserves HTML structure
-        const originalMatchers = Clipboard.DEFAULTS.matchers;
-        Clipboard.DEFAULTS.matchers = [
-          // Custom table matcher that preserves full HTML
-          (node: HTMLElement, delta: any) => {
-            if (node.tagName === 'TABLE') {
-              // Preserve the entire table HTML
-              const html = node.outerHTML;
-              return new (Quill.import('delta'))().insert({ 'table-html': html });
-            }
-            return null;
-          },
-          ...originalMatchers
-        ];
-      }
     }
 
     return {
@@ -696,7 +677,6 @@ const BlogEditor = () => {
       clipboard: {
         // Preserve table HTML when pasting/loading
         matchVisual: false,
-        // Custom matchers will be handled by the registered matchers above
       },
     };
   }, [imageHandler, tableHandler]);
