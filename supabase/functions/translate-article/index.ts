@@ -260,52 +260,67 @@ async function buildArticleSlugMapping(
   const englishSlugs = [...new Set(matches.map(m => m[1]))]; // Remove duplicates
   
   if (englishSlugs.length === 0) {
+    console.log(`No article links found in content for language ${targetLangCode}`);
     return slugMapping;
   }
   
-  console.log(`Found ${englishSlugs.length} article links to translate: ${englishSlugs.join(', ')}`);
+  console.log(`[SLUG MAPPING] Found ${englishSlugs.length} article links to translate: ${englishSlugs.join(', ')}`);
   
   // For each English slug, find the article and its translation
   for (const englishSlug of englishSlugs) {
     try {
       // Find the English article by slug
-      const { data: englishArticle } = await supabase
+      const { data: englishArticle, error: englishError } = await supabase
         .from("articles")
-        .select("id, translation_id, slug")
+        .select("id, translation_id, slug, title")
         .eq("language", "en")
         .eq("slug", englishSlug)
         .single();
       
-      if (!englishArticle || !englishArticle.translation_id) {
-        console.warn(`English article not found for slug: ${englishSlug}`);
+      if (englishError) {
+        console.error(`[SLUG MAPPING] Error fetching English article for slug "${englishSlug}":`, englishError);
         continue;
       }
       
+      if (!englishArticle || !englishArticle.translation_id) {
+        console.warn(`[SLUG MAPPING] English article not found or missing translation_id for slug: ${englishSlug}`);
+        continue;
+      }
+      
+      console.log(`[SLUG MAPPING] Found English article: "${englishArticle.title}" (ID: ${englishArticle.id}, translation_id: ${englishArticle.translation_id})`);
+      
       // Find the translated article with the same translation_id
       // Check both published and draft articles (translations might be in draft)
-      const { data: translatedArticle } = await supabase
+      const { data: translatedArticle, error: transError } = await supabase
         .from("articles")
-        .select("slug")
+        .select("slug, title, id")
         .eq("translation_id", englishArticle.translation_id)
         .eq("language", targetLangCode)
         .in("status", ["published", "draft"])
         .single();
       
+      if (transError) {
+        console.warn(`[SLUG MAPPING] Translation not found for slug "${englishSlug}" in language "${targetLangCode}":`, transError.message);
+        // Keep English slug if translation doesn't exist yet
+        slugMapping[englishSlug] = englishSlug;
+        continue;
+      }
+      
       if (translatedArticle) {
         slugMapping[englishSlug] = translatedArticle.slug;
-        console.log(`Mapped: /en/blog/${englishSlug} -> /${targetLangCode}/blog/${translatedArticle.slug}`);
+        console.log(`[SLUG MAPPING] ✓ Mapped: /en/blog/${englishSlug} -> /${targetLangCode}/blog/${translatedArticle.slug} (Article: "${translatedArticle.title}")`);
       } else {
-        console.warn(`Translation not found for slug: ${englishSlug} in language: ${targetLangCode}`);
-        // Keep English slug if translation doesn't exist yet
+        console.warn(`[SLUG MAPPING] Translation article returned null for slug: ${englishSlug} in language: ${targetLangCode}`);
         slugMapping[englishSlug] = englishSlug;
       }
     } catch (error) {
-      console.error(`Error looking up slug ${englishSlug}:`, error);
+      console.error(`[SLUG MAPPING] Exception looking up slug "${englishSlug}":`, error);
       // Fallback: keep English slug
       slugMapping[englishSlug] = englishSlug;
     }
   }
   
+  console.log(`[SLUG MAPPING] Final mapping for ${targetLangCode}:`, slugMapping);
   return slugMapping;
 }
 
@@ -881,39 +896,136 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // CRITICAL: Replace article links using actual database slugs, not AI-generated ones
     if (articleSlugMapping && Object.keys(articleSlugMapping).length > 0) {
+      console.log(`[LINK REPLACEMENT] Starting link replacement for ${langCode} with mapping:`, articleSlugMapping);
+      
       // First, replace /en/blog/english-slug patterns (from original content)
       for (const [englishSlug, translatedSlug] of Object.entries(articleSlugMapping)) {
         // Escape special regex characters in slugs
         const escapedEnglishSlug = englishSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedTranslatedSlug = translatedSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         
         // Pattern 1: Replace /en/blog/english-slug with /lang/blog/translated-slug
         const pattern1 = new RegExp(`href="/en/blog/${escapedEnglishSlug}"`, 'gi');
-        content = content.replace(pattern1, `href="/${langCode}/blog/${translatedSlug}"`);
+        const matches1 = content.match(pattern1);
+        if (matches1) {
+          content = content.replace(pattern1, `href="/${langCode}/blog/${translatedSlug}"`);
+          console.log(`[LINK REPLACEMENT] Pattern 1: Replaced ${matches1.length} occurrence(s) of /en/blog/${englishSlug} -> /${langCode}/blog/${translatedSlug}`);
+        }
         
         // Pattern 2: Replace /lang/blog/english-slug (if AI didn't translate the slug) with /lang/blog/translated-slug
         const pattern2 = new RegExp(`href="/${langCode}/blog/${escapedEnglishSlug}"`, 'gi');
-        content = content.replace(pattern2, `href="/${langCode}/blog/${translatedSlug}"`);
+        const matches2 = content.match(pattern2);
+        if (matches2) {
+          content = content.replace(pattern2, `href="/${langCode}/blog/${translatedSlug}"`);
+          console.log(`[LINK REPLACEMENT] Pattern 2: Replaced ${matches2.length} occurrence(s) of /${langCode}/blog/${englishSlug} -> /${langCode}/blog/${translatedSlug}`);
+        }
         
-        console.log(`Replaced article link: /en/blog/${englishSlug} -> /${langCode}/blog/${translatedSlug}`);
+        // Pattern 3: Replace any /lang/blog/wrong-slug that should be /lang/blog/correct-slug
+        // This handles cases where AI generated a slug that doesn't match the database
+        // We check if the slug in the link is NOT the correct translated slug
+        const pattern3 = new RegExp(`href="/${langCode}/blog/([^"]+)"`, 'g');
+        const allMatches = Array.from(content.matchAll(pattern3));
+        for (const match of allMatches) {
+          const slugInLink = match[1];
+          // If this slug doesn't match the correct translated slug, but we know what it should be
+          if (slugInLink !== translatedSlug && slugInLink !== englishSlug) {
+            // Check if this slug exists in database and has the same translation_id as our English article
+            // This is a more complex check - we'll do it in the second pass below
+          }
+        }
       }
       
-      // Second pass: Find any /lang/blog/slug links and check if they need to be replaced
+      // Second pass: Find any /lang/blog/slug links and verify they're correct
       // This handles cases where AI translated the slug but it doesn't match the database
-      // We'll match all /lang/blog/slug links and check if the slug corresponds to an English article
       const blogLinkPattern = new RegExp(`href="/${langCode}/blog/([^"]+)"`, 'g');
       const allBlogLinks = Array.from(content.matchAll(blogLinkPattern));
       
+      console.log(`[LINK REPLACEMENT] Second pass: Found ${allBlogLinks.length} blog links in translated content`);
+      
       for (const match of allBlogLinks) {
         const slugInLink = match[1];
-        // Check if this slug is in our mapping (meaning it's an AI-generated slug that should be replaced)
-        // We check by looking for the English slug that maps to this translated slug
-        const mappedEntry = Object.entries(articleSlugMapping).find(([_, translated]) => translated === slugInLink);
+        const fullMatch = match[0];
         
-        // If the slug in the link doesn't match any known translated slug, it might be AI-generated
-        // We need to check if it corresponds to an English article we're linking to
-        // For now, we'll only replace if we find a direct match in the mapping
-        // The first pass above should have handled most cases
+        // Check if this slug matches any of our known translated slugs
+        const isKnownSlug = Object.values(articleSlugMapping).includes(slugInLink);
+        
+        if (isKnownSlug) {
+          console.log(`[LINK REPLACEMENT] ✓ Link with slug "${slugInLink}" is correct (in mapping)`);
+          continue; // This slug is correct, skip
+        }
+        
+        // If the slug doesn't match any known translated slug, it might be AI-generated and wrong
+        console.log(`[LINK REPLACEMENT] ⚠️ Found potentially incorrect slug in link: "${slugInLink}"`);
+        
+        // Try to find this slug in the database and get its translation_id
+        // Then check if that translation_id matches any English article we're linking to
+        try {
+          const { data: articleWithSlug, error: slugLookupError } = await supabase
+            .from("articles")
+            .select("translation_id, slug, language, title")
+            .eq("language", langCode)
+            .eq("slug", slugInLink)
+            .single();
+          
+          if (slugLookupError || !articleWithSlug) {
+            // This slug doesn't exist in database - it's definitely wrong
+            console.warn(`[LINK REPLACEMENT] Slug "${slugInLink}" does not exist in database for language ${langCode}`);
+            
+            // Try to find which English article this might correspond to
+            // We'll look for English articles that have translations with similar slugs
+            // This is a best-effort fix
+            for (const [englishSlug, correctTranslatedSlug] of Object.entries(articleSlugMapping)) {
+              // If the incorrect slug is similar to the correct one, or if we can't find it,
+              // replace it with the correct one
+              if (slugInLink !== correctTranslatedSlug && slugInLink !== englishSlug) {
+                // Check if this might be the right article by looking at the English slug
+                // This is a heuristic - if the slug is completely different, we can't be sure
+                // For now, we'll be conservative and only fix if we're very confident
+                console.log(`[LINK REPLACEMENT] Could not verify slug "${slugInLink}" - keeping as is (might be a different article)`);
+              }
+            }
+            continue;
+          }
+          
+          // Found the article with this slug
+          if (articleWithSlug.translation_id) {
+            // Find the English article with this translation_id
+            const { data: englishArticle, error: englishError } = await supabase
+              .from("articles")
+              .select("slug, title")
+              .eq("translation_id", articleWithSlug.translation_id)
+              .eq("language", "en")
+              .single();
+            
+            if (englishError || !englishArticle) {
+              console.warn(`[LINK REPLACEMENT] Could not find English article for translation_id ${articleWithSlug.translation_id}`);
+              continue;
+            }
+            
+            // If this English article is in our mapping, check if the slug is correct
+            if (articleSlugMapping[englishArticle.slug]) {
+              const correctSlug = articleSlugMapping[englishArticle.slug];
+              if (correctSlug !== slugInLink) {
+                console.log(`[LINK REPLACEMENT] ✓ Fixing incorrect slug: "${slugInLink}" -> "${correctSlug}" (English: "${englishArticle.title}")`);
+                const escapedSlugInLink = slugInLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                content = content.replace(
+                  new RegExp(`href="/${langCode}/blog/${escapedSlugInLink}"`, 'g'),
+                  `href="/${langCode}/blog/${correctSlug}"`
+                );
+              } else {
+                console.log(`[LINK REPLACEMENT] ✓ Slug "${slugInLink}" is correct (matches database)`);
+              }
+            } else {
+              console.log(`[LINK REPLACEMENT] English article "${englishArticle.slug}" not in mapping - might be a different article`);
+            }
+          }
+        } catch (lookupError: any) {
+          // If lookup fails, log but continue
+          console.warn(`[LINK REPLACEMENT] Exception verifying slug "${slugInLink}":`, lookupError.message);
+        }
       }
+      
+      console.log(`[LINK REPLACEMENT] Completed link replacement for ${langCode}`);
     } else {
       // Fallback: if no mapping provided, just change language prefix (old behavior)
       // But this may result in incorrect slugs

@@ -617,31 +617,50 @@ const BlogEditor = () => {
     return () => clearTimeout(timer);
   }, [loading, isSourceView]);
 
-  // Preserve table HTML when content is loaded into Quill
+  // Track if we've already fixed tables to prevent infinite loops
+  const [tablesFixed, setTablesFixed] = useState(false);
+  
+  // Preserve table HTML when content is loaded into Quill (only once on initial load)
   useEffect(() => {
-    if (!quillRef.current || !formData.content || loading || isSourceView) return;
+    if (!quillRef.current || !formData.content || loading || isSourceView || tablesFixed) return;
 
     const quill = quillRef.current.getEditor();
     if (!quill) return;
 
-    // Check if content contains tables
-    const hasTables = formData.content.includes('<table') && formData.content.includes('</table>');
-    if (!hasTables) return;
+    // Wait for Quill to initialize
+    const timer = setTimeout(() => {
+      // Check if content contains tables
+      const hasTables = formData.content.includes('<table') && formData.content.includes('</table>');
+      if (!hasTables) {
+        setTablesFixed(true);
+        return;
+      }
 
-    // Get current Quill content
-    const currentContent = quill.root.innerHTML;
-    
-    // Check if tables are missing or broken in Quill
-    const tablesInOriginal = (formData.content.match(/<table[^>]*>/gi) || []).length;
-    const tablesInQuill = (currentContent.match(/<table[^>]*>/gi) || []).length;
-    
-    // If tables are missing or broken, re-insert the content using dangerouslyPasteHTML
-    if (tablesInOriginal > 0 && (tablesInQuill === 0 || tablesInQuill < tablesInOriginal)) {
-      console.log('Tables detected in content but missing in Quill, re-inserting with dangerouslyPasteHTML...');
-      // Clear and re-insert content to preserve table structure
-      quill.clipboard.dangerouslyPasteHTML(0, formData.content, 'user');
-    }
-  }, [formData.content, loading, isSourceView]);
+      // Get current Quill content
+      const currentContent = quill.root.innerHTML;
+      
+      // Check if tables are missing or broken in Quill
+      const tablesInOriginal = (formData.content.match(/<table[^>]*>/gi) || []).length;
+      const tablesInQuill = (currentContent.match(/<table[^>]*>/gi) || []).length;
+      
+      // If tables are missing or broken, re-insert the content using dangerouslyPasteHTML
+      if (tablesInOriginal > 0 && (tablesInQuill === 0 || tablesInQuill < tablesInOriginal)) {
+        console.log('Tables detected in content but missing in Quill, re-inserting with dangerouslyPasteHTML...');
+        // Clear and re-insert content to preserve table structure
+        quill.clipboard.dangerouslyPasteHTML(0, formData.content, 'user');
+        setTablesFixed(true);
+      } else {
+        setTablesFixed(true);
+      }
+    }, 500); // Small delay to ensure Quill is ready
+
+    return () => clearTimeout(timer);
+  }, [formData.content, loading, isSourceView, tablesFixed]);
+
+  // Reset tablesFixed when article ID changes
+  useEffect(() => {
+    setTablesFixed(false);
+  }, [id]);
 
   const quillModules = useMemo(() => {
     // Get Quill instance to register custom table button
