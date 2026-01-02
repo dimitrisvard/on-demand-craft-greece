@@ -277,6 +277,7 @@ ${relatedArticles}
 3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services"> our manufacturing services </a> (always include spaces before and after the link tag)
 4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
     * Use this exact format: "For high-precision results, <a href="/en/quote"> ${selectedQuoteText} </a> from ${BRAND_NAME}." (always include spaces before and after the link tag)
+    * CRITICAL: NEVER use the word "instant" or "immediately" in quote sentences. Use phrases like "within 24 hours", "in 24 hours", or "delivered in 24 hours" instead.
 
 ---
 ### CONTENT REQUIREMENTS
@@ -296,9 +297,12 @@ ${relatedArticles}
       - ALWAYS create HTML tables (<table>) when comparing materials, processes, properties, specifications, or any data that benefits from side-by-side comparison.
       - Use tables for: material properties (tensile strength, hardness, cost), process comparisons (CNC vs 3D printing), tolerance ranges, pricing tiers, material grades, surface finish options, etc.
       - Format tables with proper HTML structure: <table class="editor-table"><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>
+      - CRITICAL: Tables MUST be properly closed with </table> tag. Each <tr> must be closed with </tr>, each <td> with </td>, each <th> with </th>, <thead> with </thead>, <tbody> with </tbody>.
       - Include inline styles for borders and spacing if needed, but primary styling is via CSS classes.
-      - Use <th> for header cells.
+      - Use <th> for header cells in <thead> section.
+      - Use <td> for data cells in <tbody> section.
       - Make tables responsive and readable with proper column alignment.
+      - NEVER break table structure - keep all table HTML tags intact and properly nested.
       - Example: When comparing aluminum 6061-T6 vs 7075-T6, create a table with columns for Property, 6061-T6, 7075-T6, and rows for Yield Strength, Tensile Strength, Hardness, Cost, etc.
     * **Visual Q&A:** A visible H2 section titled "Frequently Asked Questions" at the bottom with 5-7 questions using <h3> for each question.
 4.  **FAQ Schema:** Generate Google-compliant JSON-LD for the FAQ section.
@@ -422,8 +426,27 @@ function cleanHtmlContent(html: string): string {
   // Ensure links have proper spacing - add space before opening <a> and after closing </a> if missing
   // Pattern: text<a href=...>link</a>text should become text <a href=...>link</a> text
   // More robust regex that handles various edge cases
-  html = html.replace(/([^\s>])(<a\s+[^>]*href)/g, '$1 $2'); // Space before <a> (handles any attributes)
-  html = html.replace(/(<\/a>)([^\s<])/g, '$1 $2'); // Space after </a>
+  // Don't add spaces inside table cells - only outside tables
+  html = html.replace(/([^\s>])(<a\s+[^>]*href)/g, (match, p1, p2, offset, string) => {
+    // Check if we're inside a table cell - if so, don't add space
+    const beforeMatch = string.substring(0, offset);
+    const lastTd = beforeMatch.lastIndexOf('<td');
+    const lastTh = beforeMatch.lastIndexOf('<th');
+    const lastTdClose = beforeMatch.lastIndexOf('</td>');
+    const lastThClose = beforeMatch.lastIndexOf('</th>');
+    const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
+    return inTableCell ? match : `${p1} ${p2}`;
+  });
+  html = html.replace(/(<\/a>)([^\s<])/g, (match, p1, p2, offset, string) => {
+    // Check if we're inside a table cell - if so, don't add space
+    const beforeMatch = string.substring(0, offset);
+    const lastTd = beforeMatch.lastIndexOf('<td');
+    const lastTh = beforeMatch.lastIndexOf('<th');
+    const lastTdClose = beforeMatch.lastIndexOf('</td>');
+    const lastThClose = beforeMatch.lastIndexOf('</th>');
+    const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
+    return inTableCell ? match : `${p1} ${p2}`;
+  });
   
   // Clean up table cells - remove excessive whitespace in table cells
   // Pattern: empty cells with just whitespace/newlines

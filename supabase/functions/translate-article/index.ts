@@ -312,6 +312,13 @@ Translate the metaDescription to ${targetLanguage} but:
 - Use industry-standard terms for ${targetLanguage} (e.g., "Stainless Steel" → German "Edelstahl")
 - Preserve ALL HTML tags, classes, and IDs exactly
 - Only translate the text *between* the tags
+- **CRITICAL - TABLE PRESERVATION:** 
+  * Preserve ALL table HTML structure exactly: <table>, <thead>, <tbody>, <tr>, <th>, <td> tags must remain intact
+  * Translate ONLY the text content inside <th> and <td> cells
+  * DO NOT break table structure - keep all opening and closing tags properly nested
+  * Maintain table class="editor-table" attribute
+  * Ensure proper spacing: add spaces before <a> tags and after </a> tags OUTSIDE of table cells, but preserve spacing inside table cells as needed
+  * Example: Translate "Yield Strength" in <th>Yield Strength</th> to target language, but keep the <th> tags
 
 #### 6. SMART LINK LOCALIZATION (Crucial)
 Rewrite all internal links to match the target language sub-folder structure:
@@ -808,10 +815,44 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     content = content.replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
     
     // Ensure proper spacing around <a> tags to prevent text from sticking together
-    // Add space before <a> if preceded by non-space character
-    content = content.replace(/([^\s>])(<a\s+href)/g, '$1 $2');
-    // Add space after </a> if followed by non-space character
-    content = content.replace(/(<\/a>)([^\s<])/g, '$1 $2');
+    // But don't add spaces inside table cells - only outside tables
+    content = content.replace(/([^\s>])(<a\s+href)/g, (match, p1, p2, offset, string) => {
+      // Check if we're inside a table cell - if so, don't add space
+      const beforeMatch = string.substring(0, offset);
+      const lastTd = beforeMatch.lastIndexOf('<td');
+      const lastTh = beforeMatch.lastIndexOf('<th');
+      const lastTdClose = beforeMatch.lastIndexOf('</td>');
+      const lastThClose = beforeMatch.lastIndexOf('</th>');
+      const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
+      return inTableCell ? match : `${p1} ${p2}`;
+    });
+    content = content.replace(/(<\/a>)([^\s<])/g, (match, p1, p2, offset, string) => {
+      // Check if we're inside a table cell - if so, don't add space
+      const beforeMatch = string.substring(0, offset);
+      const lastTd = beforeMatch.lastIndexOf('<td');
+      const lastTh = beforeMatch.lastIndexOf('<th');
+      const lastTdClose = beforeMatch.lastIndexOf('</td>');
+      const lastThClose = beforeMatch.lastIndexOf('</th>');
+      const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
+      return inTableCell ? match : `${p1} ${p2}`;
+    });
+    
+    // Fix broken table structures - ensure all table tags are properly closed
+    // Fix unclosed table tags
+    content = content.replace(/<table([^>]*)>/gi, '<table$1>');
+    content = content.replace(/<\/table>/gi, '</table>');
+    // Ensure proper table structure
+    content = content.replace(/<table([^>]*)>(?!\s*<thead|\s*<tbody)/gi, '<table$1><tbody>');
+    content = content.replace(/(<\/tr>)(?!\s*<\/tbody>|\s*<tr|\s*<\/table>)/gi, '$1');
+    // Fix tables missing closing tags
+    const tableCount = (content.match(/<table/gi) || []).length;
+    const tableCloseCount = (content.match(/<\/table>/gi) || []).length;
+    if (tableCount > tableCloseCount) {
+      // Add missing closing table tags at the end of content
+      for (let i = 0; i < tableCount - tableCloseCount; i++) {
+        content += '</tbody></table>';
+      }
+    }
 
     // Generate slug from translated title if not provided
     let translatedSlug = parsed.slug;
