@@ -240,7 +240,7 @@ async function generateMasterArticle(
   
   // Quote link text variations (rotating)
   const quoteTexts = [
-    "Get an instant quote in 24 hours",
+    "Get a quote in 24 hours",
     "Receive a detailed quote within 24 hours",
     "Request a free quote and get pricing in 24 hours",
     "Get your custom quote delivered in 24 hours",
@@ -421,7 +421,8 @@ function cleanHtmlContent(html: string): string {
   
   // Ensure links have proper spacing - add space before opening <a> and after closing </a> if missing
   // Pattern: text<a href=...>link</a>text should become text <a href=...>link</a> text
-  html = html.replace(/([^\s>])(<a\s+href)/g, '$1 $2'); // Space before <a>
+  // More robust regex that handles various edge cases
+  html = html.replace(/([^\s>])(<a\s+[^>]*href)/g, '$1 $2'); // Space before <a> (handles any attributes)
   html = html.replace(/(<\/a>)([^\s<])/g, '$1 $2'); // Space after </a>
   
   // Clean up table cells - remove excessive whitespace in table cells

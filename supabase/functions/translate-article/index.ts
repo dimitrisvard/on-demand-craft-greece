@@ -761,31 +761,41 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     // Ensure links are properly localized and fix any malformed links
     let content = parsed.content || originalJsonData.content;
     
-    // Fix malformed links with quotes inside href (e.g., href=""path"" → href="/path")
-    content = content.replace(/href="+([^"]+)"+/g, 'href="$1"'); // Remove duplicate quotes
-    content = content.replace(/href="([^"]*)"([^"]*)"([^"]*)"/g, 'href="$1$2$3"'); // Fix nested quotes
-    
     // Get translated service slugs for the target language
     const servicesSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.services || "services";
     const cncSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["cnc-machining"] || "cnc-machining";
     const sheetMetalSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["sheet-metal"] || "sheet-metal";
     const injectionMoldingSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["injection-molding"] || "injection-molding";
     
-    // Ensure all internal links use the correct language code and translated slugs
-    content = content
-      .replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`)
-      .replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`)
-      .replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`)
-      .replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`)
-      .replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`)
-      .replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
-    
-    // Clean up any remaining malformed links (href with quotes in the middle)
-    // Pattern: href="/something"something" → href="/somethingsomething"
-    content = content.replace(/href="([^"]*)"([^/][^"]*)"/g, (match, p1, p2) => {
-      // If there's a quote in the middle of the href value, remove it
-      return `href="${p1}${p2.replace(/"/g, '')}"`;
+    // First, fix malformed links where HTML attributes got into the href value
+    // Pattern: href="/path%20rel=noopener%20noreferrer%20target=" → href="/path"
+    // This handles cases where Gemini incorrectly included attributes in the href
+    content = content.replace(/href="([^"]*?)(?:\s*%20)?(?:rel|target|noreferrer|noopener)[^"]*"/gi, (match) => {
+      // Extract just the URL part (before any attributes)
+      const urlMatch = match.match(/href="([^"\s%]+)/);
+      if (urlMatch && urlMatch[1]) {
+        return `href="${urlMatch[1]}"`;
+      }
+      return match;
     });
+    
+    // Fix malformed links with quotes inside href (e.g., href=""path"" → href="/path")
+    content = content.replace(/href="+([^"]+)"+/g, 'href="$1"');
+    
+    // Now replace English paths with translated paths
+    // Use a more robust regex that handles various formats
+    content = content.replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`);
+    content = content.replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`);
+    content = content.replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`);
+    content = content.replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`);
+    content = content.replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`);
+    content = content.replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+    
+    // Ensure proper spacing around <a> tags to prevent text from sticking together
+    // Add space before <a> if preceded by non-space character
+    content = content.replace(/([^\s>])(<a\s+href)/g, '$1 $2');
+    // Add space after </a> if followed by non-space character
+    content = content.replace(/(<\/a>)([^\s<])/g, '$1 $2');
 
     // Generate slug from translated title if not provided
     let translatedSlug = parsed.slug;
