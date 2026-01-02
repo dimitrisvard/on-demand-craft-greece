@@ -37,87 +37,102 @@ const LANGUAGES = [
 
 // Service page slug translations for all languages
 // Maps: language -> English slug -> translated slug
+// These must match the slugs in src/locales/*/translation.json files
 const SERVICE_SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
   en: {
     "services": "services",
+    "quote": "quote",
     "cnc-machining": "cnc-machining",
     "sheet-metal": "sheet-metal",
     "injection-molding": "injection-molding",
   },
   de: {
     "services": "dienstleistungen",
+    "quote": "angebot",
     "cnc-machining": "cnc-bearbeitung",
     "sheet-metal": "blechbearbeitung",
     "injection-molding": "spritzguss",
   },
   fr: {
     "services": "services",
+    "quote": "devis",
     "cnc-machining": "usinage-cnc",
     "sheet-metal": "tolerie",
-    "injection-molding": "moulage-par-injection",
+    "injection-molding": "injection-plastique",
   },
   es: {
     "services": "servicios",
+    "quote": "cotizacion",
     "cnc-machining": "mecanizado-cnc",
     "sheet-metal": "chapa-metalica",
     "injection-molding": "moldeo-por-inyeccion",
   },
   it: {
     "services": "servizi",
+    "quote": "preventivo",
     "cnc-machining": "lavorazione-cnc",
     "sheet-metal": "lavorazione-lamiera",
-    "injection-molding": "stampaggio-ad-iniezione",
+    "injection-molding": "stampaggio-iniezione",
   },
   nl: {
     "services": "diensten",
+    "quote": "offerte",
     "cnc-machining": "cnc-bewerking",
     "sheet-metal": "plaatbewerking",
     "injection-molding": "spuitgieten",
   },
   pl: {
     "services": "uslugi",
+    "quote": "wycena",
     "cnc-machining": "obrobka-cnc",
-    "sheet-metal": "obrobka-blaszek",
-    "injection-molding": "formowanie-wtryskowe",
+    "sheet-metal": "obrobka-bluzy",
+    "injection-molding": "wtrysk-tworzywa",
   },
   sv: {
     "services": "tjanster",
+    "quote": "offert",
     "cnc-machining": "cnc-bearbetning",
     "sheet-metal": "platarbe",
-    "injection-molding": "spjutsgjutning",
+    "injection-molding": "sprutgjutning",
   },
   da: {
     "services": "tjenester",
+    "quote": "tilbud",
     "cnc-machining": "cnc-bearbejdning",
     "sheet-metal": "pladearbejde",
-    "injection-molding": "spjutsgodsning",
+    "injection-molding": "sproejtestoebning",
   },
   fi: {
     "services": "palvelut",
-    "cnc-machining": "cnc-koneistus",
-    "sheet-metal": "levytyo",
-    "injection-molding": "ruiskumuovaus",
+    "quote": "tarjous",
+    "cnc-machining": "cnc-työstö",
+    "sheet-metal": "levytyöstö",
+    "injection-molding": "ruiskupuristus",
   },
   cs: {
     "services": "sluzby",
+    "quote": "nabidka",
     "cnc-machining": "cnc-obrabeni",
     "sheet-metal": "obrabeni-plechu",
-    "injection-molding": "vstrikovani",
+    "injection-molding": "vstrekovani",
   },
   hu: {
     "services": "szolgaltatasok",
+    "quote": "ajanlat",
     "cnc-machining": "cnc-megmunkalas",
     "sheet-metal": "lemezfeldolgozas",
     "injection-molding": "frccsnyomas",
   },
   pt: {
     "services": "servicos",
+    "quote": "orcamento",
     "cnc-machining": "usinagem-cnc",
     "sheet-metal": "chapa-metalica",
-    "injection-molding": "moldagem-por-injecao",
+    "injection-molding": "moldagem-injecao",
   },
   nb: {
     "services": "tjenester",
+    "quote": "tilbud",
     "cnc-machining": "cnc-bearbeiding",
     "sheet-metal": "platarbeid",
     "injection-molding": "sproyetestoping",
@@ -300,7 +315,7 @@ Translate the metaDescription to ${targetLanguage} but:
 
 #### 6. SMART LINK LOCALIZATION (Crucial)
 Rewrite all internal links to match the target language sub-folder structure:
-* href="/en/quote" → href="/${langCode}/quote"
+* href="/en/quote" → href="/${langCode}/[translated-quote-slug]"
 * href="/en/services" → href="/${langCode}/[translated-services-slug]"  
 * href="/en/services/cnc-machining" → href="/${langCode}/[translated-services-slug]/[translated-cnc-slug]"
 * href="/en/services/sheet-metal" → href="/${langCode}/[translated-services-slug]/[translated-sheet-metal-slug]"
@@ -310,7 +325,7 @@ Rewrite all internal links to match the target language sub-folder structure:
 * CRITICAL: Links must use proper HTML format: <a href="/${langCode}/path">text</a>
 * NEVER include quotes inside the href attribute value - use: href="/path" NOT href=""path""
 * Ensure all href values start with "/" and contain no spaces or extra quotes
-* IMPORTANT: Service page links must use the correct translated slugs for the target language
+* IMPORTANT: All links (quote, services, service pages) must use the correct translated slugs for the target language
 
 ---
 ### OUTPUT FORMAT (CRITICAL - READ CAREFULLY)
@@ -763,6 +778,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // Get translated service slugs for the target language
     const servicesSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.services || "services";
+    const quoteSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.quote || "quote";
     const cncSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["cnc-machining"] || "cnc-machining";
     const sheetMetalSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["sheet-metal"] || "sheet-metal";
     const injectionMoldingSlug = SERVICE_SLUG_TRANSLATIONS[langCode]?.["injection-molding"] || "injection-molding";
@@ -784,7 +800,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // Now replace English paths with translated paths
     // Use a more robust regex that handles various formats
-    content = content.replace(/href="\/en\/quote"/g, `href="/${langCode}/quote"`);
+    content = content.replace(/href="\/en\/quote"/g, `href="/${langCode}/${quoteSlug}"`);
     content = content.replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${servicesSlug}/${cncSlug}"`);
     content = content.replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`);
     content = content.replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`);
