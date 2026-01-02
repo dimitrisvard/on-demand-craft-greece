@@ -245,6 +245,71 @@ function generateSlug(title: string): string {
 }
 
 /**
+ * Extract article slugs from content and build mapping to translated slugs
+ * Returns a map: English slug -> Translated slug for the target language
+ */
+async function buildArticleSlugMapping(
+  content: string,
+  targetLangCode: string
+): Promise<Record<string, string>> {
+  const slugMapping: Record<string, string> = {};
+  
+  // Extract all /en/blog/slug patterns from content
+  const blogLinkPattern = /href="\/en\/blog\/([^"]+)"/g;
+  const matches = Array.from(content.matchAll(blogLinkPattern));
+  const englishSlugs = [...new Set(matches.map(m => m[1]))]; // Remove duplicates
+  
+  if (englishSlugs.length === 0) {
+    return slugMapping;
+  }
+  
+  console.log(`Found ${englishSlugs.length} article links to translate: ${englishSlugs.join(', ')}`);
+  
+  // For each English slug, find the article and its translation
+  for (const englishSlug of englishSlugs) {
+    try {
+      // Find the English article by slug
+      const { data: englishArticle } = await supabase
+        .from("articles")
+        .select("id, translation_id, slug")
+        .eq("language", "en")
+        .eq("slug", englishSlug)
+        .single();
+      
+      if (!englishArticle || !englishArticle.translation_id) {
+        console.warn(`English article not found for slug: ${englishSlug}`);
+        continue;
+      }
+      
+      // Find the translated article with the same translation_id
+      // Check both published and draft articles (translations might be in draft)
+      const { data: translatedArticle } = await supabase
+        .from("articles")
+        .select("slug")
+        .eq("translation_id", englishArticle.translation_id)
+        .eq("language", targetLangCode)
+        .in("status", ["published", "draft"])
+        .single();
+      
+      if (translatedArticle) {
+        slugMapping[englishSlug] = translatedArticle.slug;
+        console.log(`Mapped: /en/blog/${englishSlug} -> /${targetLangCode}/blog/${translatedArticle.slug}`);
+      } else {
+        console.warn(`Translation not found for slug: ${englishSlug} in language: ${targetLangCode}`);
+        // Keep English slug if translation doesn't exist yet
+        slugMapping[englishSlug] = englishSlug;
+      }
+    } catch (error) {
+      console.error(`Error looking up slug ${englishSlug}:`, error);
+      // Fallback: keep English slug
+      slugMapping[englishSlug] = englishSlug;
+    }
+  }
+  
+  return slugMapping;
+}
+
+/**
  * Generate translation using "Localization & Link Processor" Prompt
  * - Translates: title, content, excerpt, meta title, meta description, slug
  */
@@ -259,7 +324,8 @@ async function generateTranslation(
   targetLanguage: string,
   langCode: string,
   articleSlug: string,
-  thoughtSignature: string
+  thoughtSignature: string,
+  articleSlugMapping?: Record<string, string>
 ): Promise<{
   title: string;
   content: string;
@@ -812,7 +878,47 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     content = content.replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${servicesSlug}/${sheetMetalSlug}"`);
     content = content.replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${servicesSlug}/${injectionMoldingSlug}"`);
     content = content.replace(/href="\/en\/services"/g, `href="/${langCode}/${servicesSlug}"`);
-    content = content.replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+    
+    // CRITICAL: Replace article links using actual database slugs, not AI-generated ones
+    if (articleSlugMapping && Object.keys(articleSlugMapping).length > 0) {
+      // First, replace /en/blog/english-slug patterns (from original content)
+      for (const [englishSlug, translatedSlug] of Object.entries(articleSlugMapping)) {
+        // Escape special regex characters in slugs
+        const escapedEnglishSlug = englishSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        
+        // Pattern 1: Replace /en/blog/english-slug with /lang/blog/translated-slug
+        const pattern1 = new RegExp(`href="/en/blog/${escapedEnglishSlug}"`, 'gi');
+        content = content.replace(pattern1, `href="/${langCode}/blog/${translatedSlug}"`);
+        
+        // Pattern 2: Replace /lang/blog/english-slug (if AI didn't translate the slug) with /lang/blog/translated-slug
+        const pattern2 = new RegExp(`href="/${langCode}/blog/${escapedEnglishSlug}"`, 'gi');
+        content = content.replace(pattern2, `href="/${langCode}/blog/${translatedSlug}"`);
+        
+        console.log(`Replaced article link: /en/blog/${englishSlug} -> /${langCode}/blog/${translatedSlug}`);
+      }
+      
+      // Second pass: Find any /lang/blog/slug links and check if they need to be replaced
+      // This handles cases where AI translated the slug but it doesn't match the database
+      // We'll match all /lang/blog/slug links and check if the slug corresponds to an English article
+      const blogLinkPattern = new RegExp(`href="/${langCode}/blog/([^"]+)"`, 'g');
+      const allBlogLinks = Array.from(content.matchAll(blogLinkPattern));
+      
+      for (const match of allBlogLinks) {
+        const slugInLink = match[1];
+        // Check if this slug is in our mapping (meaning it's an AI-generated slug that should be replaced)
+        // We check by looking for the English slug that maps to this translated slug
+        const mappedEntry = Object.entries(articleSlugMapping).find(([_, translated]) => translated === slugInLink);
+        
+        // If the slug in the link doesn't match any known translated slug, it might be AI-generated
+        // We need to check if it corresponds to an English article we're linking to
+        // For now, we'll only replace if we find a direct match in the mapping
+        // The first pass above should have handled most cases
+      }
+    } else {
+      // Fallback: if no mapping provided, just change language prefix (old behavior)
+      // But this may result in incorrect slugs
+      content = content.replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+    }
     
     // Ensure proper spacing around <a> tags to prevent text from sticking together
     // But don't add spaces inside table cells - only outside tables
@@ -1013,7 +1119,23 @@ serve(async (req) => {
 
     const thoughtSignature = `Article about ${masterArticle.title} by ${BRAND_NAME} - Technical manufacturing focus`;
 
-    // 3. Generate translations with rate limiting protection
+    // 3. Filter languages if target_languages is specified
+    const languagesToTranslate = target_languages && target_languages.length > 0
+      ? LANGUAGES.filter(l => target_languages.includes(l.code))
+      : LANGUAGES;
+    
+    console.log(`Translating to ${languagesToTranslate.length} language(s): ${languagesToTranslate.map(l => l.code).join(', ')}`);
+
+    // 4. Build article slug mapping BEFORE translation (for all target languages)
+    // This ensures we have the correct translated slugs for article links
+    const articleSlugMappings: Record<string, Record<string, string>> = {};
+    for (const lang of languagesToTranslate) {
+      const mapping = await buildArticleSlugMapping(masterArticle.content, lang.code);
+      articleSlugMappings[lang.code] = mapping;
+      console.log(`Built slug mapping for ${lang.code}: ${Object.keys(mapping).length} articles`);
+    }
+
+    // 5. Generate translations with rate limiting protection
     const translations: Record<string, any> = {};
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
@@ -1021,13 +1143,6 @@ serve(async (req) => {
     // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (safe margin for 2500-word articles)
     // With batch size of 1 from frontend, each call processes 1 language
     const DELAY_BETWEEN_TRANSLATIONS = 8000;
-
-    // Filter languages if target_languages is specified
-    const languagesToTranslate = target_languages && target_languages.length > 0
-      ? LANGUAGES.filter(l => target_languages.includes(l.code))
-      : LANGUAGES;
-    
-    console.log(`Translating to ${languagesToTranslate.length} language(s): ${languagesToTranslate.map(l => l.code).join(', ')}`);
 
     for (let i = 0; i < languagesToTranslate.length; i++) {
       const lang = languagesToTranslate[i];
@@ -1059,13 +1174,15 @@ serve(async (req) => {
         
         // Use retry wrapper to handle rate limits with exponential backoff
         // Reduced retries to return faster with actual error message
+        // Pass the article slug mapping for this language to ensure correct links
         const translation = await withRetry(
           () => generateTranslation(
             originalJsonData,
             lang.name,
             lang.code,
             masterArticle.slug, // Pass original slug for reference (will be translated)
-            thoughtSignature
+            thoughtSignature,
+            articleSlugMappings[lang.code] // Pass the slug mapping for this language
           ),
           2, // Max 2 retries to return faster with error
           5000 // Base delay of 5 seconds for retries

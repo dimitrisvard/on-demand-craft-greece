@@ -617,6 +617,32 @@ const BlogEditor = () => {
     return () => clearTimeout(timer);
   }, [loading, isSourceView]);
 
+  // Preserve table HTML when content is loaded into Quill
+  useEffect(() => {
+    if (!quillRef.current || !formData.content || loading || isSourceView) return;
+
+    const quill = quillRef.current.getEditor();
+    if (!quill) return;
+
+    // Check if content contains tables
+    const hasTables = formData.content.includes('<table') && formData.content.includes('</table>');
+    if (!hasTables) return;
+
+    // Get current Quill content
+    const currentContent = quill.root.innerHTML;
+    
+    // Check if tables are missing or broken in Quill
+    const tablesInOriginal = (formData.content.match(/<table[^>]*>/gi) || []).length;
+    const tablesInQuill = (currentContent.match(/<table[^>]*>/gi) || []).length;
+    
+    // If tables are missing or broken, re-insert the content using dangerouslyPasteHTML
+    if (tablesInOriginal > 0 && (tablesInQuill === 0 || tablesInQuill < tablesInOriginal)) {
+      console.log('Tables detected in content but missing in Quill, re-inserting with dangerouslyPasteHTML...');
+      // Clear and re-insert content to preserve table structure
+      quill.clipboard.dangerouslyPasteHTML(0, formData.content, 'user');
+    }
+  }, [formData.content, loading, isSourceView]);
+
   const quillModules = useMemo(() => {
     // Get Quill instance to register custom table button
     const Quill = (ReactQuill as any).Quill || (window as any).Quill;
@@ -626,6 +652,25 @@ const BlogEditor = () => {
       const icons = Quill.import('ui/icons');
       if (icons && !icons.table) {
         icons.table = '<svg viewBox="0 0 18 18"><rect class="ql-stroke" height="12" width="12" x="3" y="3"></rect><line class="ql-stroke" x1="9" x2="9" y1="3" y2="15"></line><line class="ql-stroke" x1="3" x2="15" y1="9" y2="9"></line></svg>';
+      }
+
+      // Configure clipboard to preserve table HTML
+      const Clipboard = Quill.import('modules/clipboard');
+      if (Clipboard) {
+        // Add custom matcher for tables that preserves HTML structure
+        const originalMatchers = Clipboard.DEFAULTS.matchers;
+        Clipboard.DEFAULTS.matchers = [
+          // Custom table matcher that preserves full HTML
+          (node: HTMLElement, delta: any) => {
+            if (node.tagName === 'TABLE') {
+              // Preserve the entire table HTML
+              const html = node.outerHTML;
+              return new (Quill.import('delta'))().insert({ 'table-html': html });
+            }
+            return null;
+          },
+          ...originalMatchers
+        ];
       }
     }
 
@@ -647,6 +692,11 @@ const BlogEditor = () => {
           image: imageHandler,
           table: tableHandler
         }
+      },
+      clipboard: {
+        // Preserve table HTML when pasting/loading
+        matchVisual: false,
+        // Custom matchers will be handled by the registered matchers above
       },
     };
   }, [imageHandler, tableHandler]);
