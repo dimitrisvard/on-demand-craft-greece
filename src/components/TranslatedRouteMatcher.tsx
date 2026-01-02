@@ -17,6 +17,10 @@ const Industries = lazy(() => import('../pages/Industries'));
 const OurWork = lazy(() => import('../pages/OurWork'));
 const About = lazy(() => import('../pages/About'));
 const Contact = lazy(() => import('../pages/Contact'));
+const Quote = lazy(() => import('../pages/Quote'));
+const QuoteSuccess = lazy(() => import('../pages/QuoteSuccess'));
+const QuoteRequestForm = lazy(() => import('../pages/QuoteRequestForm'));
+const ContactSuccess = lazy(() => import('../pages/ContactSuccess'));
 const SurfaceFinishes = lazy(() => import('../pages/SurfaceFinishes'));
 const SheetMetalFabrication = lazy(() => import('../pages/SheetMetalFabrication'));
 const CncMachining = lazy(() => import('../pages/CncMachining'));
@@ -31,6 +35,10 @@ const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<an
   '/our-work': OurWork,
   '/about': About,
   '/contact': Contact,
+  '/quote': Quote,
+  '/quote/success': QuoteSuccess,
+  '/quote-request': QuoteRequestForm,
+  '/contact/success': ContactSuccess,
   '/services/surface-finishes': SurfaceFinishes,
   '/services/sheet-metal': SheetMetalFabrication,
   '/services/cnc-machining': CncMachining,

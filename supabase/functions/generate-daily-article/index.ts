@@ -486,9 +486,43 @@ function generateSlug(title: string): string {
  * Auto-translation will occur 2 hours after article creation via cron job
  */
 serve(async (req) => {
+  // Log immediately when function is called
+  console.log(`[generate-daily-article] Function called at ${new Date().toISOString()}`);
+  console.log(`[generate-daily-article] Method: ${req.method}`);
+  
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // Validate environment variables early
+  console.log(`[generate-daily-article] Checking environment variables...`);
+  console.log(`[generate-daily-article] SUPABASE_URL: ${supabaseUrl ? 'SET' : 'MISSING'}`);
+  console.log(`[generate-daily-article] SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceKey ? 'SET' : 'MISSING'}`);
+  console.log(`[generate-daily-article] ANTHROPIC_API_KEY: ${anthropicApiKey ? 'SET' : 'MISSING'}`);
+  
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.error("[generate-daily-article] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    return new Response(
+      JSON.stringify({ error: "Server configuration error: Missing Supabase credentials" }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      }
+    );
+  }
+
+  if (!anthropicApiKey) {
+    console.error("[generate-daily-article] Missing ANTHROPIC_API_KEY");
+    return new Response(
+      JSON.stringify({ error: "Server configuration error: ANTHROPIC_API_KEY not configured" }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      }
+    );
+  }
+
+  console.log(`[generate-daily-article] Environment variables validated, starting processing...`);
 
   try {
     // 1. Determine today's silo based on rotation schedule
@@ -672,9 +706,15 @@ serve(async (req) => {
       }
     );
   } catch (error: any) {
-    console.error("Error in generate-daily-article:", error);
+    console.error("[generate-daily-article] Error in generate-daily-article:", error);
+    console.error("[generate-daily-article] Error stack:", error.stack);
+    console.error("[generate-daily-article] Error message:", error.message);
     return new Response(
-      JSON.stringify({ error: error.message || "Unknown error" }),
+      JSON.stringify({ 
+        error: error.message || "Unknown error",
+        errorType: error.name || "Error",
+        stack: error.stack 
+      }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,

@@ -949,7 +949,11 @@ const BlogList = () => {
           <DialogFooter className="flex-shrink-0 gap-2 mt-4">
             {previewArticle?.status === 'published' && (
               <Button 
-                onClick={() => window.open(`/${previewArticle.language}/blog/${previewArticle.slug}`, '_blank')}
+                onClick={() => {
+                  const siteUrl = import.meta.env.VITE_SITE_URL || window.location.origin;
+                  const fullUrl = `${siteUrl}/${previewArticle.language}/blog/${previewArticle.slug}`;
+                  window.open(fullUrl, '_blank', 'noopener,noreferrer');
+                }}
                 className="flex items-center gap-2"
               >
                 <Globe className="h-4 w-4" />
