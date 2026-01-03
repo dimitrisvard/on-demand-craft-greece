@@ -318,11 +318,11 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 You must insert 4 specific types of links naturally into the flow of the text:
 1.  **Silo Context Link:** Choose 1-2 relevant articles from this list:
 ${relatedArticles}
-    Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here"> anchor text </a> (always include spaces before and after the link tag)
-2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link with proper spacing: <a href="${selectedService.url}"> ${selectedService.anchor} </a>. Always include spaces before and after the link tag to prevent text from sticking together.
-3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services"> our manufacturing services </a> (always include spaces before and after the link tag)
+    Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here">anchor text</a> (no extra spaces inside the link tag - spaces will be added automatically)
+2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link: <a href="${selectedService.url}">${selectedService.anchor}</a> (no extra spaces inside the link tag - spaces will be added automatically).
+3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services">our manufacturing services</a> (no extra spaces inside the link tag - spaces will be added automatically)
 4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
-    * Use this exact format: "For high-precision results, <a href="/en/quote"> ${selectedQuoteText} </a> from ${BRAND_NAME}." (always include spaces before and after the link tag)
+    * Use this exact format: "For high-precision results, <a href="/en/quote">${selectedQuoteText}</a> from ${BRAND_NAME}." (no extra spaces inside the link tag - spaces will be added automatically)
     * CRITICAL: NEVER use the word "instant" or "immediately" in quote sentences. Use phrases like "within 24 hours", "in 24 hours", or "delivered in 24 hours" instead.
 
 ---
@@ -556,10 +556,12 @@ function cleanHtmlContent(html: string): string {
   // Replace newlines between closing and opening tags with single newline
   html = html.replace(/>\s*\n\s*</g, '>\n<');
   
-  // Ensure links have proper spacing - add space before opening <a> and after closing </a> if missing
-  // Pattern: text<a href=...>link</a>text should become text <a href=...>link</a> text
-  // More robust regex that handles various edge cases
-  // Don't add spaces inside table cells - only outside tables
+  // Normalize link spacing - ensure single space before <a> and after </a>, but don't add if already present
+  // First, normalize any existing spaces (remove multiple spaces, keep single)
+  html = html.replace(/\s+(<a\s+[^>]*href)/g, ' $1'); // Normalize multiple spaces before <a> to single space
+  html = html.replace(/(<\/a>)\s+/g, '$1 '); // Normalize multiple spaces after </a> to single space
+  
+  // Then, add space before <a> only if missing (and not in table cells or after punctuation)
   html = html.replace(/([^\s>])(<a\s+[^>]*href)/g, (match, p1, p2, offset, string) => {
     // Check if we're inside a table cell - if so, don't add space
     const beforeMatch = string.substring(0, offset);
@@ -568,12 +570,16 @@ function cleanHtmlContent(html: string): string {
     const lastTdClose = beforeMatch.lastIndexOf('</td>');
     const lastThClose = beforeMatch.lastIndexOf('</th>');
     const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-    // Also check if we're inside other tags that shouldn't have spaces
-    const lastP = beforeMatch.lastIndexOf('<p');
-    const lastPClose = beforeMatch.lastIndexOf('</p>');
-    const inParagraph = (lastP > lastPClose && lastP !== -1);
-    return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
+    
+    // Don't add space if previous char is punctuation or opening tag
+    if (p1 === '.' || p1 === ',' || p1 === '!' || p1 === '?' || p1 === ';' || p1 === ':' || p1 === '>' || p1 === '(') {
+      return match;
+    }
+    
+    return inTableCell ? match : `${p1} ${p2}`;
   });
+  
+  // Add space after </a> only if missing (and not in table cells or before punctuation)
   html = html.replace(/(<\/a>)([^\s<])/g, (match, p1, p2, offset, string) => {
     // Check if we're inside a table cell - if so, don't add space
     const beforeMatch = string.substring(0, offset);
@@ -582,15 +588,13 @@ function cleanHtmlContent(html: string): string {
     const lastTdClose = beforeMatch.lastIndexOf('</td>');
     const lastThClose = beforeMatch.lastIndexOf('</th>');
     const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-    // Also check if we're inside other tags that shouldn't have spaces
-    const lastP = beforeMatch.lastIndexOf('<p');
-    const lastPClose = beforeMatch.lastIndexOf('</p>');
-    const inParagraph = (lastP > lastPClose && lastP !== -1);
+    
     // Don't add space if next char is punctuation or closing tag
-    if (p2 === '.' || p2 === ',' || p2 === '!' || p2 === '?' || p2 === ';' || p2 === ':' || p2 === '<') {
+    if (p2 === '.' || p2 === ',' || p2 === '!' || p2 === '?' || p2 === ';' || p2 === ':' || p2 === '<' || p2 === ')' || p2 === ']') {
       return match;
     }
-    return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
+    
+    return inTableCell ? match : `${p1} ${p2}`;
   });
   
   // Clean up table cells - remove excessive whitespace in table cells
