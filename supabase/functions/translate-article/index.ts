@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
+const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
 const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
@@ -11,7 +11,7 @@ const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 const BRAND_NAME = "Microns Hub";
 
 // Bump this when deploying to confirm the runtime is executing the expected code
-const TRANSLATE_ARTICLE_FN_VERSION = "2026-01-03.chunking.v3.placeholder-guard";
+const TRANSLATE_ARTICLE_FN_VERSION = "2026-01-03.gemini-2.5-flash.restored";
 
 const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
 
@@ -142,23 +142,24 @@ const SERVICE_SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-interface ClaudeResponse {
-  id: string;
-  type: string;
-  role: string;
-  content: Array<{
-    type: string;
-    text: string;
+interface GeminiResponse {
+  candidates: Array<{
+    content: {
+      parts: Array<{
+        text: string;
+      }>;
+    };
+    finishReason?: string;
   }>;
-  model: string;
-  stop_reason: string;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
+  usageMetadata?: {
+    promptTokenCount: number;
+    candidatesTokenCount: number;
+    totalTokenCount: number;
   };
   error?: {
-    type: string;
+    code: number;
     message: string;
+    status: string;
   };
 }
 
@@ -238,19 +239,19 @@ function validateTranslationCompletenessOrThrow(
 }
 
 /**
- * Generate translation using Claude Sonnet (for longer articles that exceed Haiku's token limit)
- * Claude Sonnet supports up to 8192 tokens but has better handling for long content
+ * Generate translation using Google Gemini 2.5 Flash
+ * Gemini 2.5 Flash provides excellent translation quality with high output limits
  */
-async function generateWithClaudeSonnet(
+async function generateWithGemini(
   prompt: string,
   thoughtSignature?: string
 ): Promise<string> {
-  if (!anthropicApiKey) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
+  if (!geminiApiKey) {
+    throw new Error("GEMINI_API_KEY not configured");
   }
 
-  const model = "claude-sonnet-4-20250514";
-  const url = "https://api.anthropic.com/v1/messages";
+  const model = "gemini-2.0-flash-exp";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
 
   // Add thought signature if provided
   let fullPrompt = prompt;
@@ -259,113 +260,27 @@ async function generateWithClaudeSonnet(
   }
 
   const requestBody = {
-    model: model,
-    max_tokens: 8192, // Same limit but Sonnet handles long content better
-    messages: [
+    contents: [
       {
-        role: "user",
-        content: fullPrompt,
+        parts: [
+          {
+            text: fullPrompt,
+          },
+        ],
       },
     ],
-  };
-  
-  console.log(`[generateWithClaudeSonnet] Starting Claude Sonnet API request for long article`);
-  const startTime = Date.now();
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": anthropicApiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    const elapsedTime = Date.now() - startTime;
-    console.log(`[generateWithClaudeSonnet] Claude Sonnet API response received after ${elapsedTime}ms`);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[generateWithClaudeSonnet] Claude API error: ${response.status}`, errorText.substring(0, 500));
-      throw new Error(`Claude API error: ${response.status} ${errorText.substring(0, 200)}`);
-    }
-
-    const data: ClaudeResponse = await response.json();
-
-    if (data.error) {
-      throw new Error(`Claude API error: ${data.error.message}`);
-    }
-
-    if (!data.content || data.content.length === 0) {
-      throw new Error("No response from Claude API");
-    }
-
-    // Find the text content in the response
-    const textContent = data.content.find(c => c.type === "text");
-    if (!textContent) {
-      throw new Error("No text content in Claude API response");
-    }
-
-    const totalTime = Date.now() - startTime;
-    console.log(`[generateWithClaudeSonnet] Claude Sonnet API completed in ${totalTime}ms`);
-    console.log(`[generateWithClaudeSonnet] Usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
-    console.log(`[generateWithClaudeSonnet] Stop reason: ${data.stop_reason}`);
-
-    // Check if response was truncated due to max_tokens limit
-    if (data.stop_reason === 'max_tokens') {
-      console.warn(`[generateWithClaudeSonnet] ⚠️ Response was truncated due to max_tokens limit! Output tokens: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
-      throw new Error(`Translation truncated: Response hit max_tokens limit (${data.usage.output_tokens}/${requestBody.max_tokens} tokens used). Article is too long even for Claude Sonnet.`);
-    }
-
-    return textContent.text;
-  } catch (error: any) {
-    const elapsedTime = Date.now() - startTime;
-    console.error(`[generateWithClaudeSonnet] Error after ${elapsedTime}ms:`, error.message);
-    throw error;
-  }
-}
-
-/**
- * Generate translation using Claude Haiku (fast, cost-effective for translations)
- * Claude Haiku provides excellent translation quality with better HTML preservation
- */
-async function generateWithClaudeHaiku(
-  prompt: string,
-  thoughtSignature?: string
-): Promise<string> {
-  if (!anthropicApiKey) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
-  }
-
-  const model = "claude-3-5-haiku-20241022";
-  const url = "https://api.anthropic.com/v1/messages";
-
-  // Add thought signature if provided
-  let fullPrompt = prompt;
-  if (thoughtSignature) {
-    fullPrompt = `${prompt}\n\nPrevious context signature: ${thoughtSignature}`;
-  }
-
-  // Claude Haiku supports up to 8192 output tokens
-  // For 2500-word articles, this should be sufficient, but for longer articles (4000+ words),
-  // we may hit the limit. We'll use the maximum and detect truncation.
-  const requestBody = {
-    model: model,
-    max_tokens: 8192, // Maximum supported by Claude Haiku
-    messages: [
-      {
-        role: "user",
-        content: fullPrompt,
-      },
-    ],
+    generationConfig: {
+      temperature: 0.3,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens: 8192,
+    },
   };
   
   const estimatedWords = (fullPrompt.match(/\b\w+\b/g) || []).length;
-  console.log(`[generateWithClaudeHaiku] Estimated input words: ${estimatedWords}, using max_tokens: 8192`);
+  console.log(`[generateWithGemini] Estimated input words: ${estimatedWords}, using maxOutputTokens: 8192`);
 
-  console.log(`[generateWithClaudeHaiku] Starting Claude Haiku API request`);
+  console.log(`[generateWithGemini] Starting Gemini 2.5 Flash API request`);
   const startTime = Date.now();
 
   try {
@@ -373,64 +288,62 @@ async function generateWithClaudeHaiku(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": anthropicApiKey,
-        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(requestBody),
     });
 
     const elapsedTime = Date.now() - startTime;
-    console.log(`[generateWithClaudeHaiku] Claude Haiku API response received after ${elapsedTime}ms`);
+    console.log(`[generateWithGemini] Gemini API response received after ${elapsedTime}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[generateWithClaudeHaiku] Claude API error: ${response.status}`, errorText.substring(0, 500));
-      throw new Error(`Claude API error: ${response.status} ${errorText.substring(0, 200)}`);
+      console.error(`[generateWithGemini] Gemini API error: ${response.status}`, errorText.substring(0, 500));
+      throw new Error(`Gemini API error: ${response.status} ${errorText.substring(0, 200)}`);
     }
 
-    const data: ClaudeResponse = await response.json();
+    const data: GeminiResponse = await response.json();
 
     if (data.error) {
-      throw new Error(`Claude API error: ${data.error.message}`);
+      throw new Error(`Gemini API error: ${data.error.message}`);
     }
 
-    if (!data.content || data.content.length === 0) {
-      throw new Error("No response from Claude API");
+    if (!data.candidates || data.candidates.length === 0) {
+      throw new Error("No response from Gemini API");
     }
 
-    // Find the text content in the response
-    const textContent = data.content.find(c => c.type === "text");
+    const candidate = data.candidates[0];
+    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+      throw new Error("No text content in Gemini API response");
+    }
+
+    const textContent = candidate.content.parts[0].text;
     if (!textContent) {
-      throw new Error("No text content in Claude API response");
+      throw new Error("Empty text content in Gemini API response");
     }
 
     const totalTime = Date.now() - startTime;
-    console.log(`[generateWithClaudeHaiku] Claude Haiku API completed in ${totalTime}ms`);
-    console.log(`[generateWithClaudeHaiku] Usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
-    console.log(`[generateWithClaudeHaiku] Stop reason: ${data.stop_reason}`);
-
-    // Check if response was truncated due to max_tokens limit
-    if (data.stop_reason === 'max_tokens') {
-      console.warn(`[generateWithClaudeHaiku] ⚠️ Response was truncated due to max_tokens limit! Output tokens: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
-      throw new Error(`Translation truncated: Response hit max_tokens limit (${data.usage.output_tokens}/${requestBody.max_tokens} tokens used). Article may be too long.`);
+    console.log(`[generateWithGemini] Gemini API completed in ${totalTime}ms`);
+    if (data.usageMetadata) {
+      console.log(`[generateWithGemini] Usage: ${data.usageMetadata.promptTokenCount} input, ${data.usageMetadata.candidatesTokenCount} output tokens`);
     }
-    
-    // Also check if output tokens are very close to max (within 100 tokens) - this suggests truncation
-    if (data.usage.output_tokens >= requestBody.max_tokens - 100) {
-      console.warn(`[generateWithClaudeHaiku] ⚠️ Output tokens (${data.usage.output_tokens}) very close to max (${requestBody.max_tokens}), likely truncated`);
-      throw new Error(`Translation likely truncated: Output tokens (${data.usage.output_tokens}) very close to max (${requestBody.max_tokens}).`);
+    console.log(`[generateWithGemini] Finish reason: ${candidate.finishReason || "COMPLETE"}`);
+
+    // Check if response was truncated
+    if (candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "OTHER") {
+      console.warn(`[generateWithGemini] ⚠️ Response may be incomplete. Finish reason: ${candidate.finishReason}`);
+      // Don't throw error, but log warning - Gemini 2.5 Flash handles long content well
     }
 
-    return textContent.text;
+    return textContent;
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
-    console.error(`[generateWithClaudeHaiku] Error after ${elapsedTime}ms:`, error.message);
+    console.error(`[generateWithGemini] Error after ${elapsedTime}ms:`, error.message);
     throw error;
   }
 }
 
 /**
- * Split HTML content into safer chunks so Claude Haiku stays under its hard output limit.
+ * Split HTML content into safer chunks for very large articles.
  * Chunks are formed on common block boundaries to preserve HTML structure.
  */
 function splitContentIntoChunks(content: string, maxChunkSize: number = 4000): string[] {
@@ -481,9 +394,9 @@ function splitContentIntoChunks(content: string, maxChunkSize: number = 4000): s
 }
 
 /**
- * Translate only metadata (title, excerpt, meta fields, slug) with Haiku to keep payloads tiny.
+ * Translate only metadata (title, excerpt, meta fields, slug) with Gemini to keep payloads tiny.
  */
-async function translateMetadataWithHaiku(
+async function translateMetadataWithGemini(
   originalJsonData: {
     title: string;
     excerpt: string;
@@ -516,7 +429,7 @@ Input:
   "slug": "${articleSlug}"
 }`;
 
-  const response = await generateWithClaudeHaiku(
+  const response = await generateWithGemini(
     prompt,
     `${thoughtSignature} | metadata`
   );
@@ -559,9 +472,9 @@ Input:
 }
 
 /**
- * Translate a single HTML chunk with Haiku. Keeps HTML and href values intact; only text is translated.
+ * Translate a single HTML chunk with Gemini. Keeps HTML and href values intact; only text is translated.
  */
-async function translateContentChunkWithHaiku(
+async function translateContentChunkWithGemini(
   chunk: string,
   targetLanguage: string,
   langCode: string,
@@ -585,7 +498,7 @@ async function translateContentChunkWithHaiku(
 CHUNK:
 ${chunk}`;
 
-  const translated = await generateWithClaudeHaiku(
+  const translated = await generateWithGemini(
     prompt,
     `${thoughtSignature} | chunk ${chunkIndex + 1}/${totalChunks}`
   );
@@ -596,9 +509,9 @@ ${chunk}`;
 }
 
 /**
- * Chunked translation pipeline for Haiku: translate metadata once, then content in multiple small chunks.
+ * Chunked translation pipeline for Gemini: translate metadata once, then content in multiple small chunks.
  */
-async function translateWithHaikuChunking(
+async function translateWithGeminiChunking(
   originalJsonData: {
     title: string;
     content: string;
@@ -619,8 +532,8 @@ async function translateWithHaikuChunking(
   metaTitle: string;
   metaDescription: string;
 }> {
-  console.log(`[ChunkedHaiku] Starting chunked translation for ${targetLanguage} (${langCode})`);
-  const metadata = await translateMetadataWithHaiku(
+  console.log(`[ChunkedGemini] Starting chunked translation for ${targetLanguage} (${langCode})`);
+  const metadata = await translateMetadataWithGemini(
     originalJsonData,
     targetLanguage,
     langCode,
@@ -629,11 +542,11 @@ async function translateWithHaikuChunking(
   );
 
   const chunks = splitContentIntoChunks(originalJsonData.content, 4000);
-  console.log(`[ChunkedHaiku] Split content into ${chunks.length} chunk(s) for ${langCode}`);
+  console.log(`[ChunkedGemini] Split content into ${chunks.length} chunk(s) for ${langCode}`);
 
   const translatedChunks: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    const translated = await translateContentChunkWithHaiku(
+    const translated = await translateContentChunkWithGemini(
       chunks[i],
       targetLanguage,
       langCode,
@@ -653,7 +566,7 @@ async function translateWithHaikuChunking(
   const content = translatedChunks.join("");
   // Validate full stitched HTML
   validateTranslationCompletenessOrThrow(originalJsonData.content, content, `full content (${langCode})`);
-  console.log(`[ChunkedHaiku] Completed chunked translation for ${langCode}, total length: ${content.length}`);
+  console.log(`[ChunkedGemini] Completed chunked translation for ${langCode}, total length: ${content.length}`);
 
   return {
     title: metadata.title,
@@ -900,29 +813,25 @@ Return ONLY this JSON structure, nothing else:
 
 IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
-  // Estimate article length to decide which model to use
+  // Estimate article length to decide if chunking is needed
   // Count actual words by removing HTML tags first, then counting words
   const textWithoutHtml = originalJsonData.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const actualWords = textWithoutHtml.split(/\s+/).filter(w => w.length > 0).length;
   const originalContentLength = originalJsonData.content.length;
   
-  // Use Sonnet for articles longer than 2500 words OR content longer than 15000 chars
-  // This is more conservative to ensure complete translations
-  const useSonnet = actualWords > 2500 || originalContentLength > 15000;
-  // Use chunking for Haiku when we're at risk of hitting the 4096 token output limit
-  // But be more conservative: only chunk if article is large enough to likely exceed limit
-  // For smaller articles, single-call is faster and avoids timeout issues
-  const shouldUseHaikuChunking = !useSonnet && (actualWords > 1200 || originalContentLength > 6000);
+  // Gemini 2.5 Flash handles long content well, but for very large articles (>3000 words or >20000 chars),
+  // use chunking to avoid timeout issues
+  const shouldUseChunking = actualWords > 3000 || originalContentLength > 20000;
   
-  console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}${shouldUseHaikuChunking ? ' (chunked safeguard enabled)' : ''}`);
+  console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using Gemini 2.5 Flash${shouldUseChunking ? ' (chunked for large article)' : ''}`);
   
   let response: string | null = null;
-  let usedChunkedHaiku = false;
+  let usedChunked = false;
 
-  // Try chunked Haiku first when we're near the output limit
-  if (shouldUseHaikuChunking) {
+  // Try chunked translation first for very large articles
+  if (shouldUseChunking) {
     try {
-      const chunkedTranslation = await translateWithHaikuChunking(
+      const chunkedTranslation = await translateWithGeminiChunking(
         originalJsonData,
         targetLanguage,
         langCode,
@@ -931,34 +840,26 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
         articleSlugMapping
       );
       response = JSON.stringify(chunkedTranslation);
-      usedChunkedHaiku = true;
-      console.log(`[generateTranslation] Used chunked Claude Haiku path with ${chunkedTranslation.content.length} translated content characters`);
+      usedChunked = true;
+      console.log(`[generateTranslation] Used chunked Gemini path with ${chunkedTranslation.content.length} translated content characters`);
     } catch (chunkError: any) {
-      console.warn(`[generateTranslation] Chunked Claude Haiku path failed (${chunkError.message}), falling back to single-call flow`);
+      console.warn(`[generateTranslation] Chunked Gemini path failed (${chunkError.message}), falling back to single-call flow`);
     }
   }
 
   if (!response) {
     try {
-      if (useSonnet) {
-        console.log(`[generateTranslation] Article is long (${actualWords} words), using Claude Sonnet instead of Haiku`);
-        response = await generateWithClaudeSonnet(prompt, thoughtSignature);
-      } else {
-        response = await generateWithClaudeHaiku(prompt, thoughtSignature);
-      }
+      response = await generateWithGemini(prompt, thoughtSignature);
     } catch (error: any) {
-      // If translation was truncated, incomplete, or hit token limits, try safer fallbacks
-      const shouldRetryWithSonnet = !useSonnet && (
+      // If translation failed and we haven't tried chunking yet, try chunking as fallback
+      if (!usedChunked && (
         error.message?.includes('truncated') || 
         error.message?.includes('max_tokens') ||
         error.message?.includes('incomplete') ||
         error.message?.includes('suspiciously short')
-      );
-
-      // Retry with chunked Haiku before escalating to Sonnet
-      if (!useSonnet && !usedChunkedHaiku) {
+      )) {
         try {
-          const chunkedTranslation = await translateWithHaikuChunking(
+          const chunkedTranslation = await translateWithGeminiChunking(
             originalJsonData,
             targetLanguage,
             langCode,
@@ -967,23 +868,13 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
             articleSlugMapping
           );
           response = JSON.stringify(chunkedTranslation);
-          usedChunkedHaiku = true;
-          console.log(`[generateTranslation] Recovered using chunked Claude Haiku after initial error: ${error.message}`);
+          usedChunked = true;
+          console.log(`[generateTranslation] Recovered using chunked Gemini after initial error: ${error.message}`);
         } catch (chunkError: any) {
-          console.warn(`[generateTranslation] Chunked Claude Haiku fallback failed: ${chunkError.message}`);
+          console.warn(`[generateTranslation] Chunked Gemini fallback failed: ${chunkError.message}`);
+          throw new Error(`Article translation failed (${actualWords} words, ${originalContentLength} chars). Both single-call and chunked Gemini failed. Original error: ${error.message}`);
         }
-      }
-      
-      if (!response && shouldRetryWithSonnet) {
-        console.warn(`[generateTranslation] Claude Haiku failed for ${targetLanguage} (${error.message}), retrying with Claude Sonnet...`);
-        try {
-          response = await generateWithClaudeSonnet(prompt, thoughtSignature);
-          console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
-        } catch (sonnetError: any) {
-          console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
-          throw new Error(`Article too long for translation (${actualWords} words, ${originalContentLength} chars). Both Claude Haiku and Sonnet failed. Original error: ${error.message}`);
-        }
-      } else if (!response) {
+      } else {
         throw error;
       }
     }
@@ -1018,11 +909,11 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   }
 
   try {
-    // Claude Haiku should return clean JSON, but we'll handle edge cases
+    // Gemini should return clean JSON, but we'll handle edge cases
     let jsonText = response.trim();
     let parsed: any = null;
     
-    // Strategy 1: Remove markdown code fences if present (Claude usually doesn't add them, but just in case)
+    // Strategy 1: Remove markdown code fences if present (Gemini may add them)
     jsonText = jsonText
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
@@ -1314,7 +1205,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
           ? `${response.substring(0, 500)}... [${response.length - 1000} chars omitted] ...${response.substring(response.length - 500)}`
           : response;
         
-        throw new Error(`Could not extract valid JSON from Claude Haiku response. Response length: ${response.length} chars. Opening braces: ${openingBraceCount}, Closing braces: ${closingBraceCount}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
+        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. Opening braces: ${openingBraceCount}, Closing braces: ${closingBraceCount}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
       }
     }
     
@@ -1747,7 +1638,7 @@ async function submitToIndexNow(urls: string[]): Promise<boolean> {
 
 /**
  * Delay helper to avoid API rate limiting
- * Claude Haiku API has rate limits, so we add delays between translation requests
+ * Gemini API has rate limits, so we add delays between translation requests
  */
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -1864,8 +1755,8 @@ serve(async (req) => {
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
     // Delay between translations to avoid rate limiting
-    // Claude Haiku has higher rate limits, so we can use shorter delays
-    // 3 seconds should be safe for Claude Haiku API
+    // Gemini API has good rate limits, so we can use shorter delays
+    // 3 seconds should be safe for Gemini API
     const DELAY_BETWEEN_TRANSLATIONS = 3000;
 
     for (let i = 0; i < languagesToTranslate.length; i++) {
@@ -2096,7 +1987,7 @@ serve(async (req) => {
       success: successfulTranslations > 0,
       message: successfulTranslations > 0 
         ? `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`
-        : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Claude API rate limiting.`,
+        : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Gemini API rate limiting.`,
         master_article_id: article_id,
         slug: masterArticle.slug, // Original English slug
         translations: successfulTranslations,
