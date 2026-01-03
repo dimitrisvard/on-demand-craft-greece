@@ -5,10 +5,10 @@
 SELECT cron.unschedule('generate-daily-article');
 
 -- Create new cron job that enqueues tasks (fast, no timeout)
--- This runs daily at 7:00 AM UTC (9:00 AM Greece time)
+-- This runs daily at 7:00 AM UTC (9:00 AM Greece time, UTC+2)
 SELECT cron.schedule(
   'enqueue-daily-article',
-  '0 7 * * *', -- 7:00 AM UTC = 9:00 AM Greece time (UTC+2)
+  '0 7 * * *', -- 7:00 AM UTC = 9:00 AM Greece time (UTC+2, standard time)
   $$
   SELECT enqueue_next_article() AS queue_id;
   $$
