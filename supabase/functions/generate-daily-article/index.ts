@@ -200,7 +200,7 @@ async function generateWithClaude(
         },
         body: JSON.stringify(requestBody),
       },
-      135000 // 135 second timeout for Claude API
+      145000 // 145 second timeout for Claude API (maximum safe limit before 150s Edge Function timeout)
     );
 
     const elapsedTime = Date.now() - startTime;
@@ -303,7 +303,7 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 1.  **Brand Identity:** Refer to us as "${BRAND_NAME}". Never translate or alter this name.
 2.  **No "AI Fluff":** Do NOT start with "In the ever-evolving landscape of manufacturing..." or "In today's fast-paced world...". Start immediately with technical value or a defining engineering problem.
 3.  **Accuracy:** Use exact ISO standards (e.g., ISO 2768, ISO 9001) and material grades (e.g., Al 6061-T6, not just "Aluminum").
-4.  **Formatting:** Return ONLY valid JSON. No markdown fencing (\`\`\`json) around the response.
+4.  **Formatting:** Return ONLY valid, complete JSON. No markdown fencing (\`\`\`json) around the response. CRITICAL: The JSON must be complete and properly closed with all closing braces. Do not truncate the JSON response.
 
 ---
 ### EUROPEAN LOCALIZATION (MANDATORY)
@@ -393,16 +393,102 @@ ${relatedArticles}
     
     // Find the JSON object boundaries
     const jsonStartIndex = jsonText.indexOf('{');
-    const jsonEndIndex = jsonText.lastIndexOf('}');
+    let jsonEndIndex = jsonText.lastIndexOf('}');
     
-    if (jsonStartIndex === -1 || jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
-      throw new Error("Could not find valid JSON boundaries");
+    if (jsonStartIndex === -1) {
+      throw new Error("Could not find JSON start boundary");
+    }
+    
+    // If no closing brace found, try to find the last valid position and attempt to close the JSON
+    if (jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
+      console.warn("[generateMasterArticle] No valid closing brace found, attempting to fix truncated JSON");
+      // Try to find where the content field ends and close the JSON manually
+      const contentMatch = jsonText.match(/"content"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
+      if (contentMatch) {
+        // Find the position after the content string
+        const contentEndPos = jsonText.indexOf('"', contentMatch.index + contentMatch[0].length - 1);
+        if (contentEndPos > 0) {
+          // Try to close the JSON structure
+          jsonText = jsonText.substring(jsonStartIndex, contentEndPos + 1);
+          // Add closing braces for any missing structure
+          let openBraces = (jsonText.match(/{/g) || []).length;
+          let closeBraces = (jsonText.match(/}/g) || []).length;
+          while (openBraces > closeBraces) {
+            jsonText += '}';
+            closeBraces++;
+          }
+          jsonEndIndex = jsonText.length - 1;
+        }
+      }
+      
+      if (jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
+        throw new Error("Could not find or fix JSON boundaries");
+      }
     }
     
     jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
     
     // Parse JSON (this will automatically handle escaped newlines \n)
-    const parsed = JSON.parse(jsonText);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (parseError: any) {
+      console.error("[generateMasterArticle] JSON parse error:", parseError.message);
+      console.error("[generateMasterArticle] JSON text preview (first 1000 chars):", jsonText.substring(0, 1000));
+      console.error("[generateMasterArticle] JSON text preview (last 500 chars):", jsonText.substring(Math.max(0, jsonText.length - 500)));
+      
+      // Try to extract content using a more robust method for truncated JSON
+      // Look for "content": " and try to extract until we find a closing quote (handling escaped quotes)
+      const contentStartPattern = /"content"\s*:\s*"/;
+      const contentStartMatch = jsonText.match(contentStartPattern);
+      
+      if (contentStartMatch && contentStartMatch.index !== undefined) {
+        console.warn("[generateMasterArticle] Attempting to extract partial content from malformed JSON");
+        let contentStart = contentStartMatch.index + contentStartMatch[0].length;
+        let contentEnd = contentStart;
+        let inEscape = false;
+        
+        // Find the end of the content string, handling escaped characters
+        while (contentEnd < jsonText.length) {
+          if (inEscape) {
+            inEscape = false;
+          } else if (jsonText[contentEnd] === '\\') {
+            inEscape = true;
+          } else if (jsonText[contentEnd] === '"') {
+            // Found the end of the content string
+            break;
+          }
+          contentEnd++;
+        }
+        
+        if (contentEnd < jsonText.length) {
+          const extractedContent = jsonText.substring(contentStart, contentEnd);
+          // Unescape the content
+          const unescapedContent = extractedContent
+            .replace(/\\n/g, '\n')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+          
+          // Try to extract other fields similarly
+          const excerptMatch = jsonText.match(/"excerpt"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          const metaTitleMatch = jsonText.match(/"metaTitle"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          const metaDescMatch = jsonText.match(/"metaDescription"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+          
+          parsed = {
+            content: unescapedContent,
+            excerpt: excerptMatch ? excerptMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : "",
+            metaTitle: metaTitleMatch ? metaTitleMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') : `${title} | ${BRAND_NAME}`,
+            metaDescription: metaDescMatch ? metaDescMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') : "",
+            faqSchema: null
+          };
+          console.warn("[generateMasterArticle] Successfully extracted partial content from malformed JSON");
+        } else {
+          throw new Error(`Failed to parse article JSON: ${parseError.message}. Content extraction also failed.`);
+        }
+      } else {
+        throw new Error(`Failed to parse article JSON: ${parseError.message}`);
+      }
+    }
 
     // Extract and validate content
     let content = parsed.content || "";
@@ -446,9 +532,10 @@ ${relatedArticles}
       metaDescription: metaDescription.substring(0, 160), // Ensure max 160 chars
       faqSchema: parsed.faqSchema || null,
     };
-  } catch (error) {
-    console.error("Failed to parse Claude response as JSON:", error);
-    console.error("Raw response preview:", response.substring(0, 500));
+  } catch (error: any) {
+    console.error("[generateMasterArticle] Failed to parse Claude response as JSON:", error);
+    console.error("[generateMasterArticle] Raw response preview (first 1000 chars):", response.substring(0, 1000));
+    console.error("[generateMasterArticle] Raw response preview (last 500 chars):", response.substring(Math.max(0, response.length - 500)));
     throw new Error(`Failed to parse article JSON: ${error.message}`);
   }
 }
