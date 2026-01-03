@@ -595,7 +595,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   let response: string;
   try {
     if (useSonnet) {
-      console.log(`[generateTranslation] Article is long (${estimatedWords} words), using Claude Sonnet instead of Haiku`);
+      console.log(`[generateTranslation] Article is long (${actualWords} words), using Claude Sonnet instead of Haiku`);
       response = await generateWithClaudeSonnet(prompt, thoughtSignature);
     } else {
       response = await generateWithClaudeHaiku(prompt, thoughtSignature);
