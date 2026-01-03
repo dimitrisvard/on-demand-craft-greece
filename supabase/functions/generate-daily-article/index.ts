@@ -681,87 +681,131 @@ serve(async (req) => {
   console.log(`[generate-daily-article] Environment variables validated, starting processing...`);
   const functionStartTime = Date.now();
 
+  // Parse request body once
+  let requestBody: any = {};
   try {
-    // 1. Determine today's silo based on rotation schedule
-    const todaysSilo = getTodaysSilo();
-    console.log(`[generate-daily-article] Today's scheduled silo: ${todaysSilo}`);
+    requestBody = await req.json();
+  } catch (e) {
+    // Body might be empty or not JSON - that's okay for normal flow
+    requestBody = {};
+  }
 
-    // 2. Count articles created today to rotate through silos for manual creation
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStart = today.toISOString();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const todayEnd = tomorrow.toISOString();
+  try {
+    // Check if called from queue worker (has title_id in body)
+    let titleRecord: any = null;
+    let queueJobId: string | null = null;
+    let todaysSilo = getTodaysSilo();
+    let rotationSilo = "";
     
-    const { count: articlesTodayCount } = await supabase
-      .from("articles")
-      .select("*", { count: "exact", head: true })
-      .eq("language", "en")
-      .gte("created_at", todayStart)
-      .lt("created_at", todayEnd);
-    
-    const articlesToday = articlesTodayCount || 0;
-    // Rotate through silos based on articles created today (for manual creation)
-    const rotationIndex = articlesToday % SILO_ROTATION.length;
-    const rotationSilo = SILO_ROTATION[rotationIndex];
-    console.log(`Articles created today: ${articlesToday}, rotation silo: ${rotationSilo}`);
-
-    // 3. Try to fetch from rotation silo first (for manual creation variety), then today's silo, then any
-    let { data: titleRecord, error: titleError } = await supabase
-      .from("article_titles")
-      .select("*")
-      .eq("processed", false)
-      .eq("silo_category", rotationSilo)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .single();
-
-    // 4. If no title found in rotation silo, try today's scheduled silo
-    if (titleError || !titleRecord) {
-      console.log(`No unprocessed titles found in ${rotationSilo}, trying today's silo ${todaysSilo}...`);
-      const { data: todaysSiloTitle, error: todaysSiloError } = await supabase
+    if (requestBody.title_id) {
+      // Called from queue worker
+      console.log(`[generate-daily-article] Called from queue worker with title_id: ${requestBody.title_id}`);
+      queueJobId = requestBody.queue_job_id || null;
+      
+      const { data: titleData, error: titleDataError } = await supabase
         .from("article_titles")
         .select("*")
-        .eq("processed", false)
-        .eq("silo_category", todaysSilo)
-        .order("created_at", { ascending: true })
-        .limit(1)
+        .eq("id", requestBody.title_id)
         .single();
       
-      if (!todaysSiloError && todaysSiloTitle) {
-        titleRecord = todaysSiloTitle;
-        console.log(`Using title from today's scheduled silo: ${todaysSilo}`);
+      if (titleDataError || !titleData) {
+        throw new Error(`Title not found: ${requestBody.title_id}`);
       }
+      
+      if (titleData.processed) {
+        throw new Error(`Title already processed: ${requestBody.title_id}`);
+      }
+      
+      titleRecord = titleData;
+      console.log(`[generate-daily-article] Processing queued title: ${titleRecord.title}`);
     }
 
-    // 5. If still no title found, try any unprocessed title (fallback)
-    if (titleError || !titleRecord) {
-      console.log(`No unprocessed titles found in rotation or scheduled silos, trying any silo...`);
-      const { data: fallbackTitle, error: fallbackError } = await supabase
+    // If not from queue, use normal title selection logic
+    if (!titleRecord) {
+      // 1. Determine today's silo based on rotation schedule
+      todaysSilo = getTodaysSilo();
+      console.log(`[generate-daily-article] Today's scheduled silo: ${todaysSilo}`);
+
+      // 2. Count articles created today to rotate through silos for manual creation
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStart = today.toISOString();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const todayEnd = tomorrow.toISOString();
+      
+      const { count: articlesTodayCount } = await supabase
+        .from("articles")
+        .select("*", { count: "exact", head: true })
+        .eq("language", "en")
+        .eq("status", "published")
+        .gte("created_at", todayStart)
+        .lt("created_at", todayEnd);
+      
+      const articlesToday = articlesTodayCount || 0;
+      // Rotate through silos based on articles created today (for manual creation)
+      const rotationIndex = articlesToday % SILO_ROTATION.length;
+      rotationSilo = SILO_ROTATION[rotationIndex];
+      console.log(`Articles created today: ${articlesToday}, rotation silo: ${rotationSilo}`);
+
+      // 3. Try to fetch from rotation silo first (for manual creation variety), then today's silo, then any
+      let { data: titleData, error: titleError } = await supabase
         .from("article_titles")
         .select("*")
         .eq("processed", false)
+        .eq("silo_category", rotationSilo)
         .order("created_at", { ascending: true })
         .limit(1)
         .single();
 
-      if (fallbackError || !fallbackTitle) {
-        return new Response(
-          JSON.stringify({ 
-            message: "No unprocessed titles found",
-            scheduled_silo: todaysSilo,
-            rotation_silo: rotationSilo
-          }),
-          {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-            status: 200,
-          }
-        );
+      // 4. If no title found in rotation silo, try today's scheduled silo
+      if (titleError || !titleData) {
+        console.log(`No unprocessed titles found in ${rotationSilo}, trying today's silo ${todaysSilo}...`);
+        const { data: todaysSiloTitle, error: todaysSiloError } = await supabase
+          .from("article_titles")
+          .select("*")
+          .eq("processed", false)
+          .eq("silo_category", todaysSilo)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .single();
+        
+        if (!todaysSiloError && todaysSiloTitle) {
+          titleData = todaysSiloTitle;
+          console.log(`Using title from today's scheduled silo: ${todaysSilo}`);
+        }
       }
 
-      titleRecord = fallbackTitle;
-      console.log(`Using fallback title from silo: ${titleRecord.silo_category || 'None'}`);
+      // 5. If still no title found, try any unprocessed title (fallback)
+      if (titleError || !titleData) {
+        console.log(`No unprocessed titles found in rotation or scheduled silos, trying any silo...`);
+        const { data: fallbackTitle, error: fallbackError } = await supabase
+          .from("article_titles")
+          .select("*")
+          .eq("processed", false)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .single();
+
+        if (fallbackError || !fallbackTitle) {
+          return new Response(
+            JSON.stringify({ 
+              message: "No unprocessed titles found",
+              scheduled_silo: todaysSilo,
+              rotation_silo: rotationSilo
+            }),
+            {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+              status: 200,
+            }
+          );
+        }
+
+        titleData = fallbackTitle;
+        console.log(`Using fallback title from silo: ${titleData.silo_category || 'None'}`);
+      }
+      
+      titleRecord = titleData;
     }
 
     console.log(`Processing title: ${titleRecord.title}`);
@@ -827,6 +871,13 @@ serve(async (req) => {
     console.log(`[generate-daily-article] Database save completed in ${saveTime}ms`);
     
     if (masterError || !masterArticleRecord) {
+      // If called from queue, mark as failed
+      if (queueJobId) {
+        await supabase.rpc('mark_queue_job_failed', {
+          queue_job_id: queueJobId,
+          error_msg: `Failed to create master article: ${masterError?.message}`
+        });
+      }
       throw new Error(`Failed to create master article: ${masterError?.message}`);
     }
 
@@ -850,7 +901,7 @@ serve(async (req) => {
       },
     ]);
 
-    // 11. Mark title as processed
+    // 11. Mark title as processed and update queue if applicable
     await supabase
       .from("article_titles")
       .update({
@@ -858,6 +909,15 @@ serve(async (req) => {
         processed_at: new Date().toISOString(),
       })
       .eq("id", titleRecord.id);
+    
+    // If called from queue, mark queue job as completed
+    if (queueJobId) {
+      await supabase.rpc('mark_queue_job_completed', {
+        queue_job_id: queueJobId,
+        article_id: masterArticleRecord.id
+      });
+      console.log(`[generate-daily-article] Queue job ${queueJobId} marked as completed`);
+    }
 
     const totalFunctionTime = Date.now() - functionStartTime;
     console.log(`[generate-daily-article] Article generation complete. Total function time: ${totalFunctionTime}ms`);
@@ -890,6 +950,9 @@ serve(async (req) => {
     console.error("[generate-daily-article] Error message:", error.message);
     console.error("[generate-daily-article] Error name:", error.name);
     
+    // If called from queue, mark queue job as failed
+    // Note: The worker function will handle marking as failed since it has the queue_job_id
+    
     // Check if it's a timeout error
     const isTimeout = error.message?.includes('timeout') || error.message?.includes('AbortError') || totalFunctionTime > 140000;
     
@@ -899,7 +962,8 @@ serve(async (req) => {
         errorType: error.name || "Error",
         isTimeout: isTimeout,
         execution_time_ms: totalFunctionTime,
-        stack: error.stack 
+        stack: error.stack,
+        queue_job_id: requestBody.queue_job_id || null // Include for worker to handle
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
