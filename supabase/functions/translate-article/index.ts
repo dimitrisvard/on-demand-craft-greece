@@ -341,6 +341,12 @@ async function generateWithClaudeHaiku(
       console.warn(`[generateWithClaudeHaiku] ⚠️ Response was truncated due to max_tokens limit! Output tokens: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
       throw new Error(`Translation truncated: Response hit max_tokens limit (${data.usage.output_tokens}/${requestBody.max_tokens} tokens used). Article may be too long.`);
     }
+    
+    // Also check if output tokens are very close to max (within 100 tokens) - this suggests truncation
+    if (data.usage.output_tokens >= requestBody.max_tokens - 100) {
+      console.warn(`[generateWithClaudeHaiku] ⚠️ Output tokens (${data.usage.output_tokens}) very close to max (${requestBody.max_tokens}), likely truncated`);
+      throw new Error(`Translation likely truncated: Output tokens (${data.usage.output_tokens}) very close to max (${requestBody.max_tokens}).`);
+    }
 
     return textContent.text;
   } catch (error: any) {
@@ -606,15 +612,22 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       response = await generateWithClaudeHaiku(prompt, thoughtSignature);
     }
   } catch (error: any) {
-    // If translation was truncated due to max_tokens, try with Sonnet as fallback
-    if ((error.message?.includes('truncated') || error.message?.includes('max_tokens')) && !useSonnet) {
-      console.warn(`[generateTranslation] Claude Haiku hit token limit for ${targetLanguage}, retrying with Claude Sonnet...`);
+    // If translation was truncated, incomplete, or hit token limits, try with Sonnet as fallback
+    const shouldRetryWithSonnet = !useSonnet && (
+      error.message?.includes('truncated') || 
+      error.message?.includes('max_tokens') ||
+      error.message?.includes('incomplete') ||
+      error.message?.includes('suspiciously short')
+    );
+    
+    if (shouldRetryWithSonnet) {
+      console.warn(`[generateTranslation] Claude Haiku failed for ${targetLanguage} (${error.message}), retrying with Claude Sonnet...`);
       try {
         response = await generateWithClaudeSonnet(prompt, thoughtSignature);
         console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
       } catch (sonnetError: any) {
         console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
-        throw new Error(`Article too long for translation (${actualWords} words). Both Claude Haiku and Sonnet hit token limits. Original error: ${error.message}`);
+        throw new Error(`Article too long for translation (${actualWords} words, ${originalContentLength} chars). Both Claude Haiku and Sonnet failed. Original error: ${error.message}`);
       }
     } else {
       throw error;
