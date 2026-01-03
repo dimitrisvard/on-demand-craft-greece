@@ -644,9 +644,9 @@ async function translateWithHaikuChunking(
     );
     translatedChunks.push(translated);
 
-    // Small delay between chunks to respect rate limits
+    // Small delay between chunks to respect rate limits (reduced from 800ms to 300ms for speed)
     if (i < chunks.length - 1) {
-      await delay(800);
+      await delay(300);
     }
   }
 
@@ -909,8 +909,10 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   // Use Sonnet for articles longer than 2500 words OR content longer than 15000 chars
   // This is more conservative to ensure complete translations
   const useSonnet = actualWords > 2500 || originalContentLength > 15000;
-  // Be aggressive with chunking for Haiku: anything mid-sized or larger should chunk
-  const shouldUseHaikuChunking = !useSonnet && (actualWords > 800 || originalContentLength > 4000);
+  // Use chunking for Haiku when we're at risk of hitting the 4096 token output limit
+  // But be more conservative: only chunk if article is large enough to likely exceed limit
+  // For smaller articles, single-call is faster and avoids timeout issues
+  const shouldUseHaikuChunking = !useSonnet && (actualWords > 1200 || originalContentLength > 6000);
   
   console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}${shouldUseHaikuChunking ? ' (chunked safeguard enabled)' : ''}`);
   
@@ -1792,6 +1794,9 @@ serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  const functionStartTime = Date.now();
+  const FUNCTION_TIMEOUT_MS = 140000; // 140 seconds (leave 10s buffer before 150s hard limit)
+
   try {
     console.log(`[translate-article] Function version: ${TRANSLATE_ARTICLE_FN_VERSION}`);
     const { article_id, target_languages }: TranslateRequest = await req.json();
@@ -1864,6 +1869,13 @@ serve(async (req) => {
     const DELAY_BETWEEN_TRANSLATIONS = 3000;
 
     for (let i = 0; i < languagesToTranslate.length; i++) {
+      // Check timeout before starting each translation
+      const elapsedTime = Date.now() - functionStartTime;
+      if (elapsedTime > FUNCTION_TIMEOUT_MS) {
+        console.warn(`⚠️ Function approaching timeout (${elapsedTime}ms), stopping translation`);
+        throw new Error(`Translation timeout: Function execution exceeded ${FUNCTION_TIMEOUT_MS}ms. Please translate languages in smaller batches.`);
+      }
+
       const lang = languagesToTranslate[i];
       
       try {
@@ -2003,8 +2015,14 @@ serve(async (req) => {
       // Add delay between translations to avoid hitting rate limits
       // Skip delay after the last translation
       if (i < languagesToTranslate.length - 1) {
-        console.log(`Waiting ${DELAY_BETWEEN_TRANSLATIONS}ms before next translation...`);
-        await delay(DELAY_BETWEEN_TRANSLATIONS);
+        // Check timeout before delay
+        const elapsedTime = Date.now() - functionStartTime;
+        if (elapsedTime > FUNCTION_TIMEOUT_MS - 5000) {
+          console.warn(`⚠️ Approaching timeout, skipping delay`);
+        } else {
+          console.log(`Waiting ${DELAY_BETWEEN_TRANSLATIONS}ms before next translation...`);
+          await delay(DELAY_BETWEEN_TRANSLATIONS);
+        }
       }
     }
 
@@ -2103,12 +2121,26 @@ serve(async (req) => {
       }
     );
   } catch (error: any) {
-    console.error("Error in translate-article:", error);
+    const elapsedTime = Date.now() - functionStartTime;
+    console.error(`Error in translate-article after ${elapsedTime}ms:`, error);
+    console.error("Error stack:", error.stack);
+    
+    // Check if it's a timeout
+    const isTimeout = elapsedTime > FUNCTION_TIMEOUT_MS || error.message?.includes('timeout') || error.message?.includes('exceeded');
+    
     return new Response(
-      JSON.stringify({ error: error.message || "Unknown error" }),
+      JSON.stringify({ 
+        error: error.message || "Unknown error",
+        errorType: error.name || "Error",
+        isTimeout: isTimeout,
+        execution_time_ms: elapsedTime,
+        message: isTimeout 
+          ? `Translation timed out after ${elapsedTime}ms. Please try translating fewer languages at once or use smaller articles.`
+          : error.message || "Translation failed"
+      }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 500,
+        status: isTimeout ? 504 : 500, // 504 Gateway Timeout for timeout errors
       }
     );
   }
