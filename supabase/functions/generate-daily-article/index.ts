@@ -138,7 +138,7 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
 async function fetchWithTimeout(
   url: string,
   options: RequestInit,
-  timeoutMs: number = 120000 // 120 seconds default
+  timeoutMs: number = 140000 // Increased to 140 seconds default
 ): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -176,7 +176,7 @@ async function generateWithClaude(
 
   const requestBody = {
     model: model,
-    max_tokens: 7000, // Reduced from 8192 to speed up generation and prevent timeouts
+    max_tokens: 5500, // Reduced further to speed up generation and prevent timeouts
     messages: [
       {
         role: "user",
@@ -200,7 +200,7 @@ async function generateWithClaude(
         },
         body: JSON.stringify(requestBody),
       },
-      100000 // 100 second timeout for Claude API (leaves buffer for other operations)
+      130000 // 130 second timeout for Claude API
     );
 
     const elapsedTime = Date.now() - startTime;
@@ -327,7 +327,7 @@ ${relatedArticles}
 
 ---
 ### CONTENT REQUIREMENTS
-1.  **Length:** Minimum 2500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 250-350 words per major section).
+1.  **Length:** Minimum 1500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 200-300 words per major section).
 2.  **Depth & Detail:** 
     * Provide detailed explanations, not just surface-level information
     * Include specific technical values, ranges, and specifications
