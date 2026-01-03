@@ -589,8 +589,13 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   // Count actual words by removing HTML tags first, then counting words
   const textWithoutHtml = originalJsonData.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   const actualWords = textWithoutHtml.split(/\s+/).filter(w => w.length > 0).length;
-  // Use Sonnet for articles longer than 3000 words (to be safe, since translations can be longer)
-  const useSonnet = actualWords > 3000;
+  const originalContentLength = originalJsonData.content.length;
+  
+  // Use Sonnet for articles longer than 2500 words OR content longer than 15000 chars
+  // This is more conservative to ensure complete translations
+  const useSonnet = actualWords > 2500 || originalContentLength > 15000;
+  
+  console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}`);
   
   let response: string;
   try {
@@ -620,10 +625,23 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   console.log(`[generateTranslation] Response preview (first 500 chars): ${response.substring(0, 500)}`);
   console.log(`[generateTranslation] Response preview (last 500 chars): ${response.substring(Math.max(0, response.length - 500))}`);
   
+  // CRITICAL: Check raw response length BEFORE parsing - if it's suspiciously short, fail immediately
+  const originalContentLength = originalJsonData.content.length;
+  const rawResponseLength = response.length;
+  const rawResponseRatio = rawResponseLength / originalContentLength;
+  
+  console.log(`[generateTranslation] Raw response length check: original=${originalContentLength}, raw_response=${rawResponseLength}, ratio=${rawResponseRatio.toFixed(3)}`);
+  
+  // If raw response is less than 40% of original, it's definitely incomplete (even accounting for JSON structure)
+  if (rawResponseRatio < 0.4 && originalContentLength > 10000) {
+    console.error(`[generateTranslation] ⚠️ Raw response is suspiciously short (${rawResponseLength} vs ${originalContentLength} chars, ratio: ${rawResponseRatio.toFixed(3)})`);
+    throw new Error(`Translation incomplete: Raw response is only ${rawResponseLength} characters (${Math.round(rawResponseRatio * 100)}%) of original ${originalContentLength} characters. This suggests the translation was severely truncated.`);
+  }
+  
   // Check if response contains placeholder text indicating incomplete translation
   if (response.includes('[Rest of the content') || response.includes('following the original HTML structure exactly')) {
     console.error(`[generateTranslation] ⚠️ Response contains placeholder text - translation was incomplete!`);
-    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${actualWords} words). Original content length: ${originalJsonData.content.length} characters.`);
+    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${actualWords} words). Original content length: ${originalContentLength} characters.`);
   }
 
   try {
@@ -1018,16 +1036,20 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     }
     
     // Validate content completeness - check if content is suspiciously short
-    const originalContentLength = originalJsonData.content.length;
+    // Note: originalContentLength was already defined above, but we'll use it again for clarity
     const translatedContentLength = parsed.content.length;
     const lengthRatio = translatedContentLength / originalContentLength;
     
-    console.log(`[generateTranslation] Content length check: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(2)}`);
+    console.log(`[generateTranslation] Parsed content length check: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(3)}`);
     
-    // If translated content is less than 30% of original, it's likely incomplete
-    if (lengthRatio < 0.3 && originalContentLength > 5000) {
-      console.error(`[generateTranslation] ⚠️ Translated content is suspiciously short (${translatedContentLength} vs ${originalContentLength} chars, ratio: ${lengthRatio.toFixed(2)})`);
-      throw new Error(`Translation appears incomplete: translated content is only ${translatedContentLength} characters (${Math.round(lengthRatio * 100)}%) of original ${originalContentLength} characters. This suggests the translation was truncated.`);
+    // More aggressive validation: if translated content is less than 50% of original, it's incomplete
+    // For articles > 5000 chars, require at least 50% length
+    // For articles > 15000 chars, require at least 60% length (longer articles need more complete translation)
+    const minRatio = originalContentLength > 15000 ? 0.6 : (originalContentLength > 5000 ? 0.5 : 0.4);
+    
+    if (lengthRatio < minRatio && originalContentLength > 5000) {
+      console.error(`[generateTranslation] ⚠️ Translated content is suspiciously short (${translatedContentLength} vs ${originalContentLength} chars, ratio: ${lengthRatio.toFixed(3)}, required: ${minRatio})`);
+      throw new Error(`Translation appears incomplete: translated content is only ${translatedContentLength} characters (${Math.round(lengthRatio * 100)}%) of original ${originalContentLength} characters. Minimum required: ${Math.round(minRatio * 100)}%. This suggests the translation was truncated.`);
     }
     
     // Clean excerpt and metaDescription: remove any JSON artifacts
