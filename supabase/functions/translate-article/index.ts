@@ -357,6 +357,236 @@ async function generateWithClaudeHaiku(
 }
 
 /**
+ * Split HTML content into safer chunks so Claude Haiku stays under its hard output limit.
+ * Chunks are formed on common block boundaries to preserve HTML structure.
+ */
+function splitContentIntoChunks(content: string, maxChunkSize: number = 4000): string[] {
+  const blocks = content
+    .split(/(?<=<\/p>|<\/li>|<\/h[1-6]>|<\/table>|<\/section>|<\/div>)/gi)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+
+  const chunks: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    if (current.trim().length > 0) {
+      chunks.push(current);
+      current = "";
+    }
+  };
+
+  // If we couldn't find any block boundaries, fall back to raw content
+  const sourceBlocks = blocks.length > 0 ? blocks : [content];
+
+  for (const block of sourceBlocks) {
+    // If a single block is still too large, hard-split it
+    if (block.length > maxChunkSize) {
+      const hardParts = block.match(new RegExp(`.{1,${maxChunkSize}}`, "g")) || [];
+      for (const part of hardParts) {
+        if (current.length + part.length > maxChunkSize) {
+          pushCurrent();
+        }
+        current += part;
+        if (current.length >= maxChunkSize) {
+          pushCurrent();
+        }
+      }
+      continue;
+    }
+
+    if (current.length + block.length > maxChunkSize) {
+      pushCurrent();
+    }
+
+    current += block;
+  }
+
+  pushCurrent();
+
+  return chunks.length > 0 ? chunks : [content];
+}
+
+/**
+ * Translate only metadata (title, excerpt, meta fields, slug) with Haiku to keep payloads tiny.
+ */
+async function translateMetadataWithHaiku(
+  originalJsonData: {
+    title: string;
+    excerpt: string;
+    metaTitle: string;
+    metaDescription: string;
+  },
+  targetLanguage: string,
+  langCode: string,
+  articleSlug: string,
+  thoughtSignature: string
+): Promise<{
+  title: string;
+  slug: string;
+  excerpt: string;
+  metaTitle: string;
+  metaDescription: string;
+}> {
+  const prompt = `Translate the following article metadata into ${targetLanguage} (${langCode}).
+Keep the brand name "${BRAND_NAME}" unchanged.
+Generate a URL-friendly slug from the translated title (lowercase, hyphens, no special characters).
+Return ONLY JSON with: title, slug, excerpt, metaTitle, metaDescription.
+Do not include content or any extra text.
+
+Input:
+{
+  "title": ${JSON.stringify(originalJsonData.title)},
+  "excerpt": ${JSON.stringify(originalJsonData.excerpt)},
+  "metaTitle": ${JSON.stringify(originalJsonData.metaTitle)},
+  "metaDescription": ${JSON.stringify(originalJsonData.metaDescription)},
+  "slug": "${articleSlug}"
+}`;
+
+  const response = await generateWithClaudeHaiku(
+    prompt,
+    `${thoughtSignature} | metadata`
+  );
+
+  const cleaned = response
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      parsed = JSON.parse(match[0]);
+    } else {
+      throw err;
+    }
+  }
+
+  const title = parsed.title || originalJsonData.title;
+  let slug = parsed.slug || generateSlug(title);
+  const excerpt = parsed.excerpt || originalJsonData.excerpt;
+  let metaTitle = parsed.metaTitle || `${title} | ${BRAND_NAME}`;
+  let metaDescription = parsed.metaDescription || originalJsonData.metaDescription;
+
+  if (!metaTitle.includes(BRAND_NAME)) {
+    metaTitle = `${metaTitle} | ${BRAND_NAME}`;
+  }
+  if (metaTitle.length > 70) {
+    metaTitle = `${metaTitle.substring(0, 67)}...`;
+  }
+  if (metaDescription.length > 160) {
+    metaDescription = `${metaDescription.substring(0, 157)}...`;
+  }
+
+  return { title, slug, excerpt, metaTitle, metaDescription };
+}
+
+/**
+ * Translate a single HTML chunk with Haiku. Keeps HTML and href values intact; only text is translated.
+ */
+async function translateContentChunkWithHaiku(
+  chunk: string,
+  targetLanguage: string,
+  langCode: string,
+  chunkIndex: number,
+  totalChunks: number,
+  thoughtSignature: string,
+  articleSlugMapping?: Record<string, string>
+): Promise<string> {
+  const mappingNote =
+    articleSlugMapping && Object.keys(articleSlugMapping).length > 0
+      ? `Keep all href values unchanged (including /en/blog/... links). A later step will replace them using a provided mapping. Do NOT translate slugs.`
+      : `Keep all href values unchanged (including /en/... links). A later step will localize them. Do NOT translate slugs.`;
+
+  const prompt = `Translate the following HTML content chunk (${chunkIndex + 1}/${totalChunks}) into ${targetLanguage} (${langCode}).
+- Preserve every HTML tag, attribute, class, ID, and table structure exactly.
+- Translate ONLY the visible text between tags.
+- ${mappingNote}
+- Do not summarize or skip any text.
+- Return ONLY the translated HTML for this chunk (no JSON, no extra text).
+
+CHUNK:
+${chunk}`;
+
+  return generateWithClaudeHaiku(
+    prompt,
+    `${thoughtSignature} | chunk ${chunkIndex + 1}/${totalChunks}`
+  );
+}
+
+/**
+ * Chunked translation pipeline for Haiku: translate metadata once, then content in multiple small chunks.
+ */
+async function translateWithHaikuChunking(
+  originalJsonData: {
+    title: string;
+    content: string;
+    excerpt: string;
+    metaTitle: string;
+    metaDescription: string;
+  },
+  targetLanguage: string,
+  langCode: string,
+  articleSlug: string,
+  thoughtSignature: string,
+  articleSlugMapping?: Record<string, string>
+): Promise<{
+  title: string;
+  slug: string;
+  content: string;
+  excerpt: string;
+  metaTitle: string;
+  metaDescription: string;
+}> {
+  console.log(`[ChunkedHaiku] Starting chunked translation for ${targetLanguage} (${langCode})`);
+  const metadata = await translateMetadataWithHaiku(
+    originalJsonData,
+    targetLanguage,
+    langCode,
+    articleSlug,
+    thoughtSignature
+  );
+
+  const chunks = splitContentIntoChunks(originalJsonData.content, 4000);
+  console.log(`[ChunkedHaiku] Split content into ${chunks.length} chunk(s) for ${langCode}`);
+
+  const translatedChunks: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const translated = await translateContentChunkWithHaiku(
+      chunks[i],
+      targetLanguage,
+      langCode,
+      i,
+      chunks.length,
+      thoughtSignature,
+      articleSlugMapping
+    );
+    translatedChunks.push(translated);
+
+    // Small delay between chunks to respect rate limits
+    if (i < chunks.length - 1) {
+      await delay(800);
+    }
+  }
+
+  const content = translatedChunks.join("");
+  console.log(`[ChunkedHaiku] Completed chunked translation for ${langCode}, total length: ${content.length}`);
+
+  return {
+    title: metadata.title,
+    slug: metadata.slug,
+    content,
+    excerpt: metadata.excerpt,
+    metaTitle: metadata.metaTitle,
+    metaDescription: metadata.metaDescription,
+  };
+}
+
+/**
  * Generate slug from title (URL-friendly format)
  * Handles accented characters and special characters common in European languages
  */
@@ -600,38 +830,85 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   // Use Sonnet for articles longer than 2500 words OR content longer than 15000 chars
   // This is more conservative to ensure complete translations
   const useSonnet = actualWords > 2500 || originalContentLength > 15000;
+  const shouldUseHaikuChunking = !useSonnet && (actualWords > 1800 || originalContentLength > 10000);
   
-  console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}`);
+  console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}${shouldUseHaikuChunking ? ' (chunked safeguard enabled)' : ''}`);
   
-  let response: string;
-  try {
-    if (useSonnet) {
-      console.log(`[generateTranslation] Article is long (${actualWords} words), using Claude Sonnet instead of Haiku`);
-      response = await generateWithClaudeSonnet(prompt, thoughtSignature);
-    } else {
-      response = await generateWithClaudeHaiku(prompt, thoughtSignature);
+  let response: string | null = null;
+  let usedChunkedHaiku = false;
+
+  // Try chunked Haiku first when we're near the output limit
+  if (shouldUseHaikuChunking) {
+    try {
+      const chunkedTranslation = await translateWithHaikuChunking(
+        originalJsonData,
+        targetLanguage,
+        langCode,
+        articleSlug,
+        thoughtSignature,
+        articleSlugMapping
+      );
+      response = JSON.stringify(chunkedTranslation);
+      usedChunkedHaiku = true;
+      console.log(`[generateTranslation] Used chunked Claude Haiku path with ${chunkedTranslation.content.length} translated content characters`);
+    } catch (chunkError: any) {
+      console.warn(`[generateTranslation] Chunked Claude Haiku path failed (${chunkError.message}), falling back to single-call flow`);
     }
-  } catch (error: any) {
-    // If translation was truncated, incomplete, or hit token limits, try with Sonnet as fallback
-    const shouldRetryWithSonnet = !useSonnet && (
-      error.message?.includes('truncated') || 
-      error.message?.includes('max_tokens') ||
-      error.message?.includes('incomplete') ||
-      error.message?.includes('suspiciously short')
-    );
-    
-    if (shouldRetryWithSonnet) {
-      console.warn(`[generateTranslation] Claude Haiku failed for ${targetLanguage} (${error.message}), retrying with Claude Sonnet...`);
-      try {
+  }
+
+  if (!response) {
+    try {
+      if (useSonnet) {
+        console.log(`[generateTranslation] Article is long (${actualWords} words), using Claude Sonnet instead of Haiku`);
         response = await generateWithClaudeSonnet(prompt, thoughtSignature);
-        console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
-      } catch (sonnetError: any) {
-        console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
-        throw new Error(`Article too long for translation (${actualWords} words, ${originalContentLength} chars). Both Claude Haiku and Sonnet failed. Original error: ${error.message}`);
+      } else {
+        response = await generateWithClaudeHaiku(prompt, thoughtSignature);
       }
-    } else {
-      throw error;
+    } catch (error: any) {
+      // If translation was truncated, incomplete, or hit token limits, try safer fallbacks
+      const shouldRetryWithSonnet = !useSonnet && (
+        error.message?.includes('truncated') || 
+        error.message?.includes('max_tokens') ||
+        error.message?.includes('incomplete') ||
+        error.message?.includes('suspiciously short')
+      );
+
+      // Retry with chunked Haiku before escalating to Sonnet
+      if (!useSonnet && !usedChunkedHaiku) {
+        try {
+          const chunkedTranslation = await translateWithHaikuChunking(
+            originalJsonData,
+            targetLanguage,
+            langCode,
+            articleSlug,
+            thoughtSignature,
+            articleSlugMapping
+          );
+          response = JSON.stringify(chunkedTranslation);
+          usedChunkedHaiku = true;
+          console.log(`[generateTranslation] Recovered using chunked Claude Haiku after initial error: ${error.message}`);
+        } catch (chunkError: any) {
+          console.warn(`[generateTranslation] Chunked Claude Haiku fallback failed: ${chunkError.message}`);
+        }
+      }
+      
+      if (!response && shouldRetryWithSonnet) {
+        console.warn(`[generateTranslation] Claude Haiku failed for ${targetLanguage} (${error.message}), retrying with Claude Sonnet...`);
+        try {
+          response = await generateWithClaudeSonnet(prompt, thoughtSignature);
+          console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
+        } catch (sonnetError: any) {
+          console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
+          throw new Error(`Article too long for translation (${actualWords} words, ${originalContentLength} chars). Both Claude Haiku and Sonnet failed. Original error: ${error.message}`);
+        }
+      } else if (!response) {
+        throw error;
+      }
     }
+  }
+
+  if (!response) {
+    throw new Error(`Translation failed: no response generated for ${targetLanguage}`);
   }
   
   console.log(`[generateTranslation] Response received for ${targetLanguage}, length: ${response.length}`);
@@ -639,7 +916,6 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   console.log(`[generateTranslation] Response preview (last 500 chars): ${response.substring(Math.max(0, response.length - 500))}`);
   
   // CRITICAL: Check raw response length BEFORE parsing - if it's suspiciously short, fail immediately
-  const originalContentLength = originalJsonData.content.length;
   const rawResponseLength = response.length;
   const rawResponseRatio = rawResponseLength / originalContentLength;
   
