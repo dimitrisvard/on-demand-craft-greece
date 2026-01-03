@@ -165,6 +165,96 @@ interface TranslateRequest {
 }
 
 /**
+ * Generate translation using Claude Sonnet (for longer articles that exceed Haiku's token limit)
+ * Claude Sonnet supports up to 8192 tokens but has better handling for long content
+ */
+async function generateWithClaudeSonnet(
+  prompt: string,
+  thoughtSignature?: string
+): Promise<string> {
+  if (!anthropicApiKey) {
+    throw new Error("ANTHROPIC_API_KEY not configured");
+  }
+
+  const model = "claude-sonnet-4-20250514";
+  const url = "https://api.anthropic.com/v1/messages";
+
+  // Add thought signature if provided
+  let fullPrompt = prompt;
+  if (thoughtSignature) {
+    fullPrompt = `${prompt}\n\nPrevious context signature: ${thoughtSignature}`;
+  }
+
+  const requestBody = {
+    model: model,
+    max_tokens: 8192, // Same limit but Sonnet handles long content better
+    messages: [
+      {
+        role: "user",
+        content: fullPrompt,
+      },
+    ],
+  };
+  
+  console.log(`[generateWithClaudeSonnet] Starting Claude Sonnet API request for long article`);
+  const startTime = Date.now();
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const elapsedTime = Date.now() - startTime;
+    console.log(`[generateWithClaudeSonnet] Claude Sonnet API response received after ${elapsedTime}ms`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[generateWithClaudeSonnet] Claude API error: ${response.status}`, errorText.substring(0, 500));
+      throw new Error(`Claude API error: ${response.status} ${errorText.substring(0, 200)}`);
+    }
+
+    const data: ClaudeResponse = await response.json();
+
+    if (data.error) {
+      throw new Error(`Claude API error: ${data.error.message}`);
+    }
+
+    if (!data.content || data.content.length === 0) {
+      throw new Error("No response from Claude API");
+    }
+
+    // Find the text content in the response
+    const textContent = data.content.find(c => c.type === "text");
+    if (!textContent) {
+      throw new Error("No text content in Claude API response");
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[generateWithClaudeSonnet] Claude Sonnet API completed in ${totalTime}ms`);
+    console.log(`[generateWithClaudeSonnet] Usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+    console.log(`[generateWithClaudeSonnet] Stop reason: ${data.stop_reason}`);
+
+    // Check if response was truncated due to max_tokens limit
+    if (data.stop_reason === 'max_tokens') {
+      console.warn(`[generateWithClaudeSonnet] ⚠️ Response was truncated due to max_tokens limit! Output tokens: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
+      throw new Error(`Translation truncated: Response hit max_tokens limit (${data.usage.output_tokens}/${requestBody.max_tokens} tokens used). Article is too long even for Claude Sonnet.`);
+    }
+
+    return textContent.text;
+  } catch (error: any) {
+    const elapsedTime = Date.now() - startTime;
+    console.error(`[generateWithClaudeSonnet] Error after ${elapsedTime}ms:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Generate translation using Claude Haiku (fast, cost-effective for translations)
  * Claude Haiku provides excellent translation quality with better HTML preservation
  */
@@ -495,26 +585,43 @@ Return ONLY this JSON structure, nothing else:
 
 IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
+  // Estimate article length to decide which model to use
+  const contentLength = originalJsonData.content.length;
+  const estimatedWords = Math.ceil(contentLength / 5); // Rough estimate: 5 chars per word
+  const useSonnet = estimatedWords > 3500; // Use Sonnet for articles longer than 3500 words
+  
   let response: string;
   try {
-    response = await generateWithClaudeHaiku(prompt, thoughtSignature);
-  } catch (error: any) {
-    // If translation was truncated due to max_tokens, provide helpful error
-    if (error.message?.includes('truncated') || error.message?.includes('max_tokens')) {
-      console.error(`[generateTranslation] Claude Haiku hit token limit for ${targetLanguage}`);
-      throw new Error(`Article too long for Claude Haiku (max 8192 tokens). The article content is approximately ${Math.ceil(originalJsonData.content.length / 5)} words, which exceeds Claude Haiku's output token limit when translated. Please consider using Claude Sonnet for longer articles or splitting the content.`);
+    if (useSonnet) {
+      console.log(`[generateTranslation] Article is long (${estimatedWords} words), using Claude Sonnet instead of Haiku`);
+      response = await generateWithClaudeSonnet(prompt, thoughtSignature);
+    } else {
+      response = await generateWithClaudeHaiku(prompt, thoughtSignature);
     }
-    throw error;
+  } catch (error: any) {
+    // If translation was truncated due to max_tokens, try with Sonnet as fallback
+    if ((error.message?.includes('truncated') || error.message?.includes('max_tokens')) && !useSonnet) {
+      console.warn(`[generateTranslation] Claude Haiku hit token limit for ${targetLanguage}, retrying with Claude Sonnet...`);
+      try {
+        response = await generateWithClaudeSonnet(prompt, thoughtSignature);
+        console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
+      } catch (sonnetError: any) {
+        console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
+        throw new Error(`Article too long for translation (${estimatedWords} words). Both Claude Haiku and Sonnet hit token limits. Original error: ${error.message}`);
+      }
+    } else {
+      throw error;
+    }
   }
   
-  console.log(`[generateTranslation] Claude Haiku response received for ${targetLanguage}, length: ${response.length}`);
+  console.log(`[generateTranslation] Response received for ${targetLanguage}, length: ${response.length}`);
   console.log(`[generateTranslation] Response preview (first 500 chars): ${response.substring(0, 500)}`);
   console.log(`[generateTranslation] Response preview (last 500 chars): ${response.substring(Math.max(0, response.length - 500))}`);
   
   // Check if response contains placeholder text indicating incomplete translation
   if (response.includes('[Rest of the content') || response.includes('following the original HTML structure exactly')) {
     console.error(`[generateTranslation] ⚠️ Response contains placeholder text - translation was incomplete!`);
-    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long for Claude Haiku's token limit (8192 tokens). Original content length: ${originalJsonData.content.length} characters.`);
+    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${estimatedWords} words). Original content length: ${originalJsonData.content.length} characters.`);
   }
 
   try {
