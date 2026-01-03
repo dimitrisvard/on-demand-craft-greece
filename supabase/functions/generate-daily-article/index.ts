@@ -136,7 +136,9 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
   if (neighbors.length === 0) {
     return "No related articles available yet. This is the first article in this silo category. Skip silo context links for this article.";
   }
-  return neighbors.map(n => `- Title: "${n.title}" (Link: /en/blog/${n.slug})`).join("\n");
+  // Limit to maximum 2 articles and instruct to use only 1-2 links
+  const limitedNeighbors = neighbors.slice(0, 2);
+  return limitedNeighbors.map(n => `- Title: "${n.title}" (Link: /en/blog/${n.slug})`).join("\n");
 }
 
 /**
