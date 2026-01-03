@@ -84,38 +84,45 @@ async function fetchSiloNeighbors(siloCategory: string | null, currentId: string
   if (!siloCategory) return [];
 
   try {
-    // First try to get published articles from the same silo
-    const { data: publishedArticles } = await supabase
+    // Get published articles and filter by silo_category by matching with article_titles
+    // Step 1: Get all published English articles
+    const { data: allPublishedArticles, error: articlesError } = await supabase
       .from("articles")
-      .select("title, slug")
+      .select("title, slug, created_at")
       .eq("language", "en")
       .eq("status", "published")
-      .limit(5);
+      .order("created_at", { ascending: false })
+      .limit(20); // Get more to filter by silo
 
-    if (publishedArticles && publishedArticles.length > 0) {
-      // Filter to same silo if we can determine it
-      // For now, return all published articles as potential links
-      return publishedArticles;
+    if (articlesError || !allPublishedArticles) {
+      console.error("Error fetching articles:", articlesError);
+      return [];
     }
 
-    // Fallback: get other processed titles from the same silo category
-    const { data: siloTitles } = await supabase
-      .from("article_titles")
-      .select("title")
-      .eq("silo_category", siloCategory)
-      .eq("processed", true)
-      .neq("id", currentId)
-      .limit(5);
-
-    if (siloTitles && siloTitles.length > 0) {
-      return siloTitles.map(t => ({
-        title: t.title,
-        slug: t.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "")
-      }));
+    // Step 2: Filter by matching titles with article_titles to get silo_category
+    const siloNeighbors: SiloNeighbor[] = [];
+    for (const article of allPublishedArticles) {
+      // Skip if we already have 2 articles (max limit)
+      if (siloNeighbors.length >= 2) break;
+      
+      // Check if this article's title matches an article_titles entry with the same silo
+      const { data: titleMatch } = await supabase
+        .from("article_titles")
+        .select("silo_category, id")
+        .eq("title", article.title)
+        .eq("silo_category", siloCategory)
+        .single();
+      
+      if (titleMatch && titleMatch.id !== currentId) {
+        siloNeighbors.push({ 
+          title: article.title, 
+          slug: article.slug 
+        });
+      }
     }
 
-    // No articles found - this is the first article in the silo
-    return [];
+    console.log(`[fetchSiloNeighbors] Found ${siloNeighbors.length} articles in silo "${siloCategory}"`);
+    return siloNeighbors;
   } catch (error) {
     console.error("Error fetching silo neighbors:", error);
     return [];
@@ -316,9 +323,10 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 ---
 ### LINKING STRATEGY (Dynamic Insertion)
 You must insert 4 specific types of links naturally into the flow of the text:
-1.  **Silo Context Link:** Choose 1-2 relevant articles from this list:
+1.  **Silo Context Link:** Choose ONLY 1-2 relevant articles from this list (use the SAME number each time, do NOT accumulate):
 ${relatedArticles}
     Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here">anchor text</a> (no extra spaces inside the link tag - spaces will be added automatically)
+    CRITICAL: If there are 2 articles in the list, use exactly 1-2 links. Do NOT add more links than articles in the list. Do NOT accumulate links across articles.
 2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link: <a href="${selectedService.url}">${selectedService.anchor}</a> (no extra spaces inside the link tag - spaces will be added automatically).
 3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services">our manufacturing services</a> (no extra spaces inside the link tag - spaces will be added automatically)
 4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
@@ -556,7 +564,7 @@ function cleanHtmlContent(html: string): string {
   // Replace newlines between closing and opening tags with single newline
   html = html.replace(/>\s*\n\s*</g, '>\n<');
   
-  // Normalize link spacing - ensure single space before <a> and after </a>, but don't add if already present
+  // Normalize link spacing - ensure single space before <a> and after </a>
   // First, normalize any existing spaces (remove multiple spaces, keep single)
   html = html.replace(/\s+(<a\s+[^>]*href)/g, ' $1'); // Normalize multiple spaces before <a> to single space
   html = html.replace(/(<\/a>)\s+/g, '$1 '); // Normalize multiple spaces after </a> to single space
@@ -594,6 +602,28 @@ function cleanHtmlContent(html: string): string {
       return match;
     }
     
+    return inTableCell ? match : `${p1} ${p2}`;
+  });
+  
+  // Final pass: ensure links have proper spacing (more aggressive)
+  // Fix cases where links might be directly adjacent to text without spaces
+  html = html.replace(/([a-zA-Z0-9])(<a\s+[^>]*href)/g, (match, p1, p2, offset, string) => {
+    const beforeMatch = string.substring(0, offset);
+    const lastTd = beforeMatch.lastIndexOf('<td');
+    const lastTh = beforeMatch.lastIndexOf('<th');
+    const lastTdClose = beforeMatch.lastIndexOf('</td>');
+    const lastThClose = beforeMatch.lastIndexOf('</th>');
+    const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
+    return inTableCell ? match : `${p1} ${p2}`;
+  });
+  
+  html = html.replace(/(<\/a>)([a-zA-Z0-9])/g, (match, p1, p2, offset, string) => {
+    const beforeMatch = string.substring(0, offset);
+    const lastTd = beforeMatch.lastIndexOf('<td');
+    const lastTh = beforeMatch.lastIndexOf('<th');
+    const lastTdClose = beforeMatch.lastIndexOf('</td>');
+    const lastThClose = beforeMatch.lastIndexOf('</th>');
+    const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
     return inTableCell ? match : `${p1} ${p2}`;
   });
   

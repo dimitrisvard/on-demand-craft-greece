@@ -1017,6 +1017,19 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       parsed.content = String(parsed.content || '');
     }
     
+    // Validate content completeness - check if content is suspiciously short
+    const originalContentLength = originalJsonData.content.length;
+    const translatedContentLength = parsed.content.length;
+    const lengthRatio = translatedContentLength / originalContentLength;
+    
+    console.log(`[generateTranslation] Content length check: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(2)}`);
+    
+    // If translated content is less than 30% of original, it's likely incomplete
+    if (lengthRatio < 0.3 && originalContentLength > 5000) {
+      console.error(`[generateTranslation] ⚠️ Translated content is suspiciously short (${translatedContentLength} vs ${originalContentLength} chars, ratio: ${lengthRatio.toFixed(2)})`);
+      throw new Error(`Translation appears incomplete: translated content is only ${translatedContentLength} characters (${Math.round(lengthRatio * 100)}%) of original ${originalContentLength} characters. This suggests the translation was truncated.`);
+    }
+    
     // Clean excerpt and metaDescription: remove any JSON artifacts
     if (parsed.excerpt) {
       parsed.excerpt = String(parsed.excerpt).replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
