@@ -185,9 +185,12 @@ async function generateWithClaudeHaiku(
     fullPrompt = `${prompt}\n\nPrevious context signature: ${thoughtSignature}`;
   }
 
+  // Claude Haiku supports up to 8192 output tokens
+  // For 2500-word articles, this should be sufficient, but for longer articles (4000+ words),
+  // we may hit the limit. We'll use the maximum and detect truncation.
   const requestBody = {
     model: model,
-    max_tokens: 8192, // Sufficient for 2500-word translations
+    max_tokens: 8192, // Maximum supported by Claude Haiku
     messages: [
       {
         role: "user",
@@ -195,6 +198,9 @@ async function generateWithClaudeHaiku(
       },
     ],
   };
+  
+  const estimatedWords = (fullPrompt.match(/\b\w+\b/g) || []).length;
+  console.log(`[generateWithClaudeHaiku] Estimated input words: ${estimatedWords}, using max_tokens: 8192`);
 
   console.log(`[generateWithClaudeHaiku] Starting Claude Haiku API request`);
   const startTime = Date.now();
@@ -238,6 +244,13 @@ async function generateWithClaudeHaiku(
     const totalTime = Date.now() - startTime;
     console.log(`[generateWithClaudeHaiku] Claude Haiku API completed in ${totalTime}ms`);
     console.log(`[generateWithClaudeHaiku] Usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+    console.log(`[generateWithClaudeHaiku] Stop reason: ${data.stop_reason}`);
+
+    // Check if response was truncated due to max_tokens limit
+    if (data.stop_reason === 'max_tokens') {
+      console.warn(`[generateWithClaudeHaiku] ⚠️ Response was truncated due to max_tokens limit! Output tokens: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
+      throw new Error(`Translation truncated: Response hit max_tokens limit (${data.usage.output_tokens}/${requestBody.max_tokens} tokens used). Article may be too long.`);
+    }
 
     return textContent.text;
   } catch (error: any) {
@@ -462,12 +475,19 @@ You MUST return ONLY valid JSON. Do NOT include:
 - Explanatory text before or after the JSON
 - Comments or notes
 - Any text outside the JSON object
+- Placeholder text like "[Rest of the content translated...]" - you MUST translate the ENTIRE content completely
+
+**CRITICAL - COMPLETE TRANSLATION REQUIRED:**
+- You MUST translate the ENTIRE content field completely - do NOT leave any part untranslated
+- Do NOT use placeholder text or notes like "[Rest of the content translated following the original HTML structure exactly, with all tables, headers, and links preserved]"
+- If you run out of tokens, the system will detect this and handle it - but you must translate everything you can within the token limit
+- The content field must contain the FULL translated HTML content, not a partial translation
 
 Return ONLY this JSON structure, nothing else:
 {
   "title": "<translated article title>",
   "slug": "<translated-url-friendly-slug-based-on-title>",
-  "content": "<translated HTML with updated link hrefs>",
+  "content": "<COMPLETE translated HTML with updated link hrefs - translate EVERYTHING, no placeholders>",
   "excerpt": "<translated excerpt - max 160 chars>",
   "metaTitle": "<translated meta title - max 60 chars> | ${BRAND_NAME}",
   "metaDescription": "<translated meta description - max 160 chars>"
@@ -475,11 +495,27 @@ Return ONLY this JSON structure, nothing else:
 
 IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
-  const response = await generateWithClaudeHaiku(prompt, thoughtSignature);
+  let response: string;
+  try {
+    response = await generateWithClaudeHaiku(prompt, thoughtSignature);
+  } catch (error: any) {
+    // If translation was truncated due to max_tokens, provide helpful error
+    if (error.message?.includes('truncated') || error.message?.includes('max_tokens')) {
+      console.error(`[generateTranslation] Claude Haiku hit token limit for ${targetLanguage}`);
+      throw new Error(`Article too long for Claude Haiku (max 8192 tokens). The article content is approximately ${Math.ceil(originalJsonData.content.length / 5)} words, which exceeds Claude Haiku's output token limit when translated. Please consider using Claude Sonnet for longer articles or splitting the content.`);
+    }
+    throw error;
+  }
   
   console.log(`[generateTranslation] Claude Haiku response received for ${targetLanguage}, length: ${response.length}`);
   console.log(`[generateTranslation] Response preview (first 500 chars): ${response.substring(0, 500)}`);
   console.log(`[generateTranslation] Response preview (last 500 chars): ${response.substring(Math.max(0, response.length - 500))}`);
+  
+  // Check if response contains placeholder text indicating incomplete translation
+  if (response.includes('[Rest of the content') || response.includes('following the original HTML structure exactly')) {
+    console.error(`[generateTranslation] ⚠️ Response contains placeholder text - translation was incomplete!`);
+    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long for Claude Haiku's token limit (8192 tokens). Original content length: ${originalJsonData.content.length} characters.`);
+  }
 
   try {
     // Claude Haiku should return clean JSON, but we'll handle edge cases
