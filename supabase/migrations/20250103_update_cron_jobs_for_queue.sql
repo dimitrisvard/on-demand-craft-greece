@@ -16,6 +16,8 @@ SELECT cron.schedule(
 
 -- Create worker cron job that processes the queue
 -- This runs every 5 minutes to process pending jobs
+-- IMPORTANT: Replace YOUR_SERVICE_ROLE_KEY with your actual service role key from Supabase Dashboard
+-- Get it from: Supabase Dashboard > Project Settings > API > service_role (click "Reveal")
 SELECT cron.schedule(
   'process-article-queue',
   '*/5 * * * *', -- Every 5 minutes
@@ -25,7 +27,7 @@ SELECT cron.schedule(
       url := 'https://cfjrtmtaitwzggzpkhxi.supabase.co/functions/v1/process-article-queue',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmanJ0bXRhaXR3emdnenBraHhpIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0NDkyMTcwMCwiZXhwIjoyMDYwNDk3NzAwfQ.nApbQ8NYAosZO16f-vpW-LuZQY4UXSD1GLISgdo8N1g'
+        'Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY'
       ),
       body := '{}'::jsonb,
       timeout_milliseconds := 300000 -- 5 minutes timeout (worker can retry if needed)
