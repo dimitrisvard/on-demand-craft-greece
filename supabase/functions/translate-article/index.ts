@@ -586,9 +586,11 @@ Return ONLY this JSON structure, nothing else:
 IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
   // Estimate article length to decide which model to use
-  const contentLength = originalJsonData.content.length;
-  const estimatedWords = Math.ceil(contentLength / 5); // Rough estimate: 5 chars per word
-  const useSonnet = estimatedWords > 3500; // Use Sonnet for articles longer than 3500 words
+  // Count actual words by removing HTML tags first, then counting words
+  const textWithoutHtml = originalJsonData.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const actualWords = textWithoutHtml.split(/\s+/).filter(w => w.length > 0).length;
+  // Use Sonnet for articles longer than 3000 words (to be safe, since translations can be longer)
+  const useSonnet = actualWords > 3000;
   
   let response: string;
   try {
@@ -607,7 +609,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
         console.log(`[generateTranslation] Successfully translated with Claude Sonnet after Haiku failed`);
       } catch (sonnetError: any) {
         console.error(`[generateTranslation] Claude Sonnet also failed: ${sonnetError.message}`);
-        throw new Error(`Article too long for translation (${estimatedWords} words). Both Claude Haiku and Sonnet hit token limits. Original error: ${error.message}`);
+        throw new Error(`Article too long for translation (${actualWords} words). Both Claude Haiku and Sonnet hit token limits. Original error: ${error.message}`);
       }
     } else {
       throw error;
@@ -621,7 +623,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   // Check if response contains placeholder text indicating incomplete translation
   if (response.includes('[Rest of the content') || response.includes('following the original HTML structure exactly')) {
     console.error(`[generateTranslation] ⚠️ Response contains placeholder text - translation was incomplete!`);
-    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${estimatedWords} words). Original content length: ${originalJsonData.content.length} characters.`);
+    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${actualWords} words). Original content length: ${originalJsonData.content.length} characters.`);
   }
 
   try {
