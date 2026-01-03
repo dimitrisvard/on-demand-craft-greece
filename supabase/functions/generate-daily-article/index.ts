@@ -176,7 +176,7 @@ async function generateWithClaude(
 
   const requestBody = {
     model: model,
-    max_tokens: 5500, // Reduced further to speed up generation and prevent timeouts
+    max_tokens: 8192, // Restored to full capacity for 2500-word articles
     messages: [
       {
         role: "user",
@@ -200,7 +200,7 @@ async function generateWithClaude(
         },
         body: JSON.stringify(requestBody),
       },
-      130000 // 130 second timeout for Claude API
+      135000 // 135 second timeout for Claude API
     );
 
     const elapsedTime = Date.now() - startTime;
@@ -327,7 +327,7 @@ ${relatedArticles}
 
 ---
 ### CONTENT REQUIREMENTS
-1.  **Length:** Minimum 1500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 200-300 words per major section).
+1.  **Length:** Minimum 2500 words of comprehensive, detailed technical content. Go deep into each topic with specific examples, use cases, technical specifications, and practical insights. Each section should be substantial (minimum 250-350 words per major section).
 2.  **Depth & Detail:** 
     * Provide detailed explanations, not just surface-level information
     * Include specific technical values, ranges, and specifications
