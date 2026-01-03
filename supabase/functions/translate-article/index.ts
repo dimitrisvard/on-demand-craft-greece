@@ -830,7 +830,8 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   // Use Sonnet for articles longer than 2500 words OR content longer than 15000 chars
   // This is more conservative to ensure complete translations
   const useSonnet = actualWords > 2500 || originalContentLength > 15000;
-  const shouldUseHaikuChunking = !useSonnet && (actualWords > 1800 || originalContentLength > 10000);
+  // Be aggressive with chunking for Haiku: anything mid-sized or larger should chunk
+  const shouldUseHaikuChunking = !useSonnet && (actualWords > 800 || originalContentLength > 4000);
   
   console.log(`[generateTranslation] Article stats: ${actualWords} words, ${originalContentLength} chars. Using ${useSonnet ? 'Sonnet' : 'Haiku'}${shouldUseHaikuChunking ? ' (chunked safeguard enabled)' : ''}`);
   
