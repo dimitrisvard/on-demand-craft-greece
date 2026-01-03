@@ -200,7 +200,7 @@ async function generateWithClaude(
         },
         body: JSON.stringify(requestBody),
       },
-      145000 // 145 second timeout for Claude API (maximum safe limit before 150s Edge Function timeout)
+      140000 // 140 second timeout for Claude API (leaves 10s buffer for database operations)
     );
 
     const elapsedTime = Date.now() - startTime;
@@ -793,10 +793,18 @@ serve(async (req) => {
     const generationTime = Date.now() - generationStartTime;
     console.log(`[generate-daily-article] Article generation completed in ${generationTime}ms`);
     
+    // Check if we're approaching timeout - if so, save immediately
+    const elapsedTime = Date.now() - functionStartTime;
+    if (elapsedTime > 140000) {
+      console.warn(`[generate-daily-article] Approaching timeout (${elapsedTime}ms), saving article immediately`);
+    }
+    
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
-    // 9. Create master article in database - PUBLISHED MODE
+    // 9. Create master article in database - PUBLISHED MODE (do this ASAP to avoid timeout)
+    console.log(`[generate-daily-article] Saving article to database...`);
+    const saveStartTime = Date.now();
     const { data: masterArticleRecord, error: masterError } = await supabase
       .from("articles")
       .insert([
@@ -815,11 +823,14 @@ serve(async (req) => {
       .select()
       .single();
 
+    const saveTime = Date.now() - saveStartTime;
+    console.log(`[generate-daily-article] Database save completed in ${saveTime}ms`);
+    
     if (masterError || !masterArticleRecord) {
       throw new Error(`Failed to create master article: ${masterError?.message}`);
     }
 
-    console.log(`Master article created in PUBLISHED mode: ${masterArticleRecord.id}`);
+    console.log(`[generate-daily-article] Master article created in PUBLISHED mode: ${masterArticleRecord.id}`);
 
     // 10. Create generation log
     const summaryData = {
