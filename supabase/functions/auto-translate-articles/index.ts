@@ -102,16 +102,24 @@ serve(async (req) => {
     }
 
     console.log(`Found ${articlesToTranslate.length} article(s) needing translation`);
+    console.log(`Processing articles sequentially (one by one) to avoid API rate limits...`);
 
-    // Translate each article (process sequentially to avoid rate limits)
+    // Translate each article SEQUENTIALLY (one by one) to avoid rate limits
+    // This ensures we don't overwhelm the Gemini API with concurrent requests
     const results: Array<{ article_id: string; success: boolean; error?: string }> = [];
 
-    for (const articleId of articlesToTranslate) {
+    for (let i = 0; i < articlesToTranslate.length; i++) {
+      const articleId = articlesToTranslate[i];
+      const articleNumber = i + 1;
+      const totalArticles = articlesToTranslate.length;
+      
       try {
-        console.log(`Translating article ${articleId}...`);
+        console.log(`\n[${articleNumber}/${totalArticles}] Starting translation for article ${articleId}...`);
 
         // Call the translate-article Edge Function
         const translateUrl = `${supabaseUrl}/functions/v1/translate-article`;
+        const translateStartTime = Date.now();
+        
         const translateResponse = await fetch(translateUrl, {
           method: "POST",
           headers: {
@@ -122,30 +130,40 @@ serve(async (req) => {
         });
 
         const translateResult = await translateResponse.json();
+        const translateDuration = Date.now() - translateStartTime;
 
         if (translateResponse.ok) {
           results.push({ article_id: articleId, success: true });
-          console.log(`✓ Article ${articleId} translated successfully`);
+          console.log(`✓ [${articleNumber}/${totalArticles}] Article ${articleId} translated successfully in ${translateDuration}ms`);
         } else {
           results.push({
             article_id: articleId,
             success: false,
             error: translateResult.error || "Translation failed",
           });
-          console.error(`✗ Article ${articleId} translation failed:`, translateResult.error);
+          console.error(`✗ [${articleNumber}/${totalArticles}] Article ${articleId} translation failed after ${translateDuration}ms:`, translateResult.error);
         }
 
-        // Wait 10 seconds between translations to avoid rate limits
-        if (articlesToTranslate.indexOf(articleId) < articlesToTranslate.length - 1) {
+        // Wait 10 seconds between articles to avoid rate limits (only if not the last article)
+        if (i < articlesToTranslate.length - 1) {
+          console.log(`Waiting 10 seconds before processing next article...`);
           await new Promise((resolve) => setTimeout(resolve, 10000));
+        } else {
+          console.log(`All articles processed. No delay needed.`);
         }
       } catch (error: any) {
-        console.error(`Error translating article ${articleId}:`, error);
+        console.error(`✗ [${articleNumber}/${totalArticles}] Error translating article ${articleId}:`, error);
         results.push({
           article_id: articleId,
           success: false,
           error: error.message,
         });
+        
+        // Even on error, wait before next article to avoid rate limits
+        if (i < articlesToTranslate.length - 1) {
+          console.log(`Waiting 10 seconds before processing next article (after error)...`);
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+        }
       }
     }
 
