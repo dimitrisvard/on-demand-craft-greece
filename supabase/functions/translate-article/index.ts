@@ -10,6 +10,9 @@ const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 // Brand name - NEVER translate or alter this
 const BRAND_NAME = "Microns Hub";
 
+// Bump this when deploying to confirm the runtime is executing the expected code
+const TRANSLATE_ARTICLE_FN_VERSION = "2026-01-03.chunking.v3.placeholder-guard";
+
 const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
 
 const corsHeaders = {
@@ -162,6 +165,76 @@ interface ClaudeResponse {
 interface TranslateRequest {
   article_id: string;
   target_languages?: string[]; // Optional: specific language codes to translate to (e.g., ["de", "fr"])
+}
+
+function countTag(html: string, tagName: string): number {
+  if (!html) return 0;
+  const re = new RegExp(`<${tagName}\\b`, "gi");
+  return (html.match(re) || []).length;
+}
+
+function containsIncompletePlaceholder(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+
+  // Common "I didn't finish" placeholders (including the exact pattern seen in your logs)
+  const patterns = [
+    "rest of the content",
+    "translated similarly",
+    "continue translating",
+    "continued...",
+    "to be continued",
+    "placeholder",
+    "lorem ipsum",
+    "[rest of the content",
+    "following the original html structure exactly",
+  ];
+
+  if (patterns.some((p) => lower.includes(p))) return true;
+
+  // HTML comment placeholders like: <!-- Rest of the content translated similarly ... -->
+  if (lower.includes("<!--") && (lower.includes("rest of the content") || lower.includes("translated similarly"))) {
+    return true;
+  }
+
+  return false;
+}
+
+function validateTranslationCompletenessOrThrow(
+  originalHtml: string,
+  translatedHtml: string,
+  context: string
+) {
+  // 1) Hard fail on placeholders
+  if (containsIncompletePlaceholder(translatedHtml)) {
+    throw new Error(`Translation incomplete (${context}): output contains placeholder text/comments (e.g. "rest of the content").`);
+  }
+
+  // 2) Paragraph-count heuristic (robust to language expansion)
+  const origP = countTag(originalHtml, "p");
+  const transP = countTag(translatedHtml, "p");
+
+  // Only apply when original has enough structure for this to be meaningful
+  if (origP >= 8) {
+    const ratio = origP === 0 ? 1 : transP / origP;
+    if (ratio < 0.6) {
+      throw new Error(
+        `Translation incomplete (${context}): paragraph count too low (${transP}/${origP} = ${(ratio * 100).toFixed(0)}%).`
+      );
+    }
+  }
+
+  // 3) Length heuristic as a last check for larger articles
+  const origLen = originalHtml.length;
+  const transLen = translatedHtml.length;
+  if (origLen > 8000) {
+    const ratio = transLen / origLen;
+    if (ratio < 0.45) {
+      throw new Error(
+        `Translation incomplete (${context}): translated HTML too short (${transLen}/${origLen} = ${(ratio * 100).toFixed(0)}%).`
+      );
+    }
+  }
 }
 
 /**
@@ -512,10 +585,14 @@ async function translateContentChunkWithHaiku(
 CHUNK:
 ${chunk}`;
 
-  return generateWithClaudeHaiku(
+  const translated = await generateWithClaudeHaiku(
     prompt,
     `${thoughtSignature} | chunk ${chunkIndex + 1}/${totalChunks}`
   );
+  
+  // Validate chunk didn't "cheat" with placeholders
+  validateTranslationCompletenessOrThrow(chunk, translated, `chunk ${chunkIndex + 1}/${totalChunks} (${langCode})`);
+  return translated;
 }
 
 /**
@@ -574,6 +651,8 @@ async function translateWithHaikuChunking(
   }
 
   const content = translatedChunks.join("");
+  // Validate full stitched HTML
+  validateTranslationCompletenessOrThrow(originalJsonData.content, content, `full content (${langCode})`);
   console.log(`[ChunkedHaiku] Completed chunked translation for ${langCode}, total length: ${content.length}`);
 
   return {
@@ -929,9 +1008,11 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
   }
   
   // Check if response contains placeholder text indicating incomplete translation
-  if (response.includes('[Rest of the content') || response.includes('following the original HTML structure exactly')) {
-    console.error(`[generateTranslation] ⚠️ Response contains placeholder text - translation was incomplete!`);
-    throw new Error(`Translation incomplete: Response contains placeholder text indicating the translation was cut off. Article may be too long (${actualWords} words). Original content length: ${originalContentLength} characters.`);
+  if (containsIncompletePlaceholder(response)) {
+    console.error(`[generateTranslation] ⚠️ Response contains placeholder text/comments - translation was incomplete!`);
+    throw new Error(
+      `Translation incomplete: Response contains placeholder text/comments (e.g. "rest of the content"). Article may be too long (${actualWords} words).`
+    );
   }
 
   try {
@@ -1325,7 +1406,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       parsed.content = String(parsed.content || '');
     }
     
-    // Validate content completeness - check if content is suspiciously short
+    // Validate content completeness - check for placeholders and structural mismatch
     // Note: originalContentLength was already defined above, but we'll use it again for clarity
     const translatedContentLength = parsed.content.length;
     const lengthRatio = translatedContentLength / originalContentLength;
@@ -1341,6 +1422,13 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       console.error(`[generateTranslation] ⚠️ Translated content is suspiciously short (${translatedContentLength} vs ${originalContentLength} chars, ratio: ${lengthRatio.toFixed(3)}, required: ${minRatio})`);
       throw new Error(`Translation appears incomplete: translated content is only ${translatedContentLength} characters (${Math.round(lengthRatio * 100)}%) of original ${originalContentLength} characters. Minimum required: ${Math.round(minRatio * 100)}%. This suggests the translation was truncated.`);
     }
+
+    // Additional structural validation (catches "first paragraph + placeholder comment" cases)
+    validateTranslationCompletenessOrThrow(
+      originalJsonData.content,
+      parsed.content,
+      `parsed JSON content (${langCode})`
+    );
     
     // Clean excerpt and metaDescription: remove any JSON artifacts
     if (parsed.excerpt) {
@@ -1705,6 +1793,7 @@ serve(async (req) => {
   }
 
   try {
+    console.log(`[translate-article] Function version: ${TRANSLATE_ARTICLE_FN_VERSION}`);
     const { article_id, target_languages }: TranslateRequest = await req.json();
 
     if (!article_id) {
