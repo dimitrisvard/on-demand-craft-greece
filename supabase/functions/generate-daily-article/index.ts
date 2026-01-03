@@ -568,7 +568,11 @@ function cleanHtmlContent(html: string): string {
     const lastTdClose = beforeMatch.lastIndexOf('</td>');
     const lastThClose = beforeMatch.lastIndexOf('</th>');
     const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-    return inTableCell ? match : `${p1} ${p2}`;
+    // Also check if we're inside other tags that shouldn't have spaces
+    const lastP = beforeMatch.lastIndexOf('<p');
+    const lastPClose = beforeMatch.lastIndexOf('</p>');
+    const inParagraph = (lastP > lastPClose && lastP !== -1);
+    return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
   });
   html = html.replace(/(<\/a>)([^\s<])/g, (match, p1, p2, offset, string) => {
     // Check if we're inside a table cell - if so, don't add space
@@ -578,7 +582,15 @@ function cleanHtmlContent(html: string): string {
     const lastTdClose = beforeMatch.lastIndexOf('</td>');
     const lastThClose = beforeMatch.lastIndexOf('</th>');
     const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-    return inTableCell ? match : `${p1} ${p2}`;
+    // Also check if we're inside other tags that shouldn't have spaces
+    const lastP = beforeMatch.lastIndexOf('<p');
+    const lastPClose = beforeMatch.lastIndexOf('</p>');
+    const inParagraph = (lastP > lastPClose && lastP !== -1);
+    // Don't add space if next char is punctuation or closing tag
+    if (p2 === '.' || p2 === ',' || p2 === '!' || p2 === '?' || p2 === ';' || p2 === ':' || p2 === '<') {
+      return match;
+    }
+    return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
   });
   
   // Clean up table cells - remove excessive whitespace in table cells

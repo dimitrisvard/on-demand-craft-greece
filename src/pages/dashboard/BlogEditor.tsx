@@ -435,8 +435,40 @@ const BlogEditor = () => {
       
       if (!user) throw new Error("User not authenticated");
 
+      // Preserve table structure when saving
+      let contentToSave = formData.content;
+      if (!isSourceView && quillRef.current) {
+        // Get content from Quill and ensure tables are preserved
+        const quill = quillRef.current.getEditor();
+        if (quill) {
+          const quillContent = quill.root.innerHTML;
+          // Check if tables exist in original but are broken in Quill
+          const tablesInOriginal = (formData.content.match(/<table[^>]*>/gi) || []).length;
+          const tablesInQuill = (quillContent.match(/<table[^>]*>/gi) || []).length;
+          
+          // If Quill broke the tables, use original content instead
+          if (tablesInOriginal > 0 && tablesInQuill < tablesInOriginal) {
+            console.warn('Quill broke table structure, using original content');
+            contentToSave = formData.content;
+          } else {
+            contentToSave = quillContent;
+          }
+        }
+      }
+
+      // Ensure table structure is preserved
+      const tableCount = (contentToSave.match(/<table[^>]*>/gi) || []).length;
+      const tableCloseCount = (contentToSave.match(/<\/table>/gi) || []).length;
+      if (tableCount > tableCloseCount) {
+        // Add missing closing table tags
+        for (let i = 0; i < tableCount - tableCloseCount; i++) {
+          contentToSave += '</tbody></table>';
+        }
+      }
+
       const articleData = {
         ...formData,
+        content: contentToSave,
         status: status || formData.status,
         author_id: user.id,
         updated_at: new Date().toISOString()

@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
 const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
@@ -139,13 +139,22 @@ const SERVICE_SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-interface GeminiResponse {
-  candidates?: Array<{
-    content: {
-      parts: Array<{ text: string }>;
-    };
+interface ClaudeResponse {
+  id: string;
+  type: string;
+  role: string;
+  content: Array<{
+    type: string;
+    text: string;
   }>;
+  model: string;
+  stop_reason: string;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
   error?: {
+    type: string;
     message: string;
   };
 }
@@ -156,74 +165,86 @@ interface TranslateRequest {
 }
 
 /**
- * Generate article using Gemini with low thinking level for translations
+ * Generate translation using Claude Haiku (fast, cost-effective for translations)
+ * Claude Haiku provides excellent translation quality with better HTML preservation
  */
-async function generateWithGemini(
+async function generateWithClaudeHaiku(
   prompt: string,
   thoughtSignature?: string
 ): Promise<string> {
-  if (!geminiApiKey) {
-    throw new Error("GEMINI_API_KEY not configured");
+  if (!anthropicApiKey) {
+    throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  const model = "gemini-2.0-flash-exp";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+  const model = "claude-3-5-haiku-20241022";
+  const url = "https://api.anthropic.com/v1/messages";
 
-  const requestBody: any = {
-    contents: [
+  // Add thought signature if provided
+  let fullPrompt = prompt;
+  if (thoughtSignature) {
+    fullPrompt = `${prompt}\n\nPrevious context signature: ${thoughtSignature}`;
+  }
+
+  const requestBody = {
+    model: model,
+    max_tokens: 8192, // Sufficient for 2500-word translations
+    messages: [
       {
-        parts: [{ text: prompt }],
+        role: "user",
+        content: fullPrompt,
       },
     ],
-    generationConfig: {
-      temperature: 0.5,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 65536, // Increased for 2500-word articles (gemini-2.0-flash-exp supports up to 65536)
-      responseMimeType: "application/json", // Force JSON output format
-    },
   };
 
-  if (thoughtSignature) {
-    requestBody.contents[0].parts.push({
-      text: `\n\nPrevious context signature: ${thoughtSignature}`,
+  console.log(`[generateWithClaudeHaiku] Starting Claude Haiku API request`);
+  const startTime = Date.now();
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(requestBody),
     });
-  }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(requestBody),
-  });
+    const elapsedTime = Date.now() - startTime;
+    console.log(`[generateWithClaudeHaiku] Claude Haiku API response received after ${elapsedTime}ms`);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Gemini API error response: ${response.status}`, errorText);
-    // Parse error to check for specific issues
-    try {
-      const errorJson = JSON.parse(errorText);
-      if (errorJson.error?.message) {
-        throw new Error(`Gemini API error ${response.status}: ${errorJson.error.message}`);
-      }
-    } catch (parseErr) {
-      // If can't parse, use raw text
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[generateWithClaudeHaiku] Claude API error: ${response.status}`, errorText.substring(0, 500));
+      throw new Error(`Claude API error: ${response.status} ${errorText.substring(0, 200)}`);
     }
-    throw new Error(`Gemini API error: ${response.status} ${errorText.substring(0, 500)}`);
+
+    const data: ClaudeResponse = await response.json();
+
+    if (data.error) {
+      throw new Error(`Claude API error: ${data.error.message}`);
+    }
+
+    if (!data.content || data.content.length === 0) {
+      throw new Error("No response from Claude API");
+    }
+
+    // Find the text content in the response
+    const textContent = data.content.find(c => c.type === "text");
+    if (!textContent) {
+      throw new Error("No text content in Claude API response");
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[generateWithClaudeHaiku] Claude Haiku API completed in ${totalTime}ms`);
+    console.log(`[generateWithClaudeHaiku] Usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+
+    return textContent.text;
+  } catch (error: any) {
+    const elapsedTime = Date.now() - startTime;
+    console.error(`[generateWithClaudeHaiku] Error after ${elapsedTime}ms:`, error.message);
+    throw error;
   }
-
-  const data: GeminiResponse = await response.json();
-
-  if (data.error) {
-    throw new Error(`Gemini API error: ${data.error.message}`);
-  }
-
-  if (!data.candidates || data.candidates.length === 0) {
-    throw new Error("No response from Gemini API");
-  }
-
-  return data.candidates[0].content.parts[0].text;
 }
 
 /**
@@ -349,6 +370,14 @@ async function generateTranslation(
   metaDescription: string;
   slug: string;
 }> {
+  // Build article slug mapping section for prompt
+  const slugMappingSection = articleSlugMapping && Object.keys(articleSlugMapping).length > 0
+    ? `\n**ARTICLE SLUG MAPPING (CRITICAL - Use these exact slugs from database):**
+${Object.entries(articleSlugMapping).map(([enSlug, translatedSlug]) => `* English: "/en/blog/${enSlug}" → Use: "/${langCode}/blog/${translatedSlug}"`).join('\n')}
+
+**IMPORTANT:** When you see href="/en/blog/[english-slug]" in the content, you MUST replace it with href="/${langCode}/blog/[mapped-slug]" using the mapping above. DO NOT translate the slug yourself - use the exact slug from the mapping.`
+    : '';
+
   const prompt = `Role: Native Technical Translator & ISO Standard Specialist.
 Task: Translate the following manufacturing blog data into ${targetLanguage}.
 
@@ -360,6 +389,7 @@ Input Data:
   "metaTitle": ${JSON.stringify(originalJsonData.metaTitle)},
   "metaDescription": ${JSON.stringify(originalJsonData.metaDescription)}
 }
+${slugMappingSection}
 
 ---
 ### CRITICAL TRANSLATION RULES
@@ -402,18 +432,28 @@ Translate the metaDescription to ${targetLanguage} but:
   * Example: Translate "Yield Strength" in <th>Yield Strength</th> to target language, but keep the <th> tags
 
 #### 6. SMART LINK LOCALIZATION (Crucial)
+${articleSlugMapping && Object.keys(articleSlugMapping).length > 0 ? `
+**CRITICAL - ARTICLE LINK MAPPING:**
+The article slug mapping was provided above. For ALL article links (href="/en/blog/..."), you MUST use the exact translated slugs from that mapping. DO NOT translate article slugs yourself - they must match the database exactly.
+
+Example: If mapping shows "/en/blog/cnc-guide" → "/${langCode}/blog/fuehrung-cnc", then replace href="/en/blog/cnc-guide" with href="/${langCode}/blog/fuehrung-cnc" exactly as shown.
+` : ''}
 Rewrite all internal links to match the target language sub-folder structure:
 * href="/en/quote" → href="/${langCode}/[translated-quote-slug]"
 * href="/en/services" → href="/${langCode}/[translated-services-slug]"  
 * href="/en/services/cnc-machining" → href="/${langCode}/[translated-services-slug]/[translated-cnc-slug]"
 * href="/en/services/sheet-metal" → href="/${langCode}/[translated-services-slug]/[translated-sheet-metal-slug]"
 * href="/en/services/injection-molding" → href="/${langCode}/[translated-services-slug]/[translated-injection-molding-slug]"
-* href="/en/blog/any-slug" → href="/${langCode}/blog/translated-slug" (use translated slugs in links)
+${articleSlugMapping && Object.keys(articleSlugMapping).length > 0 ? `
+* href="/en/blog/[english-slug]" → href="/${langCode}/blog/[mapped-slug-from-above]" (USE EXACT MAPPING - do not translate)
+` : `
+* href="/en/blog/any-slug" → href="/${langCode}/blog/translated-slug" (translate the slug if no mapping provided)
+`}
 * Translate the visible anchor text naturally
 * CRITICAL: Links must use proper HTML format: <a href="/${langCode}/path">text</a>
 * NEVER include quotes inside the href attribute value - use: href="/path" NOT href=""path""
 * Ensure all href values start with "/" and contain no spaces or extra quotes
-* IMPORTANT: All links (quote, services, service pages) must use the correct translated slugs for the target language
+* IMPORTANT: For article links, ALWAYS use the exact slugs from the mapping provided above - they must match the database exactly
 
 ---
 ### OUTPUT FORMAT (CRITICAL - READ CAREFULLY)
@@ -435,26 +475,22 @@ Return ONLY this JSON structure, nothing else:
 
 IMPORTANT: Start your response with { and end with }. Do not add any text before or after the JSON object.`;
 
-  const response = await generateWithGemini(prompt, thoughtSignature);
+  const response = await generateWithClaudeHaiku(prompt, thoughtSignature);
   
-  console.log(`Gemini response received for ${targetLanguage}, length: ${response.length}`);
-  console.log(`Response preview (first 2000 chars): ${response.substring(0, 2000)}`);
-  console.log(`Response preview (last 1000 chars): ${response.substring(Math.max(0, response.length - 1000))}`);
+  console.log(`[generateTranslation] Claude Haiku response received for ${targetLanguage}, length: ${response.length}`);
+  console.log(`[generateTranslation] Response preview (first 500 chars): ${response.substring(0, 500)}`);
+  console.log(`[generateTranslation] Response preview (last 500 chars): ${response.substring(Math.max(0, response.length - 500))}`);
 
   try {
-    // Multiple strategies to extract JSON from response
+    // Claude Haiku should return clean JSON, but we'll handle edge cases
     let jsonText = response.trim();
     let parsed: any = null;
     
-    // Strategy 1: Remove markdown code fences (multiple patterns)
+    // Strategy 1: Remove markdown code fences if present (Claude usually doesn't add them, but just in case)
     jsonText = jsonText
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
       .replace(/\s*```$/i, '')
-      .replace(/^```json\n/gi, '')
-      .replace(/\n```$/gi, '')
-      .replace(/^```json\r\n/gi, '')
-      .replace(/\r\n```$/gi, '')
       .trim();
     
     // Strategy 2: Find JSON object boundaries (handle nested objects) - improved brace counting
@@ -500,13 +536,13 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // Strategy 3: If we found valid boundaries, extract JSON
     if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
-    jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
-    
+      jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
+      
       try {
         parsed = JSON.parse(jsonText);
         console.log(`✓ Successfully parsed JSON for ${targetLanguage} using boundary extraction`);
       } catch (parseError: any) {
-        console.warn(`Boundary extraction parse failed: ${parseError.message}`);
+        console.warn(`[generateTranslation] Boundary extraction parse failed: ${parseError.message}`);
         parsed = null;
       }
     }
@@ -742,7 +778,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
           ? `${response.substring(0, 500)}... [${response.length - 1000} chars omitted] ...${response.substring(response.length - 500)}`
           : response;
         
-        throw new Error(`Could not extract valid JSON from Gemini response. Response length: ${response.length} chars. Opening braces: ${openingBraceCount}, Closing braces: ${closingBraceCount}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
+        throw new Error(`Could not extract valid JSON from Claude Haiku response. Response length: ${response.length} chars. Opening braces: ${openingBraceCount}, Closing braces: ${closingBraceCount}. Response snippet: ${responseSnippet.substring(0, 1000)}`);
       }
     }
     
@@ -873,7 +909,7 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
     
     // First, fix malformed links where HTML attributes got into the href value
     // Pattern: href="/path%20rel=noopener%20noreferrer%20target=" → href="/path"
-    // This handles cases where Gemini incorrectly included attributes in the href
+    // This handles cases where AI incorrectly included attributes in the href
     content = content.replace(/href="([^"]*?)(?:\s*%20)?(?:rel|target|noreferrer|noopener)[^"]*"/gi, (match) => {
       // Extract just the URL part (before any attributes)
       const urlMatch = match.match(/href="([^"\s%]+)/);
@@ -1042,7 +1078,11 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       const lastTdClose = beforeMatch.lastIndexOf('</td>');
       const lastThClose = beforeMatch.lastIndexOf('</th>');
       const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-      return inTableCell ? match : `${p1} ${p2}`;
+      // Also check if we're inside other tags that shouldn't have spaces
+      const lastP = beforeMatch.lastIndexOf('<p');
+      const lastPClose = beforeMatch.lastIndexOf('</p>');
+      const inParagraph = (lastP > lastPClose && lastP !== -1);
+      return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
     });
     content = content.replace(/(<\/a>)([^\s<])/g, (match, p1, p2, offset, string) => {
       // Check if we're inside a table cell - if so, don't add space
@@ -1052,7 +1092,15 @@ IMPORTANT: Start your response with { and end with }. Do not add any text before
       const lastTdClose = beforeMatch.lastIndexOf('</td>');
       const lastThClose = beforeMatch.lastIndexOf('</th>');
       const inTableCell = (lastTd > lastTdClose || lastTh > lastThClose);
-      return inTableCell ? match : `${p1} ${p2}`;
+      // Also check if we're inside other tags that shouldn't have spaces
+      const lastP = beforeMatch.lastIndexOf('<p');
+      const lastPClose = beforeMatch.lastIndexOf('</p>');
+      const inParagraph = (lastP > lastPClose && lastP !== -1);
+      // Don't add space if next char is punctuation or closing tag
+      if (p2 === '.' || p2 === ',' || p2 === '!' || p2 === '?' || p2 === ';' || p2 === ':' || p2 === '<') {
+        return match;
+      }
+      return (inTableCell || inParagraph) ? match : `${p1} ${p2}`;
     });
     
     // Fix broken table structures - ensure all table tags are properly closed
@@ -1139,7 +1187,7 @@ async function submitToIndexNow(urls: string[]): Promise<boolean> {
 
 /**
  * Delay helper to avoid API rate limiting
- * Gemini API has rate limits, so we add delays between translation requests
+ * Claude Haiku API has rate limits, so we add delays between translation requests
  */
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -1252,9 +1300,9 @@ serve(async (req) => {
     const articleUrls: string[] = [`${siteUrl}/en/blog/${masterArticle.slug}`];
     
     // Delay between translations to avoid rate limiting
-    // Free tier limit: ~15 RPM, so 8 seconds = ~7.5 RPM (safe margin for 2500-word articles)
-    // With batch size of 1 from frontend, each call processes 1 language
-    const DELAY_BETWEEN_TRANSLATIONS = 8000;
+    // Claude Haiku has higher rate limits, so we can use shorter delays
+    // 3 seconds should be safe for Claude Haiku API
+    const DELAY_BETWEEN_TRANSLATIONS = 3000;
 
     for (let i = 0; i < languagesToTranslate.length; i++) {
       const lang = languagesToTranslate[i];
@@ -1471,7 +1519,7 @@ serve(async (req) => {
       success: successfulTranslations > 0,
       message: successfulTranslations > 0 
         ? `Article translated to ${successfulTranslations} language(s)${!target_languages || target_languages.length === 0 ? ' and published' : ''}`
-        : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Gemini API rate limiting.`,
+        : `All ${languagesToTranslate.length} translation(s) failed. This may be due to Claude API rate limiting.`,
         master_article_id: article_id,
         slug: masterArticle.slug, // Original English slug
         translations: successfulTranslations,
