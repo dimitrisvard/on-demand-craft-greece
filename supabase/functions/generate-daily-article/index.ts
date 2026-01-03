@@ -133,6 +133,33 @@ function formatSiloArticlesForPrompt(neighbors: SiloNeighbor[]): string {
 }
 
 /**
+ * Timeout wrapper for fetch requests
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number = 120000 // 120 seconds default
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
+
+/**
  * Generate article using Claude Sonnet 4
  * Claude Sonnet 4 provides excellent writing quality with fast response times
  */
@@ -149,7 +176,7 @@ async function generateWithClaude(
 
   const requestBody = {
     model: model,
-    max_tokens: 8192,
+    max_tokens: 7000, // Reduced from 8192 to speed up generation and prevent timeouts
     messages: [
       {
         role: "user",
@@ -158,40 +185,59 @@ async function generateWithClaude(
     ],
   };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": anthropicApiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(requestBody),
-  });
+  console.log(`[generateWithClaude] Starting Claude API request at ${new Date().toISOString()}`);
+  const startTime = Date.now();
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Claude API error: ${response.status} ${errorText}`);
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicApiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(requestBody),
+      },
+      100000 // 100 second timeout for Claude API (leaves buffer for other operations)
+    );
+
+    const elapsedTime = Date.now() - startTime;
+    console.log(`[generateWithClaude] Claude API response received after ${elapsedTime}ms`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[generateWithClaude] Claude API error: ${response.status}`, errorText.substring(0, 500));
+      throw new Error(`Claude API error: ${response.status} ${errorText.substring(0, 200)}`);
+    }
+
+    const data: ClaudeResponse = await response.json();
+
+    if (data.error) {
+      throw new Error(`Claude API error: ${data.error.message}`);
+    }
+
+    if (!data.content || data.content.length === 0) {
+      throw new Error("No response from Claude API");
+    }
+
+    // Find the text content in the response
+    const textContent = data.content.find(c => c.type === "text");
+    if (!textContent) {
+      throw new Error("No text content in Claude API response");
+    }
+
+    const totalTime = Date.now() - startTime;
+    console.log(`[generateWithClaude] Claude API completed in ${totalTime}ms`);
+    console.log(`[generateWithClaude] Claude API usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+
+    return textContent.text;
+  } catch (error: any) {
+    const elapsedTime = Date.now() - startTime;
+    console.error(`[generateWithClaude] Error after ${elapsedTime}ms:`, error.message);
+    throw error;
   }
-
-  const data: ClaudeResponse = await response.json();
-
-  if (data.error) {
-    throw new Error(`Claude API error: ${data.error.message}`);
-  }
-
-  if (!data.content || data.content.length === 0) {
-    throw new Error("No response from Claude API");
-  }
-
-  // Find the text content in the response
-  const textContent = data.content.find(c => c.type === "text");
-  if (!textContent) {
-    throw new Error("No text content in Claude API response");
-  }
-
-  console.log(`Claude API usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
-
-  return textContent.text;
 }
 
 /**
@@ -546,11 +592,12 @@ serve(async (req) => {
   }
 
   console.log(`[generate-daily-article] Environment variables validated, starting processing...`);
+  const functionStartTime = Date.now();
 
   try {
     // 1. Determine today's silo based on rotation schedule
     const todaysSilo = getTodaysSilo();
-    console.log(`Today's scheduled silo: ${todaysSilo}`);
+    console.log(`[generate-daily-article] Today's scheduled silo: ${todaysSilo}`);
 
     // 2. Count articles created today to rotate through silos for manual creation
     const today = new Date();
@@ -645,6 +692,9 @@ serve(async (req) => {
     console.log(`Quote text rotation: index ${quoteIndex}`);
 
     // 8. Generate master article with high thinking
+    console.log(`[generate-daily-article] Starting article generation at ${new Date().toISOString()}`);
+    const generationStartTime = Date.now();
+    
     const masterArticle = await generateMasterArticle(
       titleRecord.title,
       titleRecord.silo_category,
@@ -652,6 +702,10 @@ serve(async (req) => {
       serviceIndex,
       quoteIndex
     );
+    
+    const generationTime = Date.now() - generationStartTime;
+    console.log(`[generate-daily-article] Article generation completed in ${generationTime}ms`);
+    
     const masterSlug = generateSlug(titleRecord.title);
     const translationId = crypto.randomUUID();
 
@@ -707,7 +761,9 @@ serve(async (req) => {
       })
       .eq("id", titleRecord.id);
 
-    console.log(`Article generation complete. Ready for review and translation.`);
+    const totalFunctionTime = Date.now() - functionStartTime;
+    console.log(`[generate-daily-article] Article generation complete. Total function time: ${totalFunctionTime}ms`);
+    console.log(`[generate-daily-article] Ready for review and translation.`);
 
     return new Response(
       JSON.stringify({
@@ -722,6 +778,7 @@ serve(async (req) => {
         status: "published",
         translation_id: translationId,
         silo_neighbors_used: siloNeighbors.length,
+        execution_time_ms: totalFunctionTime,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -729,18 +786,26 @@ serve(async (req) => {
       }
     );
   } catch (error: any) {
-    console.error("[generate-daily-article] Error in generate-daily-article:", error);
+    const totalFunctionTime = Date.now() - functionStartTime;
+    console.error(`[generate-daily-article] Error after ${totalFunctionTime}ms:`, error);
     console.error("[generate-daily-article] Error stack:", error.stack);
     console.error("[generate-daily-article] Error message:", error.message);
+    console.error("[generate-daily-article] Error name:", error.name);
+    
+    // Check if it's a timeout error
+    const isTimeout = error.message?.includes('timeout') || error.message?.includes('AbortError') || totalFunctionTime > 140000;
+    
     return new Response(
       JSON.stringify({ 
         error: error.message || "Unknown error",
         errorType: error.name || "Error",
+        isTimeout: isTimeout,
+        execution_time_ms: totalFunctionTime,
         stack: error.stack 
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        status: 500,
+        status: isTimeout ? 504 : 500, // 504 Gateway Timeout for timeout errors
       }
     );
   }
