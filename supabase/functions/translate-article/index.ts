@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-fresh-v1";
+const VERSION = "2026-01-04-link-fix-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -87,12 +87,22 @@ function makeSlug(title: string): string {
 function localizeLinks(content: string, langCode: string): string {
   const s = SERVICE_SLUGS[langCode] || {};
   let c = content;
-  c = c.replace(/href="\/en\/quote"/g, `href="/${langCode}/${s.quote || "quote"}"`);
-  c = c.replace(/href="\/en\/services\/cnc-machining"/g, `href="/${langCode}/${s.services || "services"}/${s["cnc-machining"] || "cnc-machining"}"`);
-  c = c.replace(/href="\/en\/services\/sheet-metal"/g, `href="/${langCode}/${s.services || "services"}/${s["sheet-metal"] || "sheet-metal"}"`);
-  c = c.replace(/href="\/en\/services\/injection-molding"/g, `href="/${langCode}/${s.services || "services"}/${s["injection-molding"] || "injection-molding"}"`);
-  c = c.replace(/href="\/en\/services"/g, `href="/${langCode}/${s.services || "services"}"`);
-  c = c.replace(/href="\/en\/blog\//g, `href="/${langCode}/blog/`);
+  
+  // Handle both single and double quotes, case-insensitive
+  // Quote page
+  c = c.replace(/href=["']\/en\/quote["']/gi, `href="/${langCode}/${s.quote || "quote"}"`);
+  
+  // Service pages - specific first (to avoid partial matches)
+  c = c.replace(/href=["']\/en\/services\/cnc-machining["']/gi, `href="/${langCode}/${s.services || "services"}/${s["cnc-machining"] || "cnc-machining"}"`);
+  c = c.replace(/href=["']\/en\/services\/sheet-metal["']/gi, `href="/${langCode}/${s.services || "services"}/${s["sheet-metal"] || "sheet-metal"}"`);
+  c = c.replace(/href=["']\/en\/services\/injection-molding["']/gi, `href="/${langCode}/${s.services || "services"}/${s["injection-molding"] || "injection-molding"}"`);
+  
+  // General services page (after specific ones)
+  c = c.replace(/href=["']\/en\/services["']/gi, `href="/${langCode}/${s.services || "services"}"`);
+  
+  // Blog links
+  c = c.replace(/href=["']\/en\/blog\//gi, `href="/${langCode}/blog/`);
+  
   return c;
 }
 
