@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-link-fix-v1";
+const VERSION = "2026-01-04-article-links-db-lookup-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -84,7 +84,111 @@ function makeSlug(title: string): string {
     .replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/(^-|-$)+/g, "");
 }
 
-function localizeLinks(content: string, langCode: string): string {
+/**
+ * Build article slug mapping by looking up translations in database
+ * Returns a map: { englishSlug: translatedSlug }
+ */
+async function buildArticleSlugMapping(
+  content: string,
+  targetLangCode: string
+): Promise<Record<string, string>> {
+  const slugMapping: Record<string, string> = {};
+  
+  // Find all article links: href="/en/blog/slug" or href='/en/blog/slug'
+  const articleLinkPattern = /href=["']\/en\/blog\/([^"']+)["']/gi;
+  const matches = Array.from(content.matchAll(articleLinkPattern));
+  const englishSlugs = [...new Set(matches.map(m => m[1]))];
+  
+  if (englishSlugs.length === 0) {
+    return slugMapping;
+  }
+  
+  try {
+    // Batch query: Get all English articles at once
+    const { data: englishArticles } = await supabase
+      .from("articles")
+      .select("slug, translation_id")
+      .eq("language", "en")
+      .in("slug", englishSlugs);
+    
+    if (!englishArticles || englishArticles.length === 0) {
+      return slugMapping;
+    }
+    
+    // Get all translation_ids
+    const translationIds = englishArticles
+      .filter(a => a.translation_id)
+      .map(a => a.translation_id);
+    
+    if (translationIds.length === 0) {
+      return slugMapping;
+    }
+    
+    // Batch query: Get all translated articles at once
+    const { data: translatedArticles } = await supabase
+      .from("articles")
+      .select("slug, translation_id")
+      .eq("language", targetLangCode)
+      .in("translation_id", translationIds)
+      .in("status", ["published", "draft"]);
+    
+    if (!translatedArticles) {
+      return slugMapping;
+    }
+    
+    // Build mapping: englishSlug -> translatedSlug
+    const translationMap = new Map(
+      translatedArticles.map(t => [t.translation_id, t.slug])
+    );
+    
+    for (const englishArticle of englishArticles) {
+      if (englishArticle.translation_id && translationMap.has(englishArticle.translation_id)) {
+        slugMapping[englishArticle.slug] = translationMap.get(englishArticle.translation_id)!;
+      }
+    }
+  } catch (error) {
+    console.error(`[SLUG MAPPING] Error building mapping:`, error);
+    // Return empty mapping on error - links will use English slugs
+  }
+  
+  return slugMapping;
+}
+
+/**
+ * Localize article links using database lookup
+ */
+async function localizeArticleLinks(
+  content: string,
+  langCode: string
+): Promise<string> {
+  // Build slug mapping from database
+  const slugMapping = await buildArticleSlugMapping(content, langCode);
+  
+  let c = content;
+  
+  // Replace each article link with the correct translated slug
+  for (const [englishSlug, translatedSlug] of Object.entries(slugMapping)) {
+    // Escape special regex characters in slug
+    const escaped = englishSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Replace both single and double quotes, case-insensitive
+    c = c.replace(
+      new RegExp(`href=["']/en/blog/${escaped}["']`, 'gi'),
+      `href="/${langCode}/blog/${translatedSlug}"`
+    );
+  }
+  
+  // For any remaining /en/blog/ links that weren't found in database,
+  // just replace the language prefix (fallback)
+  c = c.replace(/href=["']\/en\/blog\//gi, `href="/${langCode}/blog/`);
+  
+  return c;
+}
+
+/**
+ * Localize service/quote links (non-article links)
+ */
+function localizeServiceLinks(content: string, langCode: string): string {
   const s = SERVICE_SLUGS[langCode] || {};
   let c = content;
   
@@ -99,9 +203,6 @@ function localizeLinks(content: string, langCode: string): string {
   
   // General services page (after specific ones)
   c = c.replace(/href=["']\/en\/services["']/gi, `href="/${langCode}/${s.services || "services"}"`);
-  
-  // Blog links
-  c = c.replace(/href=["']\/en\/blog\//gi, `href="/${langCode}/blog/`);
   
   return c;
 }
@@ -151,7 +252,9 @@ Return JSON:
   if (metaTitle.length > 70) metaTitle = metaTitle.substring(0, 67) + "...";
   if (metaDescription.length > 160) metaDescription = metaDescription.substring(0, 157) + "...";
   
-  content = localizeLinks(content, langCode);
+  // Localize links: first service/quote links, then article links with DB lookup
+  content = localizeServiceLinks(content, langCode);
+  content = await localizeArticleLinks(content, langCode);
 
   return { title, slug, content, excerpt, metaTitle, metaDescription };
 }
