@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-article-links-optimized-v1";
+const VERSION = "2026-01-04-simple-links-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -85,116 +85,10 @@ function makeSlug(title: string): string {
 }
 
 /**
- * Build article slug mapping ONCE at the start for all languages
- * Returns a map: { langCode: { englishSlug: translatedSlug } }
+ * Localize links in translated content
+ * Note: Article slugs are fixed AFTER all translations by fix-article-links function
  */
-async function buildAllArticleSlugMappings(
-  content: string,
-  targetLanguages: string[]
-): Promise<Record<string, Record<string, string>>> {
-  const allMappings: Record<string, Record<string, string>> = {};
-  
-  // Find all article links: href="/en/blog/slug" or href='/en/blog/slug'
-  const articleLinkPattern = /href=["']\/en\/blog\/([^"']+)["']/gi;
-  const matches = Array.from(content.matchAll(articleLinkPattern));
-  const englishSlugs = [...new Set(matches.map(m => m[1]))];
-  
-  if (englishSlugs.length === 0) {
-    return allMappings;
-  }
-  
-  try {
-    // Single batch query: Get all English articles at once
-    const { data: englishArticles } = await supabase
-      .from("articles")
-      .select("slug, translation_id")
-      .eq("language", "en")
-      .in("slug", englishSlugs);
-    
-    if (!englishArticles || englishArticles.length === 0) {
-      return allMappings;
-    }
-    
-    // Get all translation_ids
-    const translationIds = englishArticles
-      .filter(a => a.translation_id)
-      .map(a => a.translation_id);
-    
-    if (translationIds.length === 0) {
-      return allMappings;
-    }
-    
-    // Single batch query: Get ALL translated articles for ALL target languages at once
-    const { data: translatedArticles } = await supabase
-      .from("articles")
-      .select("slug, translation_id, language")
-      .in("translation_id", translationIds)
-      .in("language", targetLanguages)
-      .in("status", ["published", "draft"]);
-    
-    if (!translatedArticles) {
-      return allMappings;
-    }
-    
-    // Build mapping per language: { langCode: { englishSlug: translatedSlug } }
-    for (const langCode of targetLanguages) {
-      allMappings[langCode] = {};
-      
-      // Create map of translation_id -> slug for this language
-      const langTranslations = new Map(
-        translatedArticles
-          .filter(t => t.language === langCode)
-          .map(t => [t.translation_id, t.slug])
-      );
-      
-      // Map English slugs to translated slugs
-      for (const englishArticle of englishArticles) {
-        if (englishArticle.translation_id && langTranslations.has(englishArticle.translation_id)) {
-          allMappings[langCode][englishArticle.slug] = langTranslations.get(englishArticle.translation_id)!;
-        }
-      }
-    }
-  } catch (error) {
-    console.error(`[SLUG MAPPING] Error building mapping:`, error);
-    // Return empty mapping on error - links will use English slugs
-  }
-  
-  return allMappings;
-}
-
-/**
- * Localize article links using pre-built mapping (no DB queries)
- */
-function localizeArticleLinks(
-  content: string,
-  langCode: string,
-  slugMapping: Record<string, string>
-): string {
-  let c = content;
-  
-  // Replace each article link with the correct translated slug
-  for (const [englishSlug, translatedSlug] of Object.entries(slugMapping)) {
-    // Escape special regex characters in slug
-    const escaped = englishSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Replace both single and double quotes, case-insensitive
-    c = c.replace(
-      new RegExp(`href=["']/en/blog/${escaped}["']`, 'gi'),
-      `href="/${langCode}/blog/${translatedSlug}"`
-    );
-  }
-  
-  // For any remaining /en/blog/ links that weren't found in database,
-  // just replace the language prefix (fallback)
-  c = c.replace(/href=["']\/en\/blog\//gi, `href="/${langCode}/blog/`);
-  
-  return c;
-}
-
-/**
- * Localize service/quote links (non-article links)
- */
-function localizeServiceLinks(content: string, langCode: string): string {
+function localizeLinks(content: string, langCode: string): string {
   const s = SERVICE_SLUGS[langCode] || {};
   let c = content;
   
@@ -210,14 +104,17 @@ function localizeServiceLinks(content: string, langCode: string): string {
   // General services page (after specific ones)
   c = c.replace(/href=["']\/en\/services["']/gi, `href="/${langCode}/${s.services || "services"}"`);
   
+  // Blog links: just replace /en/ prefix with target language
+  // The actual slug translation is done by fix-article-links function AFTER all translations
+  c = c.replace(/href=["']\/en\/blog\//gi, `href="/${langCode}/blog/`);
+  
   return c;
 }
 
 async function translateToLanguage(
   original: { title: string; content: string; excerpt: string; metaTitle: string; metaDescription: string },
   langName: string,
-  langCode: string,
-  articleSlugMapping?: Record<string, string>
+  langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
   const prompt = `Translate this manufacturing blog article into ${langName}.
 
@@ -259,9 +156,8 @@ Return JSON:
   if (metaTitle.length > 70) metaTitle = metaTitle.substring(0, 67) + "...";
   if (metaDescription.length > 160) metaDescription = metaDescription.substring(0, 157) + "...";
   
-  // Localize links: first service/quote links, then article links with pre-built mapping
-  content = localizeServiceLinks(content, langCode);
-  content = localizeArticleLinks(content, langCode, articleSlugMapping || {});
+  // Localize service/quote links (article slugs are fixed later by fix-article-links)
+  content = localizeLinks(content, langCode);
 
   return { title, slug, content, excerpt, metaTitle, metaDescription };
 }
@@ -318,11 +214,6 @@ serve(async (req) => {
     
     console.log(`Languages: ${langs.map(l => l.code).join(", ")}`);
 
-    // Build article slug mappings ONCE for all languages (efficient batch query)
-    const langCodes = langs.map(l => l.code);
-    const articleSlugMappings = await buildAllArticleSlugMappings(original.content, langCodes);
-    console.log(`Built slug mappings for ${Object.keys(articleSlugMappings).length} language(s)`);
-
     const results: Record<string, any> = {};
     const urls: string[] = [`${siteUrl}/en/blog/${master.slug}`];
 
@@ -351,13 +242,8 @@ serve(async (req) => {
           continue;
         }
 
-        // Translate (pass pre-built slug mapping for this language)
-        const translation = await translateToLanguage(
-          original, 
-          lang.name, 
-          lang.code,
-          articleSlugMappings[lang.code] || {}
-        );
+        // Translate
+        const translation = await translateToLanguage(original, lang.name, lang.code);
 
         // Save
         const { data: saved, error: saveErr } = await supabase

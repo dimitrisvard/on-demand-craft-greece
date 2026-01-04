@@ -170,12 +170,40 @@ serve(async (req) => {
     const successful = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
+    // After all translations complete, fix internal article links
+    // This is necessary because during translation, linked articles may not exist yet
+    console.log(`\nFixing internal article links...`);
+    let linkFixResult = { success: false, articles_updated: 0, links_fixed: 0 };
+    
+    try {
+      const fixLinksUrl = `${supabaseUrl}/functions/v1/fix-article-links`;
+      const fixLinksResponse = await fetch(fixLinksUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${supabaseServiceKey}`,
+        },
+        body: JSON.stringify({ fix_all: true }),
+      });
+      
+      if (fixLinksResponse.ok) {
+        linkFixResult = await fixLinksResponse.json();
+        console.log(`✓ Fixed ${linkFixResult.links_fixed} links in ${linkFixResult.articles_updated} articles`);
+      } else {
+        const err = await fixLinksResponse.text();
+        console.error(`✗ Link fixing failed:`, err);
+      }
+    } catch (error: any) {
+      console.error(`✗ Error calling fix-article-links:`, error.message);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         message: `Translation process completed: ${successful} successful, ${failed} failed`,
         articles_processed: articlesToTranslate.length,
         results,
+        link_fix: linkFixResult,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
