@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-simple-links-v1";
+const VERSION = "2026-01-04-complete-translation-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -51,32 +51,67 @@ const SERVICE_SLUGS: Record<string, Record<string, string>> = {
 };
 
 interface GeminiResponse {
-  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+  candidates?: Array<{ 
+    content?: { parts?: Array<{ text?: string }> }; 
+    finishReason?: string;
+    finishMessage?: string;
+  }>;
   error?: { message: string };
 }
 
 async function callGemini(prompt: string): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`;
   
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+  
+  try {
     const response = await fetch(url, {
       method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
-    }),
-  });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { 
+          temperature: 0.3, 
+          maxOutputTokens: 32768, // Maximum for Gemini 2.0 Flash
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${err.substring(0, 200)}`);
-  }
+      const err = await response.text();
+      throw new Error(`Gemini API error: ${response.status} - ${err.substring(0, 200)}`);
+    }
 
-  const data: GeminiResponse = await response.json();
-  if (data.error) throw new Error(`Gemini error: ${data.error.message}`);
-  if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("Empty Gemini response");
-  
-  return data.candidates[0].content.parts[0].text;
+    const data: GeminiResponse = await response.json();
+    if (data.error) throw new Error(`Gemini error: ${data.error.message}`);
+    
+    const candidate = data.candidates?.[0];
+    if (!candidate?.content?.parts?.[0]?.text) {
+      throw new Error("Empty Gemini response");
+    }
+    
+    // Check if response was truncated
+    if (candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "LENGTH") {
+      console.warn(`[WARNING] Gemini response may be truncated (finishReason: ${candidate.finishReason})`);
+      throw new Error(`Translation truncated: Gemini hit token limit. finishReason: ${candidate.finishReason}`);
+    }
+    
+    if (candidate.finishReason && candidate.finishReason !== "STOP") {
+      console.warn(`[WARNING] Unexpected finishReason: ${candidate.finishReason}`);
+    }
+    
+    return candidate.content.parts[0].text;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === "AbortError") {
+      throw new Error("Gemini API request timeout (60s)");
+    }
+    throw error;
+  }
 }
 
 function makeSlug(title: string): string {
@@ -131,6 +166,9 @@ Return JSON:
 
   const response = await callGemini(prompt);
   
+  // Log response length for debugging
+  console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
+  
   let json = response.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
   const first = json.indexOf("{");
   const last = json.lastIndexOf("}");
@@ -139,10 +177,22 @@ Return JSON:
   let parsed;
   try {
     parsed = JSON.parse(json);
-  } catch {
+  } catch (parseError: any) {
+    console.error(`[translateToLanguage] JSON parse error:`, parseError.message);
+    console.error(`[translateToLanguage] JSON preview (first 500 chars):`, json.substring(0, 500));
+    console.error(`[translateToLanguage] JSON preview (last 500 chars):`, json.substring(Math.max(0, json.length - 500)));
+    
+    // Try alternative parsing
     const match = response.match(/\{[\s\S]*\}/);
-    if (match) parsed = JSON.parse(match[0]);
-    else throw new Error("Failed to parse Gemini JSON");
+    if (match) {
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        throw new Error(`Failed to parse Gemini JSON: ${parseError.message}`);
+      }
+    } else {
+      throw new Error(`Failed to parse Gemini JSON: ${parseError.message}`);
+    }
   }
 
   const title = parsed.title || original.title;
@@ -151,6 +201,20 @@ Return JSON:
   const excerpt = parsed.excerpt || original.excerpt;
   let metaTitle = parsed.metaTitle || `${title} | ${BRAND_NAME}`;
   let metaDescription = parsed.metaDescription || original.metaDescription;
+  
+  // Validate content completeness
+  const originalContentLength = original.content.length;
+  const translatedContentLength = content.length;
+  const lengthRatio = translatedContentLength / originalContentLength;
+  
+  console.log(`[translateToLanguage] Content length: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(2)}`);
+  
+  // Warn if translation is suspiciously short (less than 50% of original)
+  // This could indicate truncation
+  if (lengthRatio < 0.5 && originalContentLength > 5000) {
+    console.warn(`[WARNING] Translated content is ${(lengthRatio * 100).toFixed(1)}% of original - possible truncation!`);
+    throw new Error(`Translation appears incomplete: translated content is only ${(lengthRatio * 100).toFixed(1)}% of original length`);
+  }
 
   if (!metaTitle.includes(BRAND_NAME)) metaTitle = `${metaTitle} | ${BRAND_NAME}`;
   if (metaTitle.length > 70) metaTitle = metaTitle.substring(0, 67) + "...";
