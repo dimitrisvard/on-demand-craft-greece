@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-delimiter-format-v1";
+const VERSION = "2026-01-04-quote-sanitize-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -272,6 +272,11 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // Localize service/quote links (article slugs are fixed later by fix-article-links)
   content = localizeLinks(content, langCode);
+  
+  // Fix any mismatched quotes in href attributes (Gemini sometimes produces href="...' instead of href="...")
+  content = content.replace(/href="([^"']*?)'/g, 'href="$1"');
+  content = content.replace(/href='([^"']*?)"/g, "href='$1'");
+  console.log(`[SANITIZE] Fixed any mismatched quotes in href attributes`);
 
   return { title, slug, content, excerpt, metaTitle, metaDescription };
 }
