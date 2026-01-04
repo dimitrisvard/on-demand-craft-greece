@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-robust-json-parsing-v1";
+const VERSION = "2026-01-04-delimiter-format-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -68,7 +68,7 @@ async function callGemini(prompt: string): Promise<string> {
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-  
+
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -163,181 +163,90 @@ async function translateToLanguage(
   langName: string,
   langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
+  
+  // Use delimiter-based format instead of JSON to avoid escaping issues with HTML content
+  // JSON escaping of quotes in HTML attributes (href="...") causes parsing failures
   const prompt = `Translate this manufacturing blog article into ${langName}.
 
 RULES:
 - Keep "${BRAND_NAME}" unchanged
-- Preserve ALL HTML tags exactly
-- Return ONLY valid JSON
+- Preserve ALL HTML tags and attributes exactly (including href, class, etc.)
+- Do NOT modify any URLs or links - keep them exactly as they are
+- Translate only the visible text content
 
-Input:
-${JSON.stringify(original)}
+Use this EXACT format with the delimiters shown:
 
-Return JSON:
-{"title":"...","slug":"...","content":"...","excerpt":"...","metaTitle":"... | ${BRAND_NAME}","metaDescription":"..."}`;
+===TITLE===
+[translated title here]
+===SLUG===
+[url-friendly slug in ${langName}, lowercase, hyphens only, no special characters]
+===CONTENT===
+[translated HTML content here - preserve ALL HTML exactly]
+===EXCERPT===
+[translated excerpt here]
+===META_TITLE===
+[translated meta title here] | ${BRAND_NAME}
+===META_DESCRIPTION===
+[translated meta description here, max 160 characters]
+===END===
+
+ARTICLE TO TRANSLATE:
+
+TITLE: ${original.title}
+
+CONTENT:
+${original.content}
+
+EXCERPT: ${original.excerpt}
+
+META TITLE: ${original.metaTitle}
+
+META DESCRIPTION: ${original.metaDescription}`;
 
   const response = await callGemini(prompt);
   
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:179',message:'Gemini response received',data:{responseLength:response.length,first500:response.substring(0,500),last500:response.substring(Math.max(0,response.length-500))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H6'})}).catch(()=>{});
-  // #endregion
+  console.log(`[translateToLanguage] Response preview (first 500): ${response.substring(0, 500)}`);
+  console.log(`[translateToLanguage] Response preview (last 500): ${response.substring(Math.max(0, response.length - 500))}`);
   
-  // Try to parse directly first (most reliable)
-  let parsed: any;
-  let json = response.trim();
-  
-  // Remove markdown code fences if present
-  json = json.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:189',message:'JSON cleaned',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H6'})}).catch(()=>{});
-  // #endregion
-  
-  // Method 1: Try parsing directly
-  // #region agent log
-  const parseStartTime = Date.now();
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:180',message:'JSON parse start',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
-  try {
-    parsed = JSON.parse(json);
-    // #region agent log
-    const parseDuration = Date.now() - parseStartTime;
-    const parsedContentPreview = parsed.content ? (parsed.content.length > 1000 ? parsed.content.substring(0, 500) + '...' + parsed.content.substring(parsed.content.length - 500) : parsed.content) : 'MISSING';
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:197',message:'JSON parse direct success',data:{duration:parseDuration,parsedContentLength:parsed.content?.length||0,parsedContentPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-  } catch (directParseError: any) {
-    console.log(`[translateToLanguage] Direct parse failed, trying extraction method...`);
-    // #region agent log
-    const braceCountStartTime = Date.now();
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:183',message:'Brace counting start',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
-    // #endregion
-    // Method 2: Find JSON boundaries by counting braces (more reliable than lastIndexOf)
-    const firstBrace = json.indexOf("{");
-    if (firstBrace === -1) {
-      throw new Error("Could not find JSON start");
-    }
-    
-    // Count braces to find the matching closing brace
-    // IMPROVED: More robust parsing that handles all edge cases
-    let braceCount = 0;
-    let inString = false;
-    let escapeNext = false;
-    let jsonEnd = -1;
-    let lastBracePosition = -1;
-    let bracePositions: number[] = []; // Track all closing braces for debugging
-    
-    for (let i = firstBrace; i < json.length; i++) {
-      const char = json[i];
-      
-      // Handle escaped characters
-      if (escapeNext) {
-        escapeNext = false;
-        continue; // Skip the escaped character
-      }
-      
-      // Check for escape sequence
-      if (char === '\\') {
-        escapeNext = true;
-        continue;
-      }
-      
-      // Toggle string state on unescaped quotes
-      if (char === '"' && !escapeNext) {
-        inString = !inString;
-        continue;
-      }
-      
-      // Only count braces when NOT inside a string
-      if (!inString) {
-        if (char === '{') {
-          braceCount++;
-        } else if (char === '}') {
-          braceCount--;
-          lastBracePosition = i;
-          bracePositions.push(i);
-          
-          // Found matching closing brace
-          if (braceCount === 0) {
-            jsonEnd = i;
-            break;
-          }
-        }
-      }
-    }
-    
-    // Log brace counting details for debugging
-    console.log(`[BRACE COUNT] Found ${bracePositions.length} closing braces, final count: ${braceCount}, jsonEnd: ${jsonEnd}`);
-    if (braceCount !== 0 && jsonEnd === -1) {
-      console.error(`[BRACE COUNT] Unbalanced braces! Count: ${braceCount}, last position: ${lastBracePosition}`);
-    }
-    
-    if (jsonEnd === -1) {
-      console.error(`[translateToLanguage] Could not find matching closing brace`);
-      console.error(`[translateToLanguage] Response preview (first 1000 chars):`, response.substring(0, 1000));
-      console.error(`[translateToLanguage] Response preview (last 1000 chars):`, response.substring(Math.max(0, response.length - 1000)));
-      throw new Error("Could not find matching closing brace in JSON response");
-    }
-    
-    // Extract the JSON portion
-    const extractedJson = json.substring(firstBrace, jsonEnd + 1);
-    
-    // Validate extracted JSON has content field
-    const contentFieldMatch = extractedJson.match(/"content"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
-    if (contentFieldMatch) {
-      const contentInJson = contentFieldMatch[1];
-      console.log(`[BRACE COUNT] Content field found in extracted JSON, length: ${contentInJson.length}`);
-      console.log(`[BRACE COUNT] Content preview (first 200): ${contentInJson.substring(0, 200)}`);
-      console.log(`[BRACE COUNT] Content preview (last 200): ${contentInJson.substring(Math.max(0, contentInJson.length - 200))}`);
-    } else {
-      console.warn(`[BRACE COUNT] WARNING: Content field not found in extracted JSON!`);
-      console.warn(`[BRACE COUNT] Extracted JSON length: ${extractedJson.length}`);
-      console.warn(`[BRACE COUNT] Extracted JSON ends with: ${extractedJson.substring(Math.max(0, extractedJson.length - 500))}`);
-    }
-    
-    // #region agent log
-    const braceCountDuration = Date.now() - braceCountStartTime;
-    const extractedJsonPreview = extractedJson.length > 1000 ? extractedJson.substring(0, 500) + '...' + extractedJson.substring(extractedJson.length - 500) : extractedJson;
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:275',message:'Brace counting complete',data:{duration:braceCountDuration,extractedLength:extractedJson.length,iterations:jsonEnd-firstBrace,firstBrace,jsonEnd,braceCount,bracePositions:bracePositions.slice(-5),extractedPreview:extractedJsonPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
-    
-    try {
-      parsed = JSON.parse(extractedJson);
-      // #region agent log
-      const parseDuration = Date.now() - parseStartTime;
-      const parsedContentPreview = parsed.content ? (parsed.content.length > 1000 ? parsed.content.substring(0, 500) + '...' + parsed.content.substring(parsed.content.length - 500) : parsed.content) : 'MISSING';
-      fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:266',message:'JSON parse extracted success',data:{duration:parseDuration,parsedContentLength:parsed.content?.length||0,parsedContentPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
-    } catch (extractParseError: any) {
-      console.error(`[translateToLanguage] JSON parse error after extraction:`, extractParseError.message);
-      console.error(`[translateToLanguage] Extracted JSON length: ${extractedJson.length}`);
-      console.error(`[translateToLanguage] Extracted JSON preview (first 500 chars):`, extractedJson.substring(0, 500));
-      console.error(`[translateToLanguage] Extracted JSON preview (last 500 chars):`, extractedJson.substring(Math.max(0, extractedJson.length - 500)));
-      throw new Error(`Failed to parse Gemini JSON: ${extractParseError.message}`);
-    }
-  }
-
-  const title = parsed.title || original.title;
-  const slug = parsed.slug || makeSlug(title);
-  let content = parsed.content || original.content;
-  const excerpt = parsed.excerpt || original.excerpt;
-  let metaTitle = parsed.metaTitle || `${title} | ${BRAND_NAME}`;
-  let metaDescription = parsed.metaDescription || original.metaDescription;
-  
-  // Log detailed content extraction info
-  console.log(`[CONTENT EXTRACTION] Parsed content length: ${parsed.content?.length || 0}`);
-  console.log(`[CONTENT EXTRACTION] Extracted content length: ${content.length}`);
-  if (parsed.content) {
-    console.log(`[CONTENT EXTRACTION] Content starts with: ${parsed.content.substring(0, 100)}`);
-    console.log(`[CONTENT EXTRACTION] Content ends with: ${parsed.content.substring(Math.max(0, parsed.content.length - 100))}`);
-  } else {
-    console.error(`[CONTENT EXTRACTION] ERROR: parsed.content is missing!`);
-    console.error(`[CONTENT EXTRACTION] Parsed object keys: ${Object.keys(parsed).join(', ')}`);
+  // Parse using delimiters (much more robust than JSON for HTML content)
+  function extractBetween(text: string, startDelim: string, endDelim: string): string {
+    const startIdx = text.indexOf(startDelim);
+    if (startIdx === -1) return "";
+    const contentStart = startIdx + startDelim.length;
+    const endIdx = text.indexOf(endDelim, contentStart);
+    if (endIdx === -1) return text.substring(contentStart).trim();
+    return text.substring(contentStart, endIdx).trim();
   }
   
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:295',message:'Parsed content extracted',data:{parsedContentLength:parsed.content?.length||0,extractedContentLength:content.length,hasContent:!!parsed.content,parsedKeys:Object.keys(parsed)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-  // #endregion
+  const title = extractBetween(response, "===TITLE===", "===SLUG===") || original.title;
+  const slugRaw = extractBetween(response, "===SLUG===", "===CONTENT===");
+  const slug = slugRaw ? makeSlug(slugRaw) : makeSlug(title);
+  let content = extractBetween(response, "===CONTENT===", "===EXCERPT===") || original.content;
+  const excerpt = extractBetween(response, "===EXCERPT===", "===META_TITLE===") || original.excerpt;
+  let metaTitle = extractBetween(response, "===META_TITLE===", "===META_DESCRIPTION===") || `${title} | ${BRAND_NAME}`;
+  let metaDescription = extractBetween(response, "===META_DESCRIPTION===", "===END===") || original.metaDescription;
+  
+  // Log extraction results
+  console.log(`[DELIMITER PARSE] Title length: ${title.length}`);
+  console.log(`[DELIMITER PARSE] Slug: ${slug}`);
+  console.log(`[DELIMITER PARSE] Content length: ${content.length}`);
+  console.log(`[DELIMITER PARSE] Excerpt length: ${excerpt.length}`);
+  console.log(`[DELIMITER PARSE] Meta title: ${metaTitle}`);
+  console.log(`[DELIMITER PARSE] Meta description length: ${metaDescription.length}`);
+  
+  // Validate content was extracted
+  if (!content || content.length < 100) {
+    console.error(`[ERROR] Content extraction failed or content too short`);
+    console.error(`[ERROR] Extracted content: ${content.substring(0, 500)}`);
+    console.error(`[ERROR] Full response for debugging: ${response.substring(0, 2000)}`);
+    throw new Error(`Content extraction failed - delimiter parsing returned empty or very short content`);
+  }
+  
+  // Check for article links in the translated content
+  const articleLinks = content.match(/href=["']\/[a-z]{2}\/blog\//gi);
+  console.log(`[DELIMITER PARSE] Found ${articleLinks?.length || 0} article link(s) in content`);
   
   // Validate content completeness
   const originalContentLength = original.content.length;
@@ -345,74 +254,16 @@ Return JSON:
   const lengthRatio = translatedContentLength / originalContentLength;
   
   console.log(`[translateToLanguage] Content length: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(2)}`);
-  console.log(`[translateToLanguage] Original content ends with: ${original.content.substring(Math.max(0, originalContentLength - 200))}`);
-  console.log(`[translateToLanguage] Translated content ends with: ${content.substring(Math.max(0, translatedContentLength - 200))}`);
+  console.log(`[translateToLanguage] Content starts with: ${content.substring(0, 200)}`);
+  console.log(`[translateToLanguage] Content ends with: ${content.substring(Math.max(0, translatedContentLength - 200))}`);
   
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:310',message:'Content length validation',data:{originalLength:originalContentLength,translatedLength:translatedContentLength,ratio:lengthRatio},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-  // #endregion
-  
-  // More aggressive validation: Check if translation is incomplete
-  // For verbose languages (like German), translation can be 20-30% longer, so we check for < 70% as suspicious
-  if (lengthRatio < 0.7 && originalContentLength > 3000) {
+  // Check if translation is incomplete (less than 60% is suspicious for most languages)
+  if (lengthRatio < 0.6 && originalContentLength > 3000) {
     const missingPercent = (1 - lengthRatio) * 100;
     console.error(`[ERROR] Translation appears incomplete!`);
     console.error(`[ERROR] Original: ${originalContentLength} chars, Translated: ${translatedContentLength} chars`);
     console.error(`[ERROR] Missing approximately ${missingPercent.toFixed(1)}% of content`);
-    console.error(`[ERROR] Attempting to extract content directly from response...`);
-    
-    // FALLBACK: Try to extract content field directly using regex (more robust for malformed JSON)
-    // This handles cases where JSON.parse might have failed silently or truncated
-    const contentFieldPattern = /"content"\s*:\s*"((?:[^"\\]|\\.|\\n|\\r|\\t)*)"/s;
-    const directContentMatch = response.match(contentFieldPattern);
-    
-    if (directContentMatch && directContentMatch[1]) {
-      // Unescape the content
-      let directContent = directContentMatch[1]
-        .replace(/\\n/g, '\n')
-        .replace(/\\r/g, '\r')
-        .replace(/\\t/g, '\t')
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, '\\');
-      
-      console.log(`[FALLBACK] Extracted content directly from response: ${directContent.length} chars`);
-      
-      if (directContent.length > content.length) {
-        console.log(`[FALLBACK] Direct extraction found ${directContent.length - content.length} more characters!`);
-        console.log(`[FALLBACK] Using directly extracted content instead of parsed content`);
-        content = directContent;
-        
-        // Recalculate ratio with new content
-        const newRatio = content.length / originalContentLength;
-        console.log(`[FALLBACK] New content ratio: ${newRatio.toFixed(2)}`);
-        
-        // If still too short, throw error
-        if (newRatio < 0.7) {
-          console.error(`[FALLBACK] Even direct extraction is incomplete (${(newRatio * 100).toFixed(1)}%)`);
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:350',message:'Content still incomplete after fallback',data:{ratio:newRatio,originalLength:originalContentLength,translatedLength:content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-          // #endregion
-          throw new Error(`Translation incomplete even after fallback extraction: ${(newRatio * 100).toFixed(1)}% of original`);
-        } else {
-          console.log(`[FALLBACK] Successfully recovered complete content using direct extraction!`);
-        }
-      }
-    } else {
-      console.error(`[ERROR] Could not extract content field directly from response`);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:365',message:'Content truncation - fallback failed',data:{ratio:lengthRatio,originalLength:originalContentLength,translatedLength:translatedContentLength,missingPercent},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-      // #endregion
-      throw new Error(`Translation appears incomplete: translated content is only ${(lengthRatio * 100).toFixed(1)}% of original length (missing ~${missingPercent.toFixed(1)}%)`);
-    }
-  }
-  
-  // Also check for suspiciously short translations (less than 50% is definitely wrong)
-  if (lengthRatio < 0.5 && originalContentLength > 5000) {
-    console.warn(`[WARNING] Translated content is ${(lengthRatio * 100).toFixed(1)}% of original - possible truncation!`);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:333',message:'Severe content truncation',data:{ratio:lengthRatio,originalLength:originalContentLength,translatedLength:translatedContentLength},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
-    throw new Error(`Translation appears incomplete: translated content is only ${(lengthRatio * 100).toFixed(1)}% of original length`);
+    throw new Error(`Translation incomplete: only ${(lengthRatio * 100).toFixed(1)}% of original content translated`);
   }
 
   if (!metaTitle.includes(BRAND_NAME)) metaTitle = `${metaTitle} | ${BRAND_NAME}`;
