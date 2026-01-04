@@ -17,6 +17,7 @@ const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
@@ -197,11 +198,18 @@ async function generateWithGemini(
   console.log(`[Gemini] Starting API request`);
 
   try {
+    // Add timeout to fetch (60 seconds max for Gemini API call)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -234,6 +242,10 @@ async function generateWithGemini(
     return textContent;
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
+    if (error.name === 'AbortError') {
+      console.error(`[Gemini] Request timeout after ${elapsedTime}ms`);
+      throw new Error(`Gemini API request timed out after 60 seconds`);
+    }
     console.error(`[Gemini] Error after ${elapsedTime}ms:`, error.message);
     throw error;
   }
@@ -255,6 +267,7 @@ function generateSlug(title: string): string {
 
 /**
  * Build article slug mapping for a specific language
+ * Optimized: Batch queries instead of individual queries per slug
  */
 async function buildArticleSlugMapping(
   content: string,
@@ -269,31 +282,55 @@ async function buildArticleSlugMapping(
     return slugMapping;
   }
 
-  for (const englishSlug of englishSlugs) {
-    try {
-      const { data: englishArticle } = await supabase
-        .from("articles")
-        .select("id, translation_id, slug")
-        .eq("language", "en")
-        .eq("slug", englishSlug)
-        .single();
+  // Limit to first 20 slugs to avoid timeout (most articles don't have more)
+  const slugsToProcess = englishSlugs.slice(0, 20);
 
-      if (!englishArticle?.translation_id) continue;
+  try {
+    // Batch query: Get all English articles at once
+    const { data: englishArticles } = await supabase
+      .from("articles")
+      .select("id, translation_id, slug")
+      .eq("language", "en")
+      .in("slug", slugsToProcess);
 
-      const { data: translatedArticle } = await supabase
-        .from("articles")
-        .select("slug")
-        .eq("translation_id", englishArticle.translation_id)
-        .eq("language", targetLangCode)
-        .in("status", ["published", "draft"])
-        .single();
-
-      if (translatedArticle) {
-        slugMapping[englishSlug] = translatedArticle.slug;
-      }
-    } catch (error) {
-      // Skip on error
+    if (!englishArticles || englishArticles.length === 0) {
+      return slugMapping;
     }
+
+    // Get all translation_ids
+    const translationIds = englishArticles
+      .filter(a => a.translation_id)
+      .map(a => a.translation_id);
+
+    if (translationIds.length === 0) {
+      return slugMapping;
+    }
+
+    // Batch query: Get all translated articles at once
+    const { data: translatedArticles } = await supabase
+      .from("articles")
+      .select("slug, translation_id")
+      .eq("language", targetLangCode)
+      .in("translation_id", translationIds)
+      .in("status", ["published", "draft"]);
+
+    if (!translatedArticles) {
+      return slugMapping;
+    }
+
+    // Build mapping
+    const translationMap = new Map(
+      translatedArticles.map(t => [t.translation_id, t.slug])
+    );
+
+    for (const englishArticle of englishArticles) {
+      if (englishArticle.translation_id && translationMap.has(englishArticle.translation_id)) {
+        slugMapping[englishArticle.slug] = translationMap.get(englishArticle.translation_id)!;
+      }
+    }
+  } catch (error) {
+    console.error(`[SLUG MAPPING] Error building mapping:`, error);
+    // Return empty mapping on error - links will use English slugs
   }
 
   return slugMapping;
@@ -476,12 +513,16 @@ function delay(ms: number): Promise<void> {
  * Main handler - Translates an English article to all languages
  */
 serve(async (req) => {
+  // Handle CORS preflight immediately - must be fast
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response(null, { 
+      status: 204,
+      headers: corsHeaders 
+    });
   }
 
   const functionStartTime = Date.now();
-  const FUNCTION_TIMEOUT_MS = 140000; // 140 seconds (10s buffer before 150s limit)
+  const FUNCTION_TIMEOUT_MS = 120000; // 120 seconds (30s buffer before 150s limit)
 
   try {
     console.log(`[translate-article] Version: ${TRANSLATE_ARTICLE_FN_VERSION}`);
@@ -566,10 +607,32 @@ serve(async (req) => {
           continue;
         }
 
-        // Build slug mapping for this language (only if needed)
-        const articleSlugMapping = await buildArticleSlugMapping(originalData.content, lang.code);
+        // Check timeout before slug mapping
+        const elapsedBeforeMapping = Date.now() - functionStartTime;
+        if (elapsedBeforeMapping > FUNCTION_TIMEOUT_MS - 30000) {
+          throw new Error(`Timeout approaching before translation (${elapsedBeforeMapping}ms)`);
+        }
+
+        // Build slug mapping for this language (only if needed) - with timeout protection
+        let articleSlugMapping: Record<string, string> = {};
+        try {
+          const mappingStartTime = Date.now();
+          articleSlugMapping = await buildArticleSlugMapping(originalData.content, lang.code);
+          const mappingTime = Date.now() - mappingStartTime;
+          console.log(`[${lang.code}] Slug mapping completed in ${mappingTime}ms`);
+        } catch (mappingError: any) {
+          console.warn(`[${lang.code}] Slug mapping failed, continuing without mapping:`, mappingError.message);
+          // Continue without mapping - links will use English slugs
+        }
+
+        // Check timeout before translation
+        const elapsedBeforeTranslation = Date.now() - functionStartTime;
+        if (elapsedBeforeTranslation > FUNCTION_TIMEOUT_MS - 30000) {
+          throw new Error(`Timeout approaching before translation (${elapsedBeforeTranslation}ms)`);
+        }
 
         // Translate in ONE PASS
+        const translationStartTime = Date.now();
         const translation = await translateArticle(
           originalData,
           lang.name,
@@ -577,6 +640,8 @@ serve(async (req) => {
           masterArticle.slug,
           articleSlugMapping
         );
+        const translationTime = Date.now() - translationStartTime;
+        console.log(`[${lang.code}] Translation completed in ${translationTime}ms`);
 
         // Save to database
         const { data: translatedArticle, error: transError } = await supabase
