@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye } from "lucide-react";
+import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye, Link } from "lucide-react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
@@ -47,6 +47,7 @@ const BlogEditor = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generatingTranslations, setGeneratingTranslations] = useState(false);
+  const [fixingLinks, setFixingLinks] = useState(false);
   const [isSourceView, setIsSourceView] = useState(false);
   const quillRef = useRef<ReactQuill>(null);
 
@@ -402,6 +403,71 @@ const BlogEditor = () => {
       });
     } finally {
       setGeneratingTranslations(false);
+    }
+  };
+
+  const handleFixLinks = async () => {
+    if (!formData.translation_id) {
+      toast({
+        title: "No Translation Group",
+        description: "This article is not part of a translation group.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!id) {
+      toast({
+        title: "Save First",
+        description: "Please save this article before fixing links.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setFixingLinks(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token) throw new Error("User not authenticated");
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fix-article-links`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            translation_id: formData.translation_id,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to fix links");
+      }
+
+      toast({
+        title: "✅ Links Fixed",
+        description: `Fixed ${result.links_fixed || 0} link(s) in ${result.articles_updated || 0} article(s).`,
+      });
+
+      // Refresh the current article to show updated content
+      await fetchArticle(id);
+    } catch (error: any) {
+      console.error("Error fixing links:", error);
+      toast({
+        title: "❌ Fix Links Failed",
+        description: error.message || "Failed to fix links.",
+        variant: "destructive",
+      });
+    } finally {
+      setFixingLinks(false);
     }
   };
 
@@ -922,43 +988,63 @@ const BlogEditor = () => {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>Translations</Label>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" className="h-7 text-xs" disabled={generatingTranslations || !id}>
-                          {generatingTranslations ? (
+                    <div className="flex gap-2">
+                      {/* Fix Links Button */}
+                      {formData.translation_id && availableTranslations.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={fixingLinks || !id}
+                          onClick={handleFixLinks}
+                          title="Fix blog post links in all translations of this article"
+                        >
+                          {fixingLinks ? (
                             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                           ) : (
-                            <Plus className="h-3 w-3 mr-1" />
+                            <Link className="h-3 w-3 mr-1" />
                           )}
-                          Add
+                          Fix Links
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuLabel>Create Translation</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={handleCreateAllTranslations}>
-                          <Sparkles className="h-4 w-4 mr-2 text-yellow-500" />
-                          <span>Generate All ({LANGUAGES.length - 1 - availableTranslations.length})</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <div className="max-h-60 overflow-y-auto">
-                          {LANGUAGES.filter(l => l.code !== formData.language).map(lang => {
-                            const exists = availableTranslations.some(t => t.language === lang.code);
-                            return (
-                              <DropdownMenuItem 
-                                key={lang.code} 
-                                disabled={exists}
-                                onClick={() => handleCreateTranslation(lang.code)}
-                              >
-                                <span className="w-6 uppercase text-xs text-muted-foreground">{lang.code}</span>
-                                <span className={exists ? "line-through opacity-50" : ""}>{lang.name}</span>
-                                {exists && <span className="ml-auto text-xs text-muted-foreground">(Exists)</span>}
-                              </DropdownMenuItem>
-                            );
-                          })}
-                        </div>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="h-7 text-xs" disabled={generatingTranslations || !id}>
+                            {generatingTranslations ? (
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Plus className="h-3 w-3 mr-1" />
+                            )}
+                            Add
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuLabel>Create Translation</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={handleCreateAllTranslations}>
+                            <Sparkles className="h-4 w-4 mr-2 text-yellow-500" />
+                            <span>Generate All ({LANGUAGES.length - 1 - availableTranslations.length})</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <div className="max-h-60 overflow-y-auto">
+                            {LANGUAGES.filter(l => l.code !== formData.language).map(lang => {
+                              const exists = availableTranslations.some(t => t.language === lang.code);
+                              return (
+                                <DropdownMenuItem 
+                                  key={lang.code} 
+                                  disabled={exists}
+                                  onClick={() => handleCreateTranslation(lang.code)}
+                                >
+                                  <span className="w-6 uppercase text-xs text-muted-foreground">{lang.code}</span>
+                                  <span className={exists ? "line-through opacity-50" : ""}>{lang.name}</span>
+                                  {exists && <span className="ml-auto text-xs text-muted-foreground">(Exists)</span>}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </div>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                   
                   <div className="text-sm space-y-2 mb-2">

@@ -112,25 +112,41 @@ function fixLinksInContent(
   fixedContent = fixedContent.replace(/href=["']\/en\/services["']/gi, `href="/${targetLang}/${s.services || "services"}"`);
   
   // Fix article links - find all blog links
-  // Pattern matches both /en/blog/slug and /{lang}/blog/slug with English slug
-  const blogLinkPattern = /href=["'](\/[a-z]{2}\/blog\/([^"']+))["']/gi;
+  // Enhanced pattern matches:
+  // - /en/blog/slug and /{lang}/blog/slug with English slug
+  // - Handles trailing slashes, query parameters, and fragments
+  // - More robust quote matching (handles both single and double quotes)
+  // Pattern breakdown:
+  //   href=["'] - matches href=" or href='
+  //   (\/[a-z]{2}\/blog\/([^"'\s?#]+)) - captures full path and slug (stops at quote, space, ?, #)
+  //   ([?#][^"']*)? - optionally captures query params or fragments
+  //   ["'] - matches closing quote
+  const blogLinkPattern = /href=["'](\/[a-z]{2}\/blog\/([^"'\s?#]+)([?#][^"']*)?)["']/gi;
   
   let match;
   const replacements: Array<{ original: string; replacement: string }> = [];
   
   while ((match = blogLinkPattern.exec(content)) !== null) {
-    const fullPath = match[1];
-    const slugPart = match[2];
+    const fullPath = match[1]; // Full path including query/fragment if present
+    const slugPart = match[2]; // Just the slug part (without trailing slash, query, fragment)
+    const queryOrFragment = match[3] || ""; // Query params or fragment (e.g., ?param=value or #section)
+    
+    // Normalize slug: remove trailing slash for lookup
+    const normalizedSlug = slugPart.replace(/\/$/, "");
     
     // Check if this English slug has a translation for the target language
-    if (slugMapping[slugPart] && slugMapping[slugPart][targetLang]) {
-      const translatedSlug = slugMapping[slugPart][targetLang];
-      const newPath = `/${targetLang}/blog/${translatedSlug}`;
+    if (slugMapping[normalizedSlug] && slugMapping[normalizedSlug][targetLang]) {
+      const translatedSlug = slugMapping[normalizedSlug][targetLang];
+      const newPath = `/${targetLang}/blog/${translatedSlug}${queryOrFragment}`;
       
       if (fullPath !== newPath) {
+        // Preserve the original quote style (single or double) from the match
+        // match[0] is the full match like: href="/de/blog/slug" or href='/de/blog/slug'
+        const matchStr = match[0];
+        const quoteChar = matchStr.charAt(5) === "'" ? "'" : '"'; // Position 5 is right after "href="
         replacements.push({
           original: match[0],
-          replacement: `href="${newPath}"`
+          replacement: `href=${quoteChar}${newPath}${quoteChar}`
         });
         linksFixed++;
       }
