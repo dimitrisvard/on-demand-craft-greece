@@ -11,7 +11,7 @@ const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 const BRAND_NAME = "Microns Hub";
 
 // Bump this when deploying to confirm the runtime is executing the expected code
-const TRANSLATE_ARTICLE_FN_VERSION = "2026-01-03.gemini-2.5-flash.optimized";
+const TRANSLATE_ARTICLE_FN_VERSION = "2026-01-04.gemini-2.5-flash.timeout-fix";
 
 const supabase = createClient(supabaseUrl!, supabaseServiceKey!);
 
