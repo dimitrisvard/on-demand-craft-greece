@@ -185,7 +185,7 @@ async function generateWithClaude(
 
   const requestBody = {
     model: model,
-    max_tokens: 8192, // Restored to full capacity for 2500-word articles
+    max_tokens: 16384, // Increased for 2500-word articles with HTML formatting (was 8192, causing truncation)
     messages: [
       {
         role: "user",
@@ -240,6 +240,14 @@ async function generateWithClaude(
     const totalTime = Date.now() - startTime;
     console.log(`[generateWithClaude] Claude API completed in ${totalTime}ms`);
     console.log(`[generateWithClaude] Claude API usage: ${data.usage.input_tokens} input, ${data.usage.output_tokens} output tokens`);
+    console.log(`[generateWithClaude] Stop reason: ${data.stop_reason}`);
+
+    // Check if response was truncated due to max_tokens limit
+    if (data.stop_reason === "max_tokens") {
+      console.error(`[generateWithClaude] ERROR: Response was truncated due to max_tokens limit!`);
+      console.error(`[generateWithClaude] Output tokens used: ${data.usage.output_tokens}/${requestBody.max_tokens}`);
+      throw new Error(`Claude response truncated: hit max_tokens limit (${requestBody.max_tokens}). Response incomplete - article generation failed.`);
+    }
 
     return textContent.text;
   } catch (error: any) {
@@ -513,6 +521,31 @@ ${relatedArticles}
     
     // ADD HTML CLEANUP: Clean HTML content to remove excessive newlines and fix formatting
     content = cleanHtmlContent(content);
+    
+    // Validate content meets minimum word count requirement
+    const wordCount = content.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(w => w.length > 0).length;
+    const minWords = 2000; // Allow some flexibility (2500 is target, 2000 is minimum)
+    const targetWords = 2500;
+
+    if (wordCount < minWords) {
+      console.error(`[generateMasterArticle] WARNING: Content is shorter than expected!`);
+      console.error(`[generateMasterArticle] Word count: ${wordCount} (minimum: ${minWords}, target: ${targetWords})`);
+      console.error(`[generateMasterArticle] Content length: ${content.length} characters`);
+      console.error(`[generateMasterArticle] Content ends with: ${content.substring(Math.max(0, content.length - 100))}`);
+      
+      // Check if content ends mid-tag (indicates truncation)
+      const endsMidTag = content.match(/<[^>]*$/);
+      if (endsMidTag) {
+        console.error(`[generateMasterArticle] ERROR: Content ends mid-HTML tag - truncation detected!`);
+        throw new Error(`Article content truncated: Only ${wordCount} words generated (target: ${targetWords}). Content ends mid-HTML tag. This indicates the Claude API response was incomplete.`);
+      }
+      
+      // If content is too short but appears complete, log warning but don't fail
+      // This allows monitoring and manual review
+      console.warn(`[generateMasterArticle] Content is ${((1 - wordCount/targetWords) * 100).toFixed(1)}% shorter than target but appears complete`);
+    } else {
+      console.log(`[generateMasterArticle] Content validation passed: ${wordCount} words (target: ${targetWords})`);
+    }
     
     // Remove any H1 title tags from content (title is already stored separately)
     // Remove H1 tags at the start, middle, or end of content
