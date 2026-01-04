@@ -60,6 +60,10 @@ interface GeminiResponse {
 }
 
 async function callGemini(prompt: string): Promise<string> {
+  // #region agent log
+  const geminiStartTime = Date.now();
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:62',message:'callGemini entry',data:{promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+  // #endregion
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
@@ -104,9 +108,17 @@ async function callGemini(prompt: string): Promise<string> {
       console.warn(`[WARNING] Unexpected finishReason: ${candidate.finishReason}`);
     }
     
+    // #region agent log
+    const geminiDuration = Date.now() - geminiStartTime;
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:107',message:'callGemini exit',data:{duration:geminiDuration,responseLength:candidate.content.parts[0].text.length,finishReason:candidate.finishReason},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     return candidate.content.parts[0].text;
   } catch (error: any) {
     clearTimeout(timeoutId);
+    // #region agent log
+    const geminiDuration = Date.now() - geminiStartTime;
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:109',message:'callGemini error',data:{duration:geminiDuration,errorName:error.name,errorMessage:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     if (error.name === "AbortError") {
       throw new Error("Gemini API request timeout (60s)");
     }
@@ -168,6 +180,9 @@ Return JSON:
   
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:179',message:'Gemini response received',data:{responseLength:response.length,first500:response.substring(0,500),last500:response.substring(Math.max(0,response.length-500))},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H6'})}).catch(()=>{});
+  // #endregion
   
   // Try to parse directly first (most reliable)
   let parsed: any;
@@ -175,13 +190,28 @@ Return JSON:
   
   // Remove markdown code fences if present
   json = json.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:189',message:'JSON cleaned',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H6'})}).catch(()=>{});
+  // #endregion
   
   // Method 1: Try parsing directly
+  // #region agent log
+  const parseStartTime = Date.now();
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:180',message:'JSON parse start',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+  // #endregion
   try {
     parsed = JSON.parse(json);
+    // #region agent log
+    const parseDuration = Date.now() - parseStartTime;
+    const parsedContentPreview = parsed.content ? (parsed.content.length > 1000 ? parsed.content.substring(0, 500) + '...' + parsed.content.substring(parsed.content.length - 500) : parsed.content) : 'MISSING';
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:197',message:'JSON parse direct success',data:{duration:parseDuration,parsedContentLength:parsed.content?.length||0,parsedContentPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
   } catch (directParseError: any) {
     console.log(`[translateToLanguage] Direct parse failed, trying extraction method...`);
-    
+    // #region agent log
+    const braceCountStartTime = Date.now();
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:183',message:'Brace counting start',data:{jsonLength:json.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H2'})}).catch(()=>{});
+    // #endregion
     // Method 2: Find JSON boundaries by counting braces (more reliable than lastIndexOf)
     const firstBrace = json.indexOf("{");
     if (firstBrace === -1) {
@@ -234,9 +264,19 @@ Return JSON:
     
     // Extract the JSON portion
     const extractedJson = json.substring(firstBrace, jsonEnd + 1);
+    // #region agent log
+    const braceCountDuration = Date.now() - braceCountStartTime;
+    const extractedJsonPreview = extractedJson.length > 1000 ? extractedJson.substring(0, 500) + '...' + extractedJson.substring(extractedJson.length - 500) : extractedJson;
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:259',message:'Brace counting complete',data:{duration:braceCountDuration,extractedLength:extractedJson.length,iterations:jsonEnd-firstBrace,firstBrace,jsonEnd,extractedPreview:extractedJsonPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     
     try {
       parsed = JSON.parse(extractedJson);
+      // #region agent log
+      const parseDuration = Date.now() - parseStartTime;
+      const parsedContentPreview = parsed.content ? (parsed.content.length > 1000 ? parsed.content.substring(0, 500) + '...' + parsed.content.substring(parsed.content.length - 500) : parsed.content) : 'MISSING';
+      fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:266',message:'JSON parse extracted success',data:{duration:parseDuration,parsedContentLength:parsed.content?.length||0,parsedContentPreview},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
     } catch (extractParseError: any) {
       console.error(`[translateToLanguage] JSON parse error after extraction:`, extractParseError.message);
       console.error(`[translateToLanguage] Extracted JSON length: ${extractedJson.length}`);
@@ -253,17 +293,27 @@ Return JSON:
   let metaTitle = parsed.metaTitle || `${title} | ${BRAND_NAME}`;
   let metaDescription = parsed.metaDescription || original.metaDescription;
   
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:280',message:'Parsed content extracted',data:{parsedContentLength:parsed.content?.length||0,extractedContentLength:content.length,hasContent:!!parsed.content},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+  // #endregion
+  
   // Validate content completeness
   const originalContentLength = original.content.length;
   const translatedContentLength = content.length;
   const lengthRatio = translatedContentLength / originalContentLength;
   
   console.log(`[translateToLanguage] Content length: original=${originalContentLength}, translated=${translatedContentLength}, ratio=${lengthRatio.toFixed(2)}`);
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:292',message:'Content length validation',data:{originalLength:originalContentLength,translatedLength:translatedContentLength,ratio:lengthRatio},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+  // #endregion
   
   // Warn if translation is suspiciously short (less than 50% of original)
   // This could indicate truncation
   if (lengthRatio < 0.5 && originalContentLength > 5000) {
     console.warn(`[WARNING] Translated content is ${(lengthRatio * 100).toFixed(1)}% of original - possible truncation!`);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:296',message:'Content truncation detected',data:{ratio:lengthRatio,originalLength:originalContentLength,translatedLength:translatedContentLength},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     throw new Error(`Translation appears incomplete: translated content is only ${(lengthRatio * 100).toFixed(1)}% of original length`);
   }
 
@@ -298,6 +348,9 @@ serve(async (req) => {
 
   const startTime = Date.now();
   console.log(`[translate-article] Version: ${VERSION}`);
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:299',message:'Function entry',data:{version:VERSION},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
 
   try {
     const { article_id, target_languages } = await req.json();
@@ -306,8 +359,16 @@ serve(async (req) => {
     }
 
     // Fetch English article
+    // #region agent log
+    const dbFetchStartTime = Date.now();
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:309',message:'DB fetch start',data:{article_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
     const { data: master, error: fetchErr } = await supabase
       .from("articles").select("*").eq("id", article_id).eq("language", "en").single();
+    // #region agent log
+    const dbFetchDuration = Date.now() - dbFetchStartTime;
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:310',message:'DB fetch complete',data:{duration:dbFetchDuration,contentLength:master?.content?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
     
     if (fetchErr || !master) {
       return new Response(JSON.stringify({ error: "English article not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -328,6 +389,9 @@ serve(async (req) => {
       : LANGUAGES;
     
     console.log(`Languages: ${langs.map(l => l.code).join(", ")}`);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:330',message:'Languages determined',data:{totalLanguages:langs.length,languageCodes:langs.map(l=>l.code)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
 
     const results: Record<string, any> = {};
     const urls: string[] = [`${siteUrl}/en/blog/${master.slug}`];
@@ -335,10 +399,16 @@ serve(async (req) => {
     for (let i = 0; i < langs.length; i++) {
       const lang = langs[i];
       const elapsed = Date.now() - startTime;
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:337',message:'Language loop iteration',data:{iteration:i+1,total:langs.length,langCode:lang.code,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       
       // Stop if approaching timeout (100s limit, leave 50s buffer)
       if (elapsed > 100000) {
         console.warn(`Timeout approaching at ${elapsed}ms, stopping`);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:340',message:'Timeout check triggered',data:{elapsed,iteration:i+1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
         break;
       }
 
@@ -346,9 +416,17 @@ serve(async (req) => {
 
       try {
         // Check if exists
+        // #region agent log
+        const checkStartTime = Date.now();
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:349',message:'Check existing translation start',data:{langCode:lang.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
         const { data: existing } = await supabase
           .from("articles").select("id, title, slug")
           .eq("translation_id", master.translation_id).eq("language", lang.code).single();
+        // #region agent log
+        const checkDuration = Date.now() - checkStartTime;
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:350',message:'Check existing translation complete',data:{duration:checkDuration,exists:!!existing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
 
         if (existing) {
           console.log(`${lang.code} already exists, skipping`);
@@ -358,9 +436,21 @@ serve(async (req) => {
         }
 
         // Translate
+        // #region agent log
+        const translateStartTime = Date.now();
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
         const translation = await translateToLanguage(original, lang.name, lang.code);
+        // #region agent log
+        const translateDuration = Date.now() - translateStartTime;
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage complete',data:{duration:translateDuration,translatedLength:translation.content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+        // #endregion
 
         // Save
+        // #region agent log
+        const saveStartTime = Date.now();
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:364',message:'DB save start',data:{langCode:lang.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
         const { data: saved, error: saveErr } = await supabase
           .from("articles")
           .insert([{
@@ -377,6 +467,10 @@ serve(async (req) => {
             featured_image_alt: master.featured_image_alt,
           }])
           .select().single();
+        // #region agent log
+        const saveDuration = Date.now() - saveStartTime;
+        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:379',message:'DB save complete',data:{duration:saveDuration,success:!saveErr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
+        // #endregion
 
         if (saveErr) {
           if (saveErr.code === "23505") {
@@ -410,6 +504,9 @@ serve(async (req) => {
     const successful = Object.values(results).filter((r: any) => r.success).length;
     const totalTime = Date.now() - startTime;
     console.log(`Done: ${successful}/${langs.length} in ${totalTime}ms`);
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:412',message:'Function complete',data:{totalTime,successful,totalLanguages:langs.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
 
     return new Response(
       JSON.stringify({
