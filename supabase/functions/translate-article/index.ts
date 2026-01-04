@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-complete-translation-v1";
+const VERSION = "2026-01-04-robust-json-parsing-v1";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -169,29 +169,80 @@ Return JSON:
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
   
-  let json = response.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "");
-  const first = json.indexOf("{");
-  const last = json.lastIndexOf("}");
-  if (first !== -1 && last > first) json = json.substring(first, last + 1);
+  // Try to parse directly first (most reliable)
+  let parsed: any;
+  let json = response.trim();
   
-  let parsed;
+  // Remove markdown code fences if present
+  json = json.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  
+  // Method 1: Try parsing directly
   try {
     parsed = JSON.parse(json);
-  } catch (parseError: any) {
-    console.error(`[translateToLanguage] JSON parse error:`, parseError.message);
-    console.error(`[translateToLanguage] JSON preview (first 500 chars):`, json.substring(0, 500));
-    console.error(`[translateToLanguage] JSON preview (last 500 chars):`, json.substring(Math.max(0, json.length - 500)));
+  } catch (directParseError: any) {
+    console.log(`[translateToLanguage] Direct parse failed, trying extraction method...`);
     
-    // Try alternative parsing
-    const match = response.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        parsed = JSON.parse(match[0]);
-      } catch {
-        throw new Error(`Failed to parse Gemini JSON: ${parseError.message}`);
+    // Method 2: Find JSON boundaries by counting braces (more reliable than lastIndexOf)
+    const firstBrace = json.indexOf("{");
+    if (firstBrace === -1) {
+      throw new Error("Could not find JSON start");
+    }
+    
+    // Count braces to find the matching closing brace
+    let braceCount = 0;
+    let inString = false;
+    let escapeNext = false;
+    let jsonEnd = -1;
+    
+    for (let i = firstBrace; i < json.length; i++) {
+      const char = json[i];
+      
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
       }
-    } else {
-      throw new Error(`Failed to parse Gemini JSON: ${parseError.message}`);
+      
+      if (char === '\\') {
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"' && !escapeNext) {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') {
+          braceCount++;
+        } else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            jsonEnd = i;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (jsonEnd === -1) {
+      console.error(`[translateToLanguage] Could not find matching closing brace`);
+      console.error(`[translateToLanguage] Response preview (first 1000 chars):`, response.substring(0, 1000));
+      console.error(`[translateToLanguage] Response preview (last 1000 chars):`, response.substring(Math.max(0, response.length - 1000)));
+      throw new Error("Could not find matching closing brace in JSON response");
+    }
+    
+    // Extract the JSON portion
+    const extractedJson = json.substring(firstBrace, jsonEnd + 1);
+    
+    try {
+      parsed = JSON.parse(extractedJson);
+    } catch (extractParseError: any) {
+      console.error(`[translateToLanguage] JSON parse error after extraction:`, extractParseError.message);
+      console.error(`[translateToLanguage] Extracted JSON length: ${extractedJson.length}`);
+      console.error(`[translateToLanguage] Extracted JSON preview (first 500 chars):`, extractedJson.substring(0, 500));
+      console.error(`[translateToLanguage] Extracted JSON preview (last 500 chars):`, extractedJson.substring(Math.max(0, extractedJson.length - 500)));
+      throw new Error(`Failed to parse Gemini JSON: ${extractParseError.message}`);
     }
   }
 
