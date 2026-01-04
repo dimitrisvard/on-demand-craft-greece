@@ -161,7 +161,27 @@ function fixLinksInContent(
   }
   
   // Second pass: Add spaces before and after links (but not inside table cells)
-  // Pattern: match <a> tags and their content, then check context
+  // First, extract and protect all table blocks to prevent any modification
+  const tableBlocks: Array<{ content: string; placeholder: string }> = [];
+  const tablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  let tableMatch;
+  
+  // Collect all table blocks first
+  const tableMatches: Array<{ match: string; index: number }> = [];
+  while ((tableMatch = tablePattern.exec(fixedContent)) !== null) {
+    tableMatches.push({ match: tableMatch[0], index: tableMatch.index! });
+  }
+  
+  // Process tables in reverse order to preserve indices when replacing
+  for (let i = tableMatches.length - 1; i >= 0; i--) {
+    const { match, index } = tableMatches[i];
+    const placeholder = `__TABLE_BLOCK_${i}__`;
+    tableBlocks.unshift({ content: match, placeholder: placeholder });
+    // Replace table with placeholder temporarily (from end to start to preserve indices)
+    fixedContent = fixedContent.substring(0, index) + placeholder + fixedContent.substring(index + match.length);
+  }
+  
+  // Now process links in the content without tables
   const linkWithSpacingPattern = /(<a\s+[^>]*href=["'][^"']*["'][^>]*>.*?<\/a>)/gi;
   const linkMatches: Array<{ match: string; index: number }> = [];
   let linkMatch;
@@ -175,16 +195,20 @@ function fixLinksInContent(
   for (let i = linkMatches.length - 1; i >= 0; i--) {
     const { match, index } = linkMatches[i];
     
-    // Check if we're inside a table cell - if so, don't modify spacing
-    const beforeMatch = fixedContent.substring(0, index);
-    const lastTdOpen = beforeMatch.lastIndexOf('<td');
-    const lastThOpen = beforeMatch.lastIndexOf('<th');
-    const lastTdClose = beforeMatch.lastIndexOf('</td>');
-    const lastThClose = beforeMatch.lastIndexOf('</th>');
-    const inTableCell = (lastTdOpen > lastTdClose || lastThOpen > lastThClose);
+    // Check if this link is inside a table placeholder - if so, skip it
+    let isInTablePlaceholder = false;
+    for (const tableBlock of tableBlocks) {
+      const placeholderIndex = fixedContent.indexOf(tableBlock.placeholder);
+      if (placeholderIndex !== -1 && 
+          index >= placeholderIndex && 
+          index < placeholderIndex + tableBlock.placeholder.length) {
+        isInTablePlaceholder = true;
+        break;
+      }
+    }
     
-    if (inTableCell) {
-      continue; // Don't modify spacing inside table cells
+    if (isInTablePlaceholder) {
+      continue; // Don't modify links inside table blocks
     }
     
     // Check character before the link
@@ -220,6 +244,11 @@ function fixLinksInContent(
     
     // Apply replacement
     fixedContent = fixedContent.substring(0, index) + replacement + fixedContent.substring(afterIndex);
+  }
+  
+  // Restore all table blocks
+  for (const tableBlock of tableBlocks) {
+    fixedContent = fixedContent.replace(tableBlock.placeholder, tableBlock.content);
   }
   
   return { content: fixedContent, linksFixed };
