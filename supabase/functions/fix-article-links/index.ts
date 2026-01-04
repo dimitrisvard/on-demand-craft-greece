@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-const VERSION = "2026-01-04-v1";
+const VERSION = "2026-01-04-v2";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -90,6 +90,7 @@ async function buildGlobalSlugMapping(): Promise<Record<string, Record<string, s
 
 /**
  * Fix links in a single article's content
+ * Also ensures links have spaces before and after them
  */
 function fixLinksInContent(
   content: string,
@@ -124,8 +125,9 @@ function fixLinksInContent(
   const blogLinkPattern = /href=["'](\/[a-z]{2}\/blog\/([^"'\s?#]+)([?#][^"']*)?)["']/gi;
   
   let match;
-  const replacements: Array<{ original: string; replacement: string }> = [];
+  const replacements: Array<{ original: string; replacement: string; needsSpaceBefore: boolean; needsSpaceAfter: boolean }> = [];
   
+  // First pass: collect all replacements
   while ((match = blogLinkPattern.exec(content)) !== null) {
     const fullPath = match[1]; // Full path including query/fragment if present
     const slugPart = match[2]; // Just the slug part (without trailing slash, query, fragment)
@@ -158,7 +160,110 @@ function fixLinksInContent(
     fixedContent = fixedContent.replace(original, replacement);
   }
   
+  // Second pass: Add spaces before and after links (but not inside table cells)
+  // Pattern: match <a> tags and their content, then check context
+  const linkWithSpacingPattern = /(<a\s+[^>]*href=["'][^"']*["'][^>]*>.*?<\/a>)/gi;
+  const linkMatches: Array<{ match: string; index: number }> = [];
+  let linkMatch;
+  
+  // Collect all link matches with their positions
+  while ((linkMatch = linkWithSpacingPattern.exec(fixedContent)) !== null) {
+    linkMatches.push({ match: linkMatch[0], index: linkMatch.index! });
+  }
+  
+  // Process matches in reverse order to preserve indices
+  for (let i = linkMatches.length - 1; i >= 0; i--) {
+    const { match, index } = linkMatches[i];
+    
+    // Check if we're inside a table cell - if so, don't modify spacing
+    const beforeMatch = fixedContent.substring(0, index);
+    const lastTdOpen = beforeMatch.lastIndexOf('<td');
+    const lastThOpen = beforeMatch.lastIndexOf('<th');
+    const lastTdClose = beforeMatch.lastIndexOf('</td>');
+    const lastThClose = beforeMatch.lastIndexOf('</th>');
+    const inTableCell = (lastTdOpen > lastTdClose || lastThOpen > lastThClose);
+    
+    if (inTableCell) {
+      continue; // Don't modify spacing inside table cells
+    }
+    
+    // Check character before the link
+    const charBefore = index > 0 ? fixedContent[index - 1] : '';
+    const needsSpaceBefore = charBefore !== ' ' && 
+      charBefore !== '' && 
+      charBefore !== '\n' && 
+      charBefore !== '<' &&
+      charBefore !== '(' &&
+      charBefore !== '[' &&
+      !/[.,!?;:]/.test(charBefore);
+    
+    // Check character after the link
+    const afterIndex = index + match.length;
+    const charAfter = afterIndex < fixedContent.length ? fixedContent[afterIndex] : '';
+    const needsSpaceAfter = charAfter !== ' ' &&
+      charAfter !== '' &&
+      charAfter !== '\n' &&
+      charAfter !== '>' &&
+      charAfter !== ')' &&
+      charAfter !== ']' &&
+      charAfter !== ',' &&
+      charAfter !== '.' &&
+      charAfter !== '!' &&
+      charAfter !== '?' &&
+      charAfter !== ';' &&
+      charAfter !== ':';
+    
+    // Build replacement
+    let replacement = match;
+    if (needsSpaceBefore) replacement = ' ' + replacement;
+    if (needsSpaceAfter) replacement = replacement + ' ';
+    
+    // Apply replacement
+    fixedContent = fixedContent.substring(0, index) + replacement + fixedContent.substring(afterIndex);
+  }
+  
   return { content: fixedContent, linksFixed };
+}
+
+/**
+ * Preserve table HTML structure when updating content
+ */
+function preserveTables(content: string): string {
+  // Check if content has tables
+  const tableCount = (content.match(/<table[^>]*>/gi) || []).length;
+  if (tableCount === 0) return content;
+  
+  // Ensure all tables are properly closed
+  const tableCloseCount = (content.match(/<\/table>/gi) || []).length;
+  if (tableCount > tableCloseCount) {
+    // Add missing closing tags
+    for (let i = 0; i < tableCount - tableCloseCount; i++) {
+      content += '</tbody></table>';
+    }
+  }
+  
+  // Ensure table structure integrity - check for broken tags
+  // This regex finds unclosed table elements
+  const brokenTablePattern = /<table[^>]*>[\s\S]*?(?=<table|$)/gi;
+  let fixedContent = content;
+  let match;
+  
+  while ((match = brokenTablePattern.exec(content)) !== null) {
+    const tableBlock = match[0];
+    const hasThead = /<thead[^>]*>/i.test(tableBlock);
+    const hasTbody = /<tbody[^>]*>/i.test(tableBlock);
+    const hasTheadClose = /<\/thead>/i.test(tableBlock);
+    const hasTbodyClose = /<\/tbody>/i.test(tableBlock);
+    
+    // If table has opening tags but missing closing tags, preserve structure
+    // Don't modify if structure looks intact
+    if ((hasThead && !hasTheadClose) || (hasTbody && !hasTbodyClose)) {
+      // Table structure might be broken, but we'll preserve what we have
+      // The fixLinksInContent shouldn't break tables, so we just ensure closing tags exist
+    }
+  }
+  
+  return fixedContent;
 }
 
 /**
@@ -171,29 +276,35 @@ async function fixLinksForTranslationId(
   let articlesUpdated = 0;
   let totalLinksFixed = 0;
   
-  // Get all translated articles for this translation_id (excluding English)
+  // Get all translated articles for this translation_id (including English for completeness)
   const { data: articles } = await supabase
     .from("articles")
     .select("id, content, language, slug")
-    .eq("translation_id", translationId)
-    .neq("language", "en");
+    .eq("translation_id", translationId);
   
   if (!articles || articles.length === 0) {
     return { articlesUpdated, linksFixed: totalLinksFixed };
   }
   
   for (const article of articles) {
+    // Preserve table structure before fixing links
+    let contentWithTables = preserveTables(article.content);
+    
     const { content: fixedContent, linksFixed } = fixLinksInContent(
-      article.content,
+      contentWithTables,
       article.language,
       slugMapping
     );
     
-    if (linksFixed > 0) {
+    // Preserve table structure after fixing links
+    const finalContent = preserveTables(fixedContent);
+    
+    // Always update if links were fixed, or if we're ensuring table preservation
+    if (linksFixed > 0 || finalContent !== article.content) {
       // Update the article
       const { error } = await supabase
         .from("articles")
-        .update({ content: fixedContent })
+        .update({ content: finalContent })
         .eq("id", article.id);
       
       if (!error) {

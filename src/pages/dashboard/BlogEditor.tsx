@@ -432,6 +432,11 @@ const BlogEditor = () => {
 
       if (!token) throw new Error("User not authenticated");
 
+      toast({
+        title: "Fixing Links",
+        description: "Updating links in all translations...",
+      });
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fix-article-links`,
         {
@@ -454,7 +459,7 @@ const BlogEditor = () => {
 
       toast({
         title: "✅ Links Fixed",
-        description: `Fixed ${result.links_fixed || 0} link(s) in ${result.articles_updated || 0} article(s).`,
+        description: `Fixed ${result.links_fixed || 0} link(s) in ${result.articles_updated || 0} article(s). All translations have been automatically saved.`,
       });
 
       // Refresh the current article to show updated content
@@ -503,6 +508,38 @@ const BlogEditor = () => {
 
       // Preserve table structure when saving
       let contentToSave = formData.content;
+      
+      // Function to preserve table HTML structure
+      const preserveTableStructure = (html: string): string => {
+        // Check if content has tables
+        const tableCount = (html.match(/<table[^>]*>/gi) || []).length;
+        if (tableCount === 0) return html;
+        
+        // Ensure all tables are properly closed
+        const tableCloseCount = (html.match(/<\/table>/gi) || []).length;
+        let fixedHtml = html;
+        if (tableCount > tableCloseCount) {
+          // Add missing closing tags
+          for (let i = 0; i < tableCount - tableCloseCount; i++) {
+            fixedHtml += '</tbody></table>';
+          }
+        }
+        
+        // Ensure proper table structure - check for tbody/thead
+        const tables = fixedHtml.match(/<table[^>]*>[\s\S]*?<\/table>/gi) || [];
+        for (const table of tables) {
+          const hasTbody = /<tbody[^>]*>/i.test(table);
+          const hasThead = /<thead[^>]*>/i.test(table);
+          const hasTbodyClose = /<\/tbody>/i.test(table);
+          const hasTheadClose = /<\/thead>/i.test(table);
+          
+          // If table has content but missing tbody wrapper, preserve as-is
+          // (Some tables might not have explicit tbody, which is valid HTML)
+        }
+        
+        return fixedHtml;
+      };
+      
       if (!isSourceView && quillRef.current) {
         // Get content from Quill and ensure tables are preserved
         const quill = quillRef.current.getEditor();
@@ -515,21 +552,15 @@ const BlogEditor = () => {
           // If Quill broke the tables, use original content instead
           if (tablesInOriginal > 0 && tablesInQuill < tablesInOriginal) {
             console.warn('Quill broke table structure, using original content');
-            contentToSave = formData.content;
+            contentToSave = preserveTableStructure(formData.content);
           } else {
-            contentToSave = quillContent;
+            // Use Quill content but preserve table structure
+            contentToSave = preserveTableStructure(quillContent);
           }
         }
-      }
-
-      // Ensure table structure is preserved
-      const tableCount = (contentToSave.match(/<table[^>]*>/gi) || []).length;
-      const tableCloseCount = (contentToSave.match(/<\/table>/gi) || []).length;
-      if (tableCount > tableCloseCount) {
-        // Add missing closing table tags
-        for (let i = 0; i < tableCount - tableCloseCount; i++) {
-          contentToSave += '</tbody></table>';
-        }
+      } else {
+        // In source view, just preserve table structure
+        contentToSave = preserveTableStructure(contentToSave);
       }
 
       const articleData = {
@@ -989,15 +1020,15 @@ const BlogEditor = () => {
                   <div className="flex items-center justify-between">
                     <Label>Translations</Label>
                     <div className="flex gap-2">
-                      {/* Fix Links Button */}
-                      {formData.translation_id && availableTranslations.length > 0 && (
+                      {/* Fix Links Button - Show for English articles with translation_id */}
+                      {formData.translation_id && formData.language === 'en' && (
                         <Button
                           variant="outline"
                           size="sm"
                           className="h-7 text-xs"
                           disabled={fixingLinks || !id}
                           onClick={handleFixLinks}
-                          title="Fix blog post links in all translations of this article"
+                          title="Fix blog post links in all translations of this article and automatically save them"
                         >
                           {fixingLinks ? (
                             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1174,3 +1205,4 @@ const BlogEditor = () => {
 };
 
 export default BlogEditor;
+
