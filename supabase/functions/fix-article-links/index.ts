@@ -89,6 +89,72 @@ async function buildGlobalSlugMapping(): Promise<Record<string, Record<string, s
 }
 
 /**
+ * Add target="_blank" to internal links (blog posts, services, quote pages)
+ * This is a separate pass that runs after all link URL fixing is complete
+ */
+function addTargetBlankToInternalLinks(content: string): string {
+  // Extract and protect all table blocks to prevent any modification
+  const tableBlocks: Array<{ content: string; placeholder: string }> = [];
+  const tablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  let tableMatch;
+  
+  // Collect all table blocks first
+  const tableMatches: Array<{ match: string; index: number }> = [];
+  while ((tableMatch = tablePattern.exec(content)) !== null) {
+    tableMatches.push({ match: tableMatch[0], index: tableMatch.index! });
+  }
+  
+  // Process tables in reverse order to preserve indices when replacing
+  let contentWithoutTables = content;
+  for (let i = tableMatches.length - 1; i >= 0; i--) {
+    const { match, index } = tableMatches[i];
+    const placeholder = `__TABLE_BLOCK_TARGET_${i}__`;
+    tableBlocks.unshift({ content: match, placeholder: placeholder });
+    contentWithoutTables = contentWithoutTables.substring(0, index) + placeholder + contentWithoutTables.substring(index + match.length);
+  }
+  
+  // Pattern to match <a> tags with internal hrefs
+  // Internal links: /{lang}/blog/, /{lang}/services/, /{lang}/quote
+  const linkTagPattern = /<a\s+[^>]*>/gi;
+  
+  let modifiedContent = contentWithoutTables;
+  const matches: Array<{ fullMatch: string; index: number }> = [];
+  let match;
+  
+  // Collect all <a> tag matches
+  while ((match = linkTagPattern.exec(contentWithoutTables)) !== null) {
+    matches.push({ fullMatch: match[0], index: match.index! });
+  }
+  
+  // Process in reverse order to preserve indices
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const { fullMatch, index } = matches[i];
+    
+    // Check if this is an internal link
+    const hasInternalHref = /href=["']\/[a-z]{2}\/(?:blog\/|services\/|quote(?:"|'))/i.test(fullMatch);
+    if (!hasInternalHref) {
+      continue; // Skip external links
+    }
+    
+    // Check if target attribute already exists
+    if (/target\s*=/i.test(fullMatch)) {
+      continue; // Skip if target already exists
+    }
+    
+    // Add target="_blank" before the closing >
+    const replacement = fullMatch.replace(/>$/, ' target="_blank">');
+    modifiedContent = modifiedContent.substring(0, index) + replacement + modifiedContent.substring(index + fullMatch.length);
+  }
+  
+  // Restore all table blocks
+  for (const tableBlock of tableBlocks) {
+    modifiedContent = modifiedContent.replace(tableBlock.placeholder, tableBlock.content);
+  }
+  
+  return modifiedContent;
+}
+
+/**
  * Fix links in a single article's content
  * Also ensures links have spaces before and after them
  */
@@ -250,6 +316,9 @@ function fixLinksInContent(
   for (const tableBlock of tableBlocks) {
     fixedContent = fixedContent.replace(tableBlock.placeholder, tableBlock.content);
   }
+  
+  // Add target="_blank" to internal links (final pass, after all other fixes)
+  fixedContent = addTargetBlankToInternalLinks(fixedContent);
   
   return { content: fixedContent, linksFixed };
 }

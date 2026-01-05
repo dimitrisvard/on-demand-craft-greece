@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye, Link } from "lucide-react";
+import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye, Link, ExternalLink } from "lucide-react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
@@ -855,6 +855,16 @@ const BlogEditor = () => {
             <h1 className="text-2xl font-bold">{id ? 'Edit Article' : 'New Article'}</h1>
           </div>
           <div className="flex items-center gap-3">
+            {id && formData.status === 'published' && formData.slug && (
+              <Button
+                variant="outline"
+                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank')}
+                className="flex items-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View Article
+              </Button>
+            )}
             <Button 
               variant="outline" 
               onClick={() => handleSave()}
