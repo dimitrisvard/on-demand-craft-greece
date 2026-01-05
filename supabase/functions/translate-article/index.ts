@@ -164,15 +164,21 @@ async function translateToLanguage(
   langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
   
+  // Hungarian and some languages may produce longer translations - ensure we handle them properly
+  const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs";
+  
   // Use delimiter-based format instead of JSON to avoid escaping issues with HTML content
   // JSON escaping of quotes in HTML attributes (href="...") causes parsing failures
-  const prompt = `Translate this manufacturing blog article into ${langName}.
+  const prompt = `Translate this manufacturing blog article into ${langName}${isLongLanguage ? ". Hungarian translations may be longer than English - ensure complete translation." : ""}.
 
 RULES:
 - Keep "${BRAND_NAME}" unchanged
 - Preserve ALL HTML tags and attributes exactly (including href, class, etc.)
-- Do NOT modify any URLs or links - keep them exactly as they are
-- Translate only the visible text content
+- IMPORTANT: Translate the TEXT inside <a> tags (anchor text), but keep the href URLs unchanged
+- Example: <a href="/en/services">our services</a> becomes <a href="/en/services">[translated text]</a>
+- Do NOT translate URLs in href attributes - keep them exactly as they are
+- Remove any links to "/dashboard" or "/en/dashboard" - these are internal admin links and should not appear
+- Translate all visible text content including link text
 
 Use this EXACT format with the delimiters shown:
 
@@ -213,17 +219,61 @@ META DESCRIPTION: ${original.metaDescription}`;
   // Parse using delimiters (much more robust than JSON for HTML content)
   function extractBetween(text: string, startDelim: string, endDelim: string): string {
     const startIdx = text.indexOf(startDelim);
-    if (startIdx === -1) return "";
+    if (startIdx === -1) {
+      console.warn(`[PARSE] Delimiter "${startDelim}" not found`);
+      return "";
+    }
     const contentStart = startIdx + startDelim.length;
     const endIdx = text.indexOf(endDelim, contentStart);
-    if (endIdx === -1) return text.substring(contentStart).trim();
+    if (endIdx === -1) {
+      console.warn(`[PARSE] Delimiter "${endDelim}" not found after "${startDelim}"`);
+      // For content, try to extract until the next delimiter or end
+      if (startDelim === "===CONTENT===") {
+        // Try to find excerpt delimiter as fallback
+        const excerptIdx = text.indexOf("===EXCERPT===", contentStart);
+        if (excerptIdx !== -1) return text.substring(contentStart, excerptIdx).trim();
+      }
+      return text.substring(contentStart).trim();
+    }
     return text.substring(contentStart, endIdx).trim();
   }
   
   const title = extractBetween(response, "===TITLE===", "===SLUG===") || original.title;
   const slugRaw = extractBetween(response, "===SLUG===", "===CONTENT===");
   const slug = slugRaw ? makeSlug(slugRaw) : makeSlug(title);
-  let content = extractBetween(response, "===CONTENT===", "===EXCERPT===") || original.content;
+  let content = extractBetween(response, "===CONTENT===", "===EXCERPT===");
+  
+  // Fallback: if content extraction failed, try alternative parsing
+  if (!content || content.length < 100) {
+    console.warn(`[PARSE] Primary content extraction failed, trying fallback...`);
+    // Try to find content between CONTENT and any of the next delimiters
+    const contentStart = response.indexOf("===CONTENT===");
+    if (contentStart !== -1) {
+      const contentStartPos = contentStart + "===CONTENT===".length;
+      const excerptStart = response.indexOf("===EXCERPT===", contentStartPos);
+      const metaTitleStart = response.indexOf("===META_TITLE===", contentStartPos);
+      const metaDescStart = response.indexOf("===META_DESCRIPTION===", contentStartPos);
+      const endStart = response.indexOf("===END===", contentStartPos);
+      
+      // Find the earliest next delimiter
+      const nextDelims = [excerptStart, metaTitleStart, metaDescStart, endStart].filter(idx => idx !== -1);
+      if (nextDelims.length > 0) {
+        const nextDelim = Math.min(...nextDelims);
+        content = response.substring(contentStartPos, nextDelim).trim();
+        console.log(`[PARSE] Fallback extraction successful: ${content.length} chars`);
+      }
+    }
+    
+    // Final fallback: use original if still empty
+    if (!content || content.length < 100) {
+      console.error(`[PARSE] All content extraction methods failed for ${langCode}`);
+      console.error(`[PARSE] Response length: ${response.length}`);
+      console.error(`[PARSE] Response contains TITLE: ${response.includes("===TITLE===")}`);
+      console.error(`[PARSE] Response contains CONTENT: ${response.includes("===CONTENT===")}`);
+      throw new Error(`Failed to extract translated content for ${langCode}. Response may be malformed or truncated.`);
+    }
+  }
+  
   const excerpt = extractBetween(response, "===EXCERPT===", "===META_TITLE===") || original.excerpt;
   let metaTitle = extractBetween(response, "===META_TITLE===", "===META_DESCRIPTION===") || `${title} | ${BRAND_NAME}`;
   let metaDescription = extractBetween(response, "===META_DESCRIPTION===", "===END===") || original.metaDescription;
@@ -269,6 +319,14 @@ META DESCRIPTION: ${original.metaDescription}`;
   if (!metaTitle.includes(BRAND_NAME)) metaTitle = `${metaTitle} | ${BRAND_NAME}`;
   if (metaTitle.length > 70) metaTitle = metaTitle.substring(0, 67) + "...";
   if (metaDescription.length > 160) metaDescription = metaDescription.substring(0, 157) + "...";
+  
+  // Remove dashboard links (forbidden internal admin links)
+  const dashboardLinkPattern = /<a\s+[^>]*href=["'][^"']*\/dashboard[^"']*["'][^>]*>.*?<\/a>/gi;
+  const dashboardLinksRemoved = (content.match(dashboardLinkPattern) || []).length;
+  content = content.replace(dashboardLinkPattern, '');
+  if (dashboardLinksRemoved > 0) {
+    console.log(`[SANITIZE] Removed ${dashboardLinksRemoved} dashboard link(s)`);
+  }
   
   // Localize service/quote links (article slugs are fixed later by fix-article-links)
   content = localizeLinks(content, langCode);
