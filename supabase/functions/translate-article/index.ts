@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-04-quote-sanitize-v1";
+const VERSION = "2026-01-05-table-translation-fix";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -179,16 +179,50 @@ async function translateTableContent(tableHtml: string, langName: string, langCo
 RULES:
 - Translate ONLY the text, do NOT add any formatting or structure
 - Keep the exact same number of lines
-- Each line corresponds to a table cell
+- Each line corresponds to a table cell (separated by ---CELL---)
 - Return ONLY the translated text, one line per cell, in the same order
 - Do NOT include any HTML tags or markdown formatting
+- Preserve the ---CELL--- separators exactly as shown
 
 Text to translate:
 ${textToTranslate}`;
 
   try {
     const translatedText = await callGemini(translationPrompt);
-    const translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
+    let translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
+    
+    // If splitting by delimiter didn't work (Gemini removed it), try splitting by newlines
+    // But only if we got a different number of lines than expected
+    if (translatedLines.length !== textContents.length && translatedLines.length > 1) {
+      // Try splitting by double newlines or just newlines
+      const altSplit = translatedText.split(/\n\n+/).map(l => l.trim()).filter(l => l.length > 0);
+      if (altSplit.length === textContents.length) {
+        translatedLines = altSplit;
+        console.log(`[TABLE TRANSLATION] Used alternative splitting method (double newlines)`);
+      } else {
+        // Last resort: split by single newlines and take first N
+        const singleNewlineSplit = translatedText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        if (singleNewlineSplit.length >= textContents.length) {
+          translatedLines = singleNewlineSplit.slice(0, textContents.length);
+          console.log(`[TABLE TRANSLATION] Used single newline splitting, took first ${textContents.length} lines`);
+        } else if (singleNewlineSplit.length > 0) {
+          // Use what we have and pad with empty strings
+          translatedLines = [...singleNewlineSplit, ...Array(textContents.length - singleNewlineSplit.length).fill('')];
+          console.warn(`[TABLE TRANSLATION] Warning: Only got ${singleNewlineSplit.length} translated lines, expected ${textContents.length}`);
+        }
+      }
+    }
+    
+    // Ensure we have the right number of lines
+    if (translatedLines.length !== textContents.length) {
+      console.warn(`[TABLE TRANSLATION] Line count mismatch: got ${translatedLines.length}, expected ${textContents.length}`);
+      // Pad or truncate to match
+      if (translatedLines.length < textContents.length) {
+        translatedLines = [...translatedLines, ...Array(textContents.length - translatedLines.length).fill('')];
+      } else {
+        translatedLines = translatedLines.slice(0, textContents.length);
+      }
+    }
     
     // Rebuild table with translated text
     let translatedTable = tableHtml;
@@ -537,15 +571,20 @@ META DESCRIPTION: ${original.metaDescription}`;
   // Format: <!--TABLE_0-->, <!--TABLE_1-->, etc.
   console.log(`[TABLE RESTORE] Starting table restoration for ${tableBlocks.length} table(s)`);
   
+  // Track which tables were successfully restored for translation
+  const restoredTableIndices: number[] = [];
+  
   // Simple and reliable approach: directly replace each placeholder with its table
   for (let i = 0; i < tableBlocks.length; i++) {
     const placeholder = tableBlocks[i].placeholder;
     const originalTable = tableBlocks[i].original;
+    let restored = false;
     
     // Check if exact placeholder exists
     if (content.includes(placeholder)) {
       content = content.replace(placeholder, originalTable);
       console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} using exact placeholder`);
+      restored = true;
     } else {
       console.warn(`[TABLE RESTORE] Exact placeholder ${placeholder} not found, searching for variations...`);
       
@@ -564,6 +603,7 @@ META DESCRIPTION: ${original.metaDescription}`;
           content = content.replace(pattern, originalTable);
           console.log(`[TABLE RESTORE] Restored table ${i + 1} using pattern match`);
           found = true;
+          restored = true;
           break;
         }
       }
@@ -581,14 +621,19 @@ META DESCRIPTION: ${original.metaDescription}`;
             content = content.replace(pattern, originalTable);
             console.log(`[TABLE RESTORE] Restored table ${i + 1} using 1-based index pattern`);
             found = true;
+            restored = true;
             break;
           }
         }
       }
       
       if (!found) {
-        console.error(`[TABLE RESTORE] Could not find placeholder for table ${i + 1}, will append at end`);
+        console.error(`[TABLE RESTORE] Could not find placeholder for table ${i + 1}`);
       }
+    }
+    
+    if (restored) {
+      restoredTableIndices.push(i);
     }
   }
   
@@ -659,6 +704,47 @@ META DESCRIPTION: ${original.metaDescription}`;
     }
   } else {
     console.log(`[TABLE RESTORE] ✓ All placeholders successfully replaced`);
+  }
+  
+  // Translate content inside all restored tables
+  // Do this after ALL restoration is complete (including remaining placeholders)
+  console.log(`[TABLE TRANSLATION] Starting translation of table content...`);
+  
+  // Find all tables in the content and translate them
+  const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  const allTables: Array<{ match: string; index: number }> = [];
+  let translationTableMatch;
+  
+  // Reset regex lastIndex
+  translationTablePattern.lastIndex = 0;
+  while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
+    allTables.push({ match: translationTableMatch[0], index: translationTableMatch.index! });
+  }
+  
+  if (allTables.length > 0) {
+    console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s) to translate`);
+    
+    // Translate each table (process in reverse order to preserve indices)
+    for (let i = allTables.length - 1; i >= 0; i--) {
+      const { match: tableHtml, index } = allTables[i];
+      try {
+        const translatedTable = await translateTableContent(tableHtml, langName, langCode);
+        
+        // Replace the original table with translated version
+        content = content.substring(0, index) + 
+          translatedTable + 
+          content.substring(index + tableHtml.length);
+        
+        console.log(`[TABLE TRANSLATION] ✓ Translated table ${i + 1}/${allTables.length}`);
+      } catch (error: any) {
+        console.error(`[TABLE TRANSLATION] ✗ Error translating table ${i + 1}: ${error.message}`);
+        // Keep original table if translation fails
+      }
+    }
+    
+    console.log(`[TABLE TRANSLATION] ✓ Completed translation of ${allTables.length} table(s)`);
+  } else {
+    console.log(`[TABLE TRANSLATION] No tables found to translate`);
   }
   
   // After restoration, check for any broken tables and fix them
