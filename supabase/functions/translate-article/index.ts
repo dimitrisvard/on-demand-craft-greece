@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-05-special-char-languages-fix";
+const VERSION = "2026-01-05-special-char-languages-fix-polish";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -376,12 +376,13 @@ async function translateToLanguage(
   langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
   
-  // Hungarian, Finnish, and Czech may have different translation characteristics
+  // Hungarian, Finnish, Czech, and Polish may have different translation characteristics
   // - Hungarian: agglutinative language, can produce longer translations
   // - Finnish: agglutinative language, complex grammar, special characters (ä, ö, å)
   // - Czech: special characters (č, ř, ž, š, ě, á, í, ó, ú, ý), different word order
-  const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs";
-  const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs";
+  // - Polish: Slavic language like Czech, special characters (ą, ć, ę, ł, ń, ó, ś, ź, ż), complex grammar
+  const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
+  const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
   
   // Extract and protect tables before translation to prevent Gemini from breaking table structure
   const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
@@ -421,7 +422,7 @@ async function translateToLanguage(
   const languageSpecificNote = isLongLanguage 
     ? `\nIMPORTANT LANGUAGE-SPECIFIC INSTRUCTIONS:
   * ${langName} uses special characters and may have different sentence structures than English
-  * Preserve all special characters correctly (${langCode === "hu" ? "á, é, í, ó, ö, ő, ú, ü, ű" : langCode === "fi" ? "ä, ö, å" : "č, ř, ž, š, ě, á, í, ó, ú, ý"})
+  * Preserve all special characters correctly (${langCode === "hu" ? "á, é, í, ó, ö, ő, ú, ü, ű" : langCode === "fi" ? "ä, ö, å" : langCode === "cs" ? "č, ř, ž, š, ě, á, í, ó, ú, ý" : langCode === "pl" ? "ą, ć, ę, ł, ń, ó, ś, ź, ż" : ""})
   * ${langName} translations may be longer or shorter than English - ensure COMPLETE translation of all content
   * Do NOT skip any paragraphs, sections, or content - translate everything fully`
     : "";
@@ -483,7 +484,8 @@ META DESCRIPTION: ${original.metaDescription}`;
     const specialCharPatterns: Record<string, RegExp> = {
       hu: /[áéíóöőúüű]/i,
       fi: /[äöå]/i,
-      cs: /[čřžšěáíóúý]/i
+      cs: /[čřžšěáíóúý]/i,
+      pl: /[ąćęłńóśźż]/i
     };
     const pattern = specialCharPatterns[langCode];
     if (pattern && !pattern.test(response)) {
@@ -1065,10 +1067,10 @@ serve(async (req) => {
         }
 
         // Translate with retry logic for languages with special characters
-        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs";
+        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         let translation;
         let retryCount = 0;
-        const maxRetries = isSpecialCharLang ? 2 : 1; // Allow 1 retry for special char languages
+        const maxRetries = isSpecialCharLang ? 2 : 1; // Allow 2 retries for special char languages
         let translateStartTime = Date.now();
         
         while (retryCount <= maxRetries) {
@@ -1133,7 +1135,7 @@ serve(async (req) => {
         }
 
       } catch (err: any) {
-        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs";
+        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         console.error(`✗ ${lang.code} failed:`, err.message);
         if (isSpecialCharLang) {
           console.error(`[SPECIAL CHAR LANG ERROR] ${lang.name} (${lang.code}) translation failed. This language uses special characters - check encoding and response parsing.`);
