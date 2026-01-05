@@ -532,114 +532,213 @@ META DESCRIPTION: ${original.metaDescription}`;
   console.log(`[SANITIZE] Fixed any mismatched quotes in href attributes`);
   
   // Restore tables: translate text content inside tables while preserving structure
-  // Process in reverse order to handle multiple occurrences correctly
-  for (let i = tableBlocks.length - 1; i >= 0; i--) {
+  // NEW APPROACH: Find ALL placeholders first, then match them to tables
+  // This handles cases where Gemini modifies placeholders or where exact matching fails
+  
+  // First, find all placeholder patterns in the content (exact and modified)
+  const placeholderMatches: Array<{ match: string; index: number; tableIndex: number }> = [];
+  
+  // Try to find exact placeholders first
+  for (let i = 0; i < tableBlocks.length; i++) {
     const placeholder = tableBlocks[i].placeholder;
-    const originalTable = tableBlocks[i].original;
+    const exactIndex = content.indexOf(placeholder);
+    if (exactIndex !== -1) {
+      placeholderMatches.push({ match: placeholder, index: exactIndex, tableIndex: i });
+      console.log(`[TABLE RESTORE] Found exact placeholder ${placeholder} at index ${exactIndex}`);
+    }
+  }
+  
+  // If we didn't find all placeholders, search for modified versions
+  // Look for any pattern that looks like a table placeholder
+  const placeholderPattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*(\d+)\s*__/gi;
+  let patternMatch;
+  while ((patternMatch = placeholderPattern.exec(content)) !== null) {
+    let foundIndex = parseInt(patternMatch[1], 10);
+    const matchText = patternMatch[0];
+    const matchIndex = patternMatch.index;
     
-    // Check if placeholder exists in translated content (exact match first)
-    let placeholderIndex = content.indexOf(placeholder);
-    let placeholderRegex: RegExp | null = null;
+    // Handle 1-based vs 0-based indexing
+    // If placeholder says "1" but we only have 1 table (index 0), use that table
+    if (foundIndex > 0 && foundIndex >= tableBlocks.length && tableBlocks.length > 0) {
+      // If the number is too high, try converting from 1-based to 0-based
+      foundIndex = foundIndex - 1;
+      if (foundIndex < 0 || foundIndex >= tableBlocks.length) {
+        // Still out of range, use last table
+        foundIndex = tableBlocks.length - 1;
+      }
+      console.log(`[TABLE RESTORE] Converted 1-based placeholder number ${patternMatch[1]} to 0-based index ${foundIndex}`);
+    }
     
-    if (placeholderIndex === -1) {
-      console.warn(`[TABLE RESTORE] Placeholder ${placeholder} not found in translated content`);
-      console.warn(`[TABLE RESTORE] Searching for modified placeholders...`);
-      
-      // Try to find a modified version of the placeholder (Gemini might have changed it)
-      // Escape special regex characters in placeholder first
-      const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      
-      // Try various patterns that Gemini might have created
-      const modifiedPatterns = [
-        // Exact placeholder with any whitespace variations
-        new RegExp(escapedPlaceholder.replace(/_/g, '\\s*_\\s*'), 'gi'),
-        // Pattern with table index
-        new RegExp(`__\\s*TABLE\\s*[^_]*\\s*${i}\\s*__`, 'gi'),
-        new RegExp(`TABLE\\s*PLACEHOLDER\\s*${i}`, 'gi'),
-        new RegExp(`__\\s*TABLE\\s*_\\s*${i}\\s*__`, 'gi'),
-        // More flexible pattern
-        new RegExp(`__TABLE[^_]*${i}[^_]*__`, 'gi'),
-      ];
-      
-      let found = false;
-      for (const pattern of modifiedPatterns) {
-        const match = content.match(pattern);
-        if (match && match[0]) {
-          console.log(`[TABLE RESTORE] Found modified placeholder: "${match[0]}"`);
-          placeholderRegex = new RegExp(pattern.source.replace(/\\s\*/g, '\\s*'), 'g');
-          placeholderIndex = content.search(pattern);
-          found = true;
+    // Check if we already found this placeholder
+    const alreadyFound = placeholderMatches.some(pm => 
+      Math.abs(pm.index - matchIndex) < 50 && pm.tableIndex === foundIndex
+    );
+    
+    if (!alreadyFound && foundIndex >= 0 && foundIndex < tableBlocks.length) {
+      placeholderMatches.push({ match: matchText, index: matchIndex, tableIndex: foundIndex });
+      console.log(`[TABLE RESTORE] Found modified placeholder "${matchText}" at index ${matchIndex} (table ${foundIndex})`);
+    }
+  }
+  
+  // Also try more flexible patterns (without underscores, with spaces, etc.)
+  // Try both 0-based and 1-based indexing
+  for (let i = 0; i < tableBlocks.length; i++) {
+    // Check if we already found this table's placeholder
+    const alreadyFound = placeholderMatches.some(pm => pm.tableIndex === i);
+    if (alreadyFound) continue;
+    
+    // Try various flexible patterns with 0-based index
+    const flexiblePatterns0 = [
+      new RegExp(`TABLE\\s*PLACEHOLDER\\s*${i}`, 'gi'),
+      new RegExp(`__\\s*TABLE\\s*${i}\\s*__`, 'gi'),
+      new RegExp(`TABLE_PLACEHOLDER_${i}`, 'gi'),
+      new RegExp(`__TABLE_${i}__`, 'gi'),
+    ];
+    
+    // Also try 1-based index (i+1) in case Gemini converted it
+    const flexiblePatterns1 = [
+      new RegExp(`TABLE\\s*PLACEHOLDER\\s*${i + 1}`, 'gi'),
+      new RegExp(`__\\s*TABLE\\s*${i + 1}\\s*__`, 'gi'),
+      new RegExp(`TABLE_PLACEHOLDER_${i + 1}`, 'gi'),
+      new RegExp(`__TABLE_${i + 1}__`, 'gi'),
+    ];
+    
+    // Try 0-based patterns first
+    for (const pattern of flexiblePatterns0) {
+      const match = content.match(pattern);
+      if (match && match[0]) {
+        const matchIndex = content.indexOf(match[0]);
+        // Check if we already have this one
+        const alreadyFound = placeholderMatches.some(pm => 
+          Math.abs(pm.index - matchIndex) < 50 && pm.tableIndex === i
+        );
+        if (!alreadyFound) {
+          placeholderMatches.push({ match: match[0], index: matchIndex, tableIndex: i });
+          console.log(`[TABLE RESTORE] Found flexible placeholder "${match[0]}" at index ${matchIndex} (table ${i})`);
           break;
         }
       }
-      
-      if (!found) {
-        // Last resort: try to find where tables should be based on context
-        // Look for table-like patterns that might be corrupted placeholders
-        console.warn(`[TABLE RESTORE] Placeholder completely missing. Attempting context-based restoration...`);
-        
-        // If this is the last table and we haven't restored any, try appending
-        // Otherwise, we'll restore at the end as fallback
-        if (i === 0 && tableBlocks.length === 1) {
-          // Single table - try to find a good insertion point (before closing tags like </article> or </div>)
-          const insertionPatterns = [
-            /<\/article>/i,
-            /<\/div>\s*$/i,
-            /<\/main>/i,
-            /<\/section>/i
-          ];
-          
-          let insertionPoint = -1;
-          for (const pattern of insertionPatterns) {
-            const match = content.search(pattern);
-            if (match !== -1) {
-              insertionPoint = match;
-              break;
-            }
-          }
-          
-          if (insertionPoint !== -1) {
-            content = content.substring(0, insertionPoint) + '\n' + originalTable + '\n' + content.substring(insertionPoint);
-            console.log(`[TABLE RESTORE] Restored table at insertion point`);
-            continue;
-          }
-        }
-        
-        // Final fallback: append at the end
-        console.warn(`[TABLE RESTORE] Appending table at end as final fallback`);
-        content += '\n' + originalTable;
-        continue;
-      }
-    } else {
-      // Exact match found - create regex for replacement
-      placeholderRegex = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
     }
     
-    // Placeholder found - restore table
-    // Restore original table structure to ensure it's never broken
-    // Table text translation can be added later as an enhancement
-    // This ensures tables are never broken, even if text remains in English
-    let translatedTable = originalTable;
+    // If still not found, try 1-based patterns
+    if (!placeholderMatches.some(pm => pm.tableIndex === i)) {
+      for (const pattern of flexiblePatterns1) {
+        const match = content.match(pattern);
+        if (match && match[0]) {
+          const matchIndex = content.indexOf(match[0]);
+          // Check if we already have this one
+          const alreadyFound = placeholderMatches.some(pm => 
+            Math.abs(pm.index - matchIndex) < 50
+          );
+          if (!alreadyFound) {
+            placeholderMatches.push({ match: match[0], index: matchIndex, tableIndex: i });
+            console.log(`[TABLE RESTORE] Found 1-based flexible placeholder "${match[0]}" at index ${matchIndex} (mapped to table ${i})`);
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  // Sort matches by index (position in content) to process in order
+  placeholderMatches.sort((a, b) => a.index - b.index);
+  
+  // Now restore tables by replacing placeholders
+  // Process in reverse order to preserve indices
+  for (let i = placeholderMatches.length - 1; i >= 0; i--) {
+    const { match: placeholderText, index: placeholderIndex, tableIndex } = placeholderMatches[i];
+    const originalTable = tableBlocks[tableIndex].original;
     
     // Validate original table structure before restoring
     const tableOpenTags = (originalTable.match(/<table[^>]*>/gi) || []).length;
     const tableCloseTags = (originalTable.match(/<\/table>/gi) || []).length;
     
     if (tableOpenTags !== tableCloseTags) {
-      console.error(`[TABLE RESTORE] WARNING: Original table ${i + 1} has mismatched tags (${tableOpenTags} open, ${tableCloseTags} close)`);
+      console.error(`[TABLE RESTORE] WARNING: Original table ${tableIndex + 1} has mismatched tags (${tableOpenTags} open, ${tableCloseTags} close)`);
     }
     
-    // Replace placeholder with table (replace all occurrences to be safe)
-    if (placeholderRegex) {
-      content = content.replace(placeholderRegex, translatedTable);
-      console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} (structure preserved)`);
-    } else {
-      // Fallback: direct replacement at found index
-      if (placeholderIndex !== -1) {
-        const beforePlaceholder = content.substring(0, placeholderIndex);
-        const afterPlaceholder = content.substring(placeholderIndex + placeholder.length);
-        content = beforePlaceholder + translatedTable + afterPlaceholder;
-        console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} via direct replacement`);
+    // Replace the placeholder with the table
+    const beforePlaceholder = content.substring(0, placeholderIndex);
+    const afterPlaceholder = content.substring(placeholderIndex + placeholderText.length);
+    content = beforePlaceholder + originalTable + afterPlaceholder;
+    
+    console.log(`[TABLE RESTORE] Restored table ${tableIndex + 1}/${tableBlocks.length} (structure preserved)`);
+  }
+  
+  // If we still have placeholders that weren't matched, try to restore them
+  // Check for any remaining placeholder patterns
+  const remainingPlaceholderPattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*\d+\s*__/gi;
+  const remainingMatches = content.match(remainingPlaceholderPattern);
+  
+  if (remainingMatches && remainingMatches.length > 0) {
+    console.warn(`[TABLE RESTORE] Found ${remainingMatches.length} remaining placeholder(s) after restoration. Attempting final cleanup...`);
+    
+    // For each remaining placeholder, try to extract the number and restore
+    for (const remainingMatch of remainingMatches) {
+      const numberMatch = remainingMatch.match(/(\d+)/);
+      if (numberMatch) {
+        const tableIndex = parseInt(numberMatch[1], 10);
+        if (tableIndex < tableBlocks.length) {
+          const originalTable = tableBlocks[tableIndex].original;
+          // Replace all occurrences of this placeholder
+          const placeholderRegex = new RegExp(remainingMatch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+          content = content.replace(placeholderRegex, originalTable);
+          console.log(`[TABLE RESTORE] Cleaned up remaining placeholder for table ${tableIndex + 1}`);
+        }
+      }
+    }
+  }
+  
+  // Final check: if we still have placeholders, restore all tables at the end as last resort
+  // Use a fresh regex instance to avoid state issues
+  const finalCheckPattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*\d+\s*__/gi;
+  const remainingPlaceholders = content.match(finalCheckPattern);
+  
+  if (remainingPlaceholders && remainingPlaceholders.length > 0) {
+    console.error(`[TABLE RESTORE] ERROR: ${remainingPlaceholders.length} placeholder(s) still remain after all restoration attempts!`);
+    console.error(`[TABLE RESTORE] Restoring tables as emergency fallback...`);
+    
+    // Find all remaining placeholders and replace them
+    let finalContent = content;
+    for (const placeholder of remainingPlaceholders) {
+      const numberMatch = placeholder.match(/(\d+)/);
+      if (numberMatch) {
+        let tableIndex = parseInt(numberMatch[1], 10);
+        
+        // Handle 1-based vs 0-based indexing
+        // If placeholder says "1" but we only have 1 table (index 0), use that table
+        if (tableIndex >= tableBlocks.length && tableBlocks.length > 0) {
+          // If the number is too high, use the last table
+          tableIndex = tableBlocks.length - 1;
+          console.warn(`[TABLE RESTORE] Placeholder number ${numberMatch[1]} out of range, using last table (index ${tableIndex})`);
+        } else if (tableIndex > 0 && tableBlocks.length === 1) {
+          // If there's only one table but placeholder says "1", use index 0
+          tableIndex = 0;
+          console.warn(`[TABLE RESTORE] Placeholder number ${numberMatch[1]} for single table, using index 0`);
+        }
+        
+        if (tableIndex >= 0 && tableIndex < tableBlocks.length) {
+          // Escape the placeholder for regex replacement
+          const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const placeholderRegex = new RegExp(escapedPlaceholder, 'g');
+          finalContent = finalContent.replace(placeholderRegex, tableBlocks[tableIndex].original);
+          console.log(`[TABLE RESTORE] Emergency restoration: replaced "${placeholder}" with table ${tableIndex + 1}`);
+        }
+      }
+    }
+    content = finalContent;
+    
+    // Verify no placeholders remain
+    const verifyPattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*\d+\s*__/gi;
+    const stillRemaining = content.match(verifyPattern);
+    if (stillRemaining && stillRemaining.length > 0) {
+      console.error(`[TABLE RESTORE] CRITICAL: ${stillRemaining.length} placeholder(s) STILL remain after emergency restoration!`);
+      console.error(`[TABLE RESTORE] Remaining placeholders: ${stillRemaining.join(', ')}`);
+      // Last resort: replace ALL placeholder-like patterns with the first table (if we have one)
+      if (tableBlocks.length > 0) {
+        const universalPattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*\d+\s*__/gi;
+        content = content.replace(universalPattern, tableBlocks[0].original);
+        console.error(`[TABLE RESTORE] Last resort: replaced all remaining placeholders with first table`);
       }
     }
   }
