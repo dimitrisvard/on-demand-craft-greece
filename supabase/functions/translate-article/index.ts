@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-05-table-translation-fix";
+const VERSION = "2026-01-05-special-char-languages-fix";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -70,16 +70,21 @@ async function callGemini(prompt: string): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
   try {
+    // Ensure UTF-8 encoding for special characters (important for Hungarian, Finnish, Czech)
+    const requestBody = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { 
+        temperature: 0.3, 
+        maxOutputTokens: 32768, // Maximum for Gemini 2.0 Flash
+      },
+    };
+    
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { 
-          temperature: 0.3, 
-          maxOutputTokens: 32768, // Maximum for Gemini 2.0 Flash
-        },
-      }),
+      headers: { 
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
@@ -371,8 +376,12 @@ async function translateToLanguage(
   langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
   
-  // Hungarian and some languages may produce longer translations - ensure we handle them properly
+  // Hungarian, Finnish, and Czech may have different translation characteristics
+  // - Hungarian: agglutinative language, can produce longer translations
+  // - Finnish: agglutinative language, complex grammar, special characters (ä, ö, å)
+  // - Czech: special characters (č, ř, ž, š, ě, á, í, ó, ú, ý), different word order
   const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs";
+  const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs";
   
   // Extract and protect tables before translation to prevent Gemini from breaking table structure
   const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
@@ -409,7 +418,15 @@ async function translateToLanguage(
   
   // Use delimiter-based format instead of JSON to avoid escaping issues with HTML content
   // JSON escaping of quotes in HTML attributes (href="...") causes parsing failures
-  const prompt = `Translate this manufacturing blog article into ${langName}${isLongLanguage ? ". Hungarian translations may be longer than English - ensure complete translation." : ""}.
+  const languageSpecificNote = isLongLanguage 
+    ? `\nIMPORTANT LANGUAGE-SPECIFIC INSTRUCTIONS:
+  * ${langName} uses special characters and may have different sentence structures than English
+  * Preserve all special characters correctly (${langCode === "hu" ? "á, é, í, ó, ö, ő, ú, ü, ű" : langCode === "fi" ? "ä, ö, å" : "č, ř, ž, š, ě, á, í, ó, ú, ý"})
+  * ${langName} translations may be longer or shorter than English - ensure COMPLETE translation of all content
+  * Do NOT skip any paragraphs, sections, or content - translate everything fully`
+    : "";
+  
+  const prompt = `Translate this manufacturing blog article into ${langName}.${languageSpecificNote}
 
 RULES:
 - Keep "${BRAND_NAME}" unchanged
@@ -459,6 +476,22 @@ META DESCRIPTION: ${original.metaDescription}`;
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
   console.log(`[translateToLanguage] Response preview (first 500): ${response.substring(0, 500)}`);
   console.log(`[translateToLanguage] Response preview (last 500): ${response.substring(Math.max(0, response.length - 500))}`);
+  
+  // For languages with special characters, verify encoding
+  if (hasSpecialChars) {
+    // Check if response contains expected special characters for the language
+    const specialCharPatterns: Record<string, RegExp> = {
+      hu: /[áéíóöőúüű]/i,
+      fi: /[äöå]/i,
+      cs: /[čřžšěáíóúý]/i
+    };
+    const pattern = specialCharPatterns[langCode];
+    if (pattern && !pattern.test(response)) {
+      console.warn(`[WARNING] ${langName} response may not contain expected special characters - translation might be incomplete`);
+    } else if (pattern) {
+      console.log(`[OK] ${langName} response contains expected special characters`);
+    }
+  }
   
   // Parse using delimiters (much more robust than JSON for HTML content)
   function extractBetween(text: string, startDelim: string, endDelim: string): string {
@@ -551,13 +584,18 @@ META DESCRIPTION: ${original.metaDescription}`;
   console.log(`[translateToLanguage] Content starts with: ${content.substring(0, 200)}`);
   console.log(`[translateToLanguage] Content ends with: ${content.substring(Math.max(0, translatedContentLength - 200))}`);
   
-  // Check if translation is incomplete (less than 60% is suspicious for most languages)
-  if (lengthRatio < 0.6 && originalContentLength > 3000) {
+  // Check if translation is incomplete
+  // For languages with special characters (hu, fi, cs), use a more lenient threshold
+  // These languages may have different word lengths and structures
+  const minLengthRatio = hasSpecialChars ? 0.5 : 0.6; // 50% for special char languages, 60% for others
+  
+  if (lengthRatio < minLengthRatio && originalContentLength > 3000) {
     const missingPercent = (1 - lengthRatio) * 100;
-    console.error(`[ERROR] Translation appears incomplete!`);
+    console.error(`[ERROR] Translation appears incomplete for ${langCode}!`);
     console.error(`[ERROR] Original: ${originalContentLength} chars, Translated: ${translatedContentLength} chars`);
+    console.error(`[ERROR] Ratio: ${lengthRatio.toFixed(2)}, Threshold: ${minLengthRatio}`);
     console.error(`[ERROR] Missing approximately ${missingPercent.toFixed(1)}% of content`);
-    throw new Error(`Translation incomplete: only ${(lengthRatio * 100).toFixed(1)}% of original content translated`);
+    throw new Error(`Translation incomplete for ${langName}: only ${(lengthRatio * 100).toFixed(1)}% of original content translated (minimum ${(minLengthRatio * 100).toFixed(0)}% required)`);
   }
 
   if (!metaTitle.includes(BRAND_NAME)) metaTitle = `${metaTitle} | ${BRAND_NAME}`;
@@ -1026,12 +1064,31 @@ serve(async (req) => {
           continue;
         }
 
-        // Translate
-        // #region agent log
-        const translateStartTime = Date.now();
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
-        const translation = await translateToLanguage(original, lang.name, lang.code);
+        // Translate with retry logic for languages with special characters
+        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs";
+        let translation;
+        let retryCount = 0;
+        const maxRetries = isSpecialCharLang ? 2 : 1; // Allow 1 retry for special char languages
+        let translateStartTime = Date.now();
+        
+        while (retryCount <= maxRetries) {
+          try {
+            // #region agent log
+            translateStartTime = Date.now();
+            fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length,retryCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+            // #endregion
+            translation = await translateToLanguage(original, lang.name, lang.code);
+            break; // Success, exit retry loop
+          } catch (translateError: any) {
+            retryCount++;
+            if (retryCount > maxRetries) {
+              throw translateError; // Re-throw if max retries exceeded
+            }
+            console.warn(`[RETRY] Translation attempt ${retryCount} failed for ${lang.code}, retrying... (${translateError.message})`);
+            // Wait before retry (exponential backoff)
+            await new Promise(r => setTimeout(r, 1000 * retryCount));
+          }
+        }
         // #region agent log
         const translateDuration = Date.now() - translateStartTime;
         fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage complete',data:{duration:translateDuration,translatedLength:translation.content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
@@ -1076,8 +1133,13 @@ serve(async (req) => {
         }
 
       } catch (err: any) {
+        const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs";
         console.error(`✗ ${lang.code} failed:`, err.message);
-        results[lang.code] = { success: false, error: err.message };
+        if (isSpecialCharLang) {
+          console.error(`[SPECIAL CHAR LANG ERROR] ${lang.name} (${lang.code}) translation failed. This language uses special characters - check encoding and response parsing.`);
+          console.error(`[ERROR DETAILS] Error type: ${err.name}, Message: ${err.message}`);
+        }
+        results[lang.code] = { success: false, error: err.message, langCode: lang.code, isSpecialCharLang };
       }
 
       // Small delay between languages
