@@ -132,6 +132,103 @@ function makeSlug(title: string): string {
 }
 
 /**
+ * Translate text content inside a table while preserving HTML structure
+ * This extracts text nodes and translates them, keeping all HTML tags intact
+ */
+async function translateTableContent(tableHtml: string, langName: string, langCode: string): Promise<string> {
+  // Extract all text content from table cells
+  const cellPattern = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
+  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number }> = [];
+  let cellMatch;
+  
+  while ((cellMatch = cellPattern.exec(tableHtml)) !== null) {
+    cells.push({
+      fullMatch: cellMatch[0],
+      tag: cellMatch[1],
+      attrs: cellMatch[2],
+      innerHtml: cellMatch[3],
+      index: cellMatch.index!
+    });
+  }
+  
+  if (cells.length === 0) {
+    return tableHtml; // No cells to translate
+  }
+  
+  // Extract all text content (excluding HTML tags) for translation
+  const textContents: string[] = [];
+  for (const cell of cells) {
+    // Remove HTML tags to get pure text
+    const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (textOnly.length > 0) {
+      textContents.push(textOnly);
+    }
+  }
+  
+  if (textContents.length === 0) {
+    return tableHtml; // No text to translate
+  }
+  
+  // Translate all text content at once
+  const textToTranslate = textContents.join('\n---CELL---\n');
+  const translationPrompt = `Translate ONLY the text content below into ${langName}. 
+  
+RULES:
+- Translate ONLY the text, do NOT add any formatting or structure
+- Keep the exact same number of lines
+- Each line corresponds to a table cell
+- Return ONLY the translated text, one line per cell, in the same order
+
+Text to translate:
+${textToTranslate}`;
+
+  try {
+    const translatedText = await callGemini(translationPrompt);
+    const translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
+    
+    // Rebuild table with translated text
+    let translatedTable = tableHtml;
+    let translatedIndex = 0;
+    
+    // Process cells in reverse order to preserve indices
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const cell = cells[i];
+      const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      
+      if (textOnly.length > 0 && translatedIndex < translatedLines.length) {
+        // Replace text content in the cell while preserving HTML structure
+        // Find text nodes and replace them
+        let translatedInnerHtml = cell.innerHtml;
+        
+        // Simple approach: if cell has no nested HTML, replace entire content
+        // Otherwise, try to preserve HTML structure
+        if (!/<[^>]+>/.test(cell.innerHtml)) {
+          // No HTML tags, just text - replace directly
+          translatedInnerHtml = translatedLines[translatedIndex];
+        } else {
+          // Has HTML tags - preserve structure, translate text nodes
+          // For now, replace the whole inner content (this is a simplification)
+          // In a more sophisticated version, we'd parse and translate text nodes separately
+          translatedInnerHtml = translatedLines[translatedIndex];
+        }
+        
+        const newCell = `<${cell.tag}${cell.attrs}>${translatedInnerHtml}</${cell.tag}>`;
+        translatedTable = translatedTable.substring(0, cell.index) + 
+          newCell + 
+          translatedTable.substring(cell.index + cell.fullMatch.length);
+        translatedIndex++;
+      }
+    }
+    
+    return translatedTable;
+  } catch (error: any) {
+    console.error(`[TABLE TRANSLATION] Error translating table content: ${error.message}`);
+    // Return original table if translation fails
+    return tableHtml;
+  }
+}
+
+/**
  * Localize links in translated content
  * Note: Article slugs are fixed AFTER all translations by fix-article-links function
  */
@@ -167,6 +264,37 @@ async function translateToLanguage(
   // Hungarian and some languages may produce longer translations - ensure we handle them properly
   const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs";
   
+  // Extract and protect tables before translation to prevent Gemini from breaking table structure
+  const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
+  const tablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  let tableMatch;
+  let contentForTranslation = original.content;
+  let tableIndex = 0;
+  
+  // Collect all table blocks and replace with placeholders
+  const tableMatches: Array<{ match: string; index: number }> = [];
+  while ((tableMatch = tablePattern.exec(original.content)) !== null) {
+    tableMatches.push({ match: tableMatch[0], index: tableMatch.index! });
+  }
+  
+  // Process tables in reverse order to preserve indices when replacing
+  for (let i = tableMatches.length - 1; i >= 0; i--) {
+    const { match, index } = tableMatches[i];
+    const placeholder = `__TABLE_PLACEHOLDER_${tableIndex}__`;
+    tableBlocks.unshift({ 
+      original: match, 
+      placeholder: placeholder,
+      translated: "" // Will be filled after translation
+    });
+    // Replace table with placeholder
+    contentForTranslation = contentForTranslation.substring(0, index) + 
+      placeholder + 
+      contentForTranslation.substring(index + match.length);
+    tableIndex++;
+  }
+  
+  console.log(`[TABLE PROTECTION] Extracted ${tableBlocks.length} table(s) for protection`);
+  
   // Use delimiter-based format instead of JSON to avoid escaping issues with HTML content
   // JSON escaping of quotes in HTML attributes (href="...") causes parsing failures
   const prompt = `Translate this manufacturing blog article into ${langName}${isLongLanguage ? ". Hungarian translations may be longer than English - ensure complete translation." : ""}.
@@ -179,6 +307,10 @@ RULES:
 - Do NOT translate URLs in href attributes - keep them exactly as they are
 - Remove any links to "/dashboard" or "/en/dashboard" - these are internal admin links and should not appear
 - Translate all visible text content including link text
+- CRITICAL TABLE PRESERVATION: 
+  * Table placeholders (__TABLE_PLACEHOLDER_X__) must remain EXACTLY as written - do NOT modify, translate, or remove them
+  * These placeholders will be replaced with translated tables after translation
+  * Do NOT attempt to translate or modify table placeholders in any way
 
 Use this EXACT format with the delimiters shown:
 
@@ -201,7 +333,7 @@ ARTICLE TO TRANSLATE:
 TITLE: ${original.title}
 
 CONTENT:
-${original.content}
+${contentForTranslation}
 
 EXCERPT: ${original.excerpt}
 
@@ -335,6 +467,156 @@ META DESCRIPTION: ${original.metaDescription}`;
   content = content.replace(/href="([^"']*?)'/g, 'href="$1"');
   content = content.replace(/href='([^"']*?)"/g, "href='$1'");
   console.log(`[SANITIZE] Fixed any mismatched quotes in href attributes`);
+  
+  // Restore tables: translate text content inside tables while preserving structure
+  // Process in reverse order to handle multiple occurrences correctly
+  for (let i = tableBlocks.length - 1; i >= 0; i--) {
+    const placeholder = tableBlocks[i].placeholder;
+    const originalTable = tableBlocks[i].original;
+    
+    // Check if placeholder exists in translated content
+    const placeholderIndex = content.indexOf(placeholder);
+    
+    if (placeholderIndex === -1) {
+      console.warn(`[TABLE RESTORE] Placeholder ${placeholder} not found in translated content`);
+      console.warn(`[TABLE RESTORE] This may mean Gemini modified the placeholder. Searching for partial matches...`);
+      
+      // Try to find a modified version of the placeholder (Gemini might have changed it)
+      // Look for patterns like "TABLE_PLACEHOLDER" or similar
+      const modifiedPatterns = [
+        new RegExp(`__TABLE[^_]*${i}[^_]*__`, 'gi'),
+        new RegExp(`TABLE.*PLACEHOLDER.*${i}`, 'gi'),
+        new RegExp(`__TABLE_${i}__`, 'gi')
+      ];
+      
+      let found = false;
+      for (const pattern of modifiedPatterns) {
+        const match = content.match(pattern);
+        if (match) {
+          console.log(`[TABLE RESTORE] Found modified placeholder: ${match[0]}`);
+          content = content.replace(pattern, originalTable);
+          found = true;
+          break;
+        }
+      }
+      
+      if (!found) {
+        // Last resort: append table at the end
+        console.warn(`[TABLE RESTORE] Placeholder completely missing. Appending table at end as fallback.`);
+        content += '\n' + originalTable;
+      }
+      continue;
+    }
+    
+    // Placeholder found - restore table
+    // For now, restore original table structure to prevent breaking
+    // Table text translation can be added later as an enhancement
+    // This ensures tables are never broken, even if text remains in English
+    let translatedTable = originalTable;
+    
+    // Optional: Try to translate table content (commented out for performance)
+    // Uncomment if you want table text translated (adds latency and API calls)
+    /*
+    console.log(`[TABLE TRANSLATION] Translating table ${i + 1}/${tableBlocks.length} content...`);
+    try {
+      translatedTable = await translateTableContent(originalTable, langName, langCode);
+      console.log(`[TABLE TRANSLATION] Successfully translated table ${i + 1}`);
+    } catch (error: any) {
+      console.error(`[TABLE TRANSLATION] Failed to translate table ${i + 1}: ${error.message}`);
+      translatedTable = originalTable;
+    }
+    */
+    
+    // Replace placeholder with table (replace all occurrences to be safe)
+    const placeholderRegex = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+    content = content.replace(placeholderRegex, translatedTable);
+    console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} (structure preserved)`);
+  }
+  
+  // After restoration, check for any broken tables and fix them
+  const brokenTablePattern = /<table[^>]*>[\s\S]*?(?=<table|$)/gi;
+  const brokenTablesAfterRestore: Array<{ match: string; index: number }> = [];
+  let brokenMatch;
+  while ((brokenMatch = brokenTablePattern.exec(content)) !== null) {
+    const tableBlock = brokenMatch[0];
+    if (!tableBlock.includes('</table>')) {
+      brokenTablesAfterRestore.push({ match: tableBlock, index: brokenMatch.index! });
+      console.warn(`[TABLE FIX] Found broken table at index ${brokenMatch.index} after restoration`);
+    }
+  }
+  
+  // Replace broken tables with originals
+  if (brokenTablesAfterRestore.length > 0) {
+    console.warn(`[TABLE FIX] Replacing ${brokenTablesAfterRestore.length} broken table(s) with originals...`);
+    // Process in reverse order to preserve indices
+    for (let i = brokenTablesAfterRestore.length - 1; i >= 0; i--) {
+      const brokenTable = brokenTablesAfterRestore[i];
+      const originalTableIndex = Math.min(i, tableBlocks.length - 1);
+      const originalTable = tableBlocks[originalTableIndex].original;
+      content = content.substring(0, brokenTable.index) + 
+        originalTable + 
+        content.substring(brokenTable.index + brokenTable.match.length);
+      console.log(`[TABLE FIX] Replaced broken table ${i + 1} with original table ${originalTableIndex + 1}`);
+    }
+  }
+  
+  // Validate table structure after restoration
+  const tableCountAfter = (content.match(/<table[^>]*>/gi) || []).length;
+  const tableCloseCountAfter = (content.match(/<\/table>/gi) || []).length;
+  
+  console.log(`[TABLE VALIDATION] Found ${tableCountAfter} table opening tags and ${tableCloseCountAfter} closing tags`);
+  
+  if (tableCountAfter !== tableCloseCountAfter) {
+    console.warn(`[TABLE VALIDATION] Mismatch detected! Attempting to fix...`);
+    
+    // Check for broken tables (tables without proper closing)
+    const brokenTablePattern = /<table[^>]*>[\s\S]*?(?=<table|$)/gi;
+    let tableCheckMatch;
+    const brokenTables: number[] = [];
+    let matchIndex = 0;
+    
+    while ((tableCheckMatch = brokenTablePattern.exec(content)) !== null) {
+      const tableBlock = tableCheckMatch[0];
+      const hasProperClose = tableBlock.includes('</table>');
+      if (!hasProperClose) {
+        brokenTables.push(matchIndex);
+        console.warn(`[TABLE VALIDATION] Table ${matchIndex + 1} is broken (missing closing tag)`);
+      }
+      matchIndex++;
+    }
+    
+    // If we have broken tables and we have original tables, restore them
+    if (brokenTables.length > 0 && tableBlocks.length > 0) {
+      console.warn(`[TABLE VALIDATION] Found ${brokenTables.length} broken table(s), restoring from originals...`);
+      // Find broken tables and replace with originals
+      // This is a fallback - ideally placeholders should have been preserved
+      let restoreIndex = 0;
+      while ((tableCheckMatch = brokenTablePattern.exec(content)) !== null && restoreIndex < tableBlocks.length) {
+        const tableBlock = tableCheckMatch[0];
+        if (!tableBlock.includes('</table>')) {
+          // Replace broken table with original
+          content = content.replace(tableBlock, tableBlocks[restoreIndex].original);
+          console.log(`[TABLE VALIDATION] Restored broken table ${restoreIndex + 1} from original`);
+          restoreIndex++;
+        }
+      }
+    } else {
+      // Try to fix by adding missing closing tags
+      for (let i = 0; i < tableCountAfter - tableCloseCountAfter; i++) {
+        content += '</tbody></table>';
+        console.log(`[TABLE VALIDATION] Added missing closing tag`);
+      }
+    }
+  }
+  
+  // Final validation: ensure all tables are properly structured
+  const finalTableCount = (content.match(/<table[^>]*>/gi) || []).length;
+  const finalTableCloseCount = (content.match(/<\/table>/gi) || []).length;
+  if (finalTableCount === finalTableCloseCount && finalTableCount === tableBlocks.length) {
+    console.log(`[TABLE VALIDATION] ✓ All ${finalTableCount} table(s) properly restored`);
+  } else {
+    console.warn(`[TABLE VALIDATION] Warning: Expected ${tableBlocks.length} tables, found ${finalTableCount} opening and ${finalTableCloseCount} closing`);
+  }
 
   return { title, slug, content, excerpt, metaTitle, metaDescription };
 }
