@@ -23,15 +23,15 @@ serve(async (req) => {
 
   try {
     // Find English articles created today that don't have translations yet
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStart = today.toISOString();
+    // Use UTC for date calculations to match database timestamps
+    const now = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+    const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0));
     
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const todayEnd = tomorrow.toISOString();
+    const todayStartISO = todayStart.toISOString();
+    const todayEndISO = todayEnd.toISOString();
 
-    console.log(`Looking for articles created between ${todayStart} and ${todayEnd}`);
+    console.log(`Looking for articles created between ${todayStartISO} and ${todayEndISO} (UTC)`);
 
     // Get English articles created today
     const { data: englishArticles, error: fetchError } = await supabase
@@ -39,8 +39,8 @@ serve(async (req) => {
       .select("id, translation_id, created_at")
       .eq("language", "en")
       .eq("status", "published")
-      .gte("created_at", todayStart)
-      .lt("created_at", todayEnd)
+      .gte("created_at", todayStartISO)
+      .lt("created_at", todayEndISO)
       .order("created_at", { ascending: false });
 
     if (fetchError) {
