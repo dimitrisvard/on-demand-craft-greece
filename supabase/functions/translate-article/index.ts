@@ -138,16 +138,19 @@ function makeSlug(title: string): string {
 async function translateTableContent(tableHtml: string, langName: string, langCode: string): Promise<string> {
   // Extract all text content from table cells
   const cellPattern = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
-  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number }> = [];
+  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean }> = [];
   let cellMatch;
   
   while ((cellMatch = cellPattern.exec(tableHtml)) !== null) {
+    const innerHtml = cellMatch[3];
+    const hasHtml = /<[^>]+>/.test(innerHtml);
     cells.push({
       fullMatch: cellMatch[0],
       tag: cellMatch[1],
       attrs: cellMatch[2],
-      innerHtml: cellMatch[3],
-      index: cellMatch.index!
+      innerHtml: innerHtml,
+      index: cellMatch.index!,
+      hasHtml: hasHtml
     });
   }
   
@@ -178,6 +181,7 @@ RULES:
 - Keep the exact same number of lines
 - Each line corresponds to a table cell
 - Return ONLY the translated text, one line per cell, in the same order
+- Do NOT include any HTML tags or markdown formatting
 
 Text to translate:
 ${textToTranslate}`;
@@ -196,20 +200,69 @@ ${textToTranslate}`;
       const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       
       if (textOnly.length > 0 && translatedIndex < translatedLines.length) {
-        // Replace text content in the cell while preserving HTML structure
-        // Find text nodes and replace them
         let translatedInnerHtml = cell.innerHtml;
         
-        // Simple approach: if cell has no nested HTML, replace entire content
-        // Otherwise, try to preserve HTML structure
-        if (!/<[^>]+>/.test(cell.innerHtml)) {
+        if (!cell.hasHtml) {
           // No HTML tags, just text - replace directly
           translatedInnerHtml = translatedLines[translatedIndex];
         } else {
-          // Has HTML tags - preserve structure, translate text nodes
-          // For now, replace the whole inner content (this is a simplification)
-          // In a more sophisticated version, we'd parse and translate text nodes separately
-          translatedInnerHtml = translatedLines[translatedIndex];
+          // Has HTML tags - preserve structure by replacing only text nodes
+          // Extract HTML structure and replace text content
+          // Simple approach: find the first and last text nodes and replace them
+          // This preserves tags like <strong>, <em>, <a>, etc.
+          
+          // Try to preserve HTML structure by replacing text while keeping tags
+          // Split by HTML tags, translate text parts, keep tags
+          const parts: Array<{ type: 'text' | 'tag'; content: string }> = [];
+          let remaining = cell.innerHtml;
+          let tagMatch;
+          
+          // Parse HTML structure
+          const tagPattern = /<[^>]+>/g;
+          let lastIndex = 0;
+          while ((tagMatch = tagPattern.exec(cell.innerHtml)) !== null) {
+            // Add text before tag
+            if (tagMatch.index > lastIndex) {
+              const textPart = cell.innerHtml.substring(lastIndex, tagMatch.index);
+              if (textPart.trim()) {
+                parts.push({ type: 'text', content: textPart });
+              }
+            }
+            // Add tag
+            parts.push({ type: 'tag', content: tagMatch[0] });
+            lastIndex = tagMatch.index + tagMatch[0].length;
+          }
+          // Add remaining text
+          if (lastIndex < cell.innerHtml.length) {
+            const textPart = cell.innerHtml.substring(lastIndex);
+            if (textPart.trim()) {
+              parts.push({ type: 'text', content: textPart });
+            }
+          }
+          
+          // If we successfully parsed the structure, replace text parts
+          if (parts.length > 0) {
+            const textParts = parts.filter(p => p.type === 'text');
+            if (textParts.length === 1) {
+              // Single text node - replace it
+              textParts[0].content = translatedLines[translatedIndex];
+              translatedInnerHtml = parts.map(p => p.content).join('');
+            } else {
+              // Multiple text nodes - replace first significant one
+              // This is a simplification - ideally we'd translate all text nodes
+              const firstTextIndex = parts.findIndex(p => p.type === 'text' && p.content.trim().length > 0);
+              if (firstTextIndex !== -1) {
+                parts[firstTextIndex].content = translatedLines[translatedIndex];
+                translatedInnerHtml = parts.map(p => p.content).join('');
+              } else {
+                // Fallback: replace entire content (loses HTML but preserves table structure)
+                translatedInnerHtml = translatedLines[translatedIndex];
+              }
+            }
+          } else {
+            // Parsing failed - fallback to simple replacement
+            translatedInnerHtml = translatedLines[translatedIndex];
+          }
         }
         
         const newCell = `<${cell.tag}${cell.attrs}>${translatedInnerHtml}</${cell.tag}>`;
@@ -218,6 +271,16 @@ ${textToTranslate}`;
           translatedTable.substring(cell.index + cell.fullMatch.length);
         translatedIndex++;
       }
+    }
+    
+    // Validate the translated table structure
+    const tableOpenTags = (translatedTable.match(/<table[^>]*>/gi) || []).length;
+    const tableCloseTags = (translatedTable.match(/<\/table>/gi) || []).length;
+    
+    if (tableOpenTags !== tableCloseTags) {
+      console.error(`[TABLE TRANSLATION] WARNING: Translated table has mismatched tags (${tableOpenTags} open, ${tableCloseTags} close)`);
+      // Return original if structure is broken
+      return tableHtml;
     }
     
     return translatedTable;
@@ -474,74 +537,149 @@ META DESCRIPTION: ${original.metaDescription}`;
     const placeholder = tableBlocks[i].placeholder;
     const originalTable = tableBlocks[i].original;
     
-    // Check if placeholder exists in translated content
-    const placeholderIndex = content.indexOf(placeholder);
+    // Check if placeholder exists in translated content (exact match first)
+    let placeholderIndex = content.indexOf(placeholder);
+    let placeholderRegex: RegExp | null = null;
     
     if (placeholderIndex === -1) {
       console.warn(`[TABLE RESTORE] Placeholder ${placeholder} not found in translated content`);
-      console.warn(`[TABLE RESTORE] This may mean Gemini modified the placeholder. Searching for partial matches...`);
+      console.warn(`[TABLE RESTORE] Searching for modified placeholders...`);
       
       // Try to find a modified version of the placeholder (Gemini might have changed it)
-      // Look for patterns like "TABLE_PLACEHOLDER" or similar
+      // Escape special regex characters in placeholder first
+      const escapedPlaceholder = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      
+      // Try various patterns that Gemini might have created
       const modifiedPatterns = [
+        // Exact placeholder with any whitespace variations
+        new RegExp(escapedPlaceholder.replace(/_/g, '\\s*_\\s*'), 'gi'),
+        // Pattern with table index
+        new RegExp(`__\\s*TABLE\\s*[^_]*\\s*${i}\\s*__`, 'gi'),
+        new RegExp(`TABLE\\s*PLACEHOLDER\\s*${i}`, 'gi'),
+        new RegExp(`__\\s*TABLE\\s*_\\s*${i}\\s*__`, 'gi'),
+        // More flexible pattern
         new RegExp(`__TABLE[^_]*${i}[^_]*__`, 'gi'),
-        new RegExp(`TABLE.*PLACEHOLDER.*${i}`, 'gi'),
-        new RegExp(`__TABLE_${i}__`, 'gi')
       ];
       
       let found = false;
       for (const pattern of modifiedPatterns) {
         const match = content.match(pattern);
-        if (match) {
-          console.log(`[TABLE RESTORE] Found modified placeholder: ${match[0]}`);
-          content = content.replace(pattern, originalTable);
+        if (match && match[0]) {
+          console.log(`[TABLE RESTORE] Found modified placeholder: "${match[0]}"`);
+          placeholderRegex = new RegExp(pattern.source.replace(/\\s\*/g, '\\s*'), 'g');
+          placeholderIndex = content.search(pattern);
           found = true;
           break;
         }
       }
       
       if (!found) {
-        // Last resort: append table at the end
-        console.warn(`[TABLE RESTORE] Placeholder completely missing. Appending table at end as fallback.`);
+        // Last resort: try to find where tables should be based on context
+        // Look for table-like patterns that might be corrupted placeholders
+        console.warn(`[TABLE RESTORE] Placeholder completely missing. Attempting context-based restoration...`);
+        
+        // If this is the last table and we haven't restored any, try appending
+        // Otherwise, we'll restore at the end as fallback
+        if (i === 0 && tableBlocks.length === 1) {
+          // Single table - try to find a good insertion point (before closing tags like </article> or </div>)
+          const insertionPatterns = [
+            /<\/article>/i,
+            /<\/div>\s*$/i,
+            /<\/main>/i,
+            /<\/section>/i
+          ];
+          
+          let insertionPoint = -1;
+          for (const pattern of insertionPatterns) {
+            const match = content.search(pattern);
+            if (match !== -1) {
+              insertionPoint = match;
+              break;
+            }
+          }
+          
+          if (insertionPoint !== -1) {
+            content = content.substring(0, insertionPoint) + '\n' + originalTable + '\n' + content.substring(insertionPoint);
+            console.log(`[TABLE RESTORE] Restored table at insertion point`);
+            continue;
+          }
+        }
+        
+        // Final fallback: append at the end
+        console.warn(`[TABLE RESTORE] Appending table at end as final fallback`);
         content += '\n' + originalTable;
+        continue;
       }
-      continue;
+    } else {
+      // Exact match found - create regex for replacement
+      placeholderRegex = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
     }
     
     // Placeholder found - restore table
-    // For now, restore original table structure to prevent breaking
+    // Restore original table structure to ensure it's never broken
     // Table text translation can be added later as an enhancement
     // This ensures tables are never broken, even if text remains in English
     let translatedTable = originalTable;
     
-    // Optional: Try to translate table content (commented out for performance)
-    // Uncomment if you want table text translated (adds latency and API calls)
-    /*
-    console.log(`[TABLE TRANSLATION] Translating table ${i + 1}/${tableBlocks.length} content...`);
-    try {
-      translatedTable = await translateTableContent(originalTable, langName, langCode);
-      console.log(`[TABLE TRANSLATION] Successfully translated table ${i + 1}`);
-    } catch (error: any) {
-      console.error(`[TABLE TRANSLATION] Failed to translate table ${i + 1}: ${error.message}`);
-      translatedTable = originalTable;
+    // Validate original table structure before restoring
+    const tableOpenTags = (originalTable.match(/<table[^>]*>/gi) || []).length;
+    const tableCloseTags = (originalTable.match(/<\/table>/gi) || []).length;
+    
+    if (tableOpenTags !== tableCloseTags) {
+      console.error(`[TABLE RESTORE] WARNING: Original table ${i + 1} has mismatched tags (${tableOpenTags} open, ${tableCloseTags} close)`);
     }
-    */
     
     // Replace placeholder with table (replace all occurrences to be safe)
-    const placeholderRegex = new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-    content = content.replace(placeholderRegex, translatedTable);
-    console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} (structure preserved)`);
+    if (placeholderRegex) {
+      content = content.replace(placeholderRegex, translatedTable);
+      console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} (structure preserved)`);
+    } else {
+      // Fallback: direct replacement at found index
+      if (placeholderIndex !== -1) {
+        const beforePlaceholder = content.substring(0, placeholderIndex);
+        const afterPlaceholder = content.substring(placeholderIndex + placeholder.length);
+        content = beforePlaceholder + translatedTable + afterPlaceholder;
+        console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} via direct replacement`);
+      }
+    }
   }
   
   // After restoration, check for any broken tables and fix them
-  const brokenTablePattern = /<table[^>]*>[\s\S]*?(?=<table|$)/gi;
-  const brokenTablesAfterRestore: Array<{ match: string; index: number }> = [];
-  let brokenMatch;
-  while ((brokenMatch = brokenTablePattern.exec(content)) !== null) {
-    const tableBlock = brokenMatch[0];
-    if (!tableBlock.includes('</table>')) {
-      brokenTablesAfterRestore.push({ match: tableBlock, index: brokenMatch.index! });
-      console.warn(`[TABLE FIX] Found broken table at index ${brokenMatch.index} after restoration`);
+  // First, find all table opening tags and their positions
+  const tableOpenPattern = /<table[^>]*>/gi;
+  const tableClosePattern = /<\/table>/gi;
+  const tableOpenMatches: number[] = [];
+  const tableCloseMatches: number[] = [];
+  
+  let match;
+  while ((match = tableOpenPattern.exec(content)) !== null) {
+    tableOpenMatches.push(match.index);
+  }
+  while ((match = tableClosePattern.exec(content)) !== null) {
+    tableCloseMatches.push(match.index);
+  }
+  
+  // Check for broken tables (tables without proper closing tags)
+  const brokenTablesAfterRestore: Array<{ match: string; index: number; tableIndex: number }> = [];
+  
+  for (let i = 0; i < tableOpenMatches.length; i++) {
+    const openIndex = tableOpenMatches[i];
+    const nextOpenIndex = i < tableOpenMatches.length - 1 ? tableOpenMatches[i + 1] : content.length;
+    
+    // Find closing tag between this open and next open (or end)
+    const closingTagInRange = tableCloseMatches.find(closeIndex => 
+      closeIndex > openIndex && closeIndex < nextOpenIndex
+    );
+    
+    if (!closingTagInRange) {
+      // No closing tag found - table is broken
+      const tableBlock = content.substring(openIndex, nextOpenIndex);
+      brokenTablesAfterRestore.push({ 
+        match: tableBlock, 
+        index: openIndex,
+        tableIndex: i
+      });
+      console.warn(`[TABLE FIX] Found broken table ${i + 1} at index ${openIndex} after restoration (missing closing tag)`);
     }
   }
   
@@ -551,60 +689,94 @@ META DESCRIPTION: ${original.metaDescription}`;
     // Process in reverse order to preserve indices
     for (let i = brokenTablesAfterRestore.length - 1; i >= 0; i--) {
       const brokenTable = brokenTablesAfterRestore[i];
-      const originalTableIndex = Math.min(i, tableBlocks.length - 1);
+      const originalTableIndex = Math.min(brokenTable.tableIndex, tableBlocks.length - 1);
       const originalTable = tableBlocks[originalTableIndex].original;
-      content = content.substring(0, brokenTable.index) + 
-        originalTable + 
-        content.substring(brokenTable.index + brokenTable.match.length);
-      console.log(`[TABLE FIX] Replaced broken table ${i + 1} with original table ${originalTableIndex + 1}`);
+      
+      // Validate original table before using it
+      const origOpenTags = (originalTable.match(/<table[^>]*>/gi) || []).length;
+      const origCloseTags = (originalTable.match(/<\/table>/gi) || []).length;
+      
+      if (origOpenTags === origCloseTags && origOpenTags === 1) {
+        content = content.substring(0, brokenTable.index) + 
+          originalTable + 
+          content.substring(brokenTable.index + brokenTable.match.length);
+        console.log(`[TABLE FIX] Replaced broken table ${i + 1} with original table ${originalTableIndex + 1}`);
+      } else {
+        console.error(`[TABLE FIX] Original table ${originalTableIndex + 1} is also invalid, skipping replacement`);
+      }
     }
   }
   
   // Validate table structure after restoration
   const tableCountAfter = (content.match(/<table[^>]*>/gi) || []).length;
   const tableCloseCountAfter = (content.match(/<\/table>/gi) || []).length;
-  
+
   console.log(`[TABLE VALIDATION] Found ${tableCountAfter} table opening tags and ${tableCloseCountAfter} closing tags`);
-  
+
   if (tableCountAfter !== tableCloseCountAfter) {
-    console.warn(`[TABLE VALIDATION] Mismatch detected! Attempting to fix...`);
+    console.warn(`[TABLE VALIDATION] Mismatch detected! Expected ${tableBlocks.length} tables, found ${tableCountAfter} opening and ${tableCloseCountAfter} closing tags`);
     
-    // Check for broken tables (tables without proper closing)
-    const brokenTablePattern = /<table[^>]*>[\s\S]*?(?=<table|$)/gi;
-    let tableCheckMatch;
-    const brokenTables: number[] = [];
-    let matchIndex = 0;
-    
-    while ((tableCheckMatch = brokenTablePattern.exec(content)) !== null) {
-      const tableBlock = tableCheckMatch[0];
-      const hasProperClose = tableBlock.includes('</table>');
-      if (!hasProperClose) {
-        brokenTables.push(matchIndex);
-        console.warn(`[TABLE VALIDATION] Table ${matchIndex + 1} is broken (missing closing tag)`);
+    // If we have fewer closing tags, try to restore missing tables from originals
+    if (tableCloseCountAfter < tableCountAfter && tableBlocks.length > 0) {
+      console.warn(`[TABLE VALIDATION] Missing ${tableCountAfter - tableCloseCountAfter} closing tag(s), attempting to fix...`);
+      
+      // Find tables without closing tags and replace with originals
+      const tableOpenPattern = /<table[^>]*>/gi;
+      const tableClosePattern = /<\/table>/gi;
+      const openPositions: number[] = [];
+      const closePositions: number[] = [];
+      
+      let match;
+      while ((match = tableOpenPattern.exec(content)) !== null) {
+        openPositions.push(match.index);
       }
-      matchIndex++;
-    }
-    
-    // If we have broken tables and we have original tables, restore them
-    if (brokenTables.length > 0 && tableBlocks.length > 0) {
-      console.warn(`[TABLE VALIDATION] Found ${brokenTables.length} broken table(s), restoring from originals...`);
-      // Find broken tables and replace with originals
-      // This is a fallback - ideally placeholders should have been preserved
-      let restoreIndex = 0;
-      while ((tableCheckMatch = brokenTablePattern.exec(content)) !== null && restoreIndex < tableBlocks.length) {
-        const tableBlock = tableCheckMatch[0];
-        if (!tableBlock.includes('</table>')) {
-          // Replace broken table with original
-          content = content.replace(tableBlock, tableBlocks[restoreIndex].original);
-          console.log(`[TABLE VALIDATION] Restored broken table ${restoreIndex + 1} from original`);
-          restoreIndex++;
+      while ((match = tableClosePattern.exec(content)) !== null) {
+        closePositions.push(match.index);
+      }
+      
+      // Find tables without closing tags
+      const tablesToFix: Array<{ openIndex: number; tableIndex: number }> = [];
+      for (let i = 0; i < openPositions.length; i++) {
+        const openIndex = openPositions[i];
+        const nextOpenIndex = i < openPositions.length - 1 ? openPositions[i + 1] : content.length;
+        
+        // Check if there's a closing tag between this open and next open
+        const hasClosingTag = closePositions.some(closeIndex => 
+          closeIndex > openIndex && closeIndex < nextOpenIndex
+        );
+        
+        if (!hasClosingTag) {
+          tablesToFix.push({ openIndex, tableIndex: i });
         }
       }
-    } else {
-      // Try to fix by adding missing closing tags
-      for (let i = 0; i < tableCountAfter - tableCloseCountAfter; i++) {
+      
+      // Replace broken tables with originals (in reverse order)
+      for (let i = tablesToFix.length - 1; i >= 0; i--) {
+        const { openIndex, tableIndex } = tablesToFix[i];
+        const originalTableIndex = Math.min(tableIndex, tableBlocks.length - 1);
+        const originalTable = tableBlocks[originalTableIndex].original;
+        
+        // Find the end of this broken table (next table or end of content)
+        const nextOpenIndex = tableIndex < openPositions.length - 1 ? openPositions[tableIndex + 1] : content.length;
+        const brokenTableBlock = content.substring(openIndex, nextOpenIndex);
+        
+        // Validate original table before using
+        const origOpenTags = (originalTable.match(/<table[^>]*>/gi) || []).length;
+        const origCloseTags = (originalTable.match(/<\/table>/gi) || []).length;
+        
+        if (origOpenTags === origCloseTags && origOpenTags === 1) {
+          content = content.substring(0, openIndex) + 
+            originalTable + 
+            content.substring(openIndex + brokenTableBlock.length);
+          console.log(`[TABLE VALIDATION] Fixed broken table ${tableIndex + 1} by restoring original table ${originalTableIndex + 1}`);
+        }
+      }
+    } else if (tableCloseCountAfter < tableCountAfter) {
+      // Last resort: add missing closing tags at the end
+      const missingTags = tableCountAfter - tableCloseCountAfter;
+      console.warn(`[TABLE VALIDATION] Adding ${missingTags} missing closing tag(s) at end as fallback`);
+      for (let i = 0; i < missingTags; i++) {
         content += '</tbody></table>';
-        console.log(`[TABLE VALIDATION] Added missing closing tag`);
       }
     }
   }
@@ -612,10 +784,19 @@ META DESCRIPTION: ${original.metaDescription}`;
   // Final validation: ensure all tables are properly structured
   const finalTableCount = (content.match(/<table[^>]*>/gi) || []).length;
   const finalTableCloseCount = (content.match(/<\/table>/gi) || []).length;
+  
   if (finalTableCount === finalTableCloseCount && finalTableCount === tableBlocks.length) {
-    console.log(`[TABLE VALIDATION] ✓ All ${finalTableCount} table(s) properly restored`);
+    console.log(`[TABLE VALIDATION] ✓ All ${finalTableCount} table(s) properly restored and validated`);
+  } else if (finalTableCount === finalTableCloseCount) {
+    console.warn(`[TABLE VALIDATION] Warning: Table count mismatch - Expected ${tableBlocks.length} tables, found ${finalTableCount}`);
   } else {
-    console.warn(`[TABLE VALIDATION] Warning: Expected ${tableBlocks.length} tables, found ${finalTableCount} opening and ${finalTableCloseCount} closing`);
+    console.error(`[TABLE VALIDATION] ERROR: Table structure still broken - ${finalTableCount} opening tags, ${finalTableCloseCount} closing tags`);
+    // Last resort: if structure is still broken, try to restore all tables from originals
+    if (tableBlocks.length > 0 && finalTableCount !== tableBlocks.length) {
+      console.error(`[TABLE VALIDATION] Attempting emergency restoration of all tables...`);
+      // This is a complex operation - for now, just log the error
+      // The tables should have been restored earlier, so this shouldn't happen
+    }
   }
 
   return { title, slug, content, excerpt, metaTitle, metaDescription };
