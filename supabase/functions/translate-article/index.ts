@@ -138,7 +138,7 @@ function makeSlug(title: string): string {
 async function translateTableContent(tableHtml: string, langName: string, langCode: string): Promise<string> {
   // Extract all text content from table cells
   const cellPattern = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
-  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean }> = [];
+  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean; textIndex: number | null }> = [];
   let cellMatch;
   
   while ((cellMatch = cellPattern.exec(tableHtml)) !== null) {
@@ -150,7 +150,8 @@ async function translateTableContent(tableHtml: string, langName: string, langCo
       attrs: cellMatch[2],
       innerHtml: innerHtml,
       index: cellMatch.index!,
-      hasHtml: hasHtml
+      hasHtml: hasHtml,
+      textIndex: null // Will be set for cells with text
     });
   }
   
@@ -159,18 +160,25 @@ async function translateTableContent(tableHtml: string, langName: string, langCo
   }
   
   // Extract all text content (excluding HTML tags) for translation
+  // Also create mapping: cell index -> textContents index
   const textContents: string[] = [];
-  for (const cell of cells) {
+  let textIndex = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
     // Remove HTML tags to get pure text
     const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     if (textOnly.length > 0) {
+      cells[i].textIndex = textIndex;
       textContents.push(textOnly);
+      textIndex++;
     }
   }
   
   if (textContents.length === 0) {
     return tableHtml; // No text to translate
   }
+  
+  console.log(`[TABLE TRANSLATION] Extracted ${textContents.length} cell(s) with text from ${cells.length} total cell(s)`);
   
   // Translate all text content at once
   const textToTranslate = textContents.join('\n---CELL---\n');
@@ -187,8 +195,11 @@ RULES:
 Text to translate:
 ${textToTranslate}`;
 
+  console.log(`[TABLE TRANSLATION] Translating ${textContents.length} cell(s) of text to ${langName}`);
+  
   try {
     const translatedText = await callGemini(translationPrompt);
+    console.log(`[TABLE TRANSLATION] Received translation response (${translatedText.length} chars)`);
     let translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
     
     // If splitting by delimiter didn't work (Gemini removed it), try splitting by newlines
@@ -226,19 +237,20 @@ ${textToTranslate}`;
     
     // Rebuild table with translated text
     let translatedTable = tableHtml;
-    let translatedIndex = 0;
     
     // Process cells in reverse order to preserve indices
     for (let i = cells.length - 1; i >= 0; i--) {
       const cell = cells[i];
       const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       
-      if (textOnly.length > 0 && translatedIndex < translatedLines.length) {
+      // Only translate cells that have text (textIndex is not null)
+      if (cell.textIndex !== null && cell.textIndex < translatedLines.length) {
+        const translatedTextIndex = cell.textIndex;
         let translatedInnerHtml = cell.innerHtml;
         
         if (!cell.hasHtml) {
           // No HTML tags, just text - replace directly
-          translatedInnerHtml = translatedLines[translatedIndex];
+          translatedInnerHtml = translatedLines[translatedTextIndex];
         } else {
           // Has HTML tags - preserve structure by replacing only text nodes
           // Extract HTML structure and replace text content
@@ -279,23 +291,23 @@ ${textToTranslate}`;
             const textParts = parts.filter(p => p.type === 'text');
             if (textParts.length === 1) {
               // Single text node - replace it
-              textParts[0].content = translatedLines[translatedIndex];
+              textParts[0].content = translatedLines[translatedTextIndex];
               translatedInnerHtml = parts.map(p => p.content).join('');
             } else {
               // Multiple text nodes - replace first significant one
               // This is a simplification - ideally we'd translate all text nodes
               const firstTextIndex = parts.findIndex(p => p.type === 'text' && p.content.trim().length > 0);
               if (firstTextIndex !== -1) {
-                parts[firstTextIndex].content = translatedLines[translatedIndex];
+                parts[firstTextIndex].content = translatedLines[translatedTextIndex];
                 translatedInnerHtml = parts.map(p => p.content).join('');
               } else {
                 // Fallback: replace entire content (loses HTML but preserves table structure)
-                translatedInnerHtml = translatedLines[translatedIndex];
+                translatedInnerHtml = translatedLines[translatedTextIndex];
               }
             }
           } else {
             // Parsing failed - fallback to simple replacement
-            translatedInnerHtml = translatedLines[translatedIndex];
+            translatedInnerHtml = translatedLines[translatedTextIndex];
           }
         }
         
@@ -303,8 +315,8 @@ ${textToTranslate}`;
         translatedTable = translatedTable.substring(0, cell.index) + 
           newCell + 
           translatedTable.substring(cell.index + cell.fullMatch.length);
-        translatedIndex++;
       }
+      // Empty cells are preserved as-is (no translation needed)
     }
     
     // Validate the translated table structure
@@ -317,6 +329,7 @@ ${textToTranslate}`;
       return tableHtml;
     }
     
+    console.log(`[TABLE TRANSLATION] ✓ Successfully translated table content (${textContents.length} cell(s))`);
     return translatedTable;
   } catch (error: any) {
     console.error(`[TABLE TRANSLATION] Error translating table content: ${error.message}`);
