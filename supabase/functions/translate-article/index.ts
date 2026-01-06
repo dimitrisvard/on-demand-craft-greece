@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-skip-tables-for-hungarian";
+const VERSION = "2026-01-06-hungarian-no-retries-time-checks";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -604,13 +604,20 @@ async function translateToLanguage(
   langCode: string
 ): Promise<{ title: string; slug: string; content: string; excerpt: string; metaTitle: string; metaDescription: string }> {
   
+  const translateStartTime = Date.now();
+  
   // Hungarian, Finnish, Czech, and Polish may have different translation characteristics
-  // - Hungarian: agglutinative language, can produce longer translations
+  // - Hungarian: agglutinative language, can produce longer translations (MOST PROBLEMATIC)
   // - Finnish: agglutinative language, complex grammar, special characters (ä, ö, å)
   // - Czech: special characters (č, ř, ž, š, ě, á, í, ó, ú, ý), different word order
   // - Polish: Slavic language like Czech, special characters (ą, ć, ę, ł, ń, ó, ś, ź, ż), complex grammar
   const isLongLanguage = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
   const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
+  const isHungarian = langCode === "hu";
+  
+  // Hungarian translations take very long - we need to track time and fail fast if needed
+  // Edge Functions have 150s limit, we need ~10s buffer for saving
+  const MAX_TRANSLATION_TIME = isHungarian ? 120000 : 130000; // 120s for Hungarian, 130s for others
   
   // Extract and protect tables before translation to prevent Gemini from breaking table structure
   const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
@@ -700,6 +707,14 @@ META TITLE: ${original.metaTitle}
 META DESCRIPTION: ${original.metaDescription}`;
 
   const response = await callGemini(prompt);
+  
+  // Check time after main translation
+  const elapsedAfterMain = Date.now() - translateStartTime;
+  console.log(`[TIME CHECK] Main translation completed in ${elapsedAfterMain}ms (limit: ${MAX_TRANSLATION_TIME}ms)`);
+  
+  if (elapsedAfterMain > MAX_TRANSLATION_TIME) {
+    throw new Error(`Translation timeout: main content took ${elapsedAfterMain}ms, exceeding ${MAX_TRANSLATION_TIME}ms limit for ${langCode}`);
+  }
   
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
@@ -987,15 +1002,26 @@ META DESCRIPTION: ${original.metaDescription}`;
     console.log(`[TABLE RESTORE] ✓ All placeholders successfully replaced`);
   }
   
+  // TIME CHECK before table translation
+  const elapsedBeforeTables = Date.now() - translateStartTime;
+  const timeRemainingForTables = MAX_TRANSLATION_TIME - elapsedBeforeTables;
+  console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed, ${timeRemainingForTables}ms remaining`);
+  
   // Translate content inside all restored tables using BATCH translation (single API call)
   // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call to avoid 150s timeout
   // EXCEPTION: Hungarian (hu) is skipped because it's an agglutinative language and takes too long
   // Hungarian translations are ~40% longer than English, causing timeouts even with batching
+  // Also skip if we're running low on time (need at least 30s for table translation)
   const skipTableTranslationLangs = ["hu"]; // Languages that timeout even with batching
-  const shouldSkipTables = skipTableTranslationLangs.includes(langCode);
+  const notEnoughTimeForTables = timeRemainingForTables < 30000; // Need at least 30s for tables
+  const shouldSkipTables = skipTableTranslationLangs.includes(langCode) || notEnoughTimeForTables;
+  
+  if (notEnoughTimeForTables && !skipTableTranslationLangs.includes(langCode)) {
+    console.log(`[TIME CHECK] ⚠️ Skipping table translation - only ${timeRemainingForTables}ms remaining (need 30000ms)`);
+  }
   
   if (shouldSkipTables) {
-    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode}) - this language produces longer translations that cause timeouts`);
+    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode}) - ${notEnoughTimeForTables ? 'not enough time' : 'this language produces longer translations that cause timeouts'}`);
     console.log(`[TABLE TRANSLATION] Tables will remain in English. Main article content is fully translated.`);
   } else {
     console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
@@ -1303,15 +1329,19 @@ serve(async (req) => {
         // Translate with retry logic for languages with special characters
         // Hungarian (hu), Finnish (fi), Czech (cs), Polish (pl) have complex grammar and special characters
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
+        const isHungarian = lang.code === "hu";
         let translation;
         let retryCount = 0;
-        // Allow 3 retries for special char languages, 2 for normal languages
-        // Since we now translate one language at a time, we have plenty of time for retries
-        const maxRetries = isSpecialCharLang ? 3 : 2;
+        // Hungarian: NO retries (takes too long, causes timeout)
+        // Other special char langs: 1 retry
+        // Normal languages: 2 retries
+        const maxRetries = isHungarian ? 0 : (isSpecialCharLang ? 1 : 2);
         let translateStartTime = Date.now();
         
-        if (isSpecialCharLang) {
-          console.log(`[INFO] ${lang.name} is a special character language - using extended retries (${maxRetries})`);
+        if (isHungarian) {
+          console.log(`[INFO] ${lang.name} is a long-translation language - NO retries to avoid 150s timeout`);
+        } else if (isSpecialCharLang) {
+          console.log(`[INFO] ${lang.name} is a special character language - using limited retries (${maxRetries})`);
         }
         
         while (retryCount <= maxRetries) {
