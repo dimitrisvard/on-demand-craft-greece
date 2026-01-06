@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-skip-table-translation-hard-langs";
+const VERSION = "2026-01-06-batch-table-translation";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -137,8 +137,236 @@ function makeSlug(title: string): string {
 }
 
 /**
+ * Extract text content from a single table for batch translation
+ */
+function extractTableTextContent(tableHtml: string): { 
+  cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean; textIndex: number | null }>;
+  textContents: string[];
+} {
+  const cellPattern = /<(td|th)([^>]*)>([\s\S]*?)<\/\1>/gi;
+  const cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean; textIndex: number | null }> = [];
+  let cellMatch;
+  
+  while ((cellMatch = cellPattern.exec(tableHtml)) !== null) {
+    const innerHtml = cellMatch[3];
+    const hasHtml = /<[^>]+>/.test(innerHtml);
+    cells.push({
+      fullMatch: cellMatch[0],
+      tag: cellMatch[1],
+      attrs: cellMatch[2],
+      innerHtml: innerHtml,
+      index: cellMatch.index!,
+      hasHtml: hasHtml,
+      textIndex: null
+    });
+  }
+  
+  const textContents: string[] = [];
+  let textIndex = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    const textOnly = cell.innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (textOnly.length > 0) {
+      cells[i].textIndex = textIndex;
+      textContents.push(textOnly);
+      textIndex++;
+    }
+  }
+  
+  return { cells, textContents };
+}
+
+/**
+ * Rebuild a table with translated text content
+ */
+function rebuildTableWithTranslations(
+  tableHtml: string, 
+  cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean; textIndex: number | null }>,
+  translatedLines: string[]
+): string {
+  let translatedTable = tableHtml;
+  
+  // Process cells in reverse order to preserve indices
+  for (let i = cells.length - 1; i >= 0; i--) {
+    const cell = cells[i];
+    
+    if (cell.textIndex !== null && cell.textIndex < translatedLines.length) {
+      let translatedInnerHtml = cell.innerHtml;
+      
+      if (!cell.hasHtml) {
+        translatedInnerHtml = translatedLines[cell.textIndex];
+      } else {
+        const parts: Array<{ type: 'text' | 'tag'; content: string }> = [];
+        const tagPattern = /<[^>]+>/g;
+        let lastIndex = 0;
+        let tagMatch;
+        
+        while ((tagMatch = tagPattern.exec(cell.innerHtml)) !== null) {
+          if (tagMatch.index > lastIndex) {
+            const textPart = cell.innerHtml.substring(lastIndex, tagMatch.index);
+            if (textPart.trim()) {
+              parts.push({ type: 'text', content: textPart });
+            }
+          }
+          parts.push({ type: 'tag', content: tagMatch[0] });
+          lastIndex = tagMatch.index + tagMatch[0].length;
+        }
+        if (lastIndex < cell.innerHtml.length) {
+          const textPart = cell.innerHtml.substring(lastIndex);
+          if (textPart.trim()) {
+            parts.push({ type: 'text', content: textPart });
+          }
+        }
+        
+        if (parts.length > 0) {
+          const textParts = parts.filter(p => p.type === 'text');
+          if (textParts.length === 1) {
+            textParts[0].content = translatedLines[cell.textIndex];
+            translatedInnerHtml = parts.map(p => p.content).join('');
+          } else if (textParts.length > 1) {
+            const firstTextIndex = parts.findIndex(p => p.type === 'text' && p.content.trim().length > 0);
+            if (firstTextIndex !== -1) {
+              parts[firstTextIndex].content = translatedLines[cell.textIndex];
+              translatedInnerHtml = parts.map(p => p.content).join('');
+            } else {
+              translatedInnerHtml = translatedLines[cell.textIndex];
+            }
+          }
+        } else {
+          translatedInnerHtml = translatedLines[cell.textIndex];
+        }
+      }
+      
+      const newCell = `<${cell.tag}${cell.attrs}>${translatedInnerHtml}</${cell.tag}>`;
+      translatedTable = translatedTable.substring(0, cell.index) + 
+        newCell + 
+        translatedTable.substring(cell.index + cell.fullMatch.length);
+    }
+  }
+  
+  return translatedTable;
+}
+
+/**
+ * Translate ALL tables in a single API call to avoid timeout
+ * This is much faster than translating each table separately
+ */
+async function translateAllTablesAtOnce(
+  tables: Array<{ html: string; index: number }>,
+  langName: string,
+  langCode: string
+): Promise<Array<{ html: string; index: number }>> {
+  if (tables.length === 0) return [];
+  
+  console.log(`[BATCH TABLE TRANSLATION] Processing ${tables.length} table(s) in a single API call`);
+  
+  // Extract text from all tables
+  const tableData: Array<{
+    tableIndex: number;
+    originalHtml: string;
+    contentIndex: number;
+    cells: Array<{ fullMatch: string; tag: string; attrs: string; innerHtml: string; index: number; hasHtml: boolean; textIndex: number | null }>;
+    textContents: string[];
+    textStartIndex: number;
+  }> = [];
+  
+  let allTextContents: string[] = [];
+  
+  for (let t = 0; t < tables.length; t++) {
+    const { cells, textContents } = extractTableTextContent(tables[t].html);
+    tableData.push({
+      tableIndex: t,
+      originalHtml: tables[t].html,
+      contentIndex: tables[t].index,
+      cells,
+      textContents,
+      textStartIndex: allTextContents.length
+    });
+    allTextContents = allTextContents.concat(textContents);
+  }
+  
+  if (allTextContents.length === 0) {
+    console.log(`[BATCH TABLE TRANSLATION] No text content found in tables`);
+    return tables;
+  }
+  
+  console.log(`[BATCH TABLE TRANSLATION] Total cells to translate: ${allTextContents.length} across ${tables.length} table(s)`);
+  
+  // Create a single prompt for all table content
+  const textToTranslate = allTextContents.join('\n---CELL---\n');
+  const translationPrompt = `Translate the following table cell contents into ${langName}.
+
+RULES:
+- Translate ONLY the text content
+- Keep technical terms, numbers, and measurements as-is when appropriate
+- Each cell is separated by ---CELL---
+- Return ONLY the translated text with ---CELL--- separators
+- Maintain the EXACT same number of cells (${allTextContents.length} cells total)
+- Do NOT add any HTML, markdown, or formatting
+
+CELLS TO TRANSLATE:
+${textToTranslate}`;
+
+  try {
+    const translatedText = await callGemini(translationPrompt);
+    console.log(`[BATCH TABLE TRANSLATION] Received response (${translatedText.length} chars)`);
+    
+    // Parse the response
+    let translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
+    
+    // Handle alternative formats if Gemini changed the separator
+    if (translatedLines.length !== allTextContents.length) {
+      const altSplit = translatedText.split(/---CELL---/gi).map(l => l.trim()).filter(l => l.length > 0);
+      if (altSplit.length === allTextContents.length) {
+        translatedLines = altSplit;
+      } else {
+        const newlineSplit = translatedText.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.match(/^---CELL---$/i));
+        if (newlineSplit.length >= allTextContents.length) {
+          translatedLines = newlineSplit.slice(0, allTextContents.length);
+        } else {
+          translatedLines = [...newlineSplit, ...Array(allTextContents.length - newlineSplit.length).fill('')];
+        }
+      }
+    }
+    
+    // Ensure correct count
+    if (translatedLines.length < allTextContents.length) {
+      translatedLines = [...translatedLines, ...Array(allTextContents.length - translatedLines.length).fill('')];
+    } else if (translatedLines.length > allTextContents.length) {
+      translatedLines = translatedLines.slice(0, allTextContents.length);
+    }
+    
+    console.log(`[BATCH TABLE TRANSLATION] Parsed ${translatedLines.length} translated cells`);
+    
+    // Rebuild each table with its translated content
+    const translatedTables: Array<{ html: string; index: number }> = [];
+    
+    for (const data of tableData) {
+      const tableTranslations = translatedLines.slice(
+        data.textStartIndex, 
+        data.textStartIndex + data.textContents.length
+      );
+      
+      const translatedHtml = rebuildTableWithTranslations(data.originalHtml, data.cells, tableTranslations);
+      translatedTables.push({ html: translatedHtml, index: data.contentIndex });
+      
+      console.log(`[BATCH TABLE TRANSLATION] ✓ Rebuilt table ${data.tableIndex + 1}/${tables.length}`);
+    }
+    
+    console.log(`[BATCH TABLE TRANSLATION] ✓ Successfully translated all ${tables.length} table(s) in one API call`);
+    return translatedTables;
+    
+  } catch (error: any) {
+    console.error(`[BATCH TABLE TRANSLATION] Error: ${error.message}`);
+    // Return original tables on error
+    return tables;
+  }
+}
+
+/**
  * Translate text content inside a table while preserving HTML structure
  * This extracts text nodes and translates them, keeping all HTML tags intact
+ * @deprecated Use translateAllTablesAtOnce for better performance
  */
 async function translateTableContent(tableHtml: string, langName: string, langCode: string): Promise<string> {
   // Extract all text content from table cells
@@ -759,56 +987,46 @@ META DESCRIPTION: ${original.metaDescription}`;
     console.log(`[TABLE RESTORE] ✓ All placeholders successfully replaced`);
   }
   
-  // Translate content inside all restored tables
-  // Do this after ALL restoration is complete (including remaining placeholders)
-  // OPTIMIZATION (2026-01-06): Skip table translation for difficult languages to avoid 150s timeout
-  // Tables often contain technical data that doesn't need translation
-  const skipTableTranslation = hasSpecialChars; // Skip for hu, fi, cs, pl
+  // Translate content inside all restored tables using BATCH translation (single API call)
+  // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call to avoid 150s timeout
+  // This reduces API calls from N+1 (content + N tables) to just 2 (content + all tables)
+  console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
   
-  if (skipTableTranslation) {
-    console.log(`[TABLE TRANSLATION] Skipping table content translation for ${langName} (special character language) to avoid timeout`);
-  } else {
-    console.log(`[TABLE TRANSLATION] Starting translation of table content...`);
+  // Find all tables in the content
+  const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  const allTables: Array<{ html: string; index: number }> = [];
+  let translationTableMatch;
+  
+  // Reset regex lastIndex
+  translationTablePattern.lastIndex = 0;
+  while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
+    allTables.push({ html: translationTableMatch[0], index: translationTableMatch.index! });
+  }
+  
+  if (allTables.length > 0) {
+    console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s) - translating ALL in a single API call`);
     
-    // Find all tables in the content and translate them
-    const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
-    const allTables: Array<{ match: string; index: number }> = [];
-    let translationTableMatch;
-    
-    // Reset regex lastIndex
-    translationTablePattern.lastIndex = 0;
-    while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
-      allTables.push({ match: translationTableMatch[0], index: translationTableMatch.index! });
-    }
-    
-    if (allTables.length > 0) {
-      // Limit table translation to max 2 tables to avoid timeout
-      const tablesToTranslate = Math.min(allTables.length, 2);
-      console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s), translating first ${tablesToTranslate}`);
+    try {
+      // Translate ALL tables in ONE API call
+      const translatedTables = await translateAllTablesAtOnce(allTables, langName, langCode);
       
-      // Translate each table (process in reverse order to preserve indices)
-      // Only translate up to 2 tables to avoid timeout
-      for (let i = Math.min(allTables.length - 1, tablesToTranslate - 1); i >= 0; i--) {
-        const { match: tableHtml, index } = allTables[i];
-        try {
-          const translatedTable = await translateTableContent(tableHtml, langName, langCode);
-          
-          // Replace the original table with translated version
-          content = content.substring(0, index) + 
-            translatedTable + 
-            content.substring(index + tableHtml.length);
-          
-          console.log(`[TABLE TRANSLATION] ✓ Translated table ${i + 1}/${tablesToTranslate}`);
-        } catch (error: any) {
-          console.error(`[TABLE TRANSLATION] ✗ Error translating table ${i + 1}: ${error.message}`);
-          // Keep original table if translation fails
-        }
+      // Replace tables in reverse order to preserve indices
+      for (let i = translatedTables.length - 1; i >= 0; i--) {
+        const { html: translatedHtml, index } = translatedTables[i];
+        const originalLength = allTables[i].html.length;
+        
+        content = content.substring(0, index) + 
+          translatedHtml + 
+          content.substring(index + originalLength);
       }
       
-      console.log(`[TABLE TRANSLATION] ✓ Completed translation of ${tablesToTranslate} table(s)`);
-    } else {
-      console.log(`[TABLE TRANSLATION] No tables found to translate`);
+      console.log(`[TABLE TRANSLATION] ✓ Successfully translated all ${allTables.length} table(s)`);
+    } catch (error: any) {
+      console.error(`[TABLE TRANSLATION] ✗ Batch translation failed: ${error.message}`);
+      // Tables remain in original language (English) on error
     }
+  } else {
+    console.log(`[TABLE TRANSLATION] No tables found to translate`);
   }
   
   // After restoration, check for any broken tables and fix them
