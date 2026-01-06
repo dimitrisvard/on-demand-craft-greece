@@ -27,6 +27,7 @@ const CncMachining = lazy(() => import('../pages/CncMachining'));
 const ThreeDPrinting = lazy(() => import('../pages/3DPrinting'));
 const InjectionMolding = lazy(() => import('../pages/InjectionMolding'));
 const RapidPrototyping = lazy(() => import('../pages/RapidPrototyping'));
+const ImpressumPage = lazy(() => import('../pages/ImpressumPage'));
 
 // Route mapping: English path -> Component
 const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<any>>> = {
@@ -45,6 +46,8 @@ const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<an
   '/services/3d-printing': ThreeDPrinting,
   '/services/injection-molding': InjectionMolding,
   '/services/rapid-prototyping': RapidPrototyping,
+  '/legal-notice': ImpressumPage,
+  // '/impressum' is handled as a legacy route in App.tsx
 };
 
 interface TranslatedRouteMatcherProps {

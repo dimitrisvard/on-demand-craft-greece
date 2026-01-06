@@ -5,6 +5,12 @@ import SEOMeta from '../components/SEOMeta';
 const ImpressumPage = () => {
   const { t } = useTranslation();
 
+  // Extract URL from the EU dispute text and make it clickable
+  const euDisputeText = t('impressum_eu_dispute_text');
+  const urlMatch = euDisputeText.match(/https?:\/\/[^\s]+/);
+  const url = urlMatch ? urlMatch[0] : 'https://ec.europa.eu/consumers/odr/';
+  const textParts = euDisputeText.split(url);
+
   return (
     <div className="min-h-screen pt-24 pb-16">
       <SEOMeta
@@ -38,8 +44,8 @@ const ImpressumPage = () => {
           <section>
             <h3 className="font-semibold mb-2">{t('impressum_contact')}:</h3>
             <p>
-              Telefon: +30 697 00 77 401<br />
-              E-Mail: info@micronshub.eu
+              {t('impressum_phone', 'Phone')}: +30 697 00 77 401<br />
+              {t('impressum_email', 'E-Mail')}: <a href="mailto:info@micronshub.eu" className="text-brand-accent hover:underline">info@micronshub.eu</a>
             </p>
           </section>
 
@@ -62,8 +68,17 @@ const ImpressumPage = () => {
 
           <section>
             <h3 className="font-semibold mb-2">{t('impressum_eu_dispute')}</h3>
-            <p className="whitespace-pre-line">
-              {t('impressum_eu_dispute_text')}
+            <p>
+              {textParts[0]}
+              <a 
+                href={url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-brand-accent hover:underline"
+              >
+                {url}
+              </a>
+              {textParts[1]}
             </p>
           </section>
 

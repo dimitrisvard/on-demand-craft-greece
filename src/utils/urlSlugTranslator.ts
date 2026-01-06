@@ -22,6 +22,8 @@ export const SLUG_TRANSLATION_KEYS: Record<string, string> = {
   'injection-molding': 'url_slug_injection_molding',
   'surface-finishes': 'url_slug_surface_finishes',
   'rapid-prototyping': 'url_slug_rapid_prototyping',
+  'legal-notice': 'url_slug_impressum',
+  // 'impressum' is handled as a legacy route and will reverse-translate to 'legal-notice'
 };
 
 /**
@@ -82,6 +84,11 @@ export function reverseTranslateUrlSlug(
     if (translatedSlug === slug) {
       return englishSlug;
     }
+  }
+
+  // Special case: 'impressum' in any language should reverse-translate to 'legal-notice'
+  if (slug === 'impressum' || slug === t('url_slug_impressum', { defaultValue: 'legal-notice' })) {
+    return 'legal-notice';
   }
 
   // Not found, assume it's already English

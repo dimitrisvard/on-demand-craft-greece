@@ -181,8 +181,9 @@ function AppContent() {
                 <Route path="/dashboard/settings" element={<SettingsPage />} />
                 <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
+                {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />
-                <Route path="/:lang/impressum" element={<ImpressumPage />} />
+                {/* Translated impressum routes are handled by TranslatedRouteMatcher above */}
               </Routes>
             </Suspense>
           <CookieConsentBanner />

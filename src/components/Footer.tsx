@@ -73,7 +73,7 @@ const Footer = () => {
               </li>
               <li className="flex items-center">
                 <Scale size={18} className="mr-2 text-brand-accent" />
-                <Link to={getLocalizedPath('/impressum')} className="text-gray-600 hover:text-brand-accent transition-colors">
+                <Link to={getLocalizedPath('/legal-notice')} className="text-gray-600 hover:text-brand-accent transition-colors">
                   {t('footer_impressum', 'Legal Notice')}
                 </Link>
               </li>
