@@ -1329,10 +1329,8 @@ serve(async (req) => {
         
         console.log(`[TRANSLATION START] ${lang.name} (${lang.code}) - specialChar=${isSpecialCharLang}, maxRetries=${maxRetries}`);
         
-        if (isHungarian) {
-          console.log(`[INFO] ${lang.name} is a long-translation language - NO retries to avoid 150s timeout`);
-        } else if (isSpecialCharLang) {
-          console.log(`[INFO] ${lang.name} is a special character language - using limited retries (${maxRetries})`);
+        if (isSpecialCharLang) {
+          console.log(`[INFO] ${lang.name} is a special character language - using ${maxRetries} retries`);
         }
         
         while (retryCount <= maxRetries) {
