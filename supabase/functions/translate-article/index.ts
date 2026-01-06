@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-07-pro-plan-extended-gemini-timeout";
+const VERSION = "2026-01-07-gemini-continuation-loop";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -59,22 +59,19 @@ interface GeminiResponse {
   error?: { message: string };
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  // #region agent log
-  const geminiStartTime = Date.now();
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:62',message:'callGemini entry',data:{promptLength:prompt.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-  // #endregion
+// Helper function to make a single Gemini API call with conversation history
+async function callGeminiSingle(
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>,
+  timeoutMs: number = 180000
+): Promise<{ text: string; finishReason: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
-  // Increased timeout to 180s for complex translations (Hungarian, Finnish, etc.)
-  // Pro plan has 400s wall clock, request idle timeout is 150s but that's for inactivity
-  const timeoutId = setTimeout(() => controller.abort(), 180000); // 180 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    // Ensure UTF-8 encoding for special characters (important for Hungarian, Finnish, Czech)
     const requestBody = {
-      contents: [{ parts: [{ text: prompt }] }],
+      contents,
       generationConfig: { 
         temperature: 0.3, 
         maxOutputTokens: 32768, // Maximum for Gemini 2.0 Flash
@@ -105,32 +102,90 @@ async function callGemini(prompt: string): Promise<string> {
       throw new Error("Empty Gemini response");
     }
     
-    // Check if response was truncated
-    if (candidate.finishReason === "MAX_TOKENS" || candidate.finishReason === "LENGTH") {
-      console.warn(`[WARNING] Gemini response may be truncated (finishReason: ${candidate.finishReason})`);
-      throw new Error(`Translation truncated: Gemini hit token limit. finishReason: ${candidate.finishReason}`);
-    }
-    
-    if (candidate.finishReason && candidate.finishReason !== "STOP") {
-      console.warn(`[WARNING] Unexpected finishReason: ${candidate.finishReason}`);
-    }
-    
-    // #region agent log
-    const geminiDuration = Date.now() - geminiStartTime;
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:107',message:'callGemini exit',data:{duration:geminiDuration,responseLength:candidate.content.parts[0].text.length,finishReason:candidate.finishReason},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
-    return candidate.content.parts[0].text;
+    return {
+      text: candidate.content.parts[0].text,
+      finishReason: candidate.finishReason || "UNKNOWN"
+    };
   } catch (error: any) {
     clearTimeout(timeoutId);
-    // #region agent log
-    const geminiDuration = Date.now() - geminiStartTime;
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:109',message:'callGemini error',data:{duration:geminiDuration,errorName:error.name,errorMessage:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     if (error.name === "AbortError") {
       throw new Error("Gemini API request timeout (180s)");
     }
     throw error;
   }
+}
+
+// Main Gemini function with continuation loop for handling token limits
+// This handles MAX_TOKENS by sending continuation requests with conversation history
+async function callGemini(prompt: string): Promise<string> {
+  const geminiStartTime = Date.now();
+  const MAX_CONTINUATIONS = 3; // Maximum number of continuation attempts
+  
+  console.log(`[callGemini] Starting translation, prompt length: ${prompt.length}`);
+  
+  // Build conversation history
+  const conversationHistory: Array<{ role: string; parts: Array<{ text: string }> }> = [
+    { role: "user", parts: [{ text: prompt }] }
+  ];
+  
+  let fullResponse = "";
+  let continuationCount = 0;
+  
+  while (continuationCount <= MAX_CONTINUATIONS) {
+    const result = await callGeminiSingle(conversationHistory, 180000);
+    
+    console.log(`[callGemini] Response ${continuationCount + 1}: ${result.text.length} chars, finishReason: ${result.finishReason}`);
+    
+    // Append the response
+    fullResponse += result.text;
+    
+    // Check if we're done
+    if (result.finishReason === "STOP") {
+      console.log(`[callGemini] ✓ Complete! Total response: ${fullResponse.length} chars after ${continuationCount + 1} request(s)`);
+      break;
+    }
+    
+    // Check if we hit token limits and need to continue
+    if (result.finishReason === "MAX_TOKENS" || result.finishReason === "LENGTH") {
+      continuationCount++;
+      
+      if (continuationCount > MAX_CONTINUATIONS) {
+        console.warn(`[callGemini] ⚠️ Max continuations (${MAX_CONTINUATIONS}) reached, returning partial response`);
+        break;
+      }
+      
+      console.log(`[callGemini] Token limit hit, sending continuation request ${continuationCount}/${MAX_CONTINUATIONS}...`);
+      
+      // Add the model's partial response to history
+      conversationHistory.push({
+        role: "model",
+        parts: [{ text: result.text }]
+      });
+      
+      // Add continuation prompt
+      conversationHistory.push({
+        role: "user",
+        parts: [{ text: "You stopped due to length limits. Please continue exactly where you left off. Do not repeat the last sentence, just continue from where you stopped." }]
+      });
+      
+      // Small delay before continuation request
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+    } else if (result.finishReason !== "STOP") {
+      // Unexpected finish reason
+      console.warn(`[callGemini] Unexpected finishReason: ${result.finishReason}, treating as complete`);
+      break;
+    }
+  }
+  
+  const geminiDuration = Date.now() - geminiStartTime;
+  console.log(`[callGemini] Total duration: ${geminiDuration}ms, continuations: ${continuationCount}`);
+  
+  if (!fullResponse) {
+    throw new Error("Empty Gemini response after all attempts");
+  }
+  
+  return fullResponse;
 }
 
 function makeSlug(title: string): string {
