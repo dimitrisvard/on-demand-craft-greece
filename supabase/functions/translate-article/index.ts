@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-per-language-no-timeout";
+const VERSION = "2026-01-06-skip-table-translation-hard-langs";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -761,43 +761,54 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // Translate content inside all restored tables
   // Do this after ALL restoration is complete (including remaining placeholders)
-  console.log(`[TABLE TRANSLATION] Starting translation of table content...`);
+  // OPTIMIZATION (2026-01-06): Skip table translation for difficult languages to avoid 150s timeout
+  // Tables often contain technical data that doesn't need translation
+  const skipTableTranslation = hasSpecialChars; // Skip for hu, fi, cs, pl
   
-  // Find all tables in the content and translate them
-  const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
-  const allTables: Array<{ match: string; index: number }> = [];
-  let translationTableMatch;
-  
-  // Reset regex lastIndex
-  translationTablePattern.lastIndex = 0;
-  while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
-    allTables.push({ match: translationTableMatch[0], index: translationTableMatch.index! });
-  }
-  
-  if (allTables.length > 0) {
-    console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s) to translate`);
+  if (skipTableTranslation) {
+    console.log(`[TABLE TRANSLATION] Skipping table content translation for ${langName} (special character language) to avoid timeout`);
+  } else {
+    console.log(`[TABLE TRANSLATION] Starting translation of table content...`);
     
-    // Translate each table (process in reverse order to preserve indices)
-    for (let i = allTables.length - 1; i >= 0; i--) {
-      const { match: tableHtml, index } = allTables[i];
-      try {
-        const translatedTable = await translateTableContent(tableHtml, langName, langCode);
-        
-        // Replace the original table with translated version
-        content = content.substring(0, index) + 
-          translatedTable + 
-          content.substring(index + tableHtml.length);
-        
-        console.log(`[TABLE TRANSLATION] ✓ Translated table ${i + 1}/${allTables.length}`);
-      } catch (error: any) {
-        console.error(`[TABLE TRANSLATION] ✗ Error translating table ${i + 1}: ${error.message}`);
-        // Keep original table if translation fails
-      }
+    // Find all tables in the content and translate them
+    const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+    const allTables: Array<{ match: string; index: number }> = [];
+    let translationTableMatch;
+    
+    // Reset regex lastIndex
+    translationTablePattern.lastIndex = 0;
+    while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
+      allTables.push({ match: translationTableMatch[0], index: translationTableMatch.index! });
     }
     
-    console.log(`[TABLE TRANSLATION] ✓ Completed translation of ${allTables.length} table(s)`);
-  } else {
-    console.log(`[TABLE TRANSLATION] No tables found to translate`);
+    if (allTables.length > 0) {
+      // Limit table translation to max 2 tables to avoid timeout
+      const tablesToTranslate = Math.min(allTables.length, 2);
+      console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s), translating first ${tablesToTranslate}`);
+      
+      // Translate each table (process in reverse order to preserve indices)
+      // Only translate up to 2 tables to avoid timeout
+      for (let i = Math.min(allTables.length - 1, tablesToTranslate - 1); i >= 0; i--) {
+        const { match: tableHtml, index } = allTables[i];
+        try {
+          const translatedTable = await translateTableContent(tableHtml, langName, langCode);
+          
+          // Replace the original table with translated version
+          content = content.substring(0, index) + 
+            translatedTable + 
+            content.substring(index + tableHtml.length);
+          
+          console.log(`[TABLE TRANSLATION] ✓ Translated table ${i + 1}/${tablesToTranslate}`);
+        } catch (error: any) {
+          console.error(`[TABLE TRANSLATION] ✗ Error translating table ${i + 1}: ${error.message}`);
+          // Keep original table if translation fails
+        }
+      }
+      
+      console.log(`[TABLE TRANSLATION] ✓ Completed translation of ${tablesToTranslate} table(s)`);
+    } else {
+      console.log(`[TABLE TRANSLATION] No tables found to translate`);
+    }
   }
   
   // After restoration, check for any broken tables and fix them
