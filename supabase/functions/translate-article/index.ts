@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-hungarian-no-retries-time-checks";
+const VERSION = "2026-01-06-pro-plan-400s-all-tables";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -615,9 +615,8 @@ async function translateToLanguage(
   const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
   const isHungarian = langCode === "hu";
   
-  // Hungarian translations take very long - we need to track time and fail fast if needed
-  // Edge Functions have 150s limit, we need ~10s buffer for saving
-  const MAX_TRANSLATION_TIME = isHungarian ? 120000 : 130000; // 120s for Hungarian, 130s for others
+  // Edge Functions Pro plan have 400s limit, we need ~10s buffer for saving
+  const MAX_TRANSLATION_TIME = 390000; // 390s for all languages (Pro plan: 400s limit)
   
   // Extract and protect tables before translation to prevent Gemini from breaking table structure
   const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
@@ -710,11 +709,8 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // Check time after main translation
   const elapsedAfterMain = Date.now() - translateStartTime;
-  console.log(`[TIME CHECK] Main translation completed in ${elapsedAfterMain}ms (limit: ${MAX_TRANSLATION_TIME}ms)`);
-  
-  if (elapsedAfterMain > MAX_TRANSLATION_TIME) {
-    throw new Error(`Translation timeout: main content took ${elapsedAfterMain}ms, exceeding ${MAX_TRANSLATION_TIME}ms limit for ${langCode}`);
-  }
+  console.log(`[TIME CHECK] Main translation completed in ${elapsedAfterMain}ms (Pro plan limit: 400s)`);
+  // Removed timeout check - Pro plan has 400s limit, plenty of time
   
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
@@ -1004,24 +1000,16 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // TIME CHECK before table translation
   const elapsedBeforeTables = Date.now() - translateStartTime;
-  const timeRemainingForTables = MAX_TRANSLATION_TIME - elapsedBeforeTables;
-  console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed, ${timeRemainingForTables}ms remaining`);
+  console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed`);
   
   // Translate content inside all restored tables using BATCH translation (single API call)
-  // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call to avoid 150s timeout
-  // EXCEPTION: Hungarian (hu) is skipped because it's an agglutinative language and takes too long
-  // Hungarian translations are ~40% longer than English, causing timeouts even with batching
-  // Also skip if we're running low on time (need at least 30s for table translation)
-  const skipTableTranslationLangs = ["hu"]; // Languages that timeout even with batching
-  const notEnoughTimeForTables = timeRemainingForTables < 30000; // Need at least 30s for tables
-  const shouldSkipTables = skipTableTranslationLangs.includes(langCode) || notEnoughTimeForTables;
-  
-  if (notEnoughTimeForTables && !skipTableTranslationLangs.includes(langCode)) {
-    console.log(`[TIME CHECK] ⚠️ Skipping table translation - only ${timeRemainingForTables}ms remaining (need 30000ms)`);
-  }
+  // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call
+  // Pro plan has 400s limit, so we can translate tables for all languages including Hungarian
+  const skipTableTranslationLangs: string[] = []; // Empty - translate tables for all languages
+  const shouldSkipTables = false; // Always translate tables now
   
   if (shouldSkipTables) {
-    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode}) - ${notEnoughTimeForTables ? 'not enough time' : 'this language produces longer translations that cause timeouts'}`);
+    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode})`);
     console.log(`[TABLE TRANSLATION] Tables will remain in English. Main article content is fully translated.`);
   } else {
     console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
@@ -1298,9 +1286,8 @@ serve(async (req) => {
       fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:337',message:'Language loop iteration',data:{iteration:i+1,total:langs.length,langCode:lang.code,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
       // #endregion
       
-      // NOTE: Timeout check removed (2026-01-06)
-      // The auto-translate-articles function now calls this function once per language,
-      // so each call only processes 1 language and completes well within the 150s limit.
+      // NOTE: The auto-translate-articles function now calls this function once per language,
+      // so each call only processes 1 language and completes well within the 400s Pro plan limit.
       // This ensures ALL languages get translated, including difficult ones like Hungarian, Czech, Finnish, Polish.
 
       console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}... (elapsed: ${elapsed}ms)`);
@@ -1329,19 +1316,14 @@ serve(async (req) => {
         // Translate with retry logic for languages with special characters
         // Hungarian (hu), Finnish (fi), Czech (cs), Polish (pl) have complex grammar and special characters
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
-        const isHungarian = lang.code === "hu";
         let translation;
         let retryCount = 0;
-        // Hungarian: NO retries (takes too long, causes timeout)
-        // Other special char langs: 1 retry
-        // Normal languages: 2 retries
-        const maxRetries = isHungarian ? 0 : (isSpecialCharLang ? 1 : 2);
+        // Pro plan has 400s limit, so all languages can use 2 retries safely
+        const maxRetries = 2; // All languages get 2 retries now
         let translateStartTime = Date.now();
         
-        if (isHungarian) {
-          console.log(`[INFO] ${lang.name} is a long-translation language - NO retries to avoid 150s timeout`);
-        } else if (isSpecialCharLang) {
-          console.log(`[INFO] ${lang.name} is a special character language - using limited retries (${maxRetries})`);
+        if (isSpecialCharLang) {
+          console.log(`[INFO] ${lang.name} is a special character language - using 2 retries (400s limit)`);
         }
         
         while (retryCount <= maxRetries) {
