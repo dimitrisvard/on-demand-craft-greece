@@ -12,6 +12,7 @@ import ProductionScale from './cnc/ProductionScale';
 import TestimonialsSection from './cnc/TestimonialsSection';
 import CaseStudySection from './cnc/CaseStudySection';
 import AdvantagesSection from './cnc/AdvantagesSection';
+import FAQSection from './cnc/FAQSection';
 import CTASection from '../components/CTASection';
 
 const CncMachining = () => {
@@ -34,6 +35,7 @@ const CncMachining = () => {
       <TestimonialsSection />
       <CaseStudySection />
       <AdvantagesSection />
+      <FAQSection />
       <CTASection />
     </div>
   );

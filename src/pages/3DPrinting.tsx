@@ -20,6 +20,7 @@ import ProductionScale from './printing/ProductionScale';
 import CaseStudySection from './printing/CaseStudySection';
 import AdvantagesSection from './printing/AdvantagesSection';
 import ResourcesSection from './printing/ResourcesSection';
+import FAQSection from './printing/FAQSection';
 
 const ThreeDPrinting = () => {
   const { t } = useTranslation();
@@ -42,6 +43,7 @@ const ThreeDPrinting = () => {
       <CaseStudySection />
       <AdvantagesSection />
       <ResourcesSection />
+      <FAQSection />
       <CTASection />
     </div>
   );

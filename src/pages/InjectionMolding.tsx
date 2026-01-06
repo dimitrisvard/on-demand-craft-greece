@@ -14,6 +14,7 @@ import AdditionalMethodsSection from './injection-molding/AdditionalMethodsSecti
 import CaseStudySection from './injection-molding/CaseStudySection';
 import CTASection from '../components/CTASection';
 import TestimonialsSection from './injection-molding/TestimonialsSection';
+import FAQSection from './injection-molding/FAQSection';
 
 const InjectionMolding = () => {
   const { t } = useTranslation();
@@ -36,6 +37,7 @@ const InjectionMolding = () => {
       <PrototypingSection />
       <CaseStudySection />
       <AdditionalMethodsSection />
+      <FAQSection />
       <CTASection />
     </div>
   );

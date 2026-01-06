@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import SEOMeta from '../components/SEOMeta';
 import CTASection from '../components/CTASection';
 import PrototypingSection from './injection-molding/PrototypingSection';
+import FAQSection from './rapid-prototyping/FAQSection';
 
 const RapidPrototypingHero = () => {
   const { t } = useTranslation();
@@ -40,6 +41,7 @@ const RapidPrototyping = () => {
       />
       <RapidPrototypingHero />
       <PrototypingSection />
+      <FAQSection />
       <CTASection />
     </div>
   );

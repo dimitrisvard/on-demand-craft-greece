@@ -9,6 +9,7 @@ import SpecificationsSection from './sheetmetal/SpecificationsSection';
 import AdvantagesSection from './sheetmetal/AdvantagesSection';
 import CaseStudySection from './sheetmetal/CaseStudySection';
 import TestimonialsSection from './sheetmetal/TestimonialsSection';
+import FAQSection from './sheetmetal/FAQSection';
 
 const SheetMetalFabrication = () => {
   const { t } = useTranslation();
@@ -28,6 +29,7 @@ const SheetMetalFabrication = () => {
       <AdvantagesSection />
       <CaseStudySection />
       <TestimonialsSection />
+      <FAQSection />
       <CTASection />
     </div>
   );
