@@ -616,7 +616,7 @@
   "service_surface-finish_faq_mirror_finish_question": "Können Sie Teile zu einem Spiegelfinish polieren?",
   "service_surface-finish_faq_mirror_finish_answer": "Wir bieten mechanisches Polieren und Elektropolieren an, um niedrige Ra-Werte (mittlere Rauheit) zu erreichen, bis zu einem spiegellähnlichen Finish. Dies ist wichtig für medizinische Geräte, Lebensmittelverarbeitungsgeräte und hochwertige ästhetische Komponenten.",
   "service_surface-finish_faq_surface_roughness_question": "Wie ist die Standard-Oberflächenrauheit (Ra) für CNC-Teile?",
-  "service_surface-finish_faq_surface_roughness_answer": "Das Standard-„wie bearbeitet"-Finish ist typischerweise Ra 3,2 μm, wobei sichtbare Werkzeugmarkierungen verbleiben. Wir können dies durch Glättungs- und Polierprozesse je nach Ihren Anforderungen auf Ra 1,6, 0,8 oder 0,4 μm verfeinern.",
+  "service_surface-finish_faq_surface_roughness_answer": "Das Standard-\"wie bearbeitet\"-Finish ist typischerweise Ra 3,2 μm, wobei sichtbare Werkzeugmarkierungen verbleiben. Wir können dies durch Glättungs- und Polierprozesse je nach Ihren Anforderungen auf Ra 1,6, 0,8 oder 0,4 μm verfeinern.",
   "service_surface-finish_faq_multiple_finishes_question": "Können Sie mehrere Oberflächenbehandlungen auf ein einzelnes Teil anwenden?",
   "service_surface-finish_faq_multiple_finishes_answer": "Ja, wir können selektive Oberflächenbehandlung durchführen. Zum Beispiel können wir ein Aluminiumteil eloxieren und dann bestimmte Bereiche CNC-bearbeiten, um das rohe Metall für elektrische Erdung freizulegen (Maskierung), oder Chromatumwandlung auf innere Oberflächen anwenden, während das Äußere pulverbeschichtet wird.",
   "service_rapid-prototyping_capability_1": "Schnelle Prototypenfertigung",
