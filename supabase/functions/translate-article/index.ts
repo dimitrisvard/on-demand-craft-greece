@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-05-special-char-languages-fix-polish";
+const VERSION = "2026-01-05-timeout-handling-fix";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -1034,9 +1034,10 @@ serve(async (req) => {
       fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:337',message:'Language loop iteration',data:{iteration:i+1,total:langs.length,langCode:lang.code,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
       // #endregion
       
-      // Stop if approaching timeout (100s limit, leave 50s buffer)
-      if (elapsed > 100000) {
-        console.warn(`Timeout approaching at ${elapsed}ms, stopping`);
+      // Stop if approaching timeout (Supabase limit is 150s, leave 70s buffer for response)
+      // Check BEFORE starting translation to avoid starting work we can't complete
+      if (elapsed > 80000) {
+        console.warn(`Timeout approaching at ${elapsed}ms, stopping translation loop to avoid hard timeout`);
         // #region agent log
         fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:340',message:'Timeout check triggered',data:{elapsed,iteration:i+1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
         // #endregion
@@ -1063,6 +1064,14 @@ serve(async (req) => {
           console.log(`${lang.code} already exists, skipping`);
           results[lang.code] = { success: true, article_id: existing.id, skipped: true };
           urls.push(`${siteUrl}/${lang.code}/blog/${existing.slug}`);
+          continue;
+        }
+
+        // Check timeout again BEFORE starting translation (translation can take 60+ seconds)
+        const elapsedBeforeTranslation = Date.now() - startTime;
+        if (elapsedBeforeTranslation > 80000) {
+          console.warn(`Timeout approaching (${elapsedBeforeTranslation}ms) before starting ${lang.code} translation, skipping`);
+          results[lang.code] = { success: false, error: "Skipped due to timeout", langCode: lang.code };
           continue;
         }
 
@@ -1148,13 +1157,21 @@ serve(async (req) => {
       if (i < langs.length - 1) await new Promise(r => setTimeout(r, 500));
     }
 
-    // Update master status
-    if (!target_languages?.length) {
+    // Update master status (skip if timeout approaching)
+    const elapsedBeforeFinalOps = Date.now() - startTime;
+    if (elapsedBeforeFinalOps < 140000 && !target_languages?.length) {
       await supabase.from("articles").update({ status: "published" }).eq("id", article_id);
+    } else if (elapsedBeforeFinalOps >= 140000) {
+      console.warn(`Skipping master status update due to timeout (${elapsedBeforeFinalOps}ms)`);
     }
 
-    // IndexNow
-    const indexed = await submitIndexNow(urls);
+    // IndexNow (skip if timeout approaching)
+    let indexed = false;
+    if (elapsedBeforeFinalOps < 140000) {
+      indexed = await submitIndexNow(urls);
+    } else {
+      console.warn(`Skipping IndexNow due to timeout (${elapsedBeforeFinalOps}ms)`);
+    }
 
     const successful = Object.values(results).filter((r: any) => r.success).length;
     const totalTime = Date.now() - startTime;
@@ -1163,17 +1180,25 @@ serve(async (req) => {
     fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:412',message:'Function complete',data:{totalTime,successful,totalLanguages:langs.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
 
+    // Return 200 even if some translations failed, as long as at least one succeeded
+    // This prevents the frontend from treating partial success as complete failure
+    const statusCode = successful > 0 ? 200 : 500;
+    
     return new Response(
       JSON.stringify({
         success: successful > 0,
-        message: `Translated to ${successful} language(s)`,
+        message: successful > 0 
+          ? `Translated to ${successful}/${langs.length} language(s)${totalTime > 80000 ? ' (timeout approaching)' : ''}`
+          : `Translated to 0 language(s)`,
         translations: successful,
         total_languages: langs.length,
+        failed_count: langs.length - successful,
         execution_time_ms: totalTime,
         indexing: indexed,
         details: results,
+        timeout_warning: totalTime > 80000,
       }),
-      { status: successful > 0 ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: statusCode, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (err: any) {
