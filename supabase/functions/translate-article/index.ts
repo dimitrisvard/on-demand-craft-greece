@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-05-timeout-handling-fix";
+const VERSION = "2026-01-06-per-language-no-timeout";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -1034,17 +1034,12 @@ serve(async (req) => {
       fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:337',message:'Language loop iteration',data:{iteration:i+1,total:langs.length,langCode:lang.code,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
       // #endregion
       
-      // Stop if approaching timeout (Supabase limit is 150s, leave 70s buffer for response)
-      // Check BEFORE starting translation to avoid starting work we can't complete
-      if (elapsed > 80000) {
-        console.warn(`Timeout approaching at ${elapsed}ms, stopping translation loop to avoid hard timeout`);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:340',message:'Timeout check triggered',data:{elapsed,iteration:i+1},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
-        break;
-      }
+      // NOTE: Timeout check removed (2026-01-06)
+      // The auto-translate-articles function now calls this function once per language,
+      // so each call only processes 1 language and completes well within the 150s limit.
+      // This ensures ALL languages get translated, including difficult ones like Hungarian, Czech, Finnish, Polish.
 
-      console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}...`);
+      console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}... (elapsed: ${elapsed}ms)`);
 
       try {
         // Check if exists
@@ -1067,26 +1062,25 @@ serve(async (req) => {
           continue;
         }
 
-        // Check timeout again BEFORE starting translation (translation can take 60+ seconds)
-        const elapsedBeforeTranslation = Date.now() - startTime;
-        if (elapsedBeforeTranslation > 80000) {
-          console.warn(`Timeout approaching (${elapsedBeforeTranslation}ms) before starting ${lang.code} translation, skipping`);
-          results[lang.code] = { success: false, error: "Skipped due to timeout", langCode: lang.code };
-          continue;
-        }
-
         // Translate with retry logic for languages with special characters
+        // Hungarian (hu), Finnish (fi), Czech (cs), Polish (pl) have complex grammar and special characters
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         let translation;
         let retryCount = 0;
-        const maxRetries = isSpecialCharLang ? 2 : 1; // Allow 2 retries for special char languages
+        // Allow 3 retries for special char languages, 2 for normal languages
+        // Since we now translate one language at a time, we have plenty of time for retries
+        const maxRetries = isSpecialCharLang ? 3 : 2;
         let translateStartTime = Date.now();
+        
+        if (isSpecialCharLang) {
+          console.log(`[INFO] ${lang.name} is a special character language - using extended retries (${maxRetries})`);
+        }
         
         while (retryCount <= maxRetries) {
           try {
             // #region agent log
             translateStartTime = Date.now();
-            fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length,retryCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
+            fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length,retryCount,isSpecialCharLang},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
             // #endregion
             translation = await translateToLanguage(original, lang.name, lang.code);
             break; // Success, exit retry loop
@@ -1095,9 +1089,11 @@ serve(async (req) => {
             if (retryCount > maxRetries) {
               throw translateError; // Re-throw if max retries exceeded
             }
-            console.warn(`[RETRY] Translation attempt ${retryCount} failed for ${lang.code}, retrying... (${translateError.message})`);
-            // Wait before retry (exponential backoff)
-            await new Promise(r => setTimeout(r, 1000 * retryCount));
+            // Longer wait for special char languages (they may need more API cooling)
+            const baseWait = isSpecialCharLang ? 2000 : 1000;
+            const waitTime = baseWait * retryCount; // Exponential backoff
+            console.warn(`[RETRY] Translation attempt ${retryCount}/${maxRetries} failed for ${lang.code}, waiting ${waitTime}ms before retry... (${translateError.message})`);
+            await new Promise(r => setTimeout(r, waitTime));
           }
         }
         // #region agent log
@@ -1157,21 +1153,13 @@ serve(async (req) => {
       if (i < langs.length - 1) await new Promise(r => setTimeout(r, 500));
     }
 
-    // Update master status (skip if timeout approaching)
-    const elapsedBeforeFinalOps = Date.now() - startTime;
-    if (elapsedBeforeFinalOps < 140000 && !target_languages?.length) {
+    // Update master status
+    if (!target_languages?.length) {
       await supabase.from("articles").update({ status: "published" }).eq("id", article_id);
-    } else if (elapsedBeforeFinalOps >= 140000) {
-      console.warn(`Skipping master status update due to timeout (${elapsedBeforeFinalOps}ms)`);
     }
 
-    // IndexNow (skip if timeout approaching)
-    let indexed = false;
-    if (elapsedBeforeFinalOps < 140000) {
-      indexed = await submitIndexNow(urls);
-    } else {
-      console.warn(`Skipping IndexNow due to timeout (${elapsedBeforeFinalOps}ms)`);
-    }
+    // IndexNow
+    const indexed = await submitIndexNow(urls);
 
     const successful = Object.values(results).filter((r: any) => r.success).length;
     const totalTime = Date.now() - startTime;
@@ -1180,25 +1168,17 @@ serve(async (req) => {
     fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:412',message:'Function complete',data:{totalTime,successful,totalLanguages:langs.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
 
-    // Return 200 even if some translations failed, as long as at least one succeeded
-    // This prevents the frontend from treating partial success as complete failure
-    const statusCode = successful > 0 ? 200 : 500;
-    
     return new Response(
       JSON.stringify({
         success: successful > 0,
-        message: successful > 0 
-          ? `Translated to ${successful}/${langs.length} language(s)${totalTime > 80000 ? ' (timeout approaching)' : ''}`
-          : `Translated to 0 language(s)`,
+        message: `Translated to ${successful} language(s)`,
         translations: successful,
         total_languages: langs.length,
-        failed_count: langs.length - successful,
         execution_time_ms: totalTime,
         indexing: indexed,
         details: results,
-        timeout_warning: totalTime > 80000,
       }),
-      { status: statusCode, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: successful > 0 ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (err: any) {

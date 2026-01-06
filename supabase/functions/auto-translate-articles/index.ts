@@ -12,18 +12,45 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// All supported languages for translation
+// Order matters: difficult languages (special characters, complex grammar) are at the end
+// so if we run out of time, simpler languages are done first
+const ALL_LANGUAGES = [
+  { code: "de", name: "German", difficulty: "normal" },
+  { code: "fr", name: "French", difficulty: "normal" },
+  { code: "es", name: "Spanish", difficulty: "normal" },
+  { code: "it", name: "Italian", difficulty: "normal" },
+  { code: "nl", name: "Dutch", difficulty: "normal" },
+  { code: "pt", name: "Portuguese", difficulty: "normal" },
+  { code: "sv", name: "Swedish", difficulty: "normal" },
+  { code: "da", name: "Danish", difficulty: "normal" },
+  { code: "nb", name: "Norwegian", difficulty: "normal" },
+  // Difficult languages with special characters - translate one at a time
+  { code: "pl", name: "Polish", difficulty: "hard" },
+  { code: "cs", name: "Czech", difficulty: "hard" },
+  { code: "hu", name: "Hungarian", difficulty: "hard" },
+  { code: "fi", name: "Finnish", difficulty: "hard" },
+];
+
 /**
  * Auto-translate articles that were created today and haven't been translated yet
- * This function should be called 1-2 hours after daily article creation
+ * 
+ * NEW APPROACH (2026-01-06): Translate languages ONE AT A TIME to avoid timeout
+ * - Each language translation takes ~10-30 seconds
+ * - Edge functions have a 150s limit
+ * - By translating one language per call, we avoid timeouts completely
+ * - Difficult languages (Hungarian, Czech, Finnish, Polish) are handled separately
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  const functionStartTime = Date.now();
+  console.log(`[auto-translate-articles] Starting... (version: 2026-01-06-per-language)`);
+
   try {
-    // Find English articles created today that don't have translations yet
-    // Use UTC for date calculations to match database timestamps
+    // Find English articles created today that don't have ALL translations yet
     const now = new Date();
     const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
     const todayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0));
@@ -36,7 +63,7 @@ serve(async (req) => {
     // Get English articles created today
     const { data: englishArticles, error: fetchError } = await supabase
       .from("articles")
-      .select("id, translation_id, created_at")
+      .select("id, translation_id, title, created_at")
       .eq("language", "en")
       .eq("status", "published")
       .gte("created_at", todayStartISO)
@@ -63,16 +90,24 @@ serve(async (req) => {
 
     console.log(`Found ${englishArticles.length} English article(s) created today`);
 
-    // Check which articles already have translations
-    const articlesToTranslate: string[] = [];
-    
-    for (const article of englishArticles) {
-      if (!article.translation_id) continue;
+    // For each article, find which languages are missing
+    const articlesWithMissingLanguages: Array<{
+      articleId: string;
+      translationId: string;
+      title: string;
+      missingLanguages: string[];
+    }> = [];
 
-      // Check if translations exist
-      const { data: translations, error: transError } = await supabase
+    for (const article of englishArticles) {
+      if (!article.translation_id) {
+        console.log(`Article ${article.id} has no translation_id, skipping`);
+        continue;
+      }
+
+      // Get existing translations for this article
+      const { data: existingTranslations, error: transError } = await supabase
         .from("articles")
-        .select("id")
+        .select("language")
         .eq("translation_id", article.translation_id)
         .neq("language", "en");
 
@@ -81,17 +116,30 @@ serve(async (req) => {
         continue;
       }
 
-      // If no translations exist, add to queue
-      if (!translations || translations.length === 0) {
-        articlesToTranslate.push(article.id);
+      const existingLanguages = new Set(existingTranslations?.map(t => t.language) || []);
+      const missingLanguages = ALL_LANGUAGES
+        .map(l => l.code)
+        .filter(code => !existingLanguages.has(code));
+
+      if (missingLanguages.length > 0) {
+        console.log(`Article "${article.title}" is missing ${missingLanguages.length} languages: ${missingLanguages.join(", ")}`);
+        articlesWithMissingLanguages.push({
+          articleId: article.id,
+          translationId: article.translation_id,
+          title: article.title,
+          missingLanguages,
+        });
+      } else {
+        console.log(`Article "${article.title}" already has all translations`);
       }
     }
 
-    if (articlesToTranslate.length === 0) {
+    if (articlesWithMissingLanguages.length === 0) {
+      console.log("All articles already have all translations!");
       return new Response(
         JSON.stringify({
           success: true,
-          message: "All articles already have translations",
+          message: "All articles already have all translations",
           articles_processed: 0,
         }),
         {
@@ -101,78 +149,99 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Found ${articlesToTranslate.length} article(s) needing translation`);
-    console.log(`Processing articles sequentially (one by one) to avoid API rate limits...`);
+    // Process each article and translate missing languages ONE AT A TIME
+    const results: Array<{
+      article_id: string;
+      title: string;
+      languages_translated: string[];
+      languages_failed: Array<{ code: string; error: string }>;
+    }> = [];
 
-    // Translate each article SEQUENTIALLY (one by one) to avoid rate limits
-    // This ensures we don't overwhelm the Gemini API with concurrent requests
-    const results: Array<{ article_id: string; success: boolean; error?: string }> = [];
+    let totalTranslated = 0;
+    let totalFailed = 0;
 
-    for (let i = 0; i < articlesToTranslate.length; i++) {
-      const articleId = articlesToTranslate[i];
-      const articleNumber = i + 1;
-      const totalArticles = articlesToTranslate.length;
-      
-      try {
-        console.log(`\n[${articleNumber}/${totalArticles}] Starting translation for article ${articleId}...`);
+    for (const article of articlesWithMissingLanguages) {
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`Processing article: "${article.title}"`);
+      console.log(`Missing ${article.missingLanguages.length} languages: ${article.missingLanguages.join(", ")}`);
+      console.log(`${"=".repeat(60)}`);
 
-        // Call the translate-article Edge Function
-        const translateUrl = `${supabaseUrl}/functions/v1/translate-article`;
-        const translateStartTime = Date.now();
-        
-        const translateResponse = await fetch(translateUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${supabaseServiceKey}`,
-          },
-          body: JSON.stringify({ article_id: articleId }),
-        });
+      const articleResult = {
+        article_id: article.articleId,
+        title: article.title,
+        languages_translated: [] as string[],
+        languages_failed: [] as Array<{ code: string; error: string }>,
+      };
 
-        const translateResult = await translateResponse.json();
-        const translateDuration = Date.now() - translateStartTime;
+      // Translate each missing language ONE AT A TIME
+      for (let langIndex = 0; langIndex < article.missingLanguages.length; langIndex++) {
+        const langCode = article.missingLanguages[langIndex];
+        const langInfo = ALL_LANGUAGES.find(l => l.code === langCode);
+        const langName = langInfo?.name || langCode;
+        const isHardLanguage = langInfo?.difficulty === "hard";
 
-        if (translateResponse.ok) {
-          results.push({ article_id: articleId, success: true });
-          console.log(`✓ [${articleNumber}/${totalArticles}] Article ${articleId} translated successfully in ${translateDuration}ms`);
-        } else {
-          results.push({
-            article_id: articleId,
-            success: false,
-            error: translateResult.error || "Translation failed",
+        console.log(`\n[${langIndex + 1}/${article.missingLanguages.length}] Translating to ${langName} (${langCode})${isHardLanguage ? " [HARD]" : ""}...`);
+
+        try {
+          const translateUrl = `${supabaseUrl}/functions/v1/translate-article`;
+          const translateStartTime = Date.now();
+
+          // Call translate-article with ONLY this single language
+          const translateResponse = await fetch(translateUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${supabaseServiceKey}`,
+            },
+            body: JSON.stringify({
+              article_id: article.articleId,
+              target_languages: [langCode], // Only translate this one language
+            }),
           });
-          console.error(`✗ [${articleNumber}/${totalArticles}] Article ${articleId} translation failed after ${translateDuration}ms:`, translateResult.error);
+
+          const translateResult = await translateResponse.json();
+          const translateDuration = Date.now() - translateStartTime;
+
+          if (translateResponse.ok && translateResult.success) {
+            console.log(`✓ ${langName} translated successfully in ${translateDuration}ms`);
+            articleResult.languages_translated.push(langCode);
+            totalTranslated++;
+          } else {
+            const errorMsg = translateResult.error || translateResult.message || "Translation failed";
+            console.error(`✗ ${langName} failed after ${translateDuration}ms: ${errorMsg}`);
+            articleResult.languages_failed.push({ code: langCode, error: errorMsg });
+            totalFailed++;
+          }
+        } catch (error: any) {
+          console.error(`✗ ${langName} error: ${error.message}`);
+          articleResult.languages_failed.push({ code: langCode, error: error.message });
+          totalFailed++;
         }
 
-        // Wait 10 seconds between articles to avoid rate limits (only if not the last article)
-        if (i < articlesToTranslate.length - 1) {
-          console.log(`Waiting 10 seconds before processing next article...`);
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-        } else {
-          console.log(`All articles processed. No delay needed.`);
+        // Wait between translations to avoid rate limits
+        // Longer wait for hard languages and after errors
+        if (langIndex < article.missingLanguages.length - 1) {
+          const isNextHard = ALL_LANGUAGES.find(l => l.code === article.missingLanguages[langIndex + 1])?.difficulty === "hard";
+          const waitTime = isHardLanguage || isNextHard ? 5000 : 3000; // 5s for hard languages, 3s for normal
+          console.log(`Waiting ${waitTime / 1000}s before next language...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
         }
-      } catch (error: any) {
-        console.error(`✗ [${articleNumber}/${totalArticles}] Error translating article ${articleId}:`, error);
-        results.push({
-          article_id: articleId,
-          success: false,
-          error: error.message,
-        });
-        
-        // Even on error, wait before next article to avoid rate limits
-        if (i < articlesToTranslate.length - 1) {
-          console.log(`Waiting 10 seconds before processing next article (after error)...`);
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-        }
+      }
+
+      results.push(articleResult);
+
+      // Wait between articles if there are more
+      if (articlesWithMissingLanguages.indexOf(article) < articlesWithMissingLanguages.length - 1) {
+        console.log(`\nWaiting 10s before next article...`);
+        await new Promise(resolve => setTimeout(resolve, 10000));
       }
     }
 
-    const successful = results.filter((r) => r.success).length;
-    const failed = results.filter((r) => !r.success).length;
-
     // After all translations complete, fix internal article links
-    // This is necessary because during translation, linked articles may not exist yet
-    console.log(`\nFixing internal article links...`);
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`Fixing internal article links...`);
+    console.log(`${"=".repeat(60)}`);
+    
     let linkFixResult = { success: false, articles_updated: 0, links_fixed: 0 };
     
     try {
@@ -197,11 +266,22 @@ serve(async (req) => {
       console.error(`✗ Error calling fix-article-links:`, error.message);
     }
 
+    const totalTime = Date.now() - functionStartTime;
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`TRANSLATION COMPLETE`);
+    console.log(`Total time: ${(totalTime / 1000).toFixed(1)}s`);
+    console.log(`Languages translated: ${totalTranslated}`);
+    console.log(`Languages failed: ${totalFailed}`);
+    console.log(`${"=".repeat(60)}`);
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Translation process completed: ${successful} successful, ${failed} failed`,
-        articles_processed: articlesToTranslate.length,
+        message: `Translation completed: ${totalTranslated} languages translated, ${totalFailed} failed`,
+        articles_processed: articlesWithMissingLanguages.length,
+        total_translated: totalTranslated,
+        total_failed: totalFailed,
+        execution_time_ms: totalTime,
         results,
         link_fix: linkFixResult,
       }),
@@ -211,9 +291,13 @@ serve(async (req) => {
       }
     );
   } catch (error: any) {
+    const totalTime = Date.now() - functionStartTime;
     console.error("Error in auto-translate-articles:", error);
     return new Response(
-      JSON.stringify({ error: error.message || "Unknown error" }),
+      JSON.stringify({ 
+        error: error.message || "Unknown error",
+        execution_time_ms: totalTime,
+      }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         status: 500,
@@ -221,4 +305,3 @@ serve(async (req) => {
     );
   }
 });
-

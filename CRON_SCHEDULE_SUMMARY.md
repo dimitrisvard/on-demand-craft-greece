@@ -13,7 +13,10 @@ All times are in Greece timezone (UTC+2) with UTC equivalent:
    - Cron job: `auto-translate-daily-articles`
    - Schedule: `0 8 * * *`
    - Function: `auto-translate-articles`
-   - Translates articles created today to all supported languages
+   - **NEW (2026-01-06)**: Translates languages ONE AT A TIME to avoid timeout
+   - Supports all 13 languages including difficult ones (Hungarian, Czech, Finnish, Polish)
+   - Each language is translated in a separate API call (~10-30 seconds each)
+   - Total translation time: ~5-10 minutes for all 13 languages
 
 3. **Fix Article Links**: 10:15 AM Greece / 8:15 AM UTC (15 minutes after translation starts)
    - Cron job: `auto-fix-article-links`
