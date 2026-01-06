@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-batch-table-translation";
+const VERSION = "2026-01-06-skip-tables-for-hungarian";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -989,44 +989,53 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // Translate content inside all restored tables using BATCH translation (single API call)
   // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call to avoid 150s timeout
-  // This reduces API calls from N+1 (content + N tables) to just 2 (content + all tables)
-  console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
+  // EXCEPTION: Hungarian (hu) is skipped because it's an agglutinative language and takes too long
+  // Hungarian translations are ~40% longer than English, causing timeouts even with batching
+  const skipTableTranslationLangs = ["hu"]; // Languages that timeout even with batching
+  const shouldSkipTables = skipTableTranslationLangs.includes(langCode);
   
-  // Find all tables in the content
-  const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
-  const allTables: Array<{ html: string; index: number }> = [];
-  let translationTableMatch;
-  
-  // Reset regex lastIndex
-  translationTablePattern.lastIndex = 0;
-  while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
-    allTables.push({ html: translationTableMatch[0], index: translationTableMatch.index! });
-  }
-  
-  if (allTables.length > 0) {
-    console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s) - translating ALL in a single API call`);
-    
-    try {
-      // Translate ALL tables in ONE API call
-      const translatedTables = await translateAllTablesAtOnce(allTables, langName, langCode);
-      
-      // Replace tables in reverse order to preserve indices
-      for (let i = translatedTables.length - 1; i >= 0; i--) {
-        const { html: translatedHtml, index } = translatedTables[i];
-        const originalLength = allTables[i].html.length;
-        
-        content = content.substring(0, index) + 
-          translatedHtml + 
-          content.substring(index + originalLength);
-      }
-      
-      console.log(`[TABLE TRANSLATION] ✓ Successfully translated all ${allTables.length} table(s)`);
-    } catch (error: any) {
-      console.error(`[TABLE TRANSLATION] ✗ Batch translation failed: ${error.message}`);
-      // Tables remain in original language (English) on error
-    }
+  if (shouldSkipTables) {
+    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode}) - this language produces longer translations that cause timeouts`);
+    console.log(`[TABLE TRANSLATION] Tables will remain in English. Main article content is fully translated.`);
   } else {
-    console.log(`[TABLE TRANSLATION] No tables found to translate`);
+    console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
+    
+    // Find all tables in the content
+    const translationTablePattern = /<table[^>]*>[\s\S]*?<\/table>/gi;
+    const allTables: Array<{ html: string; index: number }> = [];
+    let translationTableMatch;
+    
+    // Reset regex lastIndex
+    translationTablePattern.lastIndex = 0;
+    while ((translationTableMatch = translationTablePattern.exec(content)) !== null) {
+      allTables.push({ html: translationTableMatch[0], index: translationTableMatch.index! });
+    }
+    
+    if (allTables.length > 0) {
+      console.log(`[TABLE TRANSLATION] Found ${allTables.length} table(s) - translating ALL in a single API call`);
+      
+      try {
+        // Translate ALL tables in ONE API call
+        const translatedTables = await translateAllTablesAtOnce(allTables, langName, langCode);
+        
+        // Replace tables in reverse order to preserve indices
+        for (let i = translatedTables.length - 1; i >= 0; i--) {
+          const { html: translatedHtml, index } = translatedTables[i];
+          const originalLength = allTables[i].html.length;
+          
+          content = content.substring(0, index) + 
+            translatedHtml + 
+            content.substring(index + originalLength);
+        }
+        
+        console.log(`[TABLE TRANSLATION] ✓ Successfully translated all ${allTables.length} table(s)`);
+      } catch (error: any) {
+        console.error(`[TABLE TRANSLATION] ✗ Batch translation failed: ${error.message}`);
+        // Tables remain in original language (English) on error
+      }
+    } else {
+      console.log(`[TABLE TRANSLATION] No tables found to translate`);
+    }
   }
   
   // After restoration, check for any broken tables and fix them
