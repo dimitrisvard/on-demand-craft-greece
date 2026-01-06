@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-01-06-150s-limit-hungarian-optimized";
+const VERSION = "2026-01-07-pro-plan-extended-gemini-timeout";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -67,7 +67,9 @@ async function callGemini(prompt: string): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+  // Increased timeout to 180s for complex translations (Hungarian, Finnish, etc.)
+  // Pro plan has 400s wall clock, request idle timeout is 150s but that's for inactivity
+  const timeoutId = setTimeout(() => controller.abort(), 180000); // 180 second timeout
 
   try {
     // Ensure UTF-8 encoding for special characters (important for Hungarian, Finnish, Czech)
@@ -125,7 +127,7 @@ async function callGemini(prompt: string): Promise<string> {
     fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:109',message:'callGemini error',data:{duration:geminiDuration,errorName:error.name,errorMessage:error.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
     // #endregion
     if (error.name === "AbortError") {
-      throw new Error("Gemini API request timeout (60s)");
+      throw new Error("Gemini API request timeout (180s)");
     }
     throw error;
   }
@@ -615,9 +617,10 @@ async function translateToLanguage(
   const hasSpecialChars = langCode === "hu" || langCode === "fi" || langCode === "cs" || langCode === "pl";
   const isHungarian = langCode === "hu";
   
-  // Edge Functions have 150s hard limit (even on Pro plan)
-  // We need ~10-20s buffer for saving, so set limits accordingly
-  const MAX_TRANSLATION_TIME = isHungarian ? 120000 : 130000; // 120s for Hungarian, 130s for others
+  // Edge Functions Pro plan: 400s wall clock, 150s request idle timeout
+  // The "idle timeout" is for inactivity - active work (waiting for Gemini) may run longer
+  // We set a generous limit and let the platform decide
+  const MAX_TRANSLATION_TIME = 350000; // 350s for all languages (Pro plan)
   
   // Extract and protect tables before translation to prevent Gemini from breaking table structure
   const tableBlocks: Array<{ original: string; placeholder: string; translated: string }> = [];
@@ -710,12 +713,8 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // Check time after main translation
   const elapsedAfterMain = Date.now() - translateStartTime;
-  console.log(`[TIME CHECK] Main translation completed in ${elapsedAfterMain}ms (limit: ${MAX_TRANSLATION_TIME}ms)`);
-  
-  // Fail fast if we're already over limit (before table translation)
-  if (elapsedAfterMain > MAX_TRANSLATION_TIME) {
-    throw new Error(`Translation timeout: main content took ${elapsedAfterMain}ms, exceeding ${MAX_TRANSLATION_TIME}ms limit for ${langCode}`);
-  }
+  console.log(`[TIME CHECK] Main translation completed in ${elapsedAfterMain}ms (Pro plan: 400s wall clock)`);
+  // No aggressive timeout check - Pro plan has 400s wall clock, let the platform decide
   
   // Log response length for debugging
   console.log(`[translateToLanguage] Gemini response length: ${response.length} characters`);
@@ -1005,24 +1004,16 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   // TIME CHECK before table translation
   const elapsedBeforeTables = Date.now() - translateStartTime;
-  const timeRemainingForTables = MAX_TRANSLATION_TIME - elapsedBeforeTables;
-  console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed, ${timeRemainingForTables}ms remaining`);
+  console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed (Pro plan: 400s wall clock)`);
   
   // Translate content inside all restored tables using BATCH translation (single API call)
   // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call
-  // EXCEPTION: Hungarian (hu) is skipped because it's an agglutinative language and takes too long
-  // Even with batching, Hungarian + tables exceeds 150s limit
-  // Also skip if we're running low on time (need at least 30s for table translation)
-  const skipTableTranslationLangs = ["hu"]; // Languages that timeout even with batching
-  const notEnoughTimeForTables = timeRemainingForTables < 30000; // Need at least 30s for tables
-  const shouldSkipTables = skipTableTranslationLangs.includes(langCode) || notEnoughTimeForTables;
-  
-  if (notEnoughTimeForTables && !skipTableTranslationLangs.includes(langCode)) {
-    console.log(`[TIME CHECK] ⚠️ Skipping table translation - only ${timeRemainingForTables}ms remaining (need 30000ms)`);
-  }
+  // Pro plan: Enable table translation for ALL languages including Hungarian
+  const skipTableTranslationLangs: string[] = []; // Empty - translate tables for all languages
+  const shouldSkipTables = skipTableTranslationLangs.includes(langCode);
   
   if (shouldSkipTables) {
-    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode}) - ${notEnoughTimeForTables ? 'not enough time' : 'this language produces longer translations that cause timeouts'}`);
+    console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode})`);
     console.log(`[TABLE TRANSLATION] Tables will remain in English. Main article content is fully translated.`);
   } else {
     console.log(`[TABLE TRANSLATION] Starting batch translation of table content...`);
@@ -1300,8 +1291,8 @@ serve(async (req) => {
       // #endregion
       
       // NOTE: The auto-translate-articles function now calls this function once per language,
-      // so each call only processes 1 language and must complete within the 150s hard limit.
-      // Hungarian skips table translation and has no retries to stay within limit.
+      // so each call only processes 1 language. Pro plan has 400s wall clock duration.
+      // All languages get full table translation and 2 retries.
 
       console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}... (elapsed: ${elapsed}ms)`);
 
@@ -1329,14 +1320,14 @@ serve(async (req) => {
         // Translate with retry logic for languages with special characters
         // Hungarian (hu), Finnish (fi), Czech (cs), Polish (pl) have complex grammar and special characters
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
-        const isHungarian = lang.code === "hu";
         let translation;
         let retryCount = 0;
-        // Hungarian: NO retries (takes too long, causes 150s timeout)
-        // Other special char langs: 1 retry
-        // Normal languages: 2 retries
-        const maxRetries = isHungarian ? 0 : (isSpecialCharLang ? 1 : 2);
+        // Pro plan (400s wall clock): All languages get 2 retries
+        // Gemini timeout is now 180s, plenty of time for complex translations
+        const maxRetries = 2; // All languages get 2 retries
         let translateStartTime = Date.now();
+        
+        console.log(`[TRANSLATION START] ${lang.name} (${lang.code}) - specialChar=${isSpecialCharLang}, maxRetries=${maxRetries}`);
         
         if (isHungarian) {
           console.log(`[INFO] ${lang.name} is a long-translation language - NO retries to avoid 150s timeout`);
