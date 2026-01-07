@@ -226,3 +226,4 @@ This will allow more languages to be translated per run before timeout protectio
 - Link fixing happens automatically when time permits, or via separate cron job
 - The cron job timeout (10 minutes) is longer than function timeout (140s) to allow proper response handling
 
+

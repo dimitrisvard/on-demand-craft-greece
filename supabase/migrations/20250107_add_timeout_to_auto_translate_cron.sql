@@ -31,3 +31,4 @@ SELECT cron.schedule(
 -- SELECT jobid, jobname, schedule, active, command FROM cron.job 
 -- WHERE jobname = 'auto-translate-daily-articles';
 
+

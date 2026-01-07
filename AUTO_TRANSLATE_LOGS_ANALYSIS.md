@@ -234,3 +234,4 @@ Modify `auto-translate-articles` to:
 2. ⚠️ **Critical:** Redesign function to use queue system (like article generation)
 3. 📊 **Monitor:** Check logs after fix to verify completion
 
+
