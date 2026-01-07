@@ -131,7 +131,13 @@
     margin-bottom: 0.75em !important;
 }
 
-/* Table styling - comprehensive fix for proper display */
+/* Table wrapper for horizontal scroll on mobile - Safari compatible */
+.prose,
+.blog-content {
+    overflow-x: visible !important;
+}
+
+/* Table styling - comprehensive fix for proper display - Safari compatible */
 .prose table,
 .blog-content table,
 .editor-table,
@@ -139,21 +145,37 @@ table {
     width: 100% !important;
     max-width: 100% !important;
     border-collapse: collapse !important;
+    border-spacing: 0 !important;
     margin: 2em 0 !important;
     display: table !important;
     table-layout: auto !important;
-    overflow-x: auto !important;
     font-size: 0.9em;
+    /* Safari specific fixes */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Ensure visibility - critical for Safari */
+    visibility: visible !important;
+    opacity: 1 !important;
+    /* Force table rendering in Safari */
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
 }
 
-/* Table wrapper for horizontal scroll on mobile */
+/* Table wrapper div - Safari compatible (wrap tables in div for scrolling) */
 .prose > table,
 .blog-content > table,
 .blog-editor-container table,
 .ql-editor table {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    display: table !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    /* Don't use display: block - Safari needs display: table */
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overflow-y: visible !important;
+    /* Safari mobile rendering fix */
+    -webkit-transform: translateZ(0) !important;
+    transform: translateZ(0) !important;
 }
 
 .prose th,
@@ -228,12 +250,26 @@ table caption {
     font-style: italic;
 }
 
-/* Responsive table adjustments */
+/* Responsive table adjustments - Safari mobile fixes */
 @media (max-width: 768px) {
+    /* Wrap tables in scrollable container for mobile Safari */
+    .prose,
+    .blog-content {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    
     .prose table,
     .blog-content table,
     table {
         font-size: 0.8em;
+        display: table !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        /* Safari mobile specific */
+        -webkit-transform: translateZ(0) !important;
+        transform: translateZ(0) !important;
+        will-change: scroll-position;
     }
     
     .prose th,
@@ -244,6 +280,34 @@ table caption {
     table td {
         padding: 0.5em 0.75em !important;
         min-width: 80px;
+        display: table-cell !important;
+        /* Safari mobile cell visibility */
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
+    
+    /* Ensure table rows are visible in Safari */
+    .prose tr,
+    .blog-content tr,
+    table tr {
+        display: table-row !important;
+        visibility: visible !important;
+    }
+    
+    /* Ensure table header is visible in Safari */
+    .prose thead,
+    .blog-content thead,
+    table thead {
+        display: table-header-group !important;
+        visibility: visible !important;
+    }
+    
+    /* Ensure table body is visible in Safari */
+    .prose tbody,
+    .blog-content tbody,
+    table tbody {
+        display: table-row-group !important;
+        visibility: visible !important;
     }
 }
 

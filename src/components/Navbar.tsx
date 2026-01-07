@@ -121,7 +121,8 @@ const Navbar = () => {
         </button>
       </div>
 
-      <div className={`xl:hidden absolute top-full left-0 right-0 bg-white shadow-md transition-all duration-300 ${isOpen ? 'max-h-[500px] opacity-100 overflow-y-auto' : 'max-h-0 opacity-0 overflow-hidden'}`}>
+      {/* Mobile Menu */}
+      <div className={`xl:hidden fixed top-[73px] left-0 right-0 bg-white shadow-lg transition-all duration-300 z-[60] ${isOpen ? 'max-h-[calc(100vh-73px)] opacity-100 overflow-y-auto' : 'max-h-0 opacity-0 overflow-hidden'}`}>
         <div className="container-custom py-4 flex flex-col space-y-4">
           <MobileNavLink to={getLocalizedPath('/')} label={t('home_title', 'Home')} />
           <MobileNavLink to="/dashboard" label="Dashboard" />
@@ -148,11 +149,19 @@ const Navbar = () => {
               Logout
             </Button>
           )}
-          <div className="flex justify-center">
+          <div className="w-full px-2">
             <LanguageSwitcher />
           </div>
         </div>
       </div>
+      
+      {/* Mobile Menu Backdrop */}
+      {isOpen && (
+        <div 
+          className="xl:hidden fixed inset-0 bg-black/20 z-[55] top-[73px]"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
     </nav>
   );
 };

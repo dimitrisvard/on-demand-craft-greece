@@ -47,7 +47,16 @@ serve(async (req) => {
   }
 
   const functionStartTime = Date.now();
-  console.log(`[auto-translate-articles] Starting... (version: 2026-01-06-per-language)`);
+  console.log(`[auto-translate-articles] Starting... (version: 2026-01-07-with-timeout-protection)`);
+
+  // Timeout protection: Stop before hitting edge function timeout
+  // Free tier: 150s limit, Pro tier: 400s limit
+  // Use 140s for free tier to leave buffer (can be increased for Pro tier)
+  const MAX_EXECUTION_TIME_MS = 140000; // 140 seconds (leave 10s buffer)
+  const checkTimeout = () => {
+    const elapsed = Date.now() - functionStartTime;
+    return elapsed >= MAX_EXECUTION_TIME_MS;
+  };
 
   try {
     // Find English articles created today that don't have ALL translations yet
@@ -175,6 +184,16 @@ serve(async (req) => {
 
       // Translate each missing language ONE AT A TIME
       for (let langIndex = 0; langIndex < article.missingLanguages.length; langIndex++) {
+        // Check timeout before starting each language translation
+        if (checkTimeout()) {
+          const elapsed = Date.now() - functionStartTime;
+          const remainingLanguages = article.missingLanguages.length - langIndex;
+          console.warn(`\n⚠️ [TIMEOUT PROTECTION] Approaching timeout (${(elapsed / 1000).toFixed(1)}s elapsed)`);
+          console.warn(`⚠️ Stopping translation to prevent timeout. ${remainingLanguages} language(s) remaining for "${article.title}"`);
+          console.warn(`⚠️ Remaining languages will be translated in the next cron run: ${article.missingLanguages.slice(langIndex).join(", ")}`);
+          break; // Exit loop, remaining languages will be picked up in next run
+        }
+
         const langCode = article.missingLanguages[langIndex];
         const langInfo = ALL_LANGUAGES.find(l => l.code === langCode);
         const langName = langInfo?.name || langCode;
@@ -218,6 +237,18 @@ serve(async (req) => {
           totalFailed++;
         }
 
+        // Check timeout again after translation completes
+        if (checkTimeout()) {
+          const elapsed = Date.now() - functionStartTime;
+          const remainingLanguages = article.missingLanguages.length - (langIndex + 1);
+          console.warn(`\n⚠️ [TIMEOUT PROTECTION] Approaching timeout (${(elapsed / 1000).toFixed(1)}s elapsed)`);
+          console.warn(`⚠️ Stopping translation to prevent timeout. ${remainingLanguages} language(s) remaining for "${article.title}"`);
+          if (remainingLanguages > 0) {
+            console.warn(`⚠️ Remaining languages will be translated in the next cron run: ${article.missingLanguages.slice(langIndex + 1).join(", ")}`);
+          }
+          break; // Exit loop, remaining languages will be picked up in next run
+        }
+
         // Wait between translations to avoid rate limits
         // Longer wait for hard languages and after errors
         if (langIndex < article.missingLanguages.length - 1) {
@@ -230,6 +261,15 @@ serve(async (req) => {
 
       results.push(articleResult);
 
+      // Check timeout before moving to next article
+      if (checkTimeout()) {
+        const elapsed = Date.now() - functionStartTime;
+        const remainingArticles = articlesWithMissingLanguages.length - (articlesWithMissingLanguages.indexOf(article) + 1);
+        console.warn(`\n⚠️ [TIMEOUT PROTECTION] Approaching timeout (${(elapsed / 1000).toFixed(1)}s elapsed)`);
+        console.warn(`⚠️ Stopping to prevent timeout. ${remainingArticles} article(s) remaining`);
+        break; // Exit article loop, remaining articles will be picked up in next run
+      }
+
       // Wait between articles if there are more
       if (articlesWithMissingLanguages.indexOf(article) < articlesWithMissingLanguages.length - 1) {
         console.log(`\nWaiting 10s before next article...`);
@@ -238,50 +278,92 @@ serve(async (req) => {
     }
 
     // After all translations complete, fix internal article links
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`Fixing internal article links...`);
-    console.log(`${"=".repeat(60)}`);
+    // Only fix links if we have time remaining (don't risk timeout)
+    const elapsedBeforeLinkFix = Date.now() - functionStartTime;
+    const timeRemaining = MAX_EXECUTION_TIME_MS - elapsedBeforeLinkFix;
+    const shouldFixLinks = timeRemaining > 10000; // Only if we have at least 10s remaining
     
-    let linkFixResult = { success: false, articles_updated: 0, links_fixed: 0 };
+    let linkFixResult = { success: false, articles_updated: 0, links_fixed: 0, skipped: false };
     
-    try {
-      const fixLinksUrl = `${supabaseUrl}/functions/v1/fix-article-links`;
-      const fixLinksResponse = await fetch(fixLinksUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${supabaseServiceKey}`,
-        },
-        body: JSON.stringify({ fix_all: true }),
-      });
+    if (shouldFixLinks && totalTranslated > 0) {
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`Fixing internal article links...`);
+      console.log(`${"=".repeat(60)}`);
       
-      if (fixLinksResponse.ok) {
-        linkFixResult = await fixLinksResponse.json();
-        console.log(`✓ Fixed ${linkFixResult.links_fixed} links in ${linkFixResult.articles_updated} articles`);
-      } else {
-        const err = await fixLinksResponse.text();
-        console.error(`✗ Link fixing failed:`, err);
+      try {
+        const fixLinksUrl = `${supabaseUrl}/functions/v1/fix-article-links`;
+        const fixLinksResponse = await fetch(fixLinksUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+          },
+          body: JSON.stringify({ fix_all: true }),
+        });
+        
+        if (fixLinksResponse.ok) {
+          linkFixResult = await fixLinksResponse.json();
+          console.log(`✓ Fixed ${linkFixResult.links_fixed} links in ${linkFixResult.articles_updated} articles`);
+        } else {
+          const err = await fixLinksResponse.text();
+          console.error(`✗ Link fixing failed:`, err);
+        }
+      } catch (error: any) {
+        console.error(`✗ Error calling fix-article-links:`, error.message);
       }
-    } catch (error: any) {
-      console.error(`✗ Error calling fix-article-links:`, error.message);
+    } else {
+      if (!shouldFixLinks) {
+        console.log(`\n⚠️ [TIMEOUT PROTECTION] Skipping link fix (only ${(timeRemaining / 1000).toFixed(1)}s remaining)`);
+        console.log(`⚠️ Links will be fixed in the next cron run or by the auto-fix-links cron job`);
+        linkFixResult.skipped = true;
+      } else if (totalTranslated === 0) {
+        console.log(`\n⚠️ No translations completed, skipping link fix`);
+        linkFixResult.skipped = true;
+      }
     }
 
     const totalTime = Date.now() - functionStartTime;
+    const wasTimeoutProtection = totalTime >= MAX_EXECUTION_TIME_MS * 0.9; // If we used 90%+ of available time
+    
+    // Check if there are still articles with missing languages
+    const articlesWithRemainingLanguages = results.filter(r => {
+      const article = articlesWithMissingLanguages.find(a => a.articleId === r.article_id);
+      if (!article) return false;
+      const completed = r.languages_translated.length + r.languages_failed.length;
+      return completed < article.missingLanguages.length;
+    });
+    
+    const hasRemainingWork = articlesWithRemainingLanguages.length > 0;
+    
     console.log(`\n${"=".repeat(60)}`);
-    console.log(`TRANSLATION COMPLETE`);
+    if (hasRemainingWork) {
+      console.log(`TRANSLATION PARTIALLY COMPLETE (Timeout Protection)`);
+    } else {
+      console.log(`TRANSLATION COMPLETE`);
+    }
     console.log(`Total time: ${(totalTime / 1000).toFixed(1)}s`);
     console.log(`Languages translated: ${totalTranslated}`);
     console.log(`Languages failed: ${totalFailed}`);
+    if (hasRemainingWork) {
+      console.log(`⚠️ Remaining work: ${articlesWithRemainingLanguages.length} article(s) still have untranslated languages`);
+      console.log(`⚠️ Next cron run will continue translation automatically`);
+    }
     console.log(`${"=".repeat(60)}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Translation completed: ${totalTranslated} languages translated, ${totalFailed} failed`,
+        message: hasRemainingWork 
+          ? `Translation partially completed: ${totalTranslated} languages translated, ${totalFailed} failed. Remaining languages will be translated in next run.`
+          : `Translation completed: ${totalTranslated} languages translated, ${totalFailed} failed`,
         articles_processed: articlesWithMissingLanguages.length,
+        articles_completed: articlesWithMissingLanguages.length - articlesWithRemainingLanguages.length,
+        articles_remaining: articlesWithRemainingLanguages.length,
         total_translated: totalTranslated,
         total_failed: totalFailed,
         execution_time_ms: totalTime,
+        timeout_protection_used: wasTimeoutProtection,
+        has_remaining_work: hasRemainingWork,
         results,
         link_fix: linkFixResult,
       }),

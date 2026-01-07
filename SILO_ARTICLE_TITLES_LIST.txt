@@ -1,0 +1,130 @@
+Article Titles Stored in Database for Auto Blog Silos
+=======================================================
+Total: 100 titles
+
+ADVANCED CNC MACHINING STRATEGY (20 titles)
+--------------------------------------------
+
+1. Undercuts in CNC Machining: T-Slot Cutters vs. 5-Axis Strategies [PROCESSED]
+2. Live Tooling Lathes: Combining Turning and Milling for Complex Geometries
+3. Chamfers vs. Fillets: Which Edge Break Method is Cheaper to Machine?
+4. CNC Machining of Magnesium: Safety Protocols and Design Benefits
+5. Blind Holes vs. Through Holes: Cost Implications in CNC Drilling
+6. Knurling Operations: Designing for Diamond vs. Straight Patterns
+7. Rigidity in CNC Parts: How Wall Thickness Affects Machining Vibration
+8. Aerospace Machining Standards: Meeting AS9100 Requirements
+9. From STEP to G-Code: How We Verify Your CAD for Manufacturability [PROCESSED]
+10. Spline Machining: Hobbing vs. Wire EDM for Precision Gears [PROCESSED]
+11. Minimizing Chatter in Deep Pocket Milling: Design Tips for Engineers [PROCESSED]
+12. CNC Turning for Long Shafts: Preventing Deflection and Whip [PROCESSED]
+13. Micromachining Guidelines: Designing Features Smaller than 0.1mm
+14. High-Speed Machining (HSM): Surface Finish Benefits for Aluminum Molds
+15. 5-Axis vs. 3-Axis CNC Milling: When the Extra Cost Pays for Itself
+16. Achieving ±0.005mm: A Designer's Guide to Tight Tolerance Machining
+17. CNC Machining Cost Drivers: 7 Design Tweaks to Reduce Part Price by 30% [PROCESSED]
+18. The Truth About CNC Thread Milling vs. Tapping for Hardened Steels
+19. Designing for Fixturing: How to Add Holding Tabs to Complex CNC Parts [PROCESSED]
+20. Reducing Tool Wear in Titanium Machining: Optimized CAD Strategies [PROCESSED]
+
+DIE CASTING & METAL CASTING (20 titles)
+----------------------------------------
+
+21. Wall Thickness Uniformity: Preventing Shrinkage Defects in Production
+22. CNC Machining Post-Casting: Holding Tight Tolerances on Cast Faces
+23. Thixoforming (Semi-Solid Casting): High Strength, Low Porosity Solutions
+24. Rib Design for Stiffness: Strengthening Thin-Walled Die Castings
+25. Short-Run Metal Casting: Alternatives to Hard Tooling for <500 Units
+26. Minimizing Porosity in High-Pressure Die Casting (HPDC): Design Strategies [PROCESSED]
+27. Die Casting vs. CNC Machining: Where is the Price Break-Even Point?
+28. Aluminum A380 vs. A356: Selecting the Right Alloy for Strength and Flow
+29. Investment Casting (Lost Wax): Achieving Impossible Geometries in Steel
+30. Designing Draft Angles for Metal Castings: A Practical Guide for Engineers
+31. Zinc vs. Aluminum Die Casting: Why Zinc Offers Superior Tool Life
+32. Surface Finishes for Cast Parts: From Shot Peening to Powder Coat
+33. Permanent Mold Casting: The "Middle Ground" for Medium Volume Production
+34. Tolerances in Die Casting: What is Realistic for NADCA Standards?
+35. Reducing Tooling Costs: Modular Dies and Family Tools Strategy
+36. Sand Casting for Large Parts: Design Limitations and Benefits
+37. Vacuum Impregnation: Sealing Leak Paths in Hydraulic Castings
+38. Heat Treating Cast Aluminum: T6 Temper Explained for Structural Parts
+39. Magnesium Die Casting: Lightweighting Strategies for Automotive Components
+40. Ejector Pin Marks: Designing "Safe Zones" on Cosmetic Cast Surfaces
+
+MATERIAL SCIENCE & SURFACE ENGINEERING (20 titles)
+---------------------------------------------------
+
+41. Aluminum 6061-T6 vs. 7075-T6: When to Pay for the Extra Strength
+42. Stainless Steel 304 vs. 316L: The Marine Environment Test
+43. Acetron GP vs. Delrin: Choosing the Right Acetal Copolymer
+44. Anodizing Types: Type II (Color) vs. Type III (Hardcoat) Durability
+45. Passivation of Stainless Steel: Citric vs. Nitric Acid Standards
+46. Heat Treatment of 17-4 PH Stainless: H900 vs. H1150 Conditions
+47. Electroless Nickel Plating: Uniform Coverage for Internal Threads
+48. Brass C360: Why it's the King of High-Speed Screw Machining
+49. Peek vs. Ultem: High-Performance Plastics for Aerospace Components
+50. Black Oxide vs. Zinc Plating: Corrosion Resistance for Steel Parts
+51. Tool Steel Selection: D2 vs. A2 for Stamping Dies
+52. Surface Roughness Ra: What 0.8μm Looks Like vs. 3.2μm
+53. Alodine (Chem Film): Conductive Coating for Electronics Chassis
+54. Inconel 718: Machining Strategies for Superalloys
+55. G10/FR4 Garolite: Machining Composite Materials for Electrical Insulation
+56. Copper C110 vs. C101: Thermal Conductivity for Heat Sinks
+57. Titanium Grade 5 vs. Grade 2: Machinability and Medical Applications
+58. Bead Blasting: Standard Media Grits and Surface Texture
+59. HDPE vs. UHMW: Wear Resistance for Conveyor Guide Rails
+60. Nitriding: Increasing Surface Hardness Without Quenching Distortion
+
+RAPID TOOLING & INJECTION MOLDING (20 titles)
+----------------------------------------------
+
+61. Draft Angles 101: Preventing Part Sticking in Deep Cavity Molds
+62. Undercuts in Injection Molding: Designing Side Actions and Lifters
+63. Sink Marks: How Rib-to-Wall Ratios Ruin Surface Finish
+64. Overmolding Guide: Bonding TPE Grips to Hard Plastic Substrates
+65. Vacuum Casting vs. Injection Molding: The 50-Part Bridge Strategy
+66. Gate Location: How to Hide Vestiges and Prevent Flow Lines
+67. Insert Molding: Encapsulating Threaded Brass Inserts
+68. Family Molds: Pros and Cons of Molding Multiple Parts at Once
+69. Polishing Standards: SPI Finishes (A1 to D3) and Cost Impact
+70. Snap Fits: Designing Durable Cantilever Clips for Plastic Assemblies
+71. Living Hinges: Material Selection (PP) and Geometry Rules
+72. Wall Thickness Uniformity: Preventing Warpage in Large Flat Parts
+73. Texture Depth: How Mold Texturing Affects Draft Angle Requirements
+74. Hot Runner vs. Cold Runner Systems: Material Waste vs. Tooling Cost
+75. Ejector Pin Marks: Negotiating "Safe Zones" on Cosmetic Surfaces
+76. Gas-Assist Injection Molding: Creating Hollow Parts for Weight Reduction
+77. Mold Flow Analysis: Identifying Weld Lines Before Cutting Steel
+78. Micro-Molding: Tolerances for Parts Weighing Less than 1 Gram
+79. Bioplastics in Injection Molding: Processing PLA and PHA
+80. Soft Tooling (Aluminum) vs. Hard Tooling (Steel): Lifecycle Costs
+
+SHEET METAL & FABRICATION (20 titles)
+---------------------------------------
+
+81. Laser Cutting vs. Waterjet: Choosing the Right Method for Thick Plate
+82. K-Factor Explained: Calculating Bend Allowances for Precision Sheet Metal
+83. Hemming Edges: Safety and Stiffness Techniques for Sheet Metal
+84. Tab and Slot Construction: Self-Fixturing Designs for Welded Assemblies
+85. Minimum Bend Radii: Avoiding Cracks in Aluminum 5052 vs. 6061
+86. PEM Fasteners: Selecting the Right Press-Fit Nuts for Thin Aluminum
+87. Designing Custom Enclosures: IP65 Sealing Strategies for Sheet Metal
+88. Deep Drawing vs. Spinning: Manufacturing Cylindrical Metal Shapes
+89. Corner Relief Designs: Rectangular vs. Circular Reliefs for Clean Bends
+90. Powder Coating Sheet Metal: Accounting for Thickness Build-up in Tolerances
+91. Galvanized vs. Stainless Steel: Corrosion Resistance in Outdoor Enclosures
+92. Punching vs. Laser Cutting: When Tooling Up Makes Sense
+93. Panel Stiffeners: Adding Ribs and Flanges to Prevent "Oil Canning"
+94. Spot Welding vs. Riveting: Strength Comparisons for Assembly
+95. Copper Busbar Fabrication: Bending and Punching for Electrical Distribution
+96. V-Grooving: Creating Sharp Bends in Architectural Sheet Metal
+97. Deburring Standards: Specifying Edge Conditions for Safe Handling
+98. Sheet Metal Grain Direction: How it Affects Bending Strength
+99. Nesting Strategies: How Part Geometry Affects Material Waste & Cost
+100. Designing Vent Patterns: EMI Shielding vs. Airflow Trade-offs
+
+=======================================================
+STATUS SUMMARY:
+- Processed: 8 articles
+- Unprocessed: 92 articles
+=======================================================
+

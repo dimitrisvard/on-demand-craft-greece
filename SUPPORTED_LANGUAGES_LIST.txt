@@ -1,0 +1,34 @@
+Supported Languages on Website
+==============================
+
+1. German (de)
+2. French (fr)
+3. Spanish (es)
+4. Italian (it)
+5. Dutch (nl)
+6. Polish (pl)
+7. Swedish (sv)
+8. Danish (da)
+9. Finnish (fi)
+10. Czech (cs)
+11. Hungarian (hu)
+12. Portuguese (pt)
+13. Norwegian (nb)
+
+Total: 13 languages
+
+Language Codes:
+- de = German
+- fr = French
+- es = Spanish
+- it = Italian
+- nl = Dutch
+- pl = Polish
+- sv = Swedish
+- da = Danish
+- fi = Finnish
+- cs = Czech
+- hu = Hungarian
+- pt = Portuguese
+- nb = Norwegian
+

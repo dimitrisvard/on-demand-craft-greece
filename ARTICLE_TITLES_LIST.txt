@@ -1,0 +1,14 @@
+Article Titles Stored in Database
+==================================
+
+1. From STEP to G-Code: How We Verify Your CAD for Manufacturability
+2. Spline Machining: Hobbing vs. Wire EDM for Precision Gears
+3. Minimizing Chatter in Deep Pocket Milling: Design Tips for Engineers
+4. Undercuts in CNC Machining: T-Slot Cutters vs. 5-Axis Strategies
+5. Reducing Tool Wear in Titanium Machining: Optimized CAD Strategies
+6. Designing for Fixturing: How to Add Holding Tabs to Complex CNC Parts
+7. Minimizing Porosity in High-Pressure Die Casting (HPDC): Design Strategies
+8. CNC Machining Cost Drivers: 7 Design Tweaks to Reduce Part Price by 30%
+
+Total: 8 articles
+
