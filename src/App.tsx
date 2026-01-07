@@ -196,6 +196,31 @@ function AppContent() {
 
 function App() {
   console.log('App rendered');
+  
+  // Suppress harmless postMessage errors from embedded iframes (YouTube, Google Maps, etc.)
+  // These errors occur when iframes try to communicate but origin checks fail
+  React.useEffect(() => {
+    // Override console.error to filter out postMessage origin mismatch errors
+    const originalError = console.error;
+    console.error = (...args: any[]) => {
+      const message = args[0]?.toString() || '';
+      // Suppress postMessage origin mismatch errors from embedded content
+      if (message.includes('postMessage') && 
+          (message.includes('google.com') || 
+           message.includes('youtube.com') ||
+           message.includes('DOMWindow'))) {
+        // Suppress this harmless error - it's from third-party iframes
+        return;
+      }
+      // Log all other errors normally
+      originalError.apply(console, args);
+    };
+
+    return () => {
+      console.error = originalError;
+    };
+  }, []);
+
   return (
     <HelmetProvider>
       <QueryClientProvider client={queryClient}>

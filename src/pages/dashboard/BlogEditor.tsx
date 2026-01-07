@@ -858,7 +858,7 @@ const BlogEditor = () => {
             {id && formData.status === 'published' && formData.slug && (
               <Button
                 variant="outline"
-                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank')}
+                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank', 'noopener,noreferrer')}
                 className="flex items-center gap-2"
               >
                 <ExternalLink className="h-4 w-4" />
@@ -1099,7 +1099,11 @@ const BlogEditor = () => {
                             variant="ghost" 
                             size="icon" 
                             className="h-6 w-6" 
-                            onClick={() => window.open(`/dashboard/blog/edit/${t.id}`, '_blank')}
+                            onClick={() => {
+                              // Open in new tab with proper security flags
+                              // Authentication session is shared via localStorage across same-origin tabs
+                              window.open(`/dashboard/blog/edit/${t.id}`, '_blank', 'noopener,noreferrer');
+                            }}
                           >
                             <ChevronLeft className="h-3 w-3 rotate-180" />
                           </Button>
