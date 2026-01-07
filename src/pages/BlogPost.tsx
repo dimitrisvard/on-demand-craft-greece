@@ -6,6 +6,7 @@ import { Calendar, Clock, ArrowLeft } from "lucide-react";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
+import { translateUrlSlug } from "@/utils/urlSlugTranslator";
 import SEOMeta from "@/components/SEOMeta";
 
 interface Article {
@@ -34,6 +35,12 @@ const BlogPost = () => {
   const [loading, setLoading] = useState(true);
   const [hreflangLinks, setHreflangLinks] = useState<Array<{ lang: string; url: string }>>([]);
   const currentLang = lang || i18n.language || 'en';
+  
+  // Get translated blog slug for current language
+  const getBlogSlug = (langCode: string) => {
+    const tForLang = i18n.getFixedT(langCode);
+    return translateUrlSlug('blog', langCode, tForLang);
+  };
 
   useEffect(() => {
     if (slug) {
@@ -72,13 +79,13 @@ const BlogPost = () => {
           // Create links for translations
           const links = translations.map(t => ({
             lang: t.language,
-            url: `${baseUrl}/${t.language}/blog/${t.slug}`
+            url: `${baseUrl}/${t.language}/${getBlogSlug(t.language)}/${t.slug}`
           }));
 
           // Add current article to the list as well (self-referencing hreflang is required)
           links.push({
             lang: currentLang,
-            url: `${baseUrl}/${currentLang}/blog/${currentArticle.slug}`
+            url: `${baseUrl}/${currentLang}/${getBlogSlug(currentLang)}/${currentArticle.slug}`
           });
 
           setHreflangLinks(links);
@@ -86,7 +93,7 @@ const BlogPost = () => {
       }
     } catch (error) {
       console.error('Error fetching article:', error);
-      navigate(`/${currentLang}/blog`); // Redirect to index if not found
+      navigate(`/${currentLang}/${getBlogSlug(currentLang)}`); // Redirect to index if not found
     } finally {
       setLoading(false);
     }
@@ -159,7 +166,7 @@ const BlogPost = () => {
             <Button 
               variant="ghost" 
               className="mb-8 pl-0 hover:pl-0 hover:bg-transparent hover:text-primary transition-colors"
-              onClick={() => navigate(`/${currentLang}/blog`)}
+              onClick={() => navigate(`/${currentLang}/${getBlogSlug(currentLang)}`)}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               {t('blog_back_to_blog', 'Back to Blog')}

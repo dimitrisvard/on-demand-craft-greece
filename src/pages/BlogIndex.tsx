@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Calendar, Clock, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { translateUrlSlug } from "@/utils/urlSlugTranslator";
 import SEOMeta from "@/components/SEOMeta";
 
 interface Article {
@@ -23,6 +24,7 @@ const BlogIndex = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   const currentLang = lang || i18n.language || 'en';
+  const blogSlug = translateUrlSlug('blog', currentLang, t);
 
   useEffect(() => {
     fetchArticles();
@@ -78,7 +80,7 @@ const BlogIndex = () => {
               {articles.map((article) => (
                 <Link 
                   key={article.id} 
-                  to={`/${currentLang}/blog/${article.slug}`}
+                  to={`/${currentLang}/${blogSlug}/${article.slug}`}
                   className="group flex flex-col bg-white border rounded-lg overflow-hidden hover:shadow-lg transition-shadow duration-300"
                 >
                   {article.featured_image ? (

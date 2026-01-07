@@ -102,9 +102,16 @@ function AppContent() {
                 {/* Language-specific routes */}
                 <Route path="/:lang" element={<Index />} />
                 
-                {/* Blog routes - use specific pattern, slug is not translated */}
+                {/* Blog routes - support both English and translated blog slugs */}
+                {/* English blog */}
                 <Route path="/:lang/blog" element={<BlogIndex />} />
                 <Route path="/:lang/blog/:slug" element={<BlogPost />} />
+                {/* Swedish/Norwegian blog (blogg) */}
+                <Route path="/:lang/blogg" element={<BlogIndex />} />
+                <Route path="/:lang/blogg/:slug" element={<BlogPost />} />
+                {/* Finnish blog (blogi) */}
+                <Route path="/:lang/blogi" element={<BlogIndex />} />
+                <Route path="/:lang/blogi/:slug" element={<BlogPost />} />
                 
                 {/* Static routes - support both English and translated slugs */}
                 <Route path="/:lang/login" element={<Login />} />
