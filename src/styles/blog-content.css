@@ -219,12 +219,19 @@ table caption {
 
 /* Responsive table adjustments */
 @media (max-width: 768px) {
+    /* Make prose container scrollable for wide tables on mobile */
+    .prose {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
     .prose table,
     .blog-content table,
     table {
         font-size: 0.8em;
         display: table !important;
         width: 100% !important;
+        min-width: 600px; /* Prevent tables from shrinking too much */
     }
     
     .prose th,
