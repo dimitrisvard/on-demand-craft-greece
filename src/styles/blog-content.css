@@ -141,21 +141,8 @@ table {
     border-collapse: collapse !important;
     margin: 2em 0 !important;
     display: table !important;
+    table-layout: auto !important;
     font-size: 0.9em;
-}
-
-/* Table wrapper for horizontal scroll on mobile */
-.prose > table,
-.blog-content > table {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-}
-
-.prose > table > *,
-.blog-content > table > * {
-    display: table;
-    width: 100%;
 }
 
 .prose th,
