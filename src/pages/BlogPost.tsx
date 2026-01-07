@@ -201,8 +201,7 @@ const BlogPost = () => {
             )}
 
             <div 
-              className="prose prose-lg prose-blue max-w-none overflow-x-auto"
-              style={{ WebkitOverflowScrolling: 'touch' }}
+              className="prose prose-lg prose-blue max-w-none"
               dangerouslySetInnerHTML={{ __html: article.content }}
             />
           </div>
