@@ -18,11 +18,12 @@ All times are in Greece timezone (UTC+2) with UTC equivalent:
    - Each language is translated in a separate API call (~10-30 seconds each)
    - Total translation time: ~5-10 minutes for all 13 languages
 
-3. **Fix Article Links**: 10:15 AM Greece / 8:15 AM UTC (15 minutes after translation starts)
+3. **Fix Article Links**: 10:30 AM Greece / 8:30 AM UTC (30 minutes after translation starts)
    - Cron job: `auto-fix-article-links`
-   - Schedule: `15 8 * * *`
+   - Schedule: `30 8 * * *`
    - Function: `fix-article-links`
    - Fixes internal article links and adds target="_blank" to open in new tabs
+   - **Updated (2026-01-07)**: Increased gap to 30 minutes to ensure translations complete
 
 4. **Sitemap Update**: 11:00 AM Greece / 9:00 AM UTC (1 hour after translation)
    - Cron job: `auto-update-sitemap`
@@ -35,7 +36,7 @@ All times are in Greece timezone (UTC+2) with UTC equivalent:
 ```
 9:00 AM Greece (7:00 AM UTC)   → Article Creation
 10:00 AM Greece (8:00 AM UTC)  → Translation (1 hour later)
-10:15 AM Greece (8:15 AM UTC)  → Fix Links (15 minutes after translation)
+10:30 AM Greece (8:30 AM UTC)  → Fix Links (30 minutes after translation)
 11:00 AM Greece (9:00 AM UTC)  → Sitemap Update (1 hour after translation)
 ```
 
@@ -52,7 +53,7 @@ SELECT
   CASE 
     WHEN jobname = 'enqueue-daily-article' THEN 'Article creation (9:00 AM Greece / 7:00 AM UTC)'
     WHEN jobname = 'auto-translate-daily-articles' THEN 'Translation (10:00 AM Greece / 8:00 AM UTC)'
-    WHEN jobname = 'auto-fix-article-links' THEN 'Fix Links (10:15 AM Greece / 8:15 AM UTC)'
+    WHEN jobname = 'auto-fix-article-links' THEN 'Fix Links (10:30 AM Greece / 8:30 AM UTC)'
     WHEN jobname = 'auto-update-sitemap' THEN 'Sitemap (11:00 AM Greece / 9:00 AM UTC)'
     ELSE 'Other'
   END as description
@@ -63,7 +64,8 @@ ORDER BY schedule;
 
 ## Last Updated
 
-- Date: January 5, 2026
-- Changes: Updated translation and sitemap schedules to run 1 hour apart as requested
+- Date: January 7, 2026
+- Changes: Updated fix-article-links schedule from 8:15 AM UTC to 8:30 AM UTC (adds 15 minutes gap after translations)
+- Previous: January 5, 2026 - Updated translation and sitemap schedules to run 1 hour apart
 - Fixed: UTC timezone issue in auto-translate-articles function
 
