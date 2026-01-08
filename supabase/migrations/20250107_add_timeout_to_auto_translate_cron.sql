@@ -32,3 +32,4 @@ SELECT cron.schedule(
 -- WHERE jobname = 'auto-translate-daily-articles';
 
 
+

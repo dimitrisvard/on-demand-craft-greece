@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
-import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw, CheckCircle2, XCircle, ChevronDown, MoreHorizontal } from "lucide-react";
+import { Pencil, PlusCircle, Search, Trash2, Eye, FileText, Languages, Globe, Loader2, Map, Download, RefreshCw, CheckCircle2, XCircle, ChevronDown, MoreHorizontal, Facebook, Linkedin } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -56,6 +56,11 @@ interface Article {
   created_at: string;
   author_id: string;
   translation_id: string | null;
+  posted_to_facebook?: boolean;
+  posted_to_linkedin?: boolean;
+  facebook_post_id?: string;
+  linkedin_post_id?: string;
+  social_posted_at?: string;
 }
 
 const LANGUAGES = [
@@ -120,7 +125,7 @@ const BlogList = () => {
       setLoading(true);
       const { data, error } = await supabase
         .from('articles')
-        .select('*')
+        .select('*, posted_to_facebook, posted_to_linkedin, facebook_post_id, linkedin_post_id, social_posted_at')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -572,6 +577,7 @@ const BlogList = () => {
                   <TableHead>Title</TableHead>
                   <TableHead>Language</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Social</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -579,13 +585,13 @@ const BlogList = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       Loading articles...
                     </TableCell>
                   </TableRow>
                 ) : filteredArticles.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       <div className="flex flex-col items-center justify-center">
                         <FileText className="h-12 w-12 mb-2 opacity-20" />
                         <p>No articles found matching your filters.</p>
@@ -623,6 +629,19 @@ const BlogList = () => {
                         <Badge variant={article.status === 'published' ? 'default' : 'secondary'}>
                           {article.status === 'published' ? 'Published' : 'Draft'}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {article.posted_to_facebook && (
+                            <Facebook className="h-4 w-4 text-blue-600" title="Posted to Facebook" />
+                          )}
+                          {article.posted_to_linkedin && (
+                            <Linkedin className="h-4 w-4 text-blue-700" title="Posted to LinkedIn" />
+                          )}
+                          {!article.posted_to_facebook && !article.posted_to_linkedin && (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {format(new Date(article.created_at), 'MMM dd, yyyy')}

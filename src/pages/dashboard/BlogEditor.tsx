@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye, Link, ExternalLink } from "lucide-react";
+import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, Code, Eye, Link, ExternalLink, Share2 } from "lucide-react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
@@ -48,6 +48,7 @@ const BlogEditor = () => {
   const [saving, setSaving] = useState(false);
   const [generatingTranslations, setGeneratingTranslations] = useState(false);
   const [fixingLinks, setFixingLinks] = useState(false);
+  const [postingToSocial, setPostingToSocial] = useState(false);
   const [isSourceView, setIsSourceView] = useState(false);
   const quillRef = useRef<ReactQuill>(null);
 
@@ -476,6 +477,74 @@ const BlogEditor = () => {
     }
   };
 
+  const handlePostToSocialMedia = async () => {
+    if (!id || formData.status !== 'published') {
+      toast({
+        title: "Article must be published",
+        description: "Please publish the article before posting to social media.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPostingToSocial(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("User not authenticated");
+
+      toast({
+        title: "Posting to Social Media",
+        description: "Sharing article to Facebook and LinkedIn...",
+      });
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/post-to-social-media`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify({ 
+            article_id: id 
+          }),
+        }
+      );
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to post to social media");
+      }
+
+      const postedTo = result.posted_to || [];
+      const errors = result.errors || [];
+
+      if (postedTo.length > 0) {
+        toast({
+          title: "✅ Posted Successfully",
+          description: `Posted to ${postedTo.join(', ')}${errors.length > 0 ? `. Some errors: ${errors.join('; ')}` : ''}`,
+        });
+        
+        // Refresh article to show updated social status
+        if (id) {
+          await fetchArticle(id);
+        }
+      } else {
+        throw new Error(errors.join('; ') || "Failed to post to any platform");
+      }
+    } catch (error: any) {
+      console.error('Error posting to social media:', error);
+      toast({
+        title: "❌ Post Failed",
+        description: error.message || "Failed to post to social media",
+        variant: "destructive",
+      });
+    } finally {
+      setPostingToSocial(false);
+    }
+  };
+
   const handleChange = (field: string, value: string) => {
     setFormData(prev => {
       const newData = { ...prev, [field]: value };
@@ -856,14 +925,29 @@ const BlogEditor = () => {
           </div>
           <div className="flex items-center gap-3">
             {id && formData.status === 'published' && formData.slug && (
-              <Button
-                variant="outline"
-                onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank', 'noopener,noreferrer')}
-                className="flex items-center gap-2"
-              >
-                <ExternalLink className="h-4 w-4" />
-                View Article
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={handlePostToSocialMedia}
+                  disabled={postingToSocial}
+                  className="flex items-center gap-2"
+                >
+                  {postingToSocial ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Share2 className="h-4 w-4" />
+                  )}
+                  Post to Social
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => window.open(`/${formData.language}/blog/${formData.slug}`, '_blank', 'noopener,noreferrer')}
+                  className="flex items-center gap-2"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  View Article
+                </Button>
+              </>
             )}
             <Button 
               variant="outline" 
