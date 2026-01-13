@@ -38,6 +38,23 @@ const REDIRECT_MAP: Record<string, string> = {
   // Polish Fix - service page (need /uslugi/ prefix, handling special character)
   '/pl/wykończenie-powierzchni': '/pl/uslugi/wykonczenie-powierzchni',
   '/pl/wyko%C5%84czenie-powierzchni': '/pl/uslugi/wykonczenie-powierzchni', // URL encoded version
+  
+  // Frankenstein URLs - direct mappings for common cases
+  '/csoffert': '/cs/nabidka',  // Czech: cs + offert (Swedish) -> cs/nabidka
+  '/dawycena': '/pl/wycena',   // Mixed: da (Danish) + wycena (Polish) -> pl/wycena
+  '/en/dawycena': '/pl/wycena', // Mixed: en + da (Danish) + wycena (Polish) -> pl/wycena
+  '/danotre-travail': '/fr/notre-travail', // Mixed: da (Danish) + notre-travail (French) -> fr/notre-travail
+  '/csservicos/usinagem-cnc': '/pt/servicos/usinagem-cnc', // Mixed: cs (Czech) + servicos/usinagem-cnc (Portuguese) -> pt/servicos/usinagem-cnc
+  '/daservices/sheet-metal': '/da/tjenester/pladearbejde', // Mixed: da + services/sheet-metal (English) -> da/tjenester/pladearbejde
+  '/deservicos/prototipagem-rapida': '/pt/servicos/prototipagem-rapida', // Mixed: de (German) + servicos/prototipagem-rapida (Portuguese) -> pt/servicos/prototipagem-rapida
+  '/daservices/impression-3d': '/fr/services/impression-3d', // Mixed: da (Danish) + services/impression-3d (French) -> fr/services/impression-3d
+  '/nbservicos/prototipagem-rapida': '/pt/servicos/prototipagem-rapida', // Mixed: nb (Norwegian) + servicos/prototipagem-rapida (Portuguese) -> pt/servicos/prototipagem-rapida
+  '/svorcamento': '/sv/offert', // Swedish: sv + orcamento (Portuguese) -> sv/offert
+  '/huorcamento': '/hu/ajanlat', // Hungarian: hu + orcamento (Portuguese) -> hu/ajanlat
+  '/itorcamento': '/it/preventivo', // Italian: it + orcamento (Portuguese) -> it/preventivo
+  '/daorcamento': '/da/tilbud', // Danish: da + orcamento (Portuguese) -> da/tilbud
+  '/deorcamento': '/de/angebot', // German: de + orcamento (Portuguese) -> de/angebot
+  '/enoffert': '/en/quote',    // English: en + offert (Swedish) -> en/quote
 };
 
 // Additional patterns for "Frankenstein" URLs (malformed concatenations)

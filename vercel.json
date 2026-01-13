@@ -59,6 +59,71 @@
       "source": "/pl/wykończenie-powierzchni",
       "destination": "/pl/uslugi/wykonczenie-powierzchni",
       "permanent": true
+    },
+    {
+      "source": "/dawycena",
+      "destination": "/pl/wycena",
+      "permanent": true
+    },
+    {
+      "source": "/en/dawycena",
+      "destination": "/pl/wycena",
+      "permanent": true
+    },
+    {
+      "source": "/danotre-travail",
+      "destination": "/fr/notre-travail",
+      "permanent": true
+    },
+    {
+      "source": "/csservicos/usinagem-cnc",
+      "destination": "/pt/servicos/usinagem-cnc",
+      "permanent": true
+    },
+    {
+      "source": "/daservices/sheet-metal",
+      "destination": "/da/tjenester/pladearbejde",
+      "permanent": true
+    },
+    {
+      "source": "/deservicos/prototipagem-rapida",
+      "destination": "/pt/servicos/prototipagem-rapida",
+      "permanent": true
+    },
+    {
+      "source": "/daservices/impression-3d",
+      "destination": "/fr/services/impression-3d",
+      "permanent": true
+    },
+    {
+      "source": "/nbservicos/prototipagem-rapida",
+      "destination": "/pt/servicos/prototipagem-rapida",
+      "permanent": true
+    },
+    {
+      "source": "/svorcamento",
+      "destination": "/sv/offert",
+      "permanent": true
+    },
+    {
+      "source": "/huorcamento",
+      "destination": "/hu/ajanlat",
+      "permanent": true
+    },
+    {
+      "source": "/itorcamento",
+      "destination": "/it/preventivo",
+      "permanent": true
+    },
+    {
+      "source": "/daorcamento",
+      "destination": "/da/tilbud",
+      "permanent": true
+    },
+    {
+      "source": "/deorcamento",
+      "destination": "/de/angebot",
+      "permanent": true
     }
   ],
   "rewrites": [
