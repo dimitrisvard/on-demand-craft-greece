@@ -6,6 +6,8 @@
 
 import { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { translateUrlPath } from '../utils/urlSlugTranslator';
 
 // Map of old bad URLs to new correct URLs
 // Format: { 'old-path': 'new-path' }
@@ -81,15 +83,44 @@ function getRedirectPath(currentPath: string): string | null {
     // Invalid URL encoding, continue
   }
   
+  return null;
+}
+
+/**
+ * Check if the current path needs a redirect (with translation support)
+ * This version uses i18n to translate paths
+ */
+function getRedirectPathWithTranslation(currentPath: string, t: any, lang: string): string | null {
+  // Normalize path by removing trailing slash
+  const normalizedPath = currentPath.endsWith('/') && currentPath !== '/' 
+    ? currentPath.slice(0, -1) 
+    : currentPath;
+  
+  // Check exact match in redirect map
+  if (REDIRECT_MAP[normalizedPath]) {
+    return REDIRECT_MAP[normalizedPath];
+  }
+  
+  // Check URL-decoded version
+  try {
+    const decodedPath = decodeURIComponent(normalizedPath);
+    if (decodedPath !== normalizedPath && REDIRECT_MAP[decodedPath]) {
+      return REDIRECT_MAP[decodedPath];
+    }
+  } catch {
+    // Invalid URL encoding, continue
+  }
+  
   // Check Frankenstein patterns
   for (const { pattern, extractLang, extractPath } of FRANKENSTEIN_PATTERNS) {
     const match = normalizedPath.match(pattern);
     if (match) {
-      const lang = extractLang(match);
+      const extractedLang = extractLang(match);
       const englishPath = extractPath(match);
-      // This needs proper translation, but for now redirect to the language home
-      // A more complete solution would use the url slug translator
-      return `/${lang}${englishPath}`;
+      
+      // Translate the English path to the extracted language
+      const translatedPath = translateUrlPath(englishPath, extractedLang, t);
+      return `/${extractedLang}${translatedPath}`;
     }
   }
   
@@ -103,16 +134,43 @@ function getRedirectPath(currentPath: string): string | null {
 const SEORedirects: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { i18n } = useTranslation();
 
   useEffect(() => {
-    const redirectPath = getRedirectPath(location.pathname);
+    // Check for Frankenstein patterns first to extract language
+    const normalizedPath = location.pathname.endsWith('/') && location.pathname !== '/' 
+      ? location.pathname.slice(0, -1) 
+      : location.pathname;
+    
+    let detectedLang = 'en';
+    let needsTranslation = false;
+    
+    // Check if this is a Frankenstein URL
+    for (const { pattern, extractLang } of FRANKENSTEIN_PATTERNS) {
+      const match = normalizedPath.match(pattern);
+      if (match) {
+        detectedLang = extractLang(match);
+        needsTranslation = true;
+        break;
+      }
+    }
+    
+    // If not a Frankenstein URL, try to detect language from path segments
+    if (!needsTranslation) {
+      const pathSegments = location.pathname.split('/');
+      detectedLang = pathSegments[1] || 'en';
+    }
+    
+    // Get translation function for the detected language
+    const tForLang = i18n.getFixedT(detectedLang);
+    const redirectPath = getRedirectPathWithTranslation(location.pathname, tForLang, detectedLang);
     
     if (redirectPath && redirectPath !== location.pathname) {
       console.log(`[SEO Redirect] ${location.pathname} -> ${redirectPath}`);
       // Use replace to simulate 301 redirect (doesn't add to history)
       navigate(redirectPath, { replace: true });
     }
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, i18n]);
 
   // This component doesn't render anything
   return null;
