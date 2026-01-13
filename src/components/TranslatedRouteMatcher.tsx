@@ -4,8 +4,8 @@
  * This allows translated URLs like /de/dienstleistungen to work
  */
 
-import React from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useParams, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -50,6 +50,47 @@ const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<an
   // '/impressum' is handled as a legacy route in App.tsx
 };
 
+// 301 Redirect map for old/bad slugs that need redirecting to correct URLs
+// Format: { language: { oldSlug: newSlug } }
+const OLD_SLUG_REDIRECTS: Record<string, Record<string, string>> = {
+  // Swedish fixes
+  sv: {
+    'spjutsgjutning': 'formsprutning',
+    'sprutgjutning': 'formsprutning',
+    'platarbe': 'platbearbetning',
+  },
+  // Danish fixes
+  da: {
+    'spjutsgodsning': 'sprojtestobning',
+    'sproejtestoebning': 'sprojtestobning',
+  },
+  // Norwegian fixes
+  nb: {
+    'spjutsgjetting': 'sproytestoping',
+    'sproyetestoping': 'sproytestoping',
+  },
+  // Polish fixes (special character issue)
+  pl: {
+    'wykończenie-powierzchni': 'wykonczenie-powierzchni',
+  },
+};
+
+// Blog slug redirects (old blog post slugs -> new correct slugs)
+const OLD_BLOG_SLUG_REDIRECTS: Record<string, Record<string, string>> = {
+  // Dutch fix
+  nl: {
+    'knoedelen-ontwerpen-voor-diamant-vs-rechte-patronen': 'kartelen-ontwerpen-voor-diamant-vs-rechte-patronen',
+  },
+  // Swedish fix
+  sv: {
+    'krapplingsoperationer-design-for-diamant-vs-raka-monster': 'lattring-operationer-design-for-diamant-vs-raka-monster',
+  },
+  // Italian fix
+  it: {
+    'minimizzare-chiacchiericcio-fresatura-cavita-profonde': 'minimizzare-vibrazioni-fresatura-cavita-profonde',
+  },
+};
+
 interface TranslatedRouteMatcherProps {
   slug?: string; // For single-level routes like /:lang/:slug
   subslug?: string; // For two-level routes like /:lang/:slug/:subslug
@@ -58,20 +99,66 @@ interface TranslatedRouteMatcherProps {
 const TranslatedRouteMatcher: React.FC<TranslatedRouteMatcherProps> = ({ slug, subslug }) => {
   const params = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const { i18n } = useTranslation();
   const { getEnglishPath } = useLanguage();
+  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   
   const lang = params.lang || i18n.language || 'en';
+  const currentSlug = params.slug || slug;
+  const currentSubSlug = params.subslug || subslug;
   const currentPath = location.pathname;
+
+  // Check for old slug redirects FIRST
+  useEffect(() => {
+    // Check if this is an old service page slug that needs redirecting
+    if (currentSlug && OLD_SLUG_REDIRECTS[lang]?.[currentSlug]) {
+      const newSlug = OLD_SLUG_REDIRECTS[lang][currentSlug];
+      const newPath = `/${lang}/${newSlug}`;
+      console.log(`[301 Redirect] Old slug: ${currentPath} -> ${newPath}`);
+      setRedirectTo(newPath);
+      return;
+    }
+    
+    // Check if this is a blog path with an old article slug
+    if (currentSlug && (currentSlug === 'blog' || currentSlug === 'blogg' || currentSlug === 'blogi') && currentSubSlug) {
+      if (OLD_BLOG_SLUG_REDIRECTS[lang]?.[currentSubSlug]) {
+        const newArticleSlug = OLD_BLOG_SLUG_REDIRECTS[lang][currentSubSlug];
+        const newPath = `/${lang}/${currentSlug}/${newArticleSlug}`;
+        console.log(`[301 Redirect] Old blog slug: ${currentPath} -> ${newPath}`);
+        setRedirectTo(newPath);
+        return;
+      }
+    }
+    
+    // Also check URL-decoded version for special characters
+    try {
+      const decodedSlug = currentSlug ? decodeURIComponent(currentSlug) : '';
+      if (decodedSlug !== currentSlug && OLD_SLUG_REDIRECTS[lang]?.[decodedSlug]) {
+        const newSlug = OLD_SLUG_REDIRECTS[lang][decodedSlug];
+        const newPath = `/${lang}/${newSlug}`;
+        console.log(`[301 Redirect] Old encoded slug: ${currentPath} -> ${newPath}`);
+        setRedirectTo(newPath);
+        return;
+      }
+    } catch {
+      // Invalid encoding, continue
+    }
+  }, [lang, currentSlug, currentSubSlug, currentPath]);
+
+  // If we have a redirect, perform it
+  if (redirectTo) {
+    return <Navigate to={redirectTo} replace />;
+  }
   
   // Build the current path segment from params
   let pathSegment = '';
-  if (subslug && slug) {
+  if (currentSubSlug && currentSlug) {
     // Two-level route: /:lang/:slug/:subslug
-    pathSegment = `/${slug}/${subslug}`;
-  } else if (slug) {
+    pathSegment = `/${currentSlug}/${currentSubSlug}`;
+  } else if (currentSlug) {
     // Single-level route: /:lang/:slug
-    pathSegment = `/${slug}`;
+    pathSegment = `/${currentSlug}`;
   }
   
   // If English, check if pathSegment directly matches any route
