@@ -51,27 +51,28 @@ const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<an
 };
 
 // 301 Redirect map for old/bad slugs that need redirecting to correct URLs
-// Format: { language: { oldSlug: newSlug } }
+// Format: { language: { oldSlug: 'full/path/to/new/slug' } }
+// Note: Service pages need the /services/ prefix (translated), standalone pages don't
 const OLD_SLUG_REDIRECTS: Record<string, Record<string, string>> = {
-  // Swedish fixes
+  // Swedish fixes - service pages need /tjanster/ prefix
   sv: {
-    'spjutsgjutning': 'formsprutning',
-    'sprutgjutning': 'formsprutning',
-    'platarbe': 'platbearbetning',
+    'spjutsgjutning': 'tjanster/formsprutning',  // /sv/tjanster/formsprutning
+    'sprutgjutning': 'tjanster/formsprutning',
+    'platarbe': 'tjanster/platbearbetning',      // /sv/tjanster/platbearbetning
   },
-  // Danish fixes
+  // Danish fixes - service pages need /tjenester/ prefix
   da: {
-    'spjutsgodsning': 'sprojtestobning',
-    'sproejtestoebning': 'sprojtestobning',
+    'spjutsgodsning': 'tjenester/sprojtestobning',  // /da/tjenester/sprojtestobning
+    'sproejtestoebning': 'tjenester/sprojtestobning',
   },
-  // Norwegian fixes
+  // Norwegian fixes - service pages need /tjenester/ prefix
   nb: {
-    'spjutsgjetting': 'sproytestoping',
-    'sproyetestoping': 'sproytestoping',
+    'spjutsgjetting': 'tjenester/sproytestoping',   // /nb/tjenester/sproytestoping
+    'sproyetestoping': 'tjenester/sproytestoping',
   },
-  // Polish fixes (special character issue)
+  // Polish fixes - service pages need /uslugi/ prefix
   pl: {
-    'wykończenie-powierzchni': 'wykonczenie-powierzchni',
+    'wykończenie-powierzchni': 'uslugi/wykonczenie-powierzchni',  // /pl/uslugi/wykonczenie-powierzchni
   },
 };
 
@@ -113,8 +114,8 @@ const TranslatedRouteMatcher: React.FC<TranslatedRouteMatcherProps> = ({ slug, s
   useEffect(() => {
     // Check if this is an old service page slug that needs redirecting
     if (currentSlug && OLD_SLUG_REDIRECTS[lang]?.[currentSlug]) {
-      const newSlug = OLD_SLUG_REDIRECTS[lang][currentSlug];
-      const newPath = `/${lang}/${newSlug}`;
+      const newPathSegment = OLD_SLUG_REDIRECTS[lang][currentSlug];
+      const newPath = `/${lang}/${newPathSegment}`;
       console.log(`[301 Redirect] Old slug: ${currentPath} -> ${newPath}`);
       setRedirectTo(newPath);
       return;
@@ -135,8 +136,8 @@ const TranslatedRouteMatcher: React.FC<TranslatedRouteMatcherProps> = ({ slug, s
     try {
       const decodedSlug = currentSlug ? decodeURIComponent(currentSlug) : '';
       if (decodedSlug !== currentSlug && OLD_SLUG_REDIRECTS[lang]?.[decodedSlug]) {
-        const newSlug = OLD_SLUG_REDIRECTS[lang][decodedSlug];
-        const newPath = `/${lang}/${newSlug}`;
+        const newPathSegment = OLD_SLUG_REDIRECTS[lang][decodedSlug];
+        const newPath = `/${lang}/${newPathSegment}`;
         console.log(`[301 Redirect] Old encoded slug: ${currentPath} -> ${newPath}`);
         setRedirectTo(newPath);
         return;

@@ -7,17 +7,17 @@
     },
     {
       "source": "/sv/spjutsgjutning",
-      "destination": "/sv/formsprutning",
+      "destination": "/sv/tjanster/formsprutning",
       "permanent": true
     },
     {
       "source": "/sv/sprutgjutning",
-      "destination": "/sv/formsprutning",
+      "destination": "/sv/tjanster/formsprutning",
       "permanent": true
     },
     {
       "source": "/sv/platarbe",
-      "destination": "/sv/platbearbetning",
+      "destination": "/sv/tjanster/platbearbetning",
       "permanent": true
     },
     {
@@ -32,22 +32,22 @@
     },
     {
       "source": "/da/spjutsgodsning",
-      "destination": "/da/sprojtestobning",
+      "destination": "/da/tjenester/sprojtestobning",
       "permanent": true
     },
     {
       "source": "/da/sproejtestoebning",
-      "destination": "/da/sprojtestobning",
+      "destination": "/da/tjenester/sprojtestobning",
       "permanent": true
     },
     {
       "source": "/nb/spjutsgjetting",
-      "destination": "/nb/sproytestoping",
+      "destination": "/nb/tjenester/sproytestoping",
       "permanent": true
     },
     {
       "source": "/nb/sproyetestoping",
-      "destination": "/nb/sproytestoping",
+      "destination": "/nb/tjenester/sproytestoping",
       "permanent": true
     },
     {
@@ -57,7 +57,7 @@
     },
     {
       "source": "/pl/wykończenie-powierzchni",
-      "destination": "/pl/wykonczenie-powierzchni",
+      "destination": "/pl/uslugi/wykonczenie-powierzchni",
       "permanent": true
     }
   ],

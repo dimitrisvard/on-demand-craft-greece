@@ -13,29 +13,29 @@ const REDIRECT_MAP: Record<string, string> = {
   // Dutch Fix - blog post
   '/nl/blog/knoedelen-ontwerpen-voor-diamant-vs-rechte-patronen': '/nl/blog/kartelen-ontwerpen-voor-diamant-vs-rechte-patronen',
   
-  // Swedish Fixes - service pages
-  '/sv/spjutsgjutning': '/sv/formsprutning',
-  '/sv/platarbe': '/sv/platbearbetning',
-  '/sv/sprutgjutning': '/sv/formsprutning', // Also handle this variant
+  // Swedish Fixes - service pages (need /tjanster/ prefix)
+  '/sv/spjutsgjutning': '/sv/tjanster/formsprutning',
+  '/sv/platarbe': '/sv/tjanster/platbearbetning',
+  '/sv/sprutgjutning': '/sv/tjanster/formsprutning', // Also handle this variant
   
   // Swedish Fix - blog post  
   '/sv/blog/krapplingsoperationer-design-for-diamant-vs-raka-monster': '/sv/blogg/lattring-operationer-design-for-diamant-vs-raka-monster',
   '/sv/blogg/krapplingsoperationer-design-for-diamant-vs-raka-monster': '/sv/blogg/lattring-operationer-design-for-diamant-vs-raka-monster',
   
-  // Danish Fix - service page
-  '/da/spjutsgodsning': '/da/sprojtestobning',
-  '/da/sproejtestoebning': '/da/sprojtestobning', // Also handle old variant
+  // Danish Fix - service page (need /tjenester/ prefix)
+  '/da/spjutsgodsning': '/da/tjenester/sprojtestobning',
+  '/da/sproejtestoebning': '/da/tjenester/sprojtestobning', // Also handle old variant
   
-  // Norwegian Fix - service page
-  '/nb/spjutsgjetting': '/nb/sproytestoping',
-  '/nb/sproyetestoping': '/nb/sproytestoping', // Also handle old variant
+  // Norwegian Fix - service page (need /tjenester/ prefix)
+  '/nb/spjutsgjetting': '/nb/tjenester/sproytestoping',
+  '/nb/sproyetestoping': '/nb/tjenester/sproytestoping', // Also handle old variant
   
   // Italian Fix - blog post
   '/it/blog/minimizzare-chiacchiericcio-fresatura-cavita-profonde': '/it/blog/minimizzare-vibrazioni-fresatura-cavita-profonde',
   
-  // Polish Fix - service page (handling special character)
-  '/pl/wykończenie-powierzchni': '/pl/wykonczenie-powierzchni',
-  '/pl/wyko%C5%84czenie-powierzchni': '/pl/wykonczenie-powierzchni', // URL encoded version
+  // Polish Fix - service page (need /uslugi/ prefix, handling special character)
+  '/pl/wykończenie-powierzchni': '/pl/uslugi/wykonczenie-powierzchni',
+  '/pl/wyko%C5%84czenie-powierzchni': '/pl/uslugi/wykonczenie-powierzchni', // URL encoded version
 };
 
 // Additional patterns for "Frankenstein" URLs (malformed concatenations)
