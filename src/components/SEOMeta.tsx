@@ -2,6 +2,7 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTranslation } from 'react-i18next';
+import { translateUrlPath, reverseTranslateUrlPath } from '../utils/urlSlugTranslator';
 
 interface SEOMetaProps {
   title?: string;
@@ -25,7 +26,7 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
   disableDefaultHreflang = false
 }) => {
   const { currentLanguage, supportedLanguages, getLocalizedPath, getPathWithoutLanguage } = useLanguage();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   // Default values
   const defaultTitle = t('home_title') || 'MicronsHub - Precision Manufacturing';
@@ -36,42 +37,72 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
   const pageKeywords = keywords || t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding');
 
   // Generate canonical URL
-  const baseUrl = window.location.origin;
+  const baseUrl = 'https://www.micronshub.eu';
   const currentPath = window.location.pathname;
   
   // Check if current path should have language prefix
   const shouldHaveLanguagePrefix = !['/dashboard', '/customers', '/partners', '/calendar', '/products', '/rfq', '/orders', '/cookie-policy'].some(route => currentPath.startsWith(route));
   
+  // Helper function to get the English path from the current path
+  const getEnglishPathFromCurrent = (): string => {
+    const cleanPath = getPathWithoutLanguage(currentPath);
+    if (currentLanguage !== 'en' && cleanPath !== '/') {
+      const tForLang = i18n.getFixedT(currentLanguage);
+      return reverseTranslateUrlPath(cleanPath, currentLanguage, tForLang);
+    }
+    return cleanPath;
+  };
+
+  // Helper function to translate a path for a specific language
+  const getTranslatedPathForLanguage = (englishPath: string, targetLang: string): string => {
+    if (targetLang === 'en' || englishPath === '/' || englishPath === '') {
+      return englishPath === '/' ? '' : englishPath;
+    }
+    const tForLang = i18n.getFixedT(targetLang);
+    return translateUrlPath(englishPath, targetLang, tForLang);
+  };
+
   let canonical;
   if (canonicalUrl) {
     canonical = canonicalUrl;
   } else if (shouldHaveLanguagePrefix) {
-    // For language-prefixed routes, ensure canonical has language
-    if (currentPath.startsWith(`/${currentLanguage}`)) {
-      canonical = `${baseUrl}${currentPath}`;
-    } else {
-      // Use the cleaned path to avoid duplication
-      const cleanPath = getPathWithoutLanguage(currentPath);
-      canonical = `${baseUrl}/${currentLanguage}${cleanPath === '/' ? '' : cleanPath}`;
-    }
+    // For language-prefixed routes, ensure canonical has the correct translated URL
+    // Get the English path first, then translate to current language
+    const englishPath = getEnglishPathFromCurrent();
+    const translatedPath = getTranslatedPathForLanguage(englishPath, currentLanguage);
+    canonical = `${baseUrl}/${currentLanguage}${translatedPath}`;
   } else {
     // For non-language routes, use as-is
     canonical = `${baseUrl}${currentPath}`;
   }
 
-  // Generate hreflang URLs for all supported languages
-  const computedHreflangLinks = hreflangLinks || (disableDefaultHreflang ? [] : Object.keys(supportedLanguages).map(lang => {
-    let url;
-    if (shouldHaveLanguagePrefix) {
-      // For language-prefixed routes, generate language alternatives using cleaned path
-      const cleanPath = getPathWithoutLanguage(currentPath);
-      url = `${baseUrl}/${lang}${cleanPath === '/' ? '' : cleanPath}`;
-    } else {
-      // For non-language routes, use the same URL for all languages
-      url = `${baseUrl}${currentPath}`;
-    }
-    return { lang, url };
-  }));
+  // Generate hreflang URLs for all supported languages with TRANSLATED slugs
+  const computedHreflangLinks = hreflangLinks || (disableDefaultHreflang ? [] : (() => {
+    // Get the English path first (reverse translate from current language)
+    const englishPath = getEnglishPathFromCurrent();
+    
+    // Generate hreflang for each language with proper translated URLs
+    const links = Object.keys(supportedLanguages).map(lang => {
+      let url;
+      if (shouldHaveLanguagePrefix) {
+        // Translate the English path to this language
+        const translatedPath = getTranslatedPathForLanguage(englishPath, lang);
+        url = `${baseUrl}/${lang}${translatedPath}`;
+      } else {
+        // For non-language routes, use the same URL for all languages
+        url = `${baseUrl}${currentPath}`;
+      }
+      return { lang, url };
+    });
+    
+    // Add x-default pointing to English version
+    const englishUrl = shouldHaveLanguagePrefix 
+      ? `${baseUrl}/en${englishPath === '/' ? '' : englishPath}`
+      : `${baseUrl}${currentPath}`;
+    links.push({ lang: 'x-default', url: englishUrl });
+    
+    return links;
+  })());
 
   return (
     <Helmet>

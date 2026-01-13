@@ -1,4 +1,66 @@
 {
+  "redirects": [
+    {
+      "source": "/nl/blog/knoedelen-ontwerpen-voor-diamant-vs-rechte-patronen",
+      "destination": "/nl/blog/kartelen-ontwerpen-voor-diamant-vs-rechte-patronen",
+      "permanent": true
+    },
+    {
+      "source": "/sv/spjutsgjutning",
+      "destination": "/sv/formsprutning",
+      "permanent": true
+    },
+    {
+      "source": "/sv/sprutgjutning",
+      "destination": "/sv/formsprutning",
+      "permanent": true
+    },
+    {
+      "source": "/sv/platarbe",
+      "destination": "/sv/platbearbetning",
+      "permanent": true
+    },
+    {
+      "source": "/sv/blog/krapplingsoperationer-design-for-diamant-vs-raka-monster",
+      "destination": "/sv/blogg/lattring-operationer-design-for-diamant-vs-raka-monster",
+      "permanent": true
+    },
+    {
+      "source": "/sv/blogg/krapplingsoperationer-design-for-diamant-vs-raka-monster",
+      "destination": "/sv/blogg/lattring-operationer-design-for-diamant-vs-raka-monster",
+      "permanent": true
+    },
+    {
+      "source": "/da/spjutsgodsning",
+      "destination": "/da/sprojtestobning",
+      "permanent": true
+    },
+    {
+      "source": "/da/sproejtestoebning",
+      "destination": "/da/sprojtestobning",
+      "permanent": true
+    },
+    {
+      "source": "/nb/spjutsgjetting",
+      "destination": "/nb/sproytestoping",
+      "permanent": true
+    },
+    {
+      "source": "/nb/sproyetestoping",
+      "destination": "/nb/sproytestoping",
+      "permanent": true
+    },
+    {
+      "source": "/it/blog/minimizzare-chiacchiericcio-fresatura-cavita-profonde",
+      "destination": "/it/blog/minimizzare-vibrazioni-fresatura-cavita-profonde",
+      "permanent": true
+    },
+    {
+      "source": "/pl/wykończenie-powierzchni",
+      "destination": "/pl/wykonczenie-powierzchni",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/sitemap.xml",

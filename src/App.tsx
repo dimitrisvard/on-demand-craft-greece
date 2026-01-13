@@ -10,6 +10,7 @@ import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import TranslatedRouteMatcher from './components/TranslatedRouteMatcher';
+import SEORedirects from './components/SEORedirects';
 
 // Lazy load pages to reduce initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -91,6 +92,7 @@ function AppContent() {
   return (
     <>
       <ScrollToTop />
+      <SEORedirects />
       <LanguageProvider>
         <AuthProvider>
             <Navbar />
