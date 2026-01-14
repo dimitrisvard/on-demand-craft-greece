@@ -111,7 +111,7 @@ export default async function handler(req, res) {
                 </div>
                 <div style="text-align: center;">
                   <p style="color: #1e40af; font-weight: bold; margin: 0; font-size: 16px;">📱 Phone</p>
-                  <a href="tel:+306970077401" style="color: #3b82f6; text-decoration: none; font-size: 14px;">+30-697-00-77-401</a>
+                  <a href="tel:+302104447830" style="color: #3b82f6; text-decoration: none; font-size: 14px;">+302104447830</a>
                 </div>
               </div>
             </div>
@@ -123,7 +123,7 @@ export default async function handler(req, res) {
               <strong>Microns Hub</strong> - Precision Manufacturing Solutions
             </p>
             <p style="margin: 0; font-size: 12px;">
-              Kosti Fragkouli 3, Heraklion, Greece 71414 | VAT ID: EL137232320
+              Industrial Area Street B Number 4, Heraklion, Greece 71601 | VAT ID: EL803129638
             </p>
             <p style="margin: 10px 0 0 0; font-size: 12px;">
               <a href="https://micronshub.eu" style="color: #3b82f6; text-decoration: none;">www.micronshub.eu</a>

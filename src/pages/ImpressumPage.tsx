@@ -32,19 +32,19 @@ const ImpressumPage = () => {
 
             <div className="mb-4">
               <h3 className="font-semibold">{t('impressum_acting_under')}:</h3>
-              <p>Microns Hub</p>
+              <p>MICRONS HUB DV Ε.Ε.</p>
             </div>
 
             <div className="mb-4">
               <h3 className="font-semibold">{t('impressum_address')}:</h3>
-              <p>Kosti Fragkouli 3<br />71414 Heraklion<br />Griechenland</p>
+              <p>Industrial Area Street B Number 4<br />71601 Heraklion<br />Griechenland</p>
             </div>
           </section>
 
           <section>
             <h3 className="font-semibold mb-2">{t('impressum_contact')}:</h3>
             <p>
-              {t('impressum_phone', 'Phone')}: +30 697 00 77 401<br />
+              {t('impressum_phone', 'Phone')}: +302104447830<br />
               {t('impressum_email', 'E-Mail')}: <a href="mailto:info@micronshub.eu" className="text-brand-accent hover:underline">info@micronshub.eu</a>
             </p>
           </section>

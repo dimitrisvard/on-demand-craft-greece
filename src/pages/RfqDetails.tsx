@@ -947,13 +947,13 @@ const RfqDetails = (props: RfqDetailsProps) => {
     // Prepare the data structure as per requirements
     const data = {
       seller: {
-        company_name: 'Microns Hub',
+        company_name: 'MICRONS HUB DV Ε.Ε.',
         address_lines: [
-          'Kosti Fragkouli 3',
-          'Heraklion Greece 71414',
-          '+30-697-00-77-401',
+          'Industrial Area Street B Number 4',
+          'Heraklion Greece 71601',
+          '+302104447830',
           'info@micronshub.eu',
-          'VAT ID EL137232320'
+          'VAT ID EL803129638'
         ],
       },
       buyer: {
@@ -1097,22 +1097,22 @@ const RfqDetails = (props: RfqDetailsProps) => {
       <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
         <strong>This offer is made as an intra-community supply (tax rate 0%) under the condition that the required VAT identification<br/>
         number of the invoice recipient is subsequently submitted.</strong><br/><br/>
-        The listed prices are net prices. Should you have any questions, please do not hesitate to call us at <strong>+30-697-00-77-401</strong>
+        The listed prices are net prices. Should you have any questions, please do not hesitate to call us at <strong>+302104447830</strong>
       </div>
       
       <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">
         <div style="text-align:left;">
-          <div style="font-weight:bold;margin-bottom:4px;">Microns Hub</div>
-          <div>Kosti Fragkouli 3</div>
+          <div style="font-weight:bold;margin-bottom:4px;">MICRONS HUB DV Ε.Ε.</div>
+          <div>Industrial Area Street B Number 4</div>
           <div>Heraklion Greece</div>
-          <div>71414</div>
+          <div>71601</div>
         </div>
         
         <div style="text-align:center;">
           <div style="font-weight:bold;margin-bottom:4px;">Trade Register</div>
           <div>Greece</div>
           <div style="margin-top:8px;font-weight:bold;">VAT ID</div>
-          <div>EL137232320</div>
+          <div>EL803129638</div>
         </div>
         
         <div style="text-align:center;">

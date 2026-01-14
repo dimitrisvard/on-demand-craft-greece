@@ -66,7 +66,7 @@ const QuoteSuccess = () => {
               </li>
               <li className="flex items-start">
                 <span className="text-blue-600 mr-2">•</span>
-                {t('quote_success_urgent', 'If urgent, call us directly at +30-697-00-77-401')}
+                {t('quote_success_urgent', 'If urgent, call us directly at +302104447830')}
               </li>
             </ul>
           </div>

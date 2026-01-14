@@ -61,7 +61,7 @@ const Footer = () => {
               </li>
               <li className="flex items-center">
                 <Phone size={18} className="mr-2 text-brand-accent" />
-                <span className="text-gray-600">+30-697-00-77-401</span>
+                <span className="text-gray-600">+302104447830</span>
               </li>
               <li className="flex items-center">
                 <Mail size={18} className="mr-2 text-brand-accent" />
@@ -69,7 +69,7 @@ const Footer = () => {
               </li>
               <li className="flex items-center">
                 <FileText size={18} className="mr-2 text-brand-accent" />
-                <span className="text-gray-600">{t('footer_vat_label', 'VAT Number')}: EL137232320</span>
+                <span className="text-gray-600">{t('footer_vat_label', 'VAT Number')}: EL803129638</span>
               </li>
               <li className="flex items-center">
                 <Scale size={18} className="mr-2 text-brand-accent" />
