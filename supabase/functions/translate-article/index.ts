@@ -60,10 +60,13 @@ interface GeminiResponse {
 }
 
 // Helper function to make a single Gemini API call with conversation history
+// Includes automatic retry with exponential backoff for rate limiting (429)
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
-  timeoutMs: number = 180000
+  timeoutMs: number = 180000,
+  retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
+  const MAX_RETRIES = 3;
   const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
@@ -88,6 +91,21 @@ async function callGeminiSingle(
     });
 
     clearTimeout(timeoutId);
+
+    // Handle rate limiting (429) with exponential backoff
+    if (response.status === 429) {
+      if (retryCount >= MAX_RETRIES) {
+        throw new Error(`Gemini API rate limited after ${MAX_RETRIES} retries. Please wait a few minutes and try again.`);
+      }
+      
+      // Exponential backoff: 15s, 30s, 60s
+      const waitTime = Math.min(15000 * Math.pow(2, retryCount), 60000);
+      console.warn(`[RATE LIMIT] Gemini API returned 429, waiting ${waitTime/1000}s before retry ${retryCount + 1}/${MAX_RETRIES}...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      
+      // Recursive retry
+      return callGeminiSingle(contents, timeoutMs, retryCount + 1);
+    }
 
     if (!response.ok) {
       const err = await response.text();
@@ -1420,8 +1438,12 @@ serve(async (req) => {
         results[lang.code] = { success: false, error: err.message, langCode: lang.code, isSpecialCharLang };
       }
 
-      // Small delay between languages
-      if (i < langs.length - 1) await new Promise(r => setTimeout(r, 500));
+      // Delay between languages to avoid rate limiting
+      // Gemini API has strict rate limits - need at least 5s between major requests
+      if (i < langs.length - 1) {
+        console.log(`[RATE LIMIT] Waiting 5s before next language to avoid rate limits...`);
+        await new Promise(r => setTimeout(r, 5000));
+      }
     }
 
     // Update master status

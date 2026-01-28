@@ -347,6 +347,11 @@ const BlogEditor = () => {
             console.error(`Batch ${batchIndex + 1} failed:`, errorMessage);
             console.error(`Full response:`, result);
             
+            // Check if it's a rate limit error
+            const isRateLimited = errorMessage.toLowerCase().includes('rate') || 
+                                  errorMessage.includes('429') ||
+                                  errorMessage.toLowerCase().includes('too many');
+            
             // Count actual failures from details if available
             if (result.details) {
               const detailsArray = Object.values(result.details);
@@ -359,10 +364,17 @@ const BlogEditor = () => {
             }
             
             toast({
-              title: `⚠️ Batch ${batchIndex + 1} had issues`,
-              description: errorMessage,
+              title: isRateLimited ? `⏳ Rate limited - Batch ${batchIndex + 1}` : `⚠️ Batch ${batchIndex + 1} had issues`,
+              description: isRateLimited 
+                ? "API rate limit reached. Waiting 30s before continuing..."
+                : errorMessage,
               variant: "destructive"
             });
+            
+            // Extra wait time if rate limited
+            if (isRateLimited && batchIndex < batches.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 30000));
+            }
           } else {
             totalSuccessful += result.translations || 0;
             totalFailed += result.failed_count || 0;
@@ -373,10 +385,14 @@ const BlogEditor = () => {
           totalFailed += batch.length;
         }
 
-        // Wait 10 seconds between batches to be safe with Gemini API rate limits
-        // The free tier has strict RPM limits, especially with large articles
+        // Wait 20 seconds between batches to be safe with Gemini API rate limits
+        // The API has strict RPM limits, especially with large articles and table translations
         if (batchIndex < batches.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 10000));
+          toast({
+            title: `⏳ Rate limit protection`,
+            description: `Waiting 20s before next batch to avoid API limits...`,
+          });
+          await new Promise(resolve => setTimeout(resolve, 20000));
         }
       }
 
