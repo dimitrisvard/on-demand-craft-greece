@@ -64,7 +64,7 @@ async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
   timeoutMs: number = 180000
 ): Promise<{ text: string; finishReason: string }> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${geminiApiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -1290,9 +1290,6 @@ serve(async (req) => {
 
   const startTime = Date.now();
   console.log(`[translate-article] Version: ${VERSION}`);
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:299',message:'Function entry',data:{version:VERSION},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-  // #endregion
 
   try {
     const { article_id, target_languages } = await req.json();
@@ -1301,16 +1298,8 @@ serve(async (req) => {
     }
 
     // Fetch English article
-    // #region agent log
-    const dbFetchStartTime = Date.now();
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:309',message:'DB fetch start',data:{article_id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     const { data: master, error: fetchErr } = await supabase
       .from("articles").select("*").eq("id", article_id).eq("language", "en").single();
-    // #region agent log
-    const dbFetchDuration = Date.now() - dbFetchStartTime;
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:310',message:'DB fetch complete',data:{duration:dbFetchDuration,contentLength:master?.content?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
     
     if (fetchErr || !master) {
       return new Response(JSON.stringify({ error: "English article not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1331,9 +1320,6 @@ serve(async (req) => {
       : LANGUAGES;
     
     console.log(`Languages: ${langs.map(l => l.code).join(", ")}`);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:330',message:'Languages determined',data:{totalLanguages:langs.length,languageCodes:langs.map(l=>l.code)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
 
     const results: Record<string, any> = {};
     const urls: string[] = [`${siteUrl}/en/blog/${master.slug}`];
@@ -1341,9 +1327,6 @@ serve(async (req) => {
     for (let i = 0; i < langs.length; i++) {
       const lang = langs[i];
       const elapsed = Date.now() - startTime;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:337',message:'Language loop iteration',data:{iteration:i+1,total:langs.length,langCode:lang.code,elapsed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       
       // NOTE: The auto-translate-articles function now calls this function once per language,
       // so each call only processes 1 language. Pro plan has 400s wall clock duration.
@@ -1353,17 +1336,9 @@ serve(async (req) => {
 
       try {
         // Check if exists
-        // #region agent log
-        const checkStartTime = Date.now();
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:349',message:'Check existing translation start',data:{langCode:lang.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         const { data: existing } = await supabase
           .from("articles").select("id, title, slug")
           .eq("translation_id", master.translation_id).eq("language", lang.code).single();
-        // #region agent log
-        const checkDuration = Date.now() - checkStartTime;
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:350',message:'Check existing translation complete',data:{duration:checkDuration,exists:!!existing},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
 
         if (existing) {
           console.log(`${lang.code} already exists, skipping`);
@@ -1390,10 +1365,6 @@ serve(async (req) => {
         
         while (retryCount <= maxRetries) {
           try {
-            // #region agent log
-            translateStartTime = Date.now();
-            fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage start',data:{langCode:lang.code,contentLength:original.content.length,retryCount,isSpecialCharLang},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-            // #endregion
             translation = await translateToLanguage(original, lang.name, lang.code);
             break; // Success, exit retry loop
           } catch (translateError: any) {
@@ -1408,16 +1379,8 @@ serve(async (req) => {
             await new Promise(r => setTimeout(r, waitTime));
           }
         }
-        // #region agent log
-        const translateDuration = Date.now() - translateStartTime;
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:361',message:'translateToLanguage complete',data:{duration:translateDuration,translatedLength:translation.content.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H3'})}).catch(()=>{});
-        // #endregion
 
         // Save
-        // #region agent log
-        const saveStartTime = Date.now();
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:364',message:'DB save start',data:{langCode:lang.code},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
         const { data: saved, error: saveErr } = await supabase
           .from("articles")
           .insert([{
@@ -1434,10 +1397,6 @@ serve(async (req) => {
             featured_image_alt: master.featured_image_alt,
           }])
           .select().single();
-        // #region agent log
-        const saveDuration = Date.now() - saveStartTime;
-        fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:379',message:'DB save complete',data:{duration:saveDuration,success:!saveErr},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H5'})}).catch(()=>{});
-        // #endregion
 
         if (saveErr) {
           if (saveErr.code === "23505") {
@@ -1476,9 +1435,6 @@ serve(async (req) => {
     const successful = Object.values(results).filter((r: any) => r.success).length;
     const totalTime = Date.now() - startTime;
     console.log(`Done: ${successful}/${langs.length} in ${totalTime}ms`);
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/9c4eca37-9600-4254-b27a-e5567336f36b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'translate-article/index.ts:412',message:'Function complete',data:{totalTime,successful,totalLanguages:langs.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
 
     return new Response(
       JSON.stringify({

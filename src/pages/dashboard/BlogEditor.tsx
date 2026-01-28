@@ -235,7 +235,7 @@ const BlogEditor = () => {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Translation failed");
+        throw new Error(result.error || result.message || "Translation failed");
       }
 
       const langName = LANGUAGES.find(l => l.code === targetLang)?.name || targetLang.toUpperCase();
