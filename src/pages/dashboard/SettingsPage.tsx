@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
+import ImpressumSettingsForm from '@/components/dashboard/ImpressumSettingsForm';
 
 interface SitemapResult {
   stats: {
@@ -98,9 +99,10 @@ const SettingsPage = () => {
         </div>
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="account">Account</TabsTrigger>
             <TabsTrigger value="seo">SEO & Sitemap</TabsTrigger>
+            <TabsTrigger value="legal">Legal Notice</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="appearance">Appearance</TabsTrigger>
@@ -247,6 +249,10 @@ const SettingsPage = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="legal" className="space-y-4 mt-4">
+            <ImpressumSettingsForm />
           </TabsContent>
 
           <TabsContent value="notifications" className="space-y-4 mt-4">
