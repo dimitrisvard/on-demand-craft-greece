@@ -99,13 +99,13 @@ const SettingsPage = () => {
         </div>
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid w-full grid-cols-6">
-            <TabsTrigger value="account">Account</TabsTrigger>
-            <TabsTrigger value="seo">SEO & Sitemap</TabsTrigger>
-            <TabsTrigger value="legal">Legal Notice</TabsTrigger>
-            <TabsTrigger value="notifications">Notifications</TabsTrigger>
-            <TabsTrigger value="security">Security</TabsTrigger>
-            <TabsTrigger value="appearance">Appearance</TabsTrigger>
+          <TabsList className="flex w-full overflow-x-auto h-auto flex-wrap gap-1 justify-start">
+            <TabsTrigger value="account" className="shrink-0">Account</TabsTrigger>
+            <TabsTrigger value="seo" className="shrink-0">SEO & Sitemap</TabsTrigger>
+            <TabsTrigger value="legal" className="shrink-0">Legal Notice</TabsTrigger>
+            <TabsTrigger value="notifications" className="shrink-0">Notifications</TabsTrigger>
+            <TabsTrigger value="security" className="shrink-0">Security</TabsTrigger>
+            <TabsTrigger value="appearance" className="shrink-0">Appearance</TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="space-y-4 mt-4">
