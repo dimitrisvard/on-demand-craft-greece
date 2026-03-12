@@ -86,6 +86,16 @@ interface ImpressumRow {
   translations: Record<string, TranslationFormValues>;
 }
 
+const DEFAULT_UNIVERSAL: UniversalFormValues = {
+  operator_name: 'Dimitrios Vardalachakis',
+  company_name: 'MICRONS HUB DV Ε.Ε.',
+  address_street: 'Industrial Area Street B Number 4',
+  address_zip_city: '71601 Heraklion',
+  address_country: 'Griechenland',
+  phone: '+302104447830',
+  email: 'info@micronshub.eu',
+};
+
 const fetchImpressumSettings = async (): Promise<ImpressumRow | null> => {
   const { data, error } = await supabase
     .from('impressum_settings')
@@ -102,6 +112,14 @@ const ImpressumSettingsForm = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [selectedLang, setSelectedLang] = useState('en');
+
+  const getTranslationDefaults = (): TranslationFormValues => ({
+    legal_form_detail: t('impressum_legal_form_detail'),
+    register_detail: t('impressum_register_detail'),
+    vat_detail: t('impressum_vat_detail'),
+    eu_dispute_text: t('impressum_eu_dispute_text'),
+    consumer_dispute_text: t('impressum_consumer_dispute_text'),
+  });
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['impressum_settings'],
@@ -121,32 +139,31 @@ const ImpressumSettingsForm = () => {
           phone: settings.phone,
           email: settings.email,
         }
-      : undefined,
+      : DEFAULT_UNIVERSAL,
   });
 
   // Form for translated fields (re-populates when language changes)
   const translationForm = useForm<TranslationFormValues>({
     resolver: zodResolver(translationSchema),
-    values:
-      settings?.translations?.[selectedLang] ??
-      ({
-        legal_form_detail: '',
-        register_detail: '',
-        vat_detail: '',
-        eu_dispute_text: '',
-        consumer_dispute_text: '',
-      } as TranslationFormValues),
+    values: settings?.translations?.[selectedLang] ?? getTranslationDefaults(),
   });
 
   // Mutation to save universal fields
   const universalMutation = useMutation({
     mutationFn: async (values: UniversalFormValues) => {
-      if (!settings?.id) throw new Error('Settings record not found');
-      const { error } = await supabase
-        .from('impressum_settings')
-        .update({ ...values, updated_at: new Date().toISOString() })
-        .eq('id', settings.id);
-      if (error) throw error;
+      const now = new Date().toISOString();
+      if (settings?.id) {
+        const { error } = await supabase
+          .from('impressum_settings')
+          .update({ ...values, updated_at: now })
+          .eq('id', settings.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('impressum_settings')
+          .insert({ ...values, translations: {}, updated_at: now });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['impressum_settings'] });
@@ -160,16 +177,23 @@ const ImpressumSettingsForm = () => {
   // Mutation to save translated fields for selected language
   const translationMutation = useMutation({
     mutationFn: async (values: TranslationFormValues) => {
-      if (!settings?.id) throw new Error('Settings record not found');
+      const now = new Date().toISOString();
       const updatedTranslations = {
-        ...(settings.translations ?? {}),
+        ...(settings?.translations ?? {}),
         [selectedLang]: values,
       };
-      const { error } = await supabase
-        .from('impressum_settings')
-        .update({ translations: updatedTranslations, updated_at: new Date().toISOString() })
-        .eq('id', settings.id);
-      if (error) throw error;
+      if (settings?.id) {
+        const { error } = await supabase
+          .from('impressum_settings')
+          .update({ translations: updatedTranslations, updated_at: now })
+          .eq('id', settings.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('impressum_settings')
+          .insert({ ...DEFAULT_UNIVERSAL, translations: updatedTranslations, updated_at: now });
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['impressum_settings'] });
@@ -365,13 +389,7 @@ const ImpressumSettingsForm = () => {
                 setSelectedLang(val);
                 // Reset form with the new language's values (handled via `values` prop)
                 translationForm.reset(
-                  settings?.translations?.[val] ?? {
-                    legal_form_detail: '',
-                    register_detail: '',
-                    vat_detail: '',
-                    eu_dispute_text: '',
-                    consumer_dispute_text: '',
-                  }
+                  settings?.translations?.[val] ?? getTranslationDefaults()
                 );
               }}
             >
