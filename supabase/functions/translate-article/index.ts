@@ -951,7 +951,7 @@ META DESCRIPTION: ${original.metaDescription}`;
     
     // Check if exact placeholder exists
     if (content.includes(placeholder)) {
-      content = content.replace(placeholder, originalTable);
+      content = content.replace(placeholder, () => originalTable);
       console.log(`[TABLE RESTORE] Restored table ${i + 1}/${tableBlocks.length} using exact placeholder`);
       restored = true;
     } else {
@@ -969,14 +969,14 @@ META DESCRIPTION: ${original.metaDescription}`;
       let found = false;
       for (const pattern of patterns) {
         if (pattern.test(content)) {
-          content = content.replace(pattern, originalTable);
+          content = content.replace(pattern, () => originalTable);
           console.log(`[TABLE RESTORE] Restored table ${i + 1} using pattern match`);
           found = true;
           restored = true;
           break;
         }
       }
-      
+
       if (!found) {
         // Try 1-based indexing (in case Gemini converted 0 to 1)
         const patterns1Based = [
@@ -984,10 +984,10 @@ META DESCRIPTION: ${original.metaDescription}`;
           new RegExp(`<!--\\s*TABLE${i + 1}\\s*-->`, 'gi'),
           new RegExp(`<!--TABLE_${i + 1}-->`, 'gi'),
         ];
-        
+
         for (const pattern of patterns1Based) {
           if (pattern.test(content)) {
-            content = content.replace(pattern, originalTable);
+            content = content.replace(pattern, () => originalTable);
             console.log(`[TABLE RESTORE] Restored table ${i + 1} using 1-based index pattern`);
             found = true;
             restored = true;
@@ -1025,20 +1025,21 @@ META DESCRIPTION: ${original.metaDescription}`;
         
         if (tableBlocks.length > 0) {
           const escapedComment = comment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          content = content.replace(new RegExp(escapedComment, 'g'), tableBlocks[tableIndex].original);
+          const tbl = tableBlocks[tableIndex].original;
+          content = content.replace(new RegExp(escapedComment, 'g'), () => tbl);
           console.log(`[TABLE RESTORE] Replaced remaining comment ${comment} with table ${tableIndex + 1}`);
         }
       }
     }
   }
-  
+
   // Also check for old-style placeholders (in case any remain from previous translations)
   const oldStylePattern = /__\s*TABLE\s*[_\s]*PLACEHOLDER\s*[_\s]*\d+\s*__/gi;
   const oldStyleMatches = content.match(oldStylePattern);
-  
+
   if (oldStyleMatches && oldStyleMatches.length > 0) {
     console.warn(`[TABLE RESTORE] Found ${oldStyleMatches.length} old-style placeholder(s) - replacing...`);
-    
+
     for (const oldPlaceholder of oldStyleMatches) {
       const numberMatch = oldPlaceholder.match(/(\d+)/);
       if (numberMatch) {
@@ -1048,26 +1049,28 @@ META DESCRIPTION: ${original.metaDescription}`;
         }
         if (tableBlocks.length > 0) {
           const escapedPlaceholder = oldPlaceholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          content = content.replace(new RegExp(escapedPlaceholder, 'g'), tableBlocks[tableIndex].original);
+          const tbl = tableBlocks[tableIndex].original;
+          content = content.replace(new RegExp(escapedPlaceholder, 'g'), () => tbl);
           console.log(`[TABLE RESTORE] Replaced old-style placeholder with table ${tableIndex + 1}`);
         }
       }
     }
   }
-  
+
   // Final verification: check if any placeholders remain
   const anyRemainingPattern = /<!--\s*TABLE[^>]*-->|__\s*TABLE[^_]*__/gi;
   const anyRemaining = content.match(anyRemainingPattern);
-  
+
   if (anyRemaining && anyRemaining.length > 0) {
     console.error(`[TABLE RESTORE] CRITICAL: ${anyRemaining.length} placeholder(s) still remain!`);
     console.error(`[TABLE RESTORE] Remaining: ${anyRemaining.join(', ')}`);
-    
+
     // Emergency: replace all remaining with first table
     if (tableBlocks.length > 0) {
+      const firstTbl = tableBlocks[0].original;
       for (const remaining of anyRemaining) {
         const escapedRemaining = remaining.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        content = content.replace(new RegExp(escapedRemaining, 'g'), tableBlocks[0].original);
+        content = content.replace(new RegExp(escapedRemaining, 'g'), () => firstTbl);
       }
       console.error(`[TABLE RESTORE] Emergency: replaced all remaining placeholders with first table`);
     }

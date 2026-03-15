@@ -479,7 +479,9 @@ const BlogEditor = () => {
         description: `Fixed ${result.links_fixed || 0} link(s) in ${result.articles_updated || 0} article(s). All translations have been automatically saved.`,
       });
 
-      // Refresh the current article to show updated content
+      // Refresh the current article and reset tablesFixed so the table
+      // preservation effect re-runs (otherwise ReactQuill strips tables on re-render)
+      setTablesFixed(false);
       await fetchArticle(id);
     } catch (error: any) {
       console.error("Error fixing links:", error);
