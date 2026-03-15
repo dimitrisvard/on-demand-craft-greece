@@ -74,7 +74,7 @@ const BlogPost = () => {
           .neq('id', currentArticle.id); // Exclude current article
 
         if (translations) {
-          const baseUrl = window.location.origin;
+          const baseUrl = 'https://www.micronshub.eu';
           
           // Create links for translations
           const links = translations.map(t => ({
@@ -130,14 +130,14 @@ const BlogPost = () => {
     "author": [{
         "@type": "Person",
         "name": "MicronsHub Team",
-        "url": "https://micronshub.com" 
+        "url": "https://www.micronshub.eu"
     }],
     "publisher": {
         "@type": "Organization",
         "name": "MicronsHub",
         "logo": {
             "@type": "ImageObject",
-            "url": "https://micronshub.com/logo.png"
+            "url": "https://www.micronshub.eu/logo.png"
         }
     },
     "description": article.meta_description || article.excerpt || ""

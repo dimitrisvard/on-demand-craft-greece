@@ -1,5 +1,6 @@
 import React from 'react';
 import { Helmet } from 'react-helmet-async';
+import { useLocation } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTranslation } from 'react-i18next';
 import { translateUrlPath, reverseTranslateUrlPath } from '../utils/urlSlugTranslator';
@@ -27,18 +28,18 @@ const SEOMeta: React.FC<SEOMetaProps> = ({
 }) => {
   const { currentLanguage, supportedLanguages, getLocalizedPath, getPathWithoutLanguage } = useLanguage();
   const { t, i18n } = useTranslation();
+  const { pathname: currentPath } = useLocation();
 
   // Default values
   const defaultTitle = t('home_title') || 'MicronsHub - Precision Manufacturing';
   const defaultDescription = t('home_subtitle') || 'Professional CNC machining, 3D printing, and manufacturing services';
-  
+
   const pageTitle = title || defaultTitle;
   const pageDescription = description || defaultDescription;
   const pageKeywords = keywords || t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding');
 
   // Generate canonical URL
   const baseUrl = 'https://www.micronshub.eu';
-  const currentPath = window.location.pathname;
   
   // Check if current path should have language prefix
   const shouldHaveLanguagePrefix = !['/dashboard', '/customers', '/partners', '/calendar', '/products', '/rfq', '/orders', '/cookie-policy'].some(route => currentPath.startsWith(route));
