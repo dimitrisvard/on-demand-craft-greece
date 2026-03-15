@@ -14,334 +14,156 @@ const corsHeaders = {
 };
 
 // All supported languages
-const LANGUAGES = ["en", "de", "fr", "es", "it", "nl", "pl", "sv", "da", "fi", "cs", "hu", "pt", "nb"];
+const LANGUAGES = ["en", "de", "fr", "es", "it", "nl", "pl", "pt", "sv", "da", "fi", "nb", "hu", "cs"];
 
-// Static pages that exist for all languages (English paths - will be translated)
-const STATIC_PAGES = [
-  { path: "", priority: "1.0", changefreq: "weekly" },
-  { path: "/services", priority: "0.9", changefreq: "monthly" },
-  { path: "/cnc-machining", priority: "0.8", changefreq: "monthly" },
-  { path: "/sheet-metal", priority: "0.8", changefreq: "monthly" },
-  { path: "/3d-printing", priority: "0.8", changefreq: "monthly" },
-  { path: "/injection-molding", priority: "0.8", changefreq: "monthly" },
-  { path: "/surface-finish", priority: "0.8", changefreq: "monthly" },
-  { path: "/rapid-prototyping", priority: "0.8", changefreq: "monthly" },
-  { path: "/about", priority: "0.7", changefreq: "monthly" },
-  { path: "/industries", priority: "0.7", changefreq: "monthly" },
-  { path: "/contact", priority: "0.7", changefreq: "monthly" },
-  { path: "/quote", priority: "0.9", changefreq: "monthly" },
-];
-
-// URL slug translations for each language
-// Maps: language -> English slug -> translated slug
-const SLUG_TRANSLATIONS: Record<string, Record<string, string>> = {
-  en: {
-    "services": "services",
-    "about": "about",
-    "contact": "contact",
-    "quote": "quote",
-    "industries": "industries",
-    "our-work": "our-work",
-    "blog": "blog",
-    "cnc-machining": "cnc-machining",
-    "sheet-metal": "sheet-metal",
-    "3d-printing": "3d-printing",
-    "injection-molding": "injection-molding",
-    "surface-finish": "surface-finish",
-    "rapid-prototyping": "rapid-prototyping",
-  },
-  de: {
-    "services": "dienstleistungen",
-    "about": "ueber-uns",
-    "contact": "kontakt",
-    "quote": "angebot",
-    "industries": "branchen",
-    "our-work": "unsere-arbeit",
-    "blog": "blog",
-    "cnc-machining": "cnc-bearbeitung",
-    "sheet-metal": "blechbearbeitung",
-    "3d-printing": "3d-druck",
-    "injection-molding": "spritzguss",
-    "surface-finish": "oberflaechenveredelung",
-    "rapid-prototyping": "rapid-prototyping",
-  },
-  fr: {
-    "services": "services",
-    "about": "a-propos",
-    "contact": "contact",
-    "quote": "devis",
-    "industries": "industries",
-    "our-work": "notre-travail",
-    "blog": "blog",
-    "cnc-machining": "usinage-cnc",
-    "sheet-metal": "tolerie",
-    "3d-printing": "impression-3d",
-    "injection-molding": "injection-plastique",
-    "surface-finish": "finition-de-surface",
-    "rapid-prototyping": "prototypage-rapide",
-  },
-  es: {
-    "services": "servicios",
-    "about": "acerca-de",
-    "contact": "contacto",
-    "quote": "cotizacion",
-    "industries": "industrias",
-    "our-work": "nuestro-trabajo",
-    "blog": "blog",
-    "cnc-machining": "mecanizado-cnc",
-    "sheet-metal": "chapa-metalica",
-    "3d-printing": "impresion-3d",
-    "injection-molding": "moldeo-por-inyeccion",
-    "surface-finish": "acabado-de-superficie",
-    "rapid-prototyping": "prototipado-rapido",
-  },
-  it: {
-    "services": "servizi",
-    "about": "chi-siamo",
-    "contact": "contatto",
-    "quote": "preventivo",
-    "industries": "settori",
-    "our-work": "il-nostro-lavoro",
-    "blog": "blog",
-    "cnc-machining": "lavorazione-cnc",
-    "sheet-metal": "lavorazione-lamiera",
-    "3d-printing": "stampa-3d",
-    "injection-molding": "stampaggio-iniezione",
-    "surface-finish": "finitura-superficiale",
-    "rapid-prototyping": "prototipazione-rapida",
-  },
-  nl: {
-    "services": "diensten",
-    "about": "over-ons",
-    "contact": "contact",
-    "quote": "offerte",
-    "industries": "industrieen",
-    "our-work": "ons-werk",
-    "blog": "blog",
-    "cnc-machining": "cnc-bewerking",
-    "sheet-metal": "plaatbewerking",
-    "3d-printing": "3d-printen",
-    "injection-molding": "spuitgieten",
-    "surface-finish": "oppervlakteafwerking",
-    "rapid-prototyping": "rapid-prototyping",
-  },
-  pl: {
-    "services": "uslugi",
-    "about": "o-nas",
-    "contact": "kontakt",
-    "quote": "wycena",
-    "industries": "branze",
-    "our-work": "nasza-praca",
-    "blog": "blog",
-    "cnc-machining": "obrobka-cnc",
-    "sheet-metal": "obrobka-bluzy",
-    "3d-printing": "drukowanie-3d",
-    "injection-molding": "wtrysk-tworzywa",
-    "surface-finish": "wykonczenie-powierzchni",
-    "rapid-prototyping": "szybkie-prototypowanie",
-  },
-  sv: {
-    "services": "tjanster",
-    "about": "om-oss",
-    "contact": "kontakt",
-    "quote": "offert",
-    "industries": "branscher",
-    "our-work": "vart-arbete",
-    "blog": "blog",
-    "cnc-machining": "cnc-bearbetning",
-    "sheet-metal": "platbearbetning",
-    "3d-printing": "3d-utskrift",
-    "injection-molding": "formsprutning",
-    "surface-finish": "ytbehandling",
-    "rapid-prototyping": "snabbprototypning",
-  },
-  da: {
-    "services": "tjenester",
-    "about": "om-os",
-    "contact": "kontakt",
-    "quote": "tilbud",
-    "industries": "brancher",
-    "our-work": "vores-arbejde",
-    "blog": "blog",
-    "cnc-machining": "cnc-bearbejdning",
-    "sheet-metal": "pladearbejde",
-    "3d-printing": "3d-print",
-    "injection-molding": "sprojtestobning",
-    "surface-finish": "overfladebehandling",
-    "rapid-prototyping": "hurtig-prototypning",
-  },
-  fi: {
-    "services": "palvelut",
-    "about": "meista",
-    "contact": "yhteystiedot",
-    "quote": "tarjous",
-    "industries": "toimialat",
-    "our-work": "tyomme",
-    "blog": "blog",
-    "cnc-machining": "cnc-työstö",
-    "sheet-metal": "levytyöstö",
-    "3d-printing": "3d-tulostus",
-    "injection-molding": "ruiskupuristus",
-    "surface-finish": "pintakasittely",
-    "rapid-prototyping": "nopea-prototyypointi",
-  },
-  cs: {
-    "services": "sluzby",
-    "about": "o-nas",
-    "contact": "kontakt",
-    "quote": "nabidka",
-    "industries": "odvetvi",
-    "our-work": "nase-prace",
-    "blog": "blog",
-    "cnc-machining": "cnc-obrabeni",
-    "sheet-metal": "obrabeni-plechu",
-    "3d-printing": "3d-tisk",
-    "injection-molding": "vstrikovani",
-    "surface-finish": "uprava-povrchu",
-    "rapid-prototyping": "rychle-prototypovani",
-  },
-  hu: {
-    "services": "szolgaltatasok",
-    "about": "rolunk",
-    "contact": "kapcsolat",
-    "quote": "ajanlat",
-    "industries": "iparagak",
-    "our-work": "munkank",
-    "blog": "blog",
-    "cnc-machining": "cnc-megmunkalas",
-    "sheet-metal": "lemezfeldolgozas",
-    "3d-printing": "3d-nyomtatas",
-    "injection-molding": "frccsnyomas",
-    "surface-finish": "feluletkezeles",
-    "rapid-prototyping": "gyors-prototipus",
-  },
-  pt: {
-    "services": "servicos",
-    "about": "sobre-nos",
-    "contact": "contato",
-    "quote": "orcamento",
-    "industries": "industrias",
-    "our-work": "nosso-trabalho",
-    "blog": "blog",
-    "cnc-machining": "usinagem-cnc",
-    "sheet-metal": "chapa-metalica",
-    "3d-printing": "impressao-3d",
-    "injection-molding": "moldagem-injecao",
-    "surface-finish": "acabamento-de-superficie",
-    "rapid-prototyping": "prototipagem-rapida",
-  },
-  nb: {
-    "services": "tjenester",
-    "about": "om-oss",
-    "contact": "kontakt",
-    "quote": "tilbud",
-    "industries": "bransjer",
-    "our-work": "vart-arbeid",
-    "blog": "blog",
-    "cnc-machining": "cnc-bearbeiding",
-    "sheet-metal": "platarbeid",
-    "3d-printing": "3d-utskrift",
-    "injection-molding": "sproytestoping",
-    "surface-finish": "overflatebehandling",
-    "rapid-prototyping": "rask-prototyping",
-  },
+// URL slugs per language — must match api/sitemap.xml.js and src/locales translations
+const SLUGS: Record<string, Record<string, string>> = {
+  en: { services: 'services', about: 'about', contact: 'contact', quote: 'quote', industries: 'industries', ourWork: 'our-work', blog: 'blog', cnc: 'cnc-machining', sheetMetal: 'sheet-metal', printing: '3d-printing', injection: 'injection-molding', surface: 'surface-finishes', rapid: 'rapid-prototyping' },
+  de: { services: 'dienstleistungen', about: 'ueber-uns', contact: 'kontakt', quote: 'angebot', industries: 'branchen', ourWork: 'unsere-arbeit', blog: 'blog', cnc: 'cnc-bearbeitung', sheetMetal: 'blechbearbeitung', printing: '3d-druck', injection: 'spritzguss', surface: 'oberflaechenveredelung', rapid: 'rapid-prototyping' },
+  fr: { services: 'services', about: 'a-propos', contact: 'contact', quote: 'devis', industries: 'secteurs', ourWork: 'notre-travail', blog: 'blog', cnc: 'usinage-cnc', sheetMetal: 'tolerie', printing: 'impression-3d', injection: 'injection-plastique', surface: 'finition-surface', rapid: 'prototypage-rapide' },
+  es: { services: 'servicios', about: 'sobre-nosotros', contact: 'contacto', quote: 'cotizacion', industries: 'industrias', ourWork: 'nuestro-trabajo', blog: 'blog', cnc: 'mecanizado-cnc', sheetMetal: 'chapa-metalica', printing: 'impresion-3d', injection: 'moldeo-por-inyeccion', surface: 'acabados-superficie', rapid: 'prototipado-rapido' },
+  it: { services: 'servizi', about: 'chi-siamo', contact: 'contatto', quote: 'preventivo', industries: 'settori', ourWork: 'i-nostri-lavori', blog: 'blog', cnc: 'lavorazione-cnc', sheetMetal: 'lavorazione-lamiera', printing: 'stampa-3d', injection: 'stampaggio-iniezione', surface: 'finitura-superficie', rapid: 'prototipazione-rapida' },
+  nl: { services: 'diensten', about: 'over-ons', contact: 'contact', quote: 'offerte', industries: 'branches', ourWork: 'ons-werk', blog: 'blog', cnc: 'cnc-bewerking', sheetMetal: 'plaatbewerking', printing: '3d-printen', injection: 'spuitgieten', surface: 'oppervlakteafwerking', rapid: 'rapid-prototyping' },
+  pl: { services: 'uslugi', about: 'o-nas', contact: 'kontakt', quote: 'wycena', industries: 'branze', ourWork: 'nasza-praca', blog: 'blog', cnc: 'obrobka-cnc', sheetMetal: 'obrobka-bluzy', printing: 'druk-3d', injection: 'wtrysk-tworzywa', surface: 'wykonczenie-powierzchni', rapid: 'szybkie-prototypowanie' },
+  pt: { services: 'servicos', about: 'sobre-nos', contact: 'contato', quote: 'orcamento', industries: 'industrias', ourWork: 'nosso-trabalho', blog: 'blog', cnc: 'usinagem-cnc', sheetMetal: 'chapa-metalica', printing: 'impressao-3d', injection: 'moldagem-injecao', surface: 'acabamento-superficie', rapid: 'prototipagem-rapida' },
+  sv: { services: 'tjanster', about: 'om-oss', contact: 'kontakt', quote: 'offert', industries: 'branscher', ourWork: 'vart-arbete', blog: 'blogg', cnc: 'cnc-bearbetning', sheetMetal: 'platbearbetning', printing: '3d-skrivning', injection: 'formsprutning', surface: 'ytbehandling', rapid: 'snabb-prototypering' },
+  da: { services: 'tjenester', about: 'om-os', contact: 'kontakt', quote: 'tilbud', industries: 'brancher', ourWork: 'vores-arbejde', blog: 'blog', cnc: 'cnc-bearbejdning', sheetMetal: 'pladearbejde', printing: '3d-printing', injection: 'sprojtestobning', surface: 'overfladebehandling', rapid: 'hurtig-prototypering' },
+  fi: { services: 'palvelut', about: 'meista', contact: 'yhteys', quote: 'tarjous', industries: 'toimialat', ourWork: 'tyomme', blog: 'blogi', cnc: 'cnc-työstö', sheetMetal: 'levytyöstö', printing: '3d-tulostus', injection: 'ruiskupuristus', surface: 'pinnan-viimeistely', rapid: 'nopea-prototyyppaus' },
+  nb: { services: 'tjenester', about: 'om-oss', contact: 'kontakt', quote: 'tilbud', industries: 'bransjer', ourWork: 'vart-arbeid', blog: 'blogg', cnc: 'cnc-bearbeiding', sheetMetal: 'platarbeid', printing: '3d-printing', injection: 'sproytestoping', surface: 'overflatebehandling', rapid: 'rask-prototyping' },
+  hu: { services: 'szolgaltatasok', about: 'rolunk', contact: 'kapcsolat', quote: 'ajanlat', industries: 'iparagak', ourWork: 'munkaink', blog: 'blog', cnc: 'cnc-megmunkalas', sheetMetal: 'lemezfeldolgozas', printing: '3d-nyomtas', injection: 'frccsnyomas', surface: 'feluletkezeles', rapid: 'gyors-prototipus' },
+  cs: { services: 'sluzby', about: 'o-nas', contact: 'kontakt', quote: 'nabidka', industries: 'prumysl', ourWork: 'nase-prace', blog: 'blog', cnc: 'cnc-obrabeni', sheetMetal: 'obrabeni-plechu', printing: '3d-tisk', injection: 'vstrekovani', surface: 'uprava-povrchu', rapid: 'rychle-prototypovani' },
 };
 
-/**
- * Translate a URL path from English to the target language
- */
-function translatePath(path: string, language: string): string {
-  if (!path || path === "/" || path === "") {
-    return "";
-  }
-
-  // Remove leading slash
-  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
-  
-  // Split into segments
-  const segments = cleanPath.split("/").filter(Boolean);
-  
-  // Get translations for this language (fallback to English if not found)
-  const translations = SLUG_TRANSLATIONS[language] || SLUG_TRANSLATIONS.en;
-  
-  // Translate each segment
-  const translatedSegments = segments.map(segment => {
-    // Check if this segment has a translation
-    if (translations[segment]) {
-      return translations[segment];
-    }
-    // No translation found, keep original (e.g., blog article slugs)
-    return segment;
-  });
-  
-  return "/" + translatedSegments.join("/");
+// Static page definitions with path builder functions
+interface PageDef {
+  key: string;
+  path: (s: Record<string, string>) => string;
+  priority: string;
+  changefreq: string;
 }
+
+const STATIC_PAGES: PageDef[] = [
+  { key: 'home', path: () => '', priority: '1.0', changefreq: 'weekly' },
+  { key: 'services', path: (s) => `/${s.services}`, priority: '0.9', changefreq: 'weekly' },
+  { key: 'cnc', path: (s) => `/${s.services}/${s.cnc}`, priority: '0.9', changefreq: 'weekly' },
+  { key: 'sheetMetal', path: (s) => `/${s.services}/${s.sheetMetal}`, priority: '0.9', changefreq: 'weekly' },
+  { key: 'printing', path: (s) => `/${s.services}/${s.printing}`, priority: '0.9', changefreq: 'weekly' },
+  { key: 'injection', path: (s) => `/${s.services}/${s.injection}`, priority: '0.9', changefreq: 'weekly' },
+  { key: 'surface', path: (s) => `/${s.services}/${s.surface}`, priority: '0.8', changefreq: 'weekly' },
+  { key: 'rapid', path: (s) => `/${s.services}/${s.rapid}`, priority: '0.8', changefreq: 'weekly' },
+  { key: 'industries', path: (s) => `/${s.industries}`, priority: '0.8', changefreq: 'weekly' },
+  { key: 'about', path: (s) => `/${s.about}`, priority: '0.7', changefreq: 'monthly' },
+  { key: 'contact', path: (s) => `/${s.contact}`, priority: '0.7', changefreq: 'monthly' },
+  { key: 'ourWork', path: (s) => `/${s.ourWork}`, priority: '0.7', changefreq: 'monthly' },
+  { key: 'quote', path: (s) => `/${s.quote}`, priority: '0.8', changefreq: 'weekly' },
+  { key: 'quoteRequest', path: () => '/quote-request', priority: '0.7', changefreq: 'weekly' },
+  { key: 'blog', path: (s) => `/${s.blog}`, priority: '0.8', changefreq: 'daily' },
+];
 
 interface Article {
   slug: string;
   language: string;
   updated_at: string;
+  created_at?: string;
   translation_id?: string;
 }
 
 /**
- * Format date to W3C format for sitemap
+ * Build full URL for a language + page combination
+ */
+function buildPageUrl(lang: string, page: PageDef): string {
+  const s = SLUGS[lang];
+  const pagePath = page.path(s);
+  return `${siteUrl}/${lang}${pagePath}`;
+}
+
+/**
+ * Build hreflang XML links for a static page across all languages
+ */
+function buildStaticPageHreflang(page: PageDef): string {
+  const links = LANGUAGES.map(lang => {
+    const url = buildPageUrl(lang, page);
+    return `    <xhtml:link rel="alternate" hreflang="${lang}" href="${url}"/>`;
+  });
+  const englishUrl = buildPageUrl('en', page);
+  links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${englishUrl}"/>`);
+  return links.join('\n');
+}
+
+/**
+ * Build a static page <url> entry for a specific language
+ */
+function buildStaticUrlEntry(lang: string, page: PageDef, today: string): string {
+  const loc = buildPageUrl(lang, page);
+  return `  <url>
+    <loc>${loc}</loc>
+${buildStaticPageHreflang(page)}
+    <lastmod>${today}</lastmod>
+    <changefreq>${page.changefreq}</changefreq>
+    <priority>${page.priority}</priority>
+  </url>`;
+}
+
+/**
+ * Build hreflang links for a blog article and its translations
+ */
+function buildBlogHreflang(siblings: Article[]): string {
+  const links = siblings.map(sibling => {
+    const lang = (sibling.language || 'en').trim().toLowerCase();
+    const blogSlug = SLUGS[lang]?.blog || 'blog';
+    const url = `${siteUrl}/${lang}/${blogSlug}/${sibling.slug}`;
+    return `    <xhtml:link rel="alternate" hreflang="${lang}" href="${url}"/>`;
+  });
+  const englishSibling = siblings.find(s => (s.language || '').trim().toLowerCase() === 'en');
+  if (englishSibling) {
+    links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${siteUrl}/en/${SLUGS.en.blog}/${englishSibling.slug}"/>`);
+  }
+  return links.join('\n');
+}
+
+/**
+ * Build a blog article <url> entry with hreflang
+ */
+function buildBlogUrlEntry(article: Article, siblings: Article[], today: string): string {
+  const lang = (article.language || 'en').trim().toLowerCase();
+  const blogSlug = SLUGS[lang]?.blog || 'blog';
+  const loc = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
+  const lastmod = (article.updated_at || article.created_at || today).split('T')[0];
+  const hreflang = siblings.length > 1 ? `\n${buildBlogHreflang(siblings)}` : '';
+
+  return `  <url>
+    <loc>${loc}</loc>${hreflang}
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>`;
+}
+
+/**
+ * Format date to W3C format
  */
 function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toISOString().split('T')[0];
+  return new Date(dateString).toISOString().split('T')[0];
 }
 
 /**
- * Generate XML for a single URL entry (simple format for Google Search Console compatibility)
- */
-function generateUrlEntry(
-  url: string, 
-  lastmod: string, 
-  changefreq: string, 
-  priority: string
-): string {
-  return `<url>
-<loc>${url}</loc>
-<lastmod>${lastmod}</lastmod>
-<changefreq>${changefreq}</changefreq>
-<priority>${priority}</priority>
-</url>`;
-}
-
-/**
- * Get language display name for comments
- */
-function getLanguageName(lang: string): string {
-  const names: Record<string, string> = {
-    en: "English",
-    de: "German",
-    fr: "French",
-    es: "Spanish",
-    it: "Italian",
-    nl: "Dutch",
-    pl: "Polish",
-    sv: "Swedish",
-    da: "Danish",
-    fi: "Finnish",
-    cs: "Czech",
-    hu: "Hungarian",
-    pt: "Portuguese",
-    nb: "Norwegian",
-  };
-  return names[lang] || lang.toUpperCase();
-}
-
-/**
- * Generate the complete sitemap XML (simple format compatible with Google Search Console)
+ * Generate the complete sitemap XML with full hreflang support
  */
 async function generateSitemap(): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
 
-  // Fetch all published articles
+  // 1. Generate static page entries: 14 languages × 15 pages = 210 entries
+  const staticEntries: string[] = [];
+  for (const page of STATIC_PAGES) {
+    for (const lang of LANGUAGES) {
+      staticEntries.push(buildStaticUrlEntry(lang, page, today));
+    }
+  }
+
+  // 2. Fetch all published articles
   const { data: articles, error } = await supabase
     .from("articles")
-    .select("slug, language, updated_at, translation_id")
+    .select("slug, language, updated_at, created_at, translation_id")
     .eq("status", "published")
     .order("language", { ascending: true })
     .order("updated_at", { ascending: false });
@@ -352,188 +174,62 @@ async function generateSitemap(): Promise<string> {
   }
 
   console.log(`Found ${articles?.length || 0} published articles for sitemap`);
+
+  // Log language distribution
   if (articles && articles.length > 0) {
-    console.log(`Sample articles:`, articles.slice(0, 5).map(a => `${a.language}/${a.slug}`));
-    // Log language distribution
     const langCounts: Record<string, number> = {};
     for (const article of articles) {
       const lang = (article.language || '').trim().toLowerCase();
       langCounts[lang] = (langCounts[lang] || 0) + 1;
     }
     console.log(`Article language distribution:`, langCounts);
-  } else {
-    console.warn("⚠️ No published articles found in database. Check if articles exist and have status='published'");
   }
 
-  // Normalize and group articles by language
-  // Normalize: trim whitespace and convert to lowercase for consistent matching
-  const articlesByLanguage: Record<string, Article[]> = {};
-  const languageNormalizationMap: Record<string, string> = {}; // Maps normalized -> original
-  
+  // 3. Group articles by translation_id for hreflang cross-referencing
+  const translationGroups = new Map<string, Article[]>();
+  const orphanArticles: Article[] = [];
+
   for (const article of articles || []) {
-    // Normalize language code: trim and lowercase
     const normalizedLang = (article.language || '').trim().toLowerCase();
-    
-    // Store original language for reference
-    if (!languageNormalizationMap[normalizedLang]) {
-      languageNormalizationMap[normalizedLang] = article.language;
+    if (!LANGUAGES.includes(normalizedLang)) continue;
+
+    if (article.translation_id) {
+      if (!translationGroups.has(article.translation_id)) {
+        translationGroups.set(article.translation_id, []);
+      }
+      translationGroups.get(article.translation_id)!.push(article);
+    } else {
+      orphanArticles.push(article);
     }
-    
-    if (!articlesByLanguage[normalizedLang]) {
-      articlesByLanguage[normalizedLang] = [];
-    }
-    articlesByLanguage[normalizedLang].push(article);
   }
 
-  // Log all languages found in articles
-  const foundLanguages = Object.keys(articlesByLanguage);
-  console.log(`Languages found in articles: ${foundLanguages.join(', ')}`);
-  console.log(`Languages to process: ${LANGUAGES.join(', ')}`);
-  
-  // Check for languages in articles that aren't in LANGUAGES array
-  const missingLanguages = foundLanguages.filter(lang => !LANGUAGES.includes(lang));
-  if (missingLanguages.length > 0) {
-    console.warn(`⚠️ Articles found with languages not in LANGUAGES array: ${missingLanguages.join(', ')}`);
-    console.warn(`These articles will be included if their normalized language matches a language in LANGUAGES array`);
-  }
-
-  let urlEntries: string[] = [];
+  // 4. Build blog entries with hreflang
+  const blogEntries: string[] = [];
   let totalArticlesAdded = 0;
 
-  // Generate sitemap organized by language sections (matching old format)
-  for (const lang of LANGUAGES) {
-    // Add language section comment
-    urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
-
-    // 1. Static pages for this language (with translated slugs)
-    for (const page of STATIC_PAGES) {
-      // Translate the path for this language
-      const translatedPath = translatePath(page.path, lang);
-      const url = `${siteUrl}/${lang}${translatedPath}`;
-      urlEntries.push(generateUrlEntry(
-        url,
-        today,
-        page.changefreq,
-        page.priority
-      ));
-    }
-
-    // 2. Blog articles for this language
-    // Check both exact match and normalized match
-    const normalizedLang = lang.toLowerCase().trim();
-    const articlesForLang = articlesByLanguage[lang] || articlesByLanguage[normalizedLang] || [];
-    
-    if (articlesForLang.length > 0) {
-      console.log(`Adding ${articlesForLang.length} blog articles for ${lang}`);
-      totalArticlesAdded += articlesForLang.length;
-      
-      // Translate "blog" slug for this language
-      const blogSlug = SLUG_TRANSLATIONS[lang]?.blog || "blog";
-      
-      for (const article of articlesForLang) {
-        const url = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
-        const lastmod = formatDate(article.updated_at);
-        urlEntries.push(generateUrlEntry(
-          url,
-          lastmod,
-          "weekly",
-          "0.7"
-        ));
-      }
-    } else {
-      console.log(`No blog articles found for language: ${lang} (checked keys: ${lang}, ${normalizedLang})`);
+  for (const [, siblings] of translationGroups) {
+    for (const article of siblings) {
+      blogEntries.push(buildBlogUrlEntry(article, siblings, today));
+      totalArticlesAdded++;
     }
   }
 
-  // Log summary
-  console.log(`Total articles added to sitemap: ${totalArticlesAdded} out of ${articles?.length || 0} published articles`);
-  if (totalArticlesAdded < (articles?.length || 0)) {
-    const missing = (articles?.length || 0) - totalArticlesAdded;
-    console.warn(`⚠️ ${missing} articles were not included in sitemap. Check language codes match LANGUAGES array.`);
+  for (const article of orphanArticles) {
+    blogEntries.push(buildBlogUrlEntry(article, [article], today));
+    totalArticlesAdded++;
   }
 
-  // Build the complete sitemap (correct XML format with namespace for Google)
+  console.log(`Total articles added to sitemap: ${totalArticlesAdded}`);
+  console.log(`Translation groups: ${translationGroups.size}, orphan articles: ${orphanArticles.length}`);
+
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urlEntries.join('\n')}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+${staticEntries.join('\n')}
+${blogEntries.join('\n')}
 </urlset>`;
 
   return sitemap;
-}
-
-/**
- * Generate language-specific sitemap (simple format)
- */
-async function generateLanguageSitemap(lang: string): Promise<string> {
-  const today = new Date().toISOString().split('T')[0];
-  const normalizedLang = lang.toLowerCase().trim();
-
-  // Fetch articles for this language
-  // First try exact match, then filter for normalized matches
-  const { data: articles, error } = await supabase
-    .from("articles")
-    .select("slug, language, updated_at")
-    .eq("status", "published")
-    .order("updated_at", { ascending: false });
-
-  if (error) {
-    console.error(`Error fetching articles:`, error);
-    throw new Error(`Failed to fetch articles: ${error.message}`);
-  }
-
-  // Filter articles by normalized language code (case-insensitive)
-  const filteredArticles = (articles || []).filter(article => {
-    const articleLang = (article.language || '').trim().toLowerCase();
-    return articleLang === normalizedLang || articleLang === lang.toLowerCase();
-  });
-
-  console.log(`Found ${filteredArticles.length} articles for language ${lang} (from ${articles?.length || 0} total published)`);
-
-  let urlEntries: string[] = [];
-
-  // Add language section comment
-  urlEntries.push(`<!-- ${getLanguageName(lang)} Pages -->`);
-
-  // Static pages for this language (with translated slugs)
-  for (const page of STATIC_PAGES) {
-    // Translate the path for this language
-    const translatedPath = translatePath(page.path, lang);
-    const url = `${siteUrl}/${lang}${translatedPath}`;
-    urlEntries.push(generateUrlEntry(url, today, page.changefreq, page.priority));
-  }
-
-  // Blog articles for this language
-  // Translate "blog" slug for this language
-  const blogSlug = SLUG_TRANSLATIONS[lang]?.blog || "blog";
-  
-  for (const article of filteredArticles) {
-    const url = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
-    const lastmod = formatDate(article.updated_at);
-    urlEntries.push(generateUrlEntry(url, lastmod, "weekly", "0.7"));
-  }
-
-  const sitemap = `<urlset>
-${urlEntries.join('\n')}
-</urlset>`;
-
-  return sitemap;
-}
-
-/**
- * Generate sitemap index
- */
-function generateSitemapIndex(): string {
-  const today = new Date().toISOString().split('T')[0];
-  
-  let sitemaps = LANGUAGES.map(lang => `  <sitemap>
-    <loc>${siteUrl}/sitemap-${lang}.xml</loc>
-    <lastmod>${today}</lastmod>
-  </sitemap>`).join('\n');
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${sitemaps}
-</sitemapindex>`;
 }
 
 /**
@@ -545,14 +241,13 @@ async function uploadSitemapToStorage(
 ): Promise<{ success: boolean; publicUrl: string | null; error?: string }> {
   try {
     const blob = new Blob([content], { type: "application/xml" });
-    
-    // Upload to storage bucket (upsert = replace if exists)
+
     const { data, error } = await supabase.storage
       .from("sitemaps")
       .upload(filename, blob, {
         contentType: "application/xml",
-        upsert: true, // Replace existing file
-        cacheControl: "3600", // Cache for 1 hour
+        upsert: true,
+        cacheControl: "3600",
       });
 
     if (error) {
@@ -560,7 +255,6 @@ async function uploadSitemapToStorage(
       return { success: false, publicUrl: null, error: error.message };
     }
 
-    // Get public URL
     const { data: urlData } = supabase.storage
       .from("sitemaps")
       .getPublicUrl(filename);
@@ -576,8 +270,7 @@ async function uploadSitemapToStorage(
 /**
  * Main handler
  * Query params:
- * - type: "complete" (default), "index", or specific language code (e.g., "en", "de")
- * - save: "true" to auto-save to storage (default for complete sitemap)
+ * - type: "complete" (default) or specific language code (e.g., "en", "de")
  */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -587,83 +280,36 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const type = url.searchParams.get("type") || "complete";
-    const shouldSave = url.searchParams.get("save") !== "false"; // Default to true
 
     let sitemap: string;
     let stats = { type: "", urls: 0, languages: 0, articles: 0 };
     const uploadResults: Array<{ filename: string; publicUrl: string | null; success: boolean }> = [];
 
-    if (type === "index") {
-      // Generate sitemap index pointing to language-specific sitemaps
-      sitemap = generateSitemapIndex();
-      stats = { type: "index", urls: LANGUAGES.length, languages: LANGUAGES.length, articles: 0 };
-      
-      if (shouldSave) {
-        const result = await uploadSitemapToStorage("sitemap-index.xml", sitemap);
-        uploadResults.push({ filename: "sitemap-index.xml", ...result });
-      }
-    } else if (type === "all" || type === "complete") {
-      // Generate single complete sitemap (SEO-perfect, Google-compatible)
-      sitemap = await generateSitemap();
-      const urlCount = (sitemap.match(/<url>/g) || []).length;
-      
-      // Count articles
-      const { count } = await supabase
-        .from("articles")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "published");
-        
-      stats = { 
-        type: "complete", 
-        urls: urlCount, 
-        languages: LANGUAGES.length, 
-        articles: count || 0 
-      };
-      
-      // Save single sitemap-complete.xml file
-      const result = await uploadSitemapToStorage("sitemap-complete.xml", sitemap);
-      uploadResults.push({ filename: "sitemap-complete.xml", ...result });
-    } else if (LANGUAGES.includes(type)) {
-      // Generate language-specific sitemap
-      sitemap = await generateLanguageSitemap(type);
-      const urlCount = (sitemap.match(/<url>/g) || []).length;
-      stats = { type: `language-${type}`, urls: urlCount, languages: 1, articles: urlCount - STATIC_PAGES.length };
-      
-      if (shouldSave) {
-        const result = await uploadSitemapToStorage(`sitemap-${type}.xml`, sitemap);
-        uploadResults.push({ filename: `sitemap-${type}.xml`, ...result });
-      }
-    } else {
-      // Generate complete sitemap with all languages (SEO-perfect format)
-      sitemap = await generateSitemap();
-      const urlCount = (sitemap.match(/<url>/g) || []).length;
-      
-      // Count articles
-      const { count } = await supabase
-        .from("articles")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "published");
+    // Always generate the full sitemap with hreflang
+    sitemap = await generateSitemap();
+    const urlCount = (sitemap.match(/<url>/g) || []).length;
 
-      stats = { 
-        type: "complete", 
-        urls: urlCount, 
-        languages: LANGUAGES.length, 
-        articles: count || 0 
-      };
-      
-      if (shouldSave) {
-        // Save as sitemap-complete.xml (single file for Google Search Console)
-        const result = await uploadSitemapToStorage("sitemap-complete.xml", sitemap);
-        uploadResults.push({ filename: "sitemap-complete.xml", ...result });
-      }
-    }
+    // Count articles
+    const { count } = await supabase
+      .from("articles")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "published");
 
-    console.log(`Generated ${stats.type} sitemap with ${stats.urls} URLs`);
+    stats = {
+      type: "complete",
+      urls: urlCount,
+      languages: LANGUAGES.length,
+      articles: count || 0
+    };
 
-    // Construct public URLs for the sitemaps
+    // Save to storage
+    const result = await uploadSitemapToStorage("sitemap-complete.xml", sitemap);
+    uploadResults.push({ filename: "sitemap-complete.xml", ...result });
+
+    console.log(`Generated sitemap with ${stats.urls} URLs (${stats.articles} articles across ${stats.languages} languages)`);
+
     const storageBaseUrl = `${supabaseUrl}/storage/v1/object/public/sitemaps`;
 
-    // Return both the sitemap XML and stats
     return new Response(
       JSON.stringify({
         success: true,
@@ -675,7 +321,7 @@ serve(async (req) => {
             sitemap: `${storageBaseUrl}/sitemap-complete.xml`,
           }
         },
-        sitemap: sitemap, // Include sitemap in response
+        sitemap: sitemap,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
