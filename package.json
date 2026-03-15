@@ -90,7 +90,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
-    "@prerenderer/renderer-puppeteer": "^1.2.4",
+    "@prerenderer/renderer-jsdom": "^1.1.9",
     "@prerenderer/rollup-plugin": "^0.3.12",
     "@tailwindcss/typography": "^0.5.15",
     "@types/node": "^22.17.2",

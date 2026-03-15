@@ -66,23 +66,21 @@ export default defineConfig(async ({ mode }) => {
 	const prerenderPlugin = await (async () => {
 		if (mode !== 'production') return null;
 		try {
-			const [{ default: PrerenderPlugin }, { default: PuppeteerRenderer }] = await Promise.all([
+			const [{ default: PrerenderPlugin }, { default: JSDomRenderer }] = await Promise.all([
 				import('@prerenderer/rollup-plugin'),
-				import('@prerenderer/renderer-puppeteer'),
+				import('@prerenderer/renderer-jsdom'),
 			]);
 			return PrerenderPlugin({
 				routes: buildPrerenderRoutes(),
-				renderer: new PuppeteerRenderer({
-					renderAfterTime: 8000,
-					headless: true,
-					args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+				renderer: new JSDomRenderer({
+					renderAfterTime: 5000,
 				}),
 				server: {
 					port: 19001,
 				},
 			});
 		} catch (e) {
-			console.warn('[vite] Prerendering skipped — @prerenderer/rollup-plugin or Chromium not available:', (e as Error).message ?? e);
+			console.warn('[vite] Prerendering skipped — @prerenderer/rollup-plugin or jsdom not available:', (e as Error).message ?? e);
 			return null;
 		}
 	})();
