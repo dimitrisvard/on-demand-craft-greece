@@ -224,6 +224,12 @@ table caption {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
+
+    /* blog-post wrapper (added by generate-daily-article) must also scroll */
+    .blog-post {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
     
     .prose table,
     .blog-content table,

@@ -146,11 +146,11 @@ function addTargetBlankToInternalLinks(content: string): string {
     modifiedContent = modifiedContent.substring(0, index) + replacement + modifiedContent.substring(index + fullMatch.length);
   }
   
-  // Restore all table blocks
+  // Restore all table blocks (use function form to prevent $ special pattern interpretation)
   for (const tableBlock of tableBlocks) {
-    modifiedContent = modifiedContent.replace(tableBlock.placeholder, tableBlock.content);
+    modifiedContent = modifiedContent.replace(tableBlock.placeholder, () => tableBlock.content);
   }
-  
+
   return modifiedContent;
 }
 
@@ -312,11 +312,11 @@ function fixLinksInContent(
     fixedContent = fixedContent.substring(0, index) + replacement + fixedContent.substring(afterIndex);
   }
   
-  // Restore all table blocks
+  // Restore all table blocks (use function form to prevent $ special pattern interpretation)
   for (const tableBlock of tableBlocks) {
-    fixedContent = fixedContent.replace(tableBlock.placeholder, tableBlock.content);
+    fixedContent = fixedContent.replace(tableBlock.placeholder, () => tableBlock.content);
   }
-  
+
   // Add target="_blank" to internal links (final pass, after all other fixes)
   fixedContent = addTargetBlankToInternalLinks(fixedContent);
   
