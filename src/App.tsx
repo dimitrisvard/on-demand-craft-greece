@@ -40,7 +40,6 @@ const ProductsPage = lazy(() => import('./pages/ProductsPage'));
 const QuoteSuccess = lazy(() => import('./pages/QuoteSuccess'));
 const ContactSuccess = lazy(() => import('./pages/ContactSuccess'));
 const RapidPrototyping = lazy(() => import('./pages/RapidPrototyping'));
-const TestPartnerNotification = lazy(() => import('./pages/TestPartnerNotification'));
 const CookiePolicy = lazy(() => import('./pages/CookiePolicy'));
 const ImpressumPage = lazy(() => import('./pages/ImpressumPage'));
 const AnalyticsPage = lazy(() => import('./pages/dashboard/AnalyticsPage'));
@@ -188,7 +187,6 @@ function AppContent() {
                 <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
                 <Route path="/dashboard/notifications" element={<NotificationsPage />} />
                 <Route path="/dashboard/settings" element={<SettingsPage />} />
-                <Route path="/test-partner-notification" element={<TestPartnerNotification />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />

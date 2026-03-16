@@ -78,7 +78,7 @@ export function injectTrackingPixel(
   campaignId: string,
   trackingDomain: string
 ): string {
-  const pixelUrl = `${trackingDomain}/api/track?type=open&eid=${eventId}&cid=${campaignId}`;
+  const pixelUrl = `${trackingDomain}/api/marketing?action=track&type=open&eid=${eventId}&cid=${campaignId}`;
   const pixel = `<img src="${pixelUrl}" width="1" height="1" style="display:none;border:0;outline:none;" alt="" />`;
 
   // Inject before closing </body> tag, or append if no body tag
@@ -106,13 +106,13 @@ export function injectClickTracking(
         href.startsWith('mailto:') ||
         href.startsWith('tel:') ||
         href.startsWith('#') ||
-        href.includes('/api/track') ||
+        href.includes('/api/marketing') ||
         href.includes('unsubscribe')
       ) {
         return `<a ${before}href="${href}"${after}>`;
       }
 
-      const trackUrl = `${trackingDomain}/api/track?type=click&eid=${eventId}&cid=${campaignId}&url=${encodeURIComponent(href)}`;
+      const trackUrl = `${trackingDomain}/api/marketing?action=track&type=click&eid=${eventId}&cid=${campaignId}&url=${encodeURIComponent(href)}`;
       return `<a ${before}href="${trackUrl}"${after}>`;
     }
   );
@@ -127,7 +127,7 @@ export function injectUnsubscribeLink(
   campaignId: string,
   trackingDomain: string
 ): string {
-  const unsubUrl = `${trackingDomain}/api/track?type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
+  const unsubUrl = `${trackingDomain}/api/marketing?action=track&type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
   const unsubHtml = `
 <div style="text-align:center;margin-top:40px;padding:20px;font-size:12px;color:#999;border-top:1px solid #eee;">
   <p>You received this email because you subscribed to our mailing list.</p>

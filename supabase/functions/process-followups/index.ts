@@ -42,14 +42,14 @@ function replaceVariables(text: string, vars: Record<string, string>): string {
 }
 
 function injectTrackingPixel(html: string, eventId: string, campaignId: string): string {
-  const url = `${trackingDomain}/api/track?type=open&eid=${eventId}&cid=${campaignId}`;
+  const url = `${trackingDomain}/api/marketing?action=track&type=open&eid=${eventId}&cid=${campaignId}`;
   const pixel = `<img src="${url}" width="1" height="1" style="display:none;border:0;" alt="" />`;
   if (html.includes("</body>")) return html.replace("</body>", `${pixel}</body>`);
   return html + pixel;
 }
 
 function injectUnsubscribeLink(html: string, eventId: string, campaignId: string): string {
-  const url = `${trackingDomain}/api/track?type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
+  const url = `${trackingDomain}/api/marketing?action=track&type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
   const block = `
 <div style="text-align:center;margin-top:32px;padding:16px;font-size:12px;color:#999;border-top:1px solid #eee;">
   <a href="${url}" style="color:#999;text-decoration:underline;">Unsubscribe</a>

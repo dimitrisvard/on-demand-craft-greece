@@ -42,7 +42,7 @@ function replaceVariables(text: string, vars: Record<string, string>): string {
 // ─── Tracking ─────────────────────────────────────────────────────────────────
 
 function injectTrackingPixel(html: string, eventId: string, campaignId: string): string {
-  const url = `${trackingDomain}/api/track?type=open&eid=${eventId}&cid=${campaignId}`;
+  const url = `${trackingDomain}/api/marketing?action=track&type=open&eid=${eventId}&cid=${campaignId}`;
   const pixel = `<img src="${url}" width="1" height="1" style="display:none;border:0;" alt="" />`;
   if (html.includes("</body>")) return html.replace("</body>", `${pixel}</body>`);
   return html + pixel;
@@ -54,18 +54,18 @@ function injectClickTracking(html: string, eventId: string, campaignId: string):
       href.startsWith("mailto:") ||
       href.startsWith("tel:") ||
       href.startsWith("#") ||
-      href.includes("/api/track") ||
+      href.includes("/api/marketing") ||
       href.includes("unsubscribe")
     ) {
       return `<a ${before}href="${href}"${after}>`;
     }
-    const trackUrl = `${trackingDomain}/api/track?type=click&eid=${eventId}&cid=${campaignId}&url=${encodeURIComponent(href)}`;
+    const trackUrl = `${trackingDomain}/api/marketing?action=track&type=click&eid=${eventId}&cid=${campaignId}&url=${encodeURIComponent(href)}`;
     return `<a ${before}href="${trackUrl}"${after}>`;
   });
 }
 
 function injectUnsubscribeLink(html: string, eventId: string, campaignId: string): string {
-  const url = `${trackingDomain}/api/track?type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
+  const url = `${trackingDomain}/api/marketing?action=track&type=unsubscribe&eid=${eventId}&cid=${campaignId}`;
   const block = `
 <div style="text-align:center;margin-top:32px;padding:16px;font-size:12px;color:#999;border-top:1px solid #eee;">
   <p style="margin:0 0 4px;">You received this email because you subscribed to our mailing list.</p>

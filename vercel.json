@@ -148,6 +148,10 @@
       "destination": "/robots.txt"
     },
     {
+      "source": "/api/track",
+      "destination": "/api/marketing?action=track"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

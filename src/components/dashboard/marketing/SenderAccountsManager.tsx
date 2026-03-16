@@ -197,8 +197,8 @@ const SenderAccountsManager = () => {
   };
 
   const handleGoogleConnect = (accountId?: string) => {
-    const params = accountId ? `?action=authorize&account_id=${accountId}` : '?action=authorize';
-    window.location.href = `/api/google-auth${params}`;
+    const params = accountId ? `&step=authorize&account_id=${accountId}` : '&step=authorize';
+    window.location.href = `/api/marketing?action=google-auth${params}`;
   };
 
   const isGoogleConnected = (account: SenderAccount) => {
