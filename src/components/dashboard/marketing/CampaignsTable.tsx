@@ -15,6 +15,8 @@ import { toast } from 'sonner';
 import { Edit, Trash2, Send, Loader2, Play, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
+import CampaignProgress from './CampaignProgress';
+import CampaignImportDialog from './CampaignImportDialog';
 
 interface Campaign {
   id: string;
@@ -26,8 +28,6 @@ interface Campaign {
   sent_count: number;
   target_tags?: string[];
 }
-
-import CampaignProgress from './CampaignProgress';
 
 const CampaignsTable = () => {
   const navigate = useNavigate();
@@ -129,7 +129,11 @@ const CampaignsTable = () => {
   }
 
   return (
-    <div className="rounded-md border">
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <CampaignImportDialog onImported={() => queryClient.invalidateQueries({ queryKey: ['campaigns'] })} />
+      </div>
+      <div className="rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
@@ -224,6 +228,7 @@ const CampaignsTable = () => {
           )}
         </TableBody>
       </Table>
+      </div>
     </div>
   );
 };

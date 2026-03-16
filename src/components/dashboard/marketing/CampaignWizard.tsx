@@ -14,8 +14,9 @@ import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, Send, Save, ArrowLeft, ArrowRight, Users, Plus, Trash2, Clock } from 'lucide-react';
+import { CalendarIcon, Loader2, Send, Save, ArrowLeft, ArrowRight, Users, Plus, Trash2, Clock, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -23,6 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import CampaignTemplatesDialog from './CampaignTemplatesDialog';
 
 // Validation Schema
 const followUpSchema = z.object({
@@ -42,6 +44,7 @@ const campaignSchema = z.object({
   smart_sending: z.boolean().default(false),
   target_tags: z.array(z.string()).default([]),
   follow_up_config: z.array(followUpSchema).default([]),
+  sender_account_ids: z.array(z.string()).default([]),
 });
 
 type CampaignFormValues = z.infer<typeof campaignSchema>;
@@ -70,6 +73,7 @@ const CampaignWizard = () => {
       smart_sending: false,
       target_tags: [],
       follow_up_config: [],
+      sender_account_ids: [],
     }
   });
 
@@ -80,6 +84,19 @@ const CampaignWizard = () => {
   const { fields: followUpFields, append: appendFollowUp, remove: removeFollowUp } = useFieldArray({
     control,
     name: "follow_up_config"
+  });
+
+  const { data: senderAccounts } = useQuery({
+    queryKey: ['sender_accounts_active'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('marketing_sender_accounts')
+        .select('id, email, display_name, provider, daily_limit, warmup_enabled, warmup_current_limit')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true });
+      if (error) return [];
+      return data;
+    },
   });
 
   const { data: tagStats } = useQuery({
@@ -193,12 +210,13 @@ const CampaignWizard = () => {
         .insert({
           name: data.name,
           subject_a: data.subject_a,
-          subject_b: data.subject_b || null, // Ensure optional fields are null if empty
+          subject_b: data.subject_b || null,
           body: data.body,
           scheduled_at: data.scheduled_at ? data.scheduled_at.toISOString() : null,
           status: data.scheduled_at ? 'scheduled' : 'draft',
           target_tags: data.target_tags,
-          follow_up_config: data.follow_up_config, 
+          follow_up_config: data.follow_up_config,
+          sender_account_ids: data.sender_account_ids,
           ab_test_config: {
             enabled: data.ab_enabled,
             test_percentage: data.test_percentage,
@@ -333,16 +351,16 @@ const CampaignWizard = () => {
                                         <Label>Test Distribution</Label>
                                         <div className="flex items-center gap-4">
                                             <span className="text-sm font-medium w-12">{watch('test_percentage')}% Test</span>
-                                            <Controller 
+                                            <Controller
                                                 name="test_percentage"
                                                 control={control}
                                                 render={({ field }) => (
-                                                    <Slider 
-                                                        value={[field.value]} 
-                                                        onValueChange={(vals) => field.onChange(vals[0])} 
-                                                        min={10} 
-                                                        max={100} 
-                                                        step={5} 
+                                                    <Slider
+                                                        value={[field.value]}
+                                                        onValueChange={(vals) => field.onChange(vals[0])}
+                                                        min={10}
+                                                        max={100}
+                                                        step={5}
                                                         className="flex-1"
                                                     />
                                                 )}
@@ -350,6 +368,71 @@ const CampaignWizard = () => {
                                             <span className="text-sm font-medium w-24 text-right">{(100 - watch('test_percentage'))}% Winner</span>
                                         </div>
                                     </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Sender Accounts Selection */}
+                        <div className="space-y-3 border p-4 rounded-lg">
+                            <div className="flex items-center gap-2">
+                                <Mail className="w-4 h-4 text-muted-foreground" />
+                                <Label className="font-medium">Sender Accounts (Inbox Rotation)</Label>
+                            </div>
+                            {!senderAccounts || senderAccounts.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                    No sender accounts configured. Go to Settings → Sender Accounts to add accounts for inbox rotation.
+                                    The default account (info@micronshub.eu) will be used.
+                                </p>
+                            ) : (
+                                <div className="space-y-2">
+                                    <p className="text-xs text-muted-foreground">
+                                        Select accounts to rotate sending. Leave all unselected to use default account.
+                                    </p>
+                                    <Controller
+                                        name="sender_account_ids"
+                                        control={control}
+                                        render={({ field }) => (
+                                            <div className="space-y-2">
+                                                {senderAccounts.map((account) => (
+                                                    <div key={account.id} className="flex items-center justify-between p-2 rounded border">
+                                                        <div className="flex items-center space-x-2">
+                                                            <Checkbox
+                                                                id={`sender-${account.id}`}
+                                                                checked={(field.value || []).includes(account.id)}
+                                                                onCheckedChange={(checked) => {
+                                                                    const current = field.value || [];
+                                                                    if (checked) {
+                                                                        field.onChange([...current, account.id]);
+                                                                    } else {
+                                                                        field.onChange(current.filter((id) => id !== account.id));
+                                                                    }
+                                                                }}
+                                                            />
+                                                            <Label htmlFor={`sender-${account.id}`} className="cursor-pointer">
+                                                                <span className="font-medium">{account.display_name}</span>
+                                                                <span className="text-muted-foreground text-xs ml-1">({account.email})</span>
+                                                            </Label>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <Badge variant={account.provider === 'google_workspace' ? 'default' : 'secondary'} className="text-xs">
+                                                                {account.provider === 'google_workspace' ? 'Google' : 'Resend'}
+                                                            </Badge>
+                                                            {account.warmup_enabled && (
+                                                                <Badge variant="outline" className="text-xs">
+                                                                    Warmup: {account.warmup_current_limit}/day
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {(field.value || []).length > 1 && (
+                                                    <p className="text-xs text-muted-foreground pt-1">
+                                                        {(field.value || []).length} accounts selected — recipients will be distributed using round-robin rotation.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+                                    />
                                 </div>
                             )}
                         </div>
@@ -362,9 +445,23 @@ const CampaignWizard = () => {
                         <div className="space-y-2">
                             <div className="flex justify-between items-center">
                                 <Label>Email Content</Label>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-wrap justify-end">
+                                    <CampaignTemplatesDialog
+                                        onSelect={(template) => {
+                                            setValue('subject_a', template.subject);
+                                            setValue('body', template.body);
+                                        }}
+                                        currentSubject={watch('subject_a')}
+                                        currentBody={watch('body')}
+                                        mode="browse"
+                                    />
                                     <Button type="button" variant="outline" size="sm" onClick={() => insertPlaceholder('name')}>+ Name</Button>
                                     <Button type="button" variant="outline" size="sm" onClick={() => insertPlaceholder('company')}>+ Company</Button>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                                        const current = watch('body');
+                                        setValue('body', current + ' {Hi|Hello|Hey} ');
+                                        toast.info('Added spintax example — variants separated by |');
+                                    }}>+ Spintax</Button>
                                 </div>
                             </div>
                             <Controller

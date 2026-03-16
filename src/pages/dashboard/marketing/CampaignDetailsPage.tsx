@@ -1,6 +1,6 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,10 +17,12 @@ import {
 } from '@/components/ui/table';
 import { Loader2, ArrowLeft, Mail, Users, Calendar, GitBranch } from 'lucide-react';
 import { format } from 'date-fns';
+import FollowUpImportDialog from '@/components/dashboard/marketing/FollowUpImportDialog';
 
 const CampaignDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // 1. Fetch Campaign Details
   const { data: campaign, isLoading: isLoadingCampaign } = useQuery({
@@ -231,8 +233,18 @@ const CampaignDetailsPage = () => {
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
-                <CardTitle>Recipients</CardTitle>
-                <Badge variant="secondary">{subscribers?.length || 0} Total</Badge>
+                <div className="flex items-center gap-3">
+                  <CardTitle>Recipients</CardTitle>
+                  <Badge variant="secondary">{subscribers?.length || 0} Total</Badge>
+                </div>
+                {id && (
+                  <FollowUpImportDialog
+                    campaignId={id}
+                    onImported={() => {
+                      queryClient.invalidateQueries({ queryKey: ['campaign-subscribers', id] });
+                    }}
+                  />
+                )}
               </div>
             </CardHeader>
             <CardContent>

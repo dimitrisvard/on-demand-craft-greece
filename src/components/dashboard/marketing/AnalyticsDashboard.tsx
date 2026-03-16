@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
-import { ArrowUpRight, ArrowDownRight, Users, Mail, MousePointer2, AlertCircle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Users, Mail, MousePointer2, AlertCircle, UserMinus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -57,7 +57,19 @@ const AnalyticsDashboard = () => {
         { sent: 0, opens: 0, clicks: 0, bounces: 0 }
       );
 
-      return totals;
+      // Fetch unsubscribe count from events
+      let unsubQuery = supabase
+        .from('marketing_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_type', 'unsubscribed');
+
+      if (selectedCampaignId !== 'all') {
+        unsubQuery = unsubQuery.eq('campaign_id', selectedCampaignId);
+      }
+
+      const { count: unsubCount } = await unsubQuery;
+
+      return { ...totals, unsubscribes: unsubCount || 0 };
     },
   });
 
@@ -73,23 +85,19 @@ const AnalyticsDashboard = () => {
         end: new Date(),
       });
 
-      if (selectedCampaignId === 'all') {
-         // Return dummy/mock data for "All" view for performance/demo
-         // In real prod, this would be an aggregation query on events
-         return days.map(day => ({
-            name: format(day, 'EEE'),
-            opens: Math.floor(Math.random() * 5000) + 1000,
-            clicks: Math.floor(Math.random() * 2000) + 500
-         }));
-      }
-
-      // Fetch events for specific campaign
-      const { data: events } = await supabase
+      // Fetch real events for all campaigns or specific campaign
+      let eventsQuery = supabase
         .from('marketing_events')
         .select('event_type, created_at')
-        .eq('campaign_id', selectedCampaignId)
+        .in('event_type', ['opened', 'clicked'])
         .gte('created_at', subDays(new Date(), 7).toISOString());
-      
+
+      if (selectedCampaignId !== 'all') {
+        eventsQuery = eventsQuery.eq('campaign_id', selectedCampaignId);
+      }
+
+      const { data: events } = await eventsQuery;
+
       const dayMap = new Map();
       days.forEach(day => {
           dayMap.set(format(day, 'MMM dd'), { name: format(day, 'MMM dd'), opens: 0, clicks: 0 });
@@ -112,10 +120,12 @@ const AnalyticsDashboard = () => {
   const totalOpens = metrics?.opens || 0;
   const totalClicks = metrics?.clicks || 0;
   const totalBounces = metrics?.bounces || 0;
+  const totalUnsubscribes = (metrics as any)?.unsubscribes || 0;
 
   const openRate = totalSent > 0 ? ((totalOpens / totalSent) * 100).toFixed(1) : '0.0';
   const clickRate = totalSent > 0 ? ((totalClicks / totalSent) * 100).toFixed(1) : '0.0';
   const bounceRate = totalSent > 0 ? ((totalBounces / totalSent) * 100).toFixed(1) : '0.0';
+  const unsubRate = totalSent > 0 ? ((totalUnsubscribes / totalSent) * 100).toFixed(1) : '0.0';
 
   const engagementData = [
     { name: 'Opened', value: totalOpens, color: '#0ea5e9' },
@@ -151,7 +161,7 @@ const AnalyticsDashboard = () => {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Total Sent</CardTitle>
@@ -195,6 +205,18 @@ const AnalyticsDashboard = () => {
                     <div className="text-2xl font-bold">{bounceRate}%</div>
                     <p className="text-xs text-muted-foreground text-red-500">
                         {totalBounces.toLocaleString()} bounces
+                    </p>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Unsubscribe Rate</CardTitle>
+                    <UserMinus className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                    <div className="text-2xl font-bold">{unsubRate}%</div>
+                    <p className="text-xs text-muted-foreground text-orange-500">
+                        {totalUnsubscribes.toLocaleString()} unsubscribes
                     </p>
                 </CardContent>
             </Card>
