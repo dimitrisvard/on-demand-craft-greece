@@ -1,7 +1,7 @@
 import { Resend } from 'resend';
 
 // Initialize Resend with env or fallback
-const API_KEY = process.env.RESEND_API_KEY || 're_Kt4eqTRh_KPSsn348fDERPLRZwsDZQhxy';
+const API_KEY = process.env.RESEND_API_KEY;
 const resend = new Resend(API_KEY);
 
 export default async function handler(req, res) {
