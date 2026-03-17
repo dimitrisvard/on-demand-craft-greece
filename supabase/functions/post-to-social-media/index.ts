@@ -19,11 +19,68 @@ const corsHeaders = {
 };
 
 interface GeminiResponse {
-  candidates?: Array<{ 
-    content?: { parts?: Array<{ text?: string }> }; 
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
     finishReason?: string;
   }>;
   error?: { message: string };
+}
+
+// Fetch the English version of an article using translation_id
+async function fetchEnglishVersion(article: any): Promise<any> {
+  // If already English, return as-is
+  if (article.language === 'en') {
+    return article;
+  }
+
+  // Try to find the English translation via translation_id
+  if (article.translation_id) {
+    const { data: englishArticle, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('translation_id', article.translation_id)
+      .eq('language', 'en')
+      .single();
+
+    if (!error && englishArticle) {
+      console.log(`Found English version (id: ${englishArticle.id}) for article ${article.id}`);
+      return englishArticle;
+    }
+    console.warn(`No English translation found for translation_id: ${article.translation_id}`);
+  }
+
+  // Fallback: return the original article
+  console.warn(`Using original ${article.language} article as fallback`);
+  return article;
+}
+
+// Strip HTML tags and get plain text
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+// Generate a social media excerpt from the article content
+function generateSocialExcerpt(article: any): string {
+  // Priority: excerpt > meta_description > first ~300 chars of stripped content > title
+  if (article.excerpt && article.excerpt.trim()) {
+    return article.excerpt.trim();
+  }
+  if (article.meta_description && article.meta_description.trim()) {
+    return article.meta_description.trim();
+  }
+  if (article.content) {
+    const plainText = stripHtml(article.content);
+    if (plainText.length > 300) {
+      // Cut at the last complete sentence or word within 300 chars
+      const truncated = plainText.substring(0, 300);
+      const lastSentence = truncated.lastIndexOf('.');
+      const lastSpace = truncated.lastIndexOf(' ');
+      const cutAt = lastSentence > 200 ? lastSentence + 1 : lastSpace > 0 ? lastSpace : 300;
+      return truncated.substring(0, cutAt) + '...';
+    }
+    return plainText;
+  }
+  return article.title;
 }
 
 // Generate hashtags using Gemini API
@@ -33,9 +90,8 @@ async function generateHashtags(
   content: string
 ): Promise<string[]> {
   try {
-    // Extract first 500 words of content (remove HTML tags)
-    const textContent = content.replace(/<[^>]*>/g, '').substring(0, 2000);
-    
+    const textContent = stripHtml(content).substring(0, 2000);
+
     const prompt = `Analyze this blog article and generate 5-10 relevant hashtags for social media posting.
 
 Title: ${title}
@@ -51,16 +107,16 @@ Generate hashtags that are:
     Return only the hashtags, one per line, without # prefix.`;
 
     const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
-    
+
     const response = await fetch(url, {
       method: "POST",
-      headers: { 
+      headers: {
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { 
-          temperature: 0.7, 
+        generationConfig: {
+          temperature: 0.7,
           maxOutputTokens: 500,
         },
       }),
@@ -73,62 +129,65 @@ Generate hashtags that are:
 
     const data: GeminiResponse = await response.json();
     if (data.error) throw new Error(`Gemini error: ${data.error.message}`);
-    
+
     const candidate = data.candidates?.[0];
     if (!candidate?.content?.parts?.[0]?.text) {
       throw new Error("Empty Gemini response");
     }
-    
-    // Parse hashtags from response (one per line, without #)
+
     const hashtagsText = candidate.content.parts[0].text.trim();
     const hashtags = hashtagsText
       .split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0)
       .map(line => line.startsWith('#') ? line.substring(1) : line)
-      .slice(0, 10); // Limit to 10 hashtags
-    
+      .slice(0, 10);
+
     return hashtags;
   } catch (error: any) {
     console.error('Error generating hashtags:', error);
-    // Return default hashtags if generation fails
     return ['Manufacturing', 'CNCMachining', 'Engineering', 'Greece', 'IndustrialDesign'];
   }
 }
 
 // Format post content for social media
 function formatPostContent(
-  excerpt: string,
+  text: string,
   articleUrl: string,
   hashtags: string[]
 ): string {
   const hashtagsText = hashtags.map(tag => `#${tag}`).join(' ');
-  
-  return `${excerpt}
 
-Read the full article: ${articleUrl}
+  // Enforce LinkedIn's 3000 char limit (leave room for URL and hashtags)
+  const urlPart = `\n\nRead the full article: ${articleUrl}`;
+  const hashPart = `\n\n${hashtagsText}`;
+  const maxTextLen = 3000 - urlPart.length - hashPart.length;
+  const trimmedText = text.length > maxTextLen ? text.substring(0, maxTextLen - 3) + '...' : text;
 
-${hashtagsText}`;
+  return `${trimmedText}${urlPart}${hashPart}`;
 }
 
-// Post to Facebook
+// Post to Facebook using Graph API v21.0
 async function postToFacebook(
   pageId: string,
   accessToken: string,
   message: string,
-  link: string
+  link: string,
+  imageUrl?: string
 ): Promise<{ success: boolean; postId?: string; error?: string }> {
   try {
+    const body: any = {
+      message,
+      link,
+      access_token: accessToken,
+    };
+
     const response = await fetch(
-      `https://graph.facebook.com/v18.0/${pageId}/feed`,
+      `https://graph.facebook.com/v21.0/${pageId}/feed`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          link,
-          access_token: accessToken,
-        }),
+        body: JSON.stringify(body),
       }
     );
 
@@ -147,56 +206,55 @@ async function postToFacebook(
   }
 }
 
-// Post to LinkedIn
+// Post to LinkedIn using the Posts API (replaces deprecated ugcPosts)
 async function postToLinkedIn(
   orgId: string,
   accessToken: string,
   text: string,
-  articleUrl: string
+  articleUrl: string,
+  articleTitle?: string,
+  imageUrl?: string
 ): Promise<{ success: boolean; postId?: string; error?: string }> {
   try {
-    const response = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+    const response = await fetch('https://api.linkedin.com/rest/posts', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
         'X-Restli-Protocol-Version': '2.0.0',
+        'LinkedIn-Version': '202401',
       },
       body: JSON.stringify({
         author: `urn:li:organization:${orgId}`,
-        lifecycleState: 'PUBLISHED',
-        specificContent: {
-          'com.linkedin.ugc.ShareContent': {
-            shareCommentary: {
-              text: text,
-            },
-            shareMediaCategory: 'ARTICLE',
-            media: [{
-              status: 'READY',
-              description: {
-                text: text.substring(0, 200),
-              },
-              originalUrl: articleUrl,
-            }],
+        commentary: text,
+        visibility: 'PUBLIC',
+        distribution: {
+          feedDistribution: 'MAIN_FEED',
+          targetEntities: [],
+          thirdPartyDistributionChannels: [],
+        },
+        content: {
+          article: {
+            source: articleUrl,
+            title: articleTitle || '',
+            description: text.substring(0, 200),
+            ...(imageUrl ? { thumbnail: imageUrl } : {}),
           },
         },
-        visibility: {
-          'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC',
-        },
+        lifecycleState: 'PUBLISHED',
+        isReshareDisabledByAuthor: false,
       }),
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      const errorMsg = data.message || data.error?.message || `LinkedIn API error: ${response.status}`;
-      console.error('LinkedIn posting error:', errorMsg);
-      return { success: false, error: errorMsg };
+    if (response.status === 201 || response.status === 200) {
+      const postUrn = response.headers.get('x-restli-id') || response.headers.get('x-linkedin-id');
+      return { success: true, postId: postUrn || undefined };
     }
 
-    // LinkedIn returns the post ID in the response
-    const postId = data.id || data.entity || undefined;
-    return { success: true, postId };
+    const data = await response.json().catch(() => ({}));
+    const errorMsg = data.message || data.error?.message || `LinkedIn API error: ${response.status}`;
+    console.error('LinkedIn posting error:', errorMsg, JSON.stringify(data));
+    return { success: false, error: errorMsg };
   } catch (error: any) {
     console.error('LinkedIn posting exception:', error);
     return { success: false, error: error.message || 'Unknown error' };
@@ -210,7 +268,6 @@ serve(async (req) => {
   }
 
   try {
-    // Validate environment variables
     if (!supabaseUrl || !supabaseServiceKey) {
       throw new Error("Missing Supabase configuration");
     }
@@ -220,7 +277,7 @@ serve(async (req) => {
     }
 
     // Parse request body
-    const { article_id } = await req.json();
+    const { article_id, platforms, custom_text } = await req.json();
 
     if (!article_id) {
       return new Response(
@@ -231,6 +288,10 @@ serve(async (req) => {
         }
       );
     }
+
+    // Determine which platforms to post to (default: both)
+    const postToFb = platforms ? platforms.includes('facebook') : true;
+    const postToLi = platforms ? platforms.includes('linkedin') : true;
 
     // Fetch article from database
     const { data: article, error: articleError } = await supabase
@@ -260,23 +321,29 @@ serve(async (req) => {
       );
     }
 
-    // Build article URL
-    const articleUrl = `${siteUrl}/${article.language}/blog/${article.slug}`;
+    // Fetch the English version for social media content
+    const englishArticle = await fetchEnglishVersion(article);
 
-    // Generate hashtags
+    // Build the article URL (always link to English version)
+    const articleUrl = `${siteUrl}/en/blog/${englishArticle.slug}`;
+
+    // Generate social excerpt from the English version
+    const socialExcerpt = generateSocialExcerpt(englishArticle);
+
+    // Generate hashtags from the English version
     console.log('Generating hashtags...');
     const hashtags = await generateHashtags(
-      article.title,
-      article.excerpt || '',
-      article.content
+      englishArticle.title,
+      socialExcerpt,
+      englishArticle.content || ''
     );
 
-    // Format post content
-    const postContent = formatPostContent(
-      article.excerpt || article.title,
-      articleUrl,
-      hashtags
-    );
+    // Use custom text if provided, otherwise format from excerpt
+    const postContent = custom_text
+      ? formatPostContent(custom_text, articleUrl, hashtags)
+      : formatPostContent(socialExcerpt, articleUrl, hashtags);
+
+    const featuredImage = englishArticle.featured_image || article.featured_image || undefined;
 
     const results: {
       facebook?: { success: boolean; postId?: string; error?: string };
@@ -284,29 +351,32 @@ serve(async (req) => {
     } = {};
 
     // Post to Facebook
-    if (facebookPageId && facebookAccessToken) {
+    if (postToFb && facebookPageId && facebookAccessToken) {
       console.log('Posting to Facebook...');
       results.facebook = await postToFacebook(
         facebookPageId,
         facebookAccessToken,
         postContent,
-        articleUrl
+        articleUrl,
+        featuredImage
       );
-    } else {
+    } else if (postToFb) {
       console.warn('Facebook credentials not configured');
       results.facebook = { success: false, error: 'Facebook credentials not configured' };
     }
 
     // Post to LinkedIn
-    if (linkedinOrgId && linkedinAccessToken) {
+    if (postToLi && linkedinOrgId && linkedinAccessToken) {
       console.log('Posting to LinkedIn...');
       results.linkedin = await postToLinkedIn(
         linkedinOrgId,
         linkedinAccessToken,
         postContent,
-        articleUrl
+        articleUrl,
+        englishArticle.title,
+        featuredImage
       );
-    } else {
+    } else if (postToLi) {
       console.warn('LinkedIn credentials not configured');
       results.linkedin = { success: false, error: 'LinkedIn credentials not configured' };
     }
@@ -353,6 +423,8 @@ serve(async (req) => {
         posted_to: postedTo,
         results,
         errors: errors.length > 0 ? errors : undefined,
+        english_article_used: englishArticle.id !== article.id ? englishArticle.id : undefined,
+        post_content_preview: postContent.substring(0, 200) + '...',
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -362,9 +434,9 @@ serve(async (req) => {
   } catch (error: any) {
     console.error('Edge function error:', error);
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: error.message || "Internal server error",
-        success: false 
+        success: false
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -45,7 +45,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { format as dateFormat } from "date-fns";
-import { Calendar, Clock, ArrowLeft, X } from "lucide-react";
+import { Calendar, Clock, ArrowLeft, X, Share2 } from "lucide-react";
+import SocialPostDialog from "@/components/dashboard/SocialPostDialog";
 
 interface Article {
   id: string;
@@ -113,6 +114,9 @@ const BlogList = () => {
   // Bulk delete confirmation dialog
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Social post dialog state
+  const [socialDialogOpen, setSocialDialogOpen] = useState(false);
+  const [socialArticle, setSocialArticle] = useState<FullArticle | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -407,6 +411,28 @@ const BlogList = () => {
     }
   };
 
+  const handleSocialClick = async (article: Article) => {
+    // Fetch full article data for the dialog
+    try {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('id', article.id)
+        .single();
+
+      if (error) throw error;
+      setSocialArticle(data);
+      setSocialDialogOpen(true);
+    } catch (error: any) {
+      console.error('Error fetching article for social posting:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load article data",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Check if an article has translations
   const hasTranslations = (article: Article) => {
     if (!article.translation_id) return false;
@@ -666,8 +692,8 @@ const BlogList = () => {
                             </Button>
                           )}
                           {/* Preview button - works for both draft and published articles */}
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="sm"
                             onClick={() => handlePreviewClick(article)}
                             title={article.status === 'published' ? "Preview Article" : "Preview Draft"}
@@ -675,8 +701,20 @@ const BlogList = () => {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
+                          {/* Social share button - only for published articles */}
+                          {article.status === 'published' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSocialClick(article)}
+                              title={article.posted_to_facebook || article.posted_to_linkedin ? "Re-share to Social Media" : "Share to Social Media"}
+                              className="text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                            >
+                              <Share2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
                             size="sm"
                             onClick={() => navigate(`/dashboard/blog/edit/${article.id}`)}
                             title="Edit"
@@ -990,6 +1028,28 @@ const BlogList = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Social Post Dialog */}
+      {socialArticle && (
+        <SocialPostDialog
+          open={socialDialogOpen}
+          onOpenChange={(open) => {
+            setSocialDialogOpen(open);
+            if (!open) setSocialArticle(null);
+          }}
+          articleId={socialArticle.id}
+          articleTitle={socialArticle.title}
+          articleSlug={socialArticle.slug}
+          articleLanguage={socialArticle.language}
+          articleExcerpt={socialArticle.excerpt || ''}
+          articleContent={socialArticle.content || ''}
+          articleFeaturedImage={socialArticle.featured_image}
+          translationId={socialArticle.translation_id || undefined}
+          postedToFacebook={socialArticle.posted_to_facebook}
+          postedToLinkedin={socialArticle.posted_to_linkedin}
+          socialPostedAt={socialArticle.social_posted_at}
+          onPostSuccess={fetchArticles}
+        />
+      )}
     </PersistentDashboardLayout>
   );
 };

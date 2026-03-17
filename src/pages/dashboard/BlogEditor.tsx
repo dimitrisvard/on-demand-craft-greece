@@ -21,6 +21,7 @@ import { ChevronLeft, Loader2, Save, Image as ImageIcon, Globe, Plus, Sparkles, 
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import MediaLibraryModal from "@/components/dashboard/MediaLibraryModal";
+import SocialPostDialog from "@/components/dashboard/SocialPostDialog";
 
 // Available languages matching the rest of the app
 const LANGUAGES = [
@@ -49,6 +50,12 @@ const BlogEditor = () => {
   const [generatingTranslations, setGeneratingTranslations] = useState(false);
   const [fixingLinks, setFixingLinks] = useState(false);
   const [postingToSocial, setPostingToSocial] = useState(false);
+  const [socialDialogOpen, setSocialDialogOpen] = useState(false);
+  const [socialStatus, setSocialStatus] = useState({
+    posted_to_facebook: false,
+    posted_to_linkedin: false,
+    social_posted_at: '',
+  });
   const [isSourceView, setIsSourceView] = useState(false);
   const quillRef = useRef<ReactQuill>(null);
 
@@ -110,6 +117,11 @@ const BlogEditor = () => {
           featured_image: data.featured_image || "",
           featured_image_alt: data.featured_image_alt || "",
           translation_id: data.translation_id || crypto.randomUUID() // Fallback if null
+        });
+        setSocialStatus({
+          posted_to_facebook: data.posted_to_facebook || false,
+          posted_to_linkedin: data.posted_to_linkedin || false,
+          social_posted_at: data.social_posted_at || '',
         });
 
         // Fetch sibling translations
@@ -499,7 +511,7 @@ const BlogEditor = () => {
     }
   };
 
-  const handlePostToSocialMedia = async () => {
+  const handleOpenSocialDialog = () => {
     if (!id || formData.status !== 'published') {
       toast({
         title: "Article must be published",
@@ -508,62 +520,13 @@ const BlogEditor = () => {
       });
       return;
     }
+    setSocialDialogOpen(true);
+  };
 
-    setPostingToSocial(true);
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("User not authenticated");
-
-      toast({
-        title: "Posting to Social Media",
-        description: "Sharing article to Facebook and LinkedIn...",
-      });
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/post-to-social-media`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify({ 
-            article_id: id 
-          }),
-        }
-      );
-
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to post to social media");
-      }
-
-      const postedTo = result.posted_to || [];
-      const errors = result.errors || [];
-
-      if (postedTo.length > 0) {
-        toast({
-          title: "✅ Posted Successfully",
-          description: `Posted to ${postedTo.join(', ')}${errors.length > 0 ? `. Some errors: ${errors.join('; ')}` : ''}`,
-        });
-        
-        // Refresh article to show updated social status
-        if (id) {
-          await fetchArticle(id);
-        }
-      } else {
-        throw new Error(errors.join('; ') || "Failed to post to any platform");
-      }
-    } catch (error: any) {
-      console.error('Error posting to social media:', error);
-      toast({
-        title: "❌ Post Failed",
-        description: error.message || "Failed to post to social media",
-        variant: "destructive",
-      });
-    } finally {
-      setPostingToSocial(false);
+  const handleSocialPostSuccess = () => {
+    // Refresh article to show updated social status
+    if (id) {
+      fetchArticle(id);
     }
   };
 
@@ -951,16 +914,11 @@ const BlogEditor = () => {
               <>
                 <Button
                   variant="outline"
-                  onClick={handlePostToSocialMedia}
-                  disabled={postingToSocial}
+                  onClick={handleOpenSocialDialog}
                   className="flex items-center gap-2"
                 >
-                  {postingToSocial ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Share2 className="h-4 w-4" />
-                  )}
-                  Post to Social
+                  <Share2 className="h-4 w-4" />
+                  {socialStatus.posted_to_facebook || socialStatus.posted_to_linkedin ? 'Re-share' : 'Post to Social'}
                 </Button>
                 <Button
                   variant="outline"
@@ -1314,12 +1272,31 @@ const BlogEditor = () => {
           </div>
         </div>
 
-        <MediaLibraryModal 
-          open={mediaLibraryOpen} 
+        <MediaLibraryModal
+          open={mediaLibraryOpen}
           onOpenChange={setMediaLibraryOpen}
           onSelect={mediaLibraryCallback}
           articleId={id}
         />
+
+        {id && (
+          <SocialPostDialog
+            open={socialDialogOpen}
+            onOpenChange={setSocialDialogOpen}
+            articleId={id}
+            articleTitle={formData.title}
+            articleSlug={formData.slug}
+            articleLanguage={formData.language}
+            articleExcerpt={formData.excerpt}
+            articleContent={formData.content}
+            articleFeaturedImage={formData.featured_image}
+            translationId={formData.translation_id}
+            postedToFacebook={socialStatus.posted_to_facebook}
+            postedToLinkedin={socialStatus.posted_to_linkedin}
+            socialPostedAt={socialStatus.social_posted_at}
+            onPostSuccess={handleSocialPostSuccess}
+          />
+        )}
       </div>
     </PersistentDashboardLayout>
   );
