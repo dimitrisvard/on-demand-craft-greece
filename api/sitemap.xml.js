@@ -12,7 +12,38 @@
 const STORAGE_URL = 'https://cfjrtmtaitwzggzpkhxi.supabase.co/storage/v1/object/public/sitemaps/sitemap-complete.xml';
 
 const BASE_URL = 'https://www.micronshub.eu';
-const TODAY = new Date().toISOString().split('T')[0];
+
+/**
+ * Escape special XML characters in text content
+ */
+function escapeXml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Encode non-ASCII characters in a URL path for sitemap compliance.
+ * Preserves /, :, and other valid URL characters but percent-encodes
+ * characters like ö, ä, ü etc.
+ */
+function encodeSitemapUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    // encodeURI handles non-ASCII but preserves valid URL chars
+    // We need to re-encode the pathname specifically for non-ASCII
+    urlObj.pathname = urlObj.pathname
+      .split('/')
+      .map(segment => encodeURIComponent(decodeURIComponent(segment)))
+      .join('/');
+    return urlObj.toString();
+  } catch {
+    return encodeURI(url);
+  }
+}
 
 // All supported languages
 const LANGUAGES = ['en', 'de', 'fr', 'es', 'it', 'nl', 'pl', 'pt', 'sv', 'da', 'fi', 'nb', 'hu', 'cs'];
@@ -56,43 +87,44 @@ const STATIC_PAGES = [
 function buildPageUrl(lang, page) {
   const s = SLUGS[lang];
   const pagePath = page.path(s);
-  return BASE_URL + '/' + lang + pagePath;
+  return encodeSitemapUrl(BASE_URL + '/' + lang + pagePath);
 }
 
 function buildStaticPageHreflang(page) {
   const links = LANGUAGES.map(lang => {
-    const url = buildPageUrl(lang, page);
+    const url = escapeXml(buildPageUrl(lang, page));
     return '    <xhtml:link rel="alternate" hreflang="' + lang + '" href="' + url + '"/>';
   });
-  const englishUrl = buildPageUrl('en', page);
+  const englishUrl = escapeXml(buildPageUrl('en', page));
   links.push('    <xhtml:link rel="alternate" hreflang="x-default" href="' + englishUrl + '"/>');
   return links.join('\n');
 }
 
-function buildStaticUrlEntry(lang, page) {
-  const loc = buildPageUrl(lang, page);
-  return '  <url>\n    <loc>' + loc + '</loc>\n' + buildStaticPageHreflang(page) + '\n    <lastmod>' + TODAY + '</lastmod>\n    <changefreq>' + page.changefreq + '</changefreq>\n    <priority>' + page.priority + '</priority>\n  </url>';
+function buildStaticUrlEntry(lang, page, today) {
+  const loc = escapeXml(buildPageUrl(lang, page));
+  return '  <url>\n    <loc>' + loc + '</loc>\n' + buildStaticPageHreflang(page) + '\n    <lastmod>' + today + '</lastmod>\n    <changefreq>' + page.changefreq + '</changefreq>\n    <priority>' + page.priority + '</priority>\n  </url>';
 }
 
 function buildBlogHreflang(article, siblings) {
   const links = siblings.map(sibling => {
     const lang = (sibling.language || 'en').trim().toLowerCase();
     const blogSlug = SLUGS[lang]?.blog || 'blog';
-    const url = BASE_URL + '/' + lang + '/' + blogSlug + '/' + sibling.slug;
+    const url = escapeXml(encodeSitemapUrl(BASE_URL + '/' + lang + '/' + blogSlug + '/' + sibling.slug));
     return '    <xhtml:link rel="alternate" hreflang="' + lang + '" href="' + url + '"/>';
   });
   const englishSibling = siblings.find(s => (s.language || '').trim().toLowerCase() === 'en');
   if (englishSibling) {
-    links.push('    <xhtml:link rel="alternate" hreflang="x-default" href="' + BASE_URL + '/en/' + SLUGS.en.blog + '/' + englishSibling.slug + '"/>');
+    const url = escapeXml(encodeSitemapUrl(BASE_URL + '/en/' + SLUGS.en.blog + '/' + englishSibling.slug));
+    links.push('    <xhtml:link rel="alternate" hreflang="x-default" href="' + url + '"/>');
   }
   return links.join('\n');
 }
 
-function buildBlogUrlEntry(article, siblings) {
+function buildBlogUrlEntry(article, siblings, today) {
   const lang = (article.language || 'en').trim().toLowerCase();
   const blogSlug = SLUGS[lang]?.blog || 'blog';
-  const loc = BASE_URL + '/' + lang + '/' + blogSlug + '/' + article.slug;
-  const lastmod = (article.updated_at || article.created_at || TODAY).split('T')[0];
+  const loc = escapeXml(encodeSitemapUrl(BASE_URL + '/' + lang + '/' + blogSlug + '/' + article.slug));
+  const lastmod = (article.updated_at || article.created_at || today).split('T')[0];
   const hreflang = siblings.length > 1 ? '\n' + buildBlogHreflang(article, siblings) : '';
   return '  <url>\n    <loc>' + loc + '</loc>' + hreflang + '\n    <lastmod>' + lastmod + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>';
 }
@@ -141,10 +173,11 @@ export default async function handler(req, res) {
 
   // Fallback: generate dynamically
   try {
+    const today = new Date().toISOString().split('T')[0];
     const staticEntries = [];
     for (const page of STATIC_PAGES) {
       for (const lang of LANGUAGES) {
-        staticEntries.push(buildStaticUrlEntry(lang, page));
+        staticEntries.push(buildStaticUrlEntry(lang, page, today));
       }
     }
 
@@ -164,9 +197,9 @@ export default async function handler(req, res) {
 
     const blogEntries = [];
     for (const [, siblings] of translationGroups) {
-      for (const article of siblings) blogEntries.push(buildBlogUrlEntry(article, siblings));
+      for (const article of siblings) blogEntries.push(buildBlogUrlEntry(article, siblings, today));
     }
-    for (const article of orphanArticles) blogEntries.push(buildBlogUrlEntry(article, [article]));
+    for (const article of orphanArticles) blogEntries.push(buildBlogUrlEntry(article, [article], today));
 
     const xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n' + staticEntries.join('\n') + '\n' + blogEntries.join('\n') + '\n</urlset>';
     res.status(200).send(xml);

@@ -34,6 +34,35 @@ const SLUGS: Record<string, Record<string, string>> = {
   cs: { services: 'sluzby', about: 'o-nas', contact: 'kontakt', quote: 'nabidka', industries: 'prumysl', ourWork: 'nase-prace', blog: 'blog', cnc: 'cnc-obrabeni', sheetMetal: 'obrabeni-plechu', printing: '3d-tisk', injection: 'vstrekovani', surface: 'uprava-povrchu', rapid: 'rychle-prototypovani' },
 };
 
+/**
+ * Escape special XML characters in text content
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+/**
+ * Encode non-ASCII characters in a URL path for sitemap compliance.
+ * Preserves valid URL characters but percent-encodes characters like ö, ä, ü.
+ */
+function encodeSitemapUrl(url: string): string {
+  try {
+    const urlObj = new URL(url);
+    urlObj.pathname = urlObj.pathname
+      .split('/')
+      .map(segment => encodeURIComponent(decodeURIComponent(segment)))
+      .join('/');
+    return urlObj.toString();
+  } catch {
+    return encodeURI(url);
+  }
+}
+
 // Static page definitions with path builder functions
 interface PageDef {
   key: string;
@@ -74,7 +103,7 @@ interface Article {
 function buildPageUrl(lang: string, page: PageDef): string {
   const s = SLUGS[lang];
   const pagePath = page.path(s);
-  return `${siteUrl}/${lang}${pagePath}`;
+  return encodeSitemapUrl(`${siteUrl}/${lang}${pagePath}`);
 }
 
 /**
@@ -82,10 +111,10 @@ function buildPageUrl(lang: string, page: PageDef): string {
  */
 function buildStaticPageHreflang(page: PageDef): string {
   const links = LANGUAGES.map(lang => {
-    const url = buildPageUrl(lang, page);
+    const url = escapeXml(buildPageUrl(lang, page));
     return `    <xhtml:link rel="alternate" hreflang="${lang}" href="${url}"/>`;
   });
-  const englishUrl = buildPageUrl('en', page);
+  const englishUrl = escapeXml(buildPageUrl('en', page));
   links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${englishUrl}"/>`);
   return links.join('\n');
 }
@@ -94,7 +123,7 @@ function buildStaticPageHreflang(page: PageDef): string {
  * Build a static page <url> entry for a specific language
  */
 function buildStaticUrlEntry(lang: string, page: PageDef, today: string): string {
-  const loc = buildPageUrl(lang, page);
+  const loc = escapeXml(buildPageUrl(lang, page));
   return `  <url>
     <loc>${loc}</loc>
 ${buildStaticPageHreflang(page)}
@@ -111,12 +140,13 @@ function buildBlogHreflang(siblings: Article[]): string {
   const links = siblings.map(sibling => {
     const lang = (sibling.language || 'en').trim().toLowerCase();
     const blogSlug = SLUGS[lang]?.blog || 'blog';
-    const url = `${siteUrl}/${lang}/${blogSlug}/${sibling.slug}`;
+    const url = escapeXml(encodeSitemapUrl(`${siteUrl}/${lang}/${blogSlug}/${sibling.slug}`));
     return `    <xhtml:link rel="alternate" hreflang="${lang}" href="${url}"/>`;
   });
   const englishSibling = siblings.find(s => (s.language || '').trim().toLowerCase() === 'en');
   if (englishSibling) {
-    links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${siteUrl}/en/${SLUGS.en.blog}/${englishSibling.slug}"/>`);
+    const url = escapeXml(encodeSitemapUrl(`${siteUrl}/en/${SLUGS.en.blog}/${englishSibling.slug}`));
+    links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${url}"/>`);
   }
   return links.join('\n');
 }
@@ -127,7 +157,7 @@ function buildBlogHreflang(siblings: Article[]): string {
 function buildBlogUrlEntry(article: Article, siblings: Article[], today: string): string {
   const lang = (article.language || 'en').trim().toLowerCase();
   const blogSlug = SLUGS[lang]?.blog || 'blog';
-  const loc = `${siteUrl}/${lang}/${blogSlug}/${article.slug}`;
+  const loc = escapeXml(encodeSitemapUrl(`${siteUrl}/${lang}/${blogSlug}/${article.slug}`));
   const lastmod = (article.updated_at || article.created_at || today).split('T')[0];
   const hreflang = siblings.length > 1 ? `\n${buildBlogHreflang(siblings)}` : '';
 
