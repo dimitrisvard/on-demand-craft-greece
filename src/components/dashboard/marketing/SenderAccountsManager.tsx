@@ -67,6 +67,20 @@ const SenderAccountsManager = () => {
     resend_api_key: '',
   });
 
+  // Listen for OAuth popup messages
+  React.useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'google-oauth-success') {
+        toast.success(`Google account ${event.data.email || ''} connected successfully!`);
+        queryClient.invalidateQueries({ queryKey: ['sender_accounts'] });
+      } else if (event.data?.type === 'google-oauth-error') {
+        toast.error(`Failed to connect Google: ${event.data.error || 'Unknown error'}`);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [queryClient]);
+
   const { data: accounts, isLoading } = useQuery({
     queryKey: ['sender_accounts'],
     queryFn: async () => {
@@ -198,7 +212,19 @@ const SenderAccountsManager = () => {
 
   const handleGoogleConnect = (accountId?: string) => {
     const params = accountId ? `&step=authorize&account_id=${accountId}` : '&step=authorize';
-    window.location.href = `/api/marketing?action=google-auth${params}`;
+    const url = `/api/marketing?action=google-auth${params}`;
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = window.open(
+      url,
+      'google-oauth',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+    );
+    if (!popup) {
+      toast.error('Popup blocked. Please allow popups for this site and try again.');
+    }
   };
 
   const isGoogleConnected = (account: SenderAccount) => {

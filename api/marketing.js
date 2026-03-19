@@ -379,7 +379,19 @@ async function handleGoogleAuth(req, res) {
   const { step, code, state, account_id, error: oauthError } = req.query;
 
   if (oauthError) {
-    return res.redirect(302, `/dashboard/email-marketing?tab=settings&google_error=${encodeURIComponent(oauthError)}`);
+    return res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Google Connection Failed</title></head>
+<body>
+<p>OAuth error: ${oauthError}. This window will close automatically.</p>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google-oauth-error', error: '${oauthError}' }, '*');
+    window.close();
+  } else {
+    window.location.href = '/dashboard/email-marketing?tab=settings&google_error=' + encodeURIComponent('${oauthError}');
+  }
+</script>
+</body></html>`);
   }
 
   switch (step) {
@@ -406,7 +418,19 @@ async function handleGoogleAuth(req, res) {
 
     case 'callback': {
       if (!code) {
-        return res.redirect(302, '/dashboard/email-marketing?tab=settings&google_error=no_code');
+        return res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Google Connection Failed</title></head>
+<body>
+<p>No authorization code received. This window will close automatically.</p>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google-oauth-error', error: 'no_code' }, '*');
+    window.close();
+  } else {
+    window.location.href = '/dashboard/email-marketing?tab=settings&google_error=no_code';
+  }
+</script>
+</body></html>`);
       }
 
       try {
@@ -426,7 +450,20 @@ async function handleGoogleAuth(req, res) {
 
         if (!tokenResponse.ok || tokens.error) {
           console.error('Token exchange error:', tokens);
-          return res.redirect(302, `/dashboard/email-marketing?tab=settings&google_error=${encodeURIComponent(tokens.error || 'token_error')}`);
+          const tokenErr = tokens.error || 'token_error';
+          return res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Google Connection Failed</title></head>
+<body>
+<p>Token exchange failed. This window will close automatically.</p>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google-oauth-error', error: '${tokenErr}' }, '*');
+    window.close();
+  } else {
+    window.location.href = '/dashboard/email-marketing?tab=settings&google_error=${encodeURIComponent(tokenErr)}';
+  }
+</script>
+</body></html>`);
         }
 
         const userInfoResponse = await fetch(
@@ -472,10 +509,36 @@ async function handleGoogleAuth(req, res) {
           );
         }
 
-        return res.redirect(302, '/dashboard/email-marketing?tab=settings&google_connected=1');
+        // Return an HTML page that communicates back to the opener window and closes the popup
+        return res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Google Connected</title></head>
+<body>
+<p>Google account connected successfully. This window will close automatically.</p>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google-oauth-success', email: ${JSON.stringify(userInfo.email)} }, '*');
+    window.close();
+  } else {
+    window.location.href = '/dashboard/email-marketing?tab=settings&google_connected=1';
+  }
+</script>
+</body></html>`);
       } catch (error) {
         console.error('Google OAuth callback error:', error);
-        return res.redirect(302, `/dashboard/email-marketing?tab=settings&google_error=${encodeURIComponent(error.message)}`);
+        const errorMsg = error.message || 'Unknown error';
+        return res.status(200).send(`<!DOCTYPE html>
+<html><head><title>Google Connection Failed</title></head>
+<body>
+<p>Failed to connect Google account. This window will close automatically.</p>
+<script>
+  if (window.opener) {
+    window.opener.postMessage({ type: 'google-oauth-error', error: ${JSON.stringify(error.message || 'Unknown error')} }, '*');
+    window.close();
+  } else {
+    window.location.href = '/dashboard/email-marketing?tab=settings&google_error=' + encodeURIComponent(${JSON.stringify(error.message || 'Unknown error')});
+  }
+</script>
+</body></html>`);
       }
     }
 
