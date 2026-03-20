@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -15,14 +15,29 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Loader2, ArrowLeft, Mail, Users, Calendar, GitBranch } from 'lucide-react';
 import { format } from 'date-fns';
 import FollowUpImportDialog from '@/components/dashboard/marketing/FollowUpImportDialog';
+
+interface ContactPreview {
+  email: string;
+  name: string | null;
+  subject: string;
+  body: string;
+  sent_at: string | null;
+}
 
 const CampaignDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [selectedContact, setSelectedContact] = useState<ContactPreview | null>(null);
 
   // 1. Fetch Campaign Details
   const { data: campaign, isLoading: isLoadingCampaign } = useQuery({
@@ -58,13 +73,31 @@ const CampaignDetailsPage = () => {
     enabled: !!id,
   });
 
-  // 3. Fetch Subscribers/Recipients
+  // 3. Fetch Subscribers/Recipients (with custom content for CSV campaigns)
   const { data: subscribers, isLoading: isLoadingSubscribers } = useQuery({
     queryKey: ['campaign-subscribers', id],
     queryFn: async () => {
       if (!id || !campaign) return null;
 
-      // Try to get actual sent events first
+      // Check for CSV-imported recipients first (they have custom_subject/body)
+      const { data: csvRecipients } = await supabase
+        .from('marketing_campaign_recipients')
+        .select('custom_subject, custom_body, status, sent_at, marketing_subscribers(email, name)')
+        .eq('campaign_id', id)
+        .eq('sequence_number', 1);
+
+      if (csvRecipients && csvRecipients.length > 0) {
+        return csvRecipients.map((r: any) => ({
+          email: r.marketing_subscribers?.email,
+          name: r.marketing_subscribers?.name,
+          sent_at: r.sent_at || null,
+          status: r.status === 'sent' ? 'Sent' : 'Targeted',
+          custom_subject: r.custom_subject,
+          custom_body: r.custom_body,
+        }));
+      }
+
+      // Try to get actual sent events for standard campaigns
       const { data: events } = await supabase
         .from('marketing_events')
         .select('subscriber_id, event_type, created_at, marketing_subscribers(email, name)')
@@ -76,7 +109,9 @@ const CampaignDetailsPage = () => {
           email: e.marketing_subscribers?.email,
           name: e.marketing_subscribers?.name,
           sent_at: e.created_at,
-          status: 'Sent'
+          status: 'Sent',
+          custom_subject: campaign.subject_a,
+          custom_body: campaign.body,
         }));
       }
 
@@ -88,13 +123,15 @@ const CampaignDetailsPage = () => {
       if (!allSubscribers) return [];
 
       const targetTags = campaign.target_tags || [];
-      
+
       if (!targetTags || targetTags.length === 0) {
         return allSubscribers.map(s => ({
             email: s.email,
             name: s.name,
             sent_at: null,
-            status: 'Targeted'
+            status: 'Targeted',
+            custom_subject: campaign.subject_a,
+            custom_body: campaign.body,
         }));
       }
 
@@ -107,7 +144,9 @@ const CampaignDetailsPage = () => {
             email: s.email,
             name: s.name,
             sent_at: null,
-            status: 'Targeted'
+            status: 'Targeted',
+            custom_subject: campaign.subject_a,
+            custom_body: campaign.body,
         }));
     },
     enabled: !!id && !!campaign,
@@ -252,16 +291,28 @@ const CampaignDetailsPage = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-[50px]">#</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Time</TableHead>
+                      <TableHead className="text-right">Sent At</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {subscribers && subscribers.length > 0 ? (
                       subscribers.map((sub, idx) => (
-                        <TableRow key={idx}>
+                        <TableRow
+                          key={idx}
+                          className="cursor-pointer hover:bg-muted/50"
+                          onClick={() => setSelectedContact({
+                            email: sub.email,
+                            name: sub.name,
+                            subject: sub.custom_subject || campaign.subject_a,
+                            body: sub.custom_body || campaign.body,
+                            sent_at: sub.sent_at,
+                          })}
+                        >
+                          <TableCell className="text-muted-foreground text-sm">{idx + 1}</TableCell>
                           <TableCell className="font-medium">{sub.email}</TableCell>
                           <TableCell>{sub.name || '-'}</TableCell>
                           <TableCell>
@@ -278,7 +329,7 @@ const CampaignDetailsPage = () => {
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                           No recipients found
                         </TableCell>
                       </TableRow>
@@ -382,6 +433,38 @@ const CampaignDetailsPage = () => {
         </div>
       </div>
     </div>
+
+    {/* Contact Email Preview Dialog */}
+    <Dialog open={!!selectedContact} onOpenChange={(open) => { if (!open) setSelectedContact(null); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Mail className="h-5 w-5" />
+            Email for {selectedContact?.email}
+          </DialogTitle>
+          {selectedContact?.sent_at && (
+            <p className="text-sm text-muted-foreground">
+              Sent: {format(new Date(selectedContact.sent_at), 'PPP p')}
+            </p>
+          )}
+        </DialogHeader>
+        <div className="space-y-4 flex-1 overflow-y-auto">
+          <div className="space-y-1">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">Subject</span>
+            <div className="flex items-center gap-2 p-3 bg-muted rounded-md border">
+              <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="font-medium">{selectedContact?.subject}</span>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">Email Body</span>
+            <div className="rounded-md border p-4 bg-white min-h-[200px] prose max-w-none overflow-auto">
+              <div dangerouslySetInnerHTML={{ __html: selectedContact?.body || '' }} />
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 

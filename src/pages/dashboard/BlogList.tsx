@@ -600,6 +600,7 @@ const BlogList = () => {
                       className={isSomeSelected ? "data-[state=checked]:bg-blue-600" : ""}
                     />
                   </TableHead>
+                  <TableHead className="w-[50px]">#</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Language</TableHead>
                   <TableHead>Status</TableHead>
@@ -611,13 +612,13 @@ const BlogList = () => {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       Loading articles...
                     </TableCell>
                   </TableRow>
                 ) : filteredArticles.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                       <div className="flex flex-col items-center justify-center">
                         <FileText className="h-12 w-12 mb-2 opacity-20" />
                         <p>No articles found matching your filters.</p>
@@ -625,8 +626,8 @@ const BlogList = () => {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredArticles.map((article) => (
-                    <TableRow 
+                  filteredArticles.map((article, idx) => (
+                    <TableRow
                       key={article.id}
                       className={selectedArticles.has(article.id) ? "bg-blue-50" : ""}
                     >
@@ -637,6 +638,7 @@ const BlogList = () => {
                           aria-label={`Select ${article.title}`}
                         />
                       </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{idx + 1}</TableCell>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {article.title}

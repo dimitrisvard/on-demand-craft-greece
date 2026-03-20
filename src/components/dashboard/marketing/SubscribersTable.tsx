@@ -52,6 +52,7 @@ const SubscribersTable = () => {
       const { data, error } = await supabase
         .from('marketing_subscribers')
         .select('*')
+        .not('tags', 'cs', '["_csv_only"]')
         .order('created_at', { ascending: false });
 
       if (error) throw error;

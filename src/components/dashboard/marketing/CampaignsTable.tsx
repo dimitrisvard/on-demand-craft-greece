@@ -137,6 +137,7 @@ const CampaignsTable = () => {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-[50px]">#</TableHead>
             <TableHead>Name</TableHead>
             <TableHead>Subject</TableHead>
             <TableHead>Status</TableHead>
@@ -148,13 +149,14 @@ const CampaignsTable = () => {
         <TableBody>
           {campaigns?.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+              <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                 No campaigns found. Create your first one!
               </TableCell>
             </TableRow>
           ) : (
-            campaigns?.map((campaign) => (
+            campaigns?.map((campaign, idx) => (
               <TableRow key={campaign.id}>
+                <TableCell className="text-muted-foreground text-sm">{idx + 1}</TableCell>
                 <TableCell className="font-medium">{campaign.name}</TableCell>
                 <TableCell className="max-w-[200px] truncate" title={campaign.subject_a}>
                     {campaign.subject_a}

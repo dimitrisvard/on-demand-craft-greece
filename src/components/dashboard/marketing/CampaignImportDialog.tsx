@@ -144,7 +144,7 @@ const CampaignImportDialog = ({ onImported }: Props) => {
               email: row.recipient_email,
               name: row.recipient_name || null,
               status: 'active',
-              tags: [],
+              tags: ['_csv_only'],
             })
             .select('id')
             .single();
