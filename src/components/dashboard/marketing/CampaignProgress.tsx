@@ -53,10 +53,29 @@ const CampaignProgress: React.FC<CampaignProgressProps> = ({
           if (newData.status !== undefined) setCurrentStatus(newData.status);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Realtime subscription unavailable, using polling fallback');
+        }
+      });
+
+    // Polling fallback: fetch every 3s while campaign is sending
+    // This ensures progress updates even if WebSocket is unavailable
+    const pollInterval = setInterval(async () => {
+      const { data } = await supabase
+        .from('marketing_campaigns')
+        .select('sent_count, status')
+        .eq('id', campaignId)
+        .single();
+      if (data) {
+        setSentCount(data.sent_count || 0);
+        setCurrentStatus(data.status || 'draft');
+      }
+    }, 3000);
 
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, [campaignId]);
 
