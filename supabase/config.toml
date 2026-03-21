@@ -22,3 +22,15 @@ verify_jwt = false
 
 [functions.generate-daily-article]
 verify_jwt = false
+
+[functions.reddit-collector]
+verify_jwt = false
+
+[functions.hn-collector]
+verify_jwt = false
+
+[functions.leads-api]
+verify_jwt = false
+
+[functions.telegram-leads-bot]
+verify_jwt = false

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { 
-  Users, 
-  Factory, 
-  ShoppingBag, 
-  FileText, 
-  Package, 
-  Calendar, 
-  Bell, 
+import {
+  Users,
+  Factory,
+  ShoppingBag,
+  FileText,
+  Package,
+  Calendar,
+  Bell,
   Settings,
   LayoutDashboard,
   BarChart3,
@@ -18,7 +18,8 @@ import {
   Inbox,
   Sparkles,
   Menu,
-  X
+  X,
+  Radio
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -70,6 +71,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/calendar') return 'calendar';
     if (path === '/dashboard/notifications') return 'notifications';
     if (path === '/dashboard/settings') return 'settings';
+    if (path === '/dashboard/leads') return 'leads';
     return 'overview';
   };
 
@@ -250,6 +252,23 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               </AccordionContent>
             </AccordionItem>
 
+              {/* Lead Monitor Section */}
+              {!isProductionPartner && (
+                <AccordionItem value="leads" className="border-none">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Lead Monitor
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton
+                      active={activeModule === "leads"}
+                      onClick={() => handleNavigation("/dashboard/leads")}
+                      icon={<Radio className="h-4 w-4" />}
+                      label="Lead Feed"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
               {/* System Section */}
               {!isProductionPartner && (
                 <AccordionItem value="system" className="border-none">
@@ -257,13 +276,13 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                     System
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "notifications"}
                       onClick={() => handleNavigation("/dashboard/notifications")}
                       icon={<Bell className="h-4 w-4" />}
                       label="Notifications"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "settings"}
                       onClick={() => handleNavigation("/dashboard/settings")}
                       icon={<Settings className="h-4 w-4" />}
@@ -432,6 +451,23 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               </AccordionContent>
             </AccordionItem>
 
+              {/* Lead Monitor Section */}
+              {!isProductionPartner && (
+                <AccordionItem value="leads" className="border-none">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    Lead Monitor
+                  </AccordionTrigger>
+                  <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton
+                      active={activeModule === "leads"}
+                      onClick={() => handleNavigation("/dashboard/leads")}
+                      icon={<Radio className="h-4 w-4" />}
+                      label="Lead Feed"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
               {/* System Section */}
               {!isProductionPartner && (
                 <AccordionItem value="system" className="border-none">
@@ -439,13 +475,13 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                     System
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "notifications"}
                       onClick={() => handleNavigation("/dashboard/notifications")}
                       icon={<Bell className="h-4 w-4" />}
                       label="Notifications"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "settings"}
                       onClick={() => handleNavigation("/dashboard/settings")}
                       icon={<Settings className="h-4 w-4" />}

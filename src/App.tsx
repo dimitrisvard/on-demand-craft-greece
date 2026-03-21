@@ -53,6 +53,7 @@ const NotificationsPage = lazy(() => import('./pages/dashboard/NotificationsPage
 const SettingsPage = lazy(() => import('./pages/dashboard/SettingsPage'));
 const QuotesPage = lazy(() => import('./pages/dashboard/QuotesPage'));
 const AutoBlogDashboard = lazy(() => import('./pages/dashboard/AutoBlogDashboard'));
+const LeadMonitorPage = lazy(() => import('./pages/dashboard/LeadMonitorPage'));
 const Education = lazy(() => import('./pages/Education'));
 
 // Loading component
@@ -190,6 +191,7 @@ function AppContent() {
                 <Route path="/dashboard/email-marketing/*" element={<EmailMarketing />} />
                 <Route path="/dashboard/notifications" element={<NotificationsPage />} />
                 <Route path="/dashboard/settings" element={<SettingsPage />} />
+                <Route path="/dashboard/leads" element={<LeadMonitorPage />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />
