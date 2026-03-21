@@ -23,7 +23,6 @@
   "learn_more": "Saperne di più",
   "service_cnc-machining_title": "Elaborazione CNC",
   "service_cnc-machining_desc": "Elaborazione ad alta precisione per parti complesse. I nostri moderni centri di lavorazione CNC a 3, 4 e 5 assi possono produrre geometrie complesse con tolleranze strette e superfici eccellenti.",
-  
   "comparison_title": "Perché Microns Hub Supera la Produzione del Marketplace",
   "comparison_subtitle": "Scopri i vantaggi chiave di lavorare direttamente con il nostro team di produzione interno rispetto alle piattaforme di marketplace tradizionali.",
   "comparison_header_feature": "Caratteristica",
@@ -370,7 +369,7 @@
   "contact_email_us": "Invia email",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Chiamaci",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Orario di lavoro",
   "contact_hours_weekdays": "Dal lunedì al venerdì: 9:00 - 18:00",
   "contact_hours_weekend": "Sabato - domenica: chiuso",
@@ -1224,8 +1223,7 @@
   "service_surface-finishes_treatments_sandblasting_title": "Sabbiare",
   "service_surface-finishes_treatments_sandblasting_desc": "La sabbiatura indica il trattamento superficiale di un materiale mediante l'azione degli agenti del raggio contro ruggine, sporcizia, colore, tinder e altri contaminanti o per la progettazione di superficie di Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Raggi di perle di vetro",
-  "service_surface-finishes_treatments_glassbead_desc": "I raggi di perline di vetro sono ono un trattamento meccanico di superficie simili al sabbia, a Cui Vengono utilizzate Piccole Pearl Di Vetro Come Agent A Raggio per Lice E Compat."
-  ,
+  "service_surface-finishes_treatments_glassbead_desc": "I raggi di perline di vetro sono ono un trattamento meccanico di superficie simili al sabbia, a Cui Vengono utilizzate Piccole Pearl Di Vetro Come Agent A Raggio per Lice E Compat.",
   "navbar_our_work": "I nostri lavori",
   "our_work_title": "I nostri lavori",
   "our_work_intro": "Qui puoi vedere una selezione dei nostri lavori in lavorazione della lamiera, lavorazione CNC, tornitura CNC e stampaggio a iniezione.",
@@ -1292,5 +1290,10 @@
   "impressum_eu_dispute_text": "La Commissione europea fornisce una piattaforma per la risoluzione delle controversie online (ODR): https://ec.europa.eu/consumers/odr/. Puoi trovare il nostro indirizzo email nelle note legali sopra.",
   "impressum_consumer_dispute": "Risoluzione delle controversie dei consumatori/Commissione arbitrale universale",
   "impressum_consumer_dispute_text": "Non siamo disposti né obbligati a partecipare a procedure di risoluzione delle controversie davanti a una commissione arbitrale dei consumatori.",
-  "footer_impressum": "Note Legali"
+  "footer_impressum": "Note Legali",
+  "seo_education_title": "Educazione e Partnership Universitarie | Microns Hub — Produzione di Precisione per Studenti",
+  "seo_education_description": "Sconto educativo del 10-15% su lavorazione CNC, stampa 3D e lavorazione della lamiera per università europee, team Formula Student e laboratori di ricerca.",
+  "seo_education_keywords": "sconto studente lavorazione CNC, partner produzione universitaria, parti Formula Student, stampa 3D sconto educativo, produzione studente, parti precisione Europa",
+  "navbar_education": "Istruzione",
+  "url_slug_education": "istruzione"
 }

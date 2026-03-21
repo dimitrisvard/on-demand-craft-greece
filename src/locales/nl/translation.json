@@ -23,7 +23,6 @@
   "learn_more": "Leer meer",
   "service_cnc-machining_title": "CNC -verwerking",
   "service_cnc-machining_desc": "Hoge -opdrachtverwerking voor complexe onderdelen. Onze moderne CNC-bewerkingscentra van 3-, 4 en 5-assige bewerkingscentra kunnen complexe geometrieën produceren met strakke toleranties en uitstekende oppervlakken.",
-  
   "comparison_title": "Waarom Microns Hub Marketplace-productie Overstijgt",
   "comparison_subtitle": "Ontdek de belangrijkste voordelen van direct samenwerken met ons interne productieteam versus traditionele marketplace-platforms.",
   "comparison_header_feature": "Functie",
@@ -370,7 +369,7 @@
   "contact_email_us": "Stuur e -mail",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Bel ons",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Kantooruren",
   "contact_hours_weekdays": "Maandag - vrijdag: 9:00 uur - 18:00 uur",
   "contact_hours_weekend": "Zaterdag - zondag: gesloten",
@@ -1224,8 +1223,7 @@
   "service_surface-finishes_treatments_sandblasting_title": "Zandstraal",
   "service_surface-finishes_treatments_sandblasting_desc": "Zandsterkte duidt op de oppervlaktebehandeling van een materiaal door de werking van straalmiddelen tegen roest, vuil, kleur, tondel en andere verontreinigingen of voor oppervlakte -ontwerp door mat.",
   "service_surface-finishes_treatments_glassbead_title": "Glazen kraalstralen",
-  "service_surface-finishes_treatments_glassbead_desc": "Glazen kraalstralen zijn een mechanische oppervlaktebehandeling vergelijkbaar met zandstoten, waarbij kleine glazen kralen worden gebruikt als een balkmiddel om gladde en compacte oppervlakken te gladstrijken."
-  ,
+  "service_surface-finishes_treatments_glassbead_desc": "Glazen kraalstralen zijn een mechanische oppervlaktebehandeling vergelijkbaar met zandstoten, waarbij kleine glazen kralen worden gebruikt als een balkmiddel om gladde en compacte oppervlakken te gladstrijken.",
   "navbar_our_work": "Ons werk",
   "our_work_title": "Ons werk",
   "our_work_intro": "Hier ziet u een selectie van ons werk in plaatbewerking, CNC-bewerking, CNC-draaien en spuitgieten.",
@@ -1292,5 +1290,10 @@
   "impressum_eu_dispute_text": "De Europese Commissie biedt een platform voor online geschillenbeslechting (ODR): https://ec.europa.eu/consumers/odr/. U kunt ons e-mailadres vinden in de juridische mededeling hierboven.",
   "impressum_consumer_dispute": "Consumentengeschillenbeslechting/Universele arbitragecommissie",
   "impressum_consumer_dispute_text": "Wij zijn niet bereid of verplicht om deel te nemen aan geschillenbeslechtingsprocedures voor een consumentenarbitragecommissie.",
-  "footer_impressum": "Juridische Mededeling"
+  "footer_impressum": "Juridische Mededeling",
+  "seo_education_title": "Onderwijs & Universitaire Partnerschappen | Microns Hub — Precisieproductie voor Studenten",
+  "seo_education_description": "10-15% onderwijskorting op CNC-bewerking, 3D-printen en plaatbewerking voor Europese universiteiten, Formula Student-teams en onderzoekslaboratoria.",
+  "seo_education_keywords": "CNC bewerking studentenkorting, universitaire productiepartner, Formula Student onderdelen, 3D printen onderwijskorting, studenten productie, precisieonderdelen Europa",
+  "navbar_education": "Onderwijs",
+  "url_slug_education": "onderwijs"
 }

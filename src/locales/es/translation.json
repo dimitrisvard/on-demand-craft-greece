@@ -24,7 +24,6 @@
   "learn_more": "Obtenga más información",
   "service_cnc-machining_title": "Procesamiento de CNC",
   "service_cnc-machining_desc": "Procesamiento de alta precisión para piezas complejas. Nuestros modernos centros de mecanizado CNC de 3, 4 y 5 ejes pueden producir geometrías complejas con tolerancias estrechas y excelentes superficies.",
-  
   "comparison_title": "Por Qué Microns Hub Supera la Fabricación de Mercado",
   "comparison_subtitle": "Descubre las ventajas clave de trabajar directamente con nuestro equipo de fabricación interno versus plataformas de mercado tradicionales.",
   "comparison_header_feature": "Característica",
@@ -376,7 +375,7 @@
   "contact_email_us": "Enviar correo electrónico",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Llámenos",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Horario comercial",
   "contact_hours_weekdays": "Lunes a viernes: 9:00 a.m. a 6:00 p.m.",
   "contact_hours_weekend": "Sábado - Domingo: Cerrado",
@@ -1292,5 +1291,10 @@
   "impressum_eu_dispute_text": "La Comisión Europea proporciona una plataforma para la resolución de disputas en línea (ODR): https://ec.europa.eu/consumers/odr/. Puede encontrar nuestra dirección de correo electrónico en el aviso legal anterior.",
   "impressum_consumer_dispute": "Resolución de disputas de consumidores/Junta de arbitraje universal",
   "impressum_consumer_dispute_text": "No estamos dispuestos ni obligados a participar en procedimientos de resolución de disputas ante una junta de arbitraje de consumidores.",
-  "footer_impressum": "Aviso Legal"
+  "footer_impressum": "Aviso Legal",
+  "seo_education_title": "Educación y Alianzas Universitarias | Microns Hub — Fabricación de Precisión para Estudiantes",
+  "seo_education_description": "Descuento educativo del 10-15% en mecanizado CNC, impresión 3D y fabricación de chapa metálica para universidades europeas, equipos de Formula Student y laboratorios de investigación.",
+  "seo_education_keywords": "descuento estudiante mecanizado CNC, socio fabricación universitaria, piezas Formula Student, impresión 3D descuento educativo, fabricación estudiante, piezas precisión Europa",
+  "navbar_education": "Educación",
+  "url_slug_education": "educacion"
 }

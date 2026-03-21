@@ -53,6 +53,7 @@ const NotificationsPage = lazy(() => import('./pages/dashboard/NotificationsPage
 const SettingsPage = lazy(() => import('./pages/dashboard/SettingsPage'));
 const QuotesPage = lazy(() => import('./pages/dashboard/QuotesPage'));
 const AutoBlogDashboard = lazy(() => import('./pages/dashboard/AutoBlogDashboard'));
+const Education = lazy(() => import('./pages/Education'));
 
 // Loading component
 const PageLoader = () => (
@@ -129,6 +130,7 @@ function AppContent() {
                 <Route path="/:lang/about" element={<About />} />
                 <Route path="/:lang/contact" element={<Contact />} />
                 <Route path="/:lang/contact/success" element={<ContactSuccess />} />
+                <Route path="/:lang/education" element={<Education />} />
                 
                 <Route path="/:lang/services/surface-finishes" element={<SurfaceFinishes />} />
                 <Route path="/:lang/services/sheet-metal" element={<SheetMetalFabrication />} />
@@ -153,6 +155,7 @@ function AppContent() {
                 <Route path="/about" element={<About />} />
                 <Route path="/contact" element={<Contact />} />
                 <Route path="/contact/success" element={<ContactSuccess />} />
+                <Route path="/education" element={<Education />} />
                 
                 <Route path="/services/surface-finishes" element={<SurfaceFinishes />} />
                 <Route path="/services/sheet-metal" element={<SheetMetalFabrication />} />

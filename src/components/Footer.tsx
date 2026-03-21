@@ -45,6 +45,7 @@ const Footer = () => {
             <h4 className="font-bold text-lg mb-4 text-gray-800">{t('footer_company', 'Company')}</h4>
             <ul className="space-y-3">
               <FooterLink to={getLocalizedPath('/about')} label={t('footer_about_us', 'About Us')} />
+              <FooterLink to={getLocalizedPath('/education')} label={t('navbar_education', 'Education')} />
               <FooterLink to={getLocalizedPath('/careers')} label={t('footer_careers', 'Careers')} />
               <FooterLink to={getLocalizedPath('/blog')} label={t('footer_blog', 'Blog')} />
               <FooterLink to={getLocalizedPath('/terms')} label={t('footer_terms', 'Terms of Service')} />

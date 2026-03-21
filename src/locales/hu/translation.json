@@ -1291,5 +1291,10 @@
   "impressum_eu_dispute_text": "Az Európai Bizottság online vitarendezési platformot biztosít (ODR): https://ec.europa.eu/consumers/odr/. E-mail címünket a fenti jogi közleményben találja.",
   "impressum_consumer_dispute": "Fogyasztói vitarendezés/Univerzális választottbíróság",
   "impressum_consumer_dispute_text": "Nem vagyunk hajlandóak vagy kötelezettek részt venni fogyasztói választottbíróság előtti vitarendezési eljárásokban.",
-  "footer_impressum": "Jogi Közlemény"
+  "footer_impressum": "Jogi Közlemény",
+  "seo_education_title": "Oktatás & Egyetemi Partnerségek | Microns Hub — Precíziós Gyártás Hallgatóknak",
+  "seo_education_description": "10-15% oktatási kedvezmény CNC megmunkálásra, 3D nyomtatásra és lemezfeldolgozásra európai egyetemek, Formula Student csapatok és kutatólaboratóriumok számára.",
+  "seo_education_keywords": "CNC megmunkálás hallgatói kedvezmény, egyetemi gyártási partner, Formula Student alkatrészek, 3D nyomtatás oktatási kedvezmény, hallgatói gyártás, precíziós alkatrészek Európa",
+  "navbar_education": "Oktatás",
+  "url_slug_education": "oktatas"
 }

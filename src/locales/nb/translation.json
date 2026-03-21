@@ -1291,5 +1291,10 @@
   "impressum_eu_dispute_text": "Den europeiske kommisjonen gir en plattform for onlinetvistløsning (ODR): https://ec.europa.eu/consumers/odr/. Du kan finne vår e-postadresse i den juridiske informasjonen ovenfor.",
   "impressum_consumer_dispute": "Forbrukertvistløsning/Universell voldgiftskommisjon",
   "impressum_consumer_dispute_text": "Vi er ikke villige eller forpliktet til å delta i tvistløsningsprosedyrer foran en forbrukervoldgiftskommisjon.",
-  "footer_impressum": "Juridisk Informasjon"
+  "footer_impressum": "Juridisk Informasjon",
+  "seo_education_title": "Utdanning & Universitetspartnerskap | Microns Hub — Presisjonstilvirkning for Studenter",
+  "seo_education_description": "10-15% utdanningsrabatt på CNC-bearbeiding, 3D-printing og platearbeiding for europeiske universiteter, Formula Student-lag og forskningslaboratorier.",
+  "seo_education_keywords": "CNC bearbeiding studentrabatt, universitets produksjonspartner, Formula Student deler, 3D-printing utdanningsrabatt, student produksjon, presisjonsdeler Europa",
+  "navbar_education": "Utdanning",
+  "url_slug_education": "utdanning"
 }

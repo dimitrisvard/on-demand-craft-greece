@@ -24,7 +24,6 @@
   "learn_more": "Oppia lisää",
   "service_cnc-machining_title": "CNC -prosessointi",
   "service_cnc-machining_desc": "Korkean tarkkuuden prosessointi monimutkaisissa osissa. Nykyaikaiset 3-, 4- ja 5-akseliset CNC-koneistuskeskuksemme voivat tuottaa monimutkaisia geometrioita, joilla on tiukka toleranssit ja erinomaiset pinnat.",
-  
   "comparison_title": "Miksi Microns Hub Ylittää Markkinapaikan Valmistuksen",
   "comparison_subtitle": "Tutustu keskeisiin etuihin työskennellessä suoraan sisäisen valmistustiimimme kanssa perinteisiin markkinapaikka-alustoihin verrattuna.",
   "comparison_header_feature": "Ominaisuus",
@@ -376,7 +375,7 @@
   "contact_email_us": "Lähettää sähköposti",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Soita meille",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Työaika",
   "contact_hours_weekdays": "Maanantai - perjantai: klo 9.00–18.00.",
   "contact_hours_weekend": "Lauantai - Sunnuntai: Suljettu",
@@ -1292,5 +1291,10 @@
   "impressum_eu_dispute_text": "Euroopan komissio tarjoaa alustan online-riitojen ratkaisemiseen (ODR): https://ec.europa.eu/consumers/odr/. Löydät sähköpostiosoitteemme yllä olevista oikeudellisista huomautuksista.",
   "impressum_consumer_dispute": "Kuluttajariitojen ratkaisu/Yleinen välimieslautakunta",
   "impressum_consumer_dispute_text": "Emme ole halukkaita tai velvollisia osallistumaan riitojen ratkaisumenettelyihin kuluttajavälimieslautakunnan edessä.",
-  "footer_impressum": "Oikeudelliset Huomautukset"
+  "footer_impressum": "Oikeudelliset Huomautukset",
+  "seo_education_title": "Koulutus & Yliopistoyhteistyö | Microns Hub — Tarkkuusvalmistus Opiskelijoille",
+  "seo_education_description": "10-15% opiskelijaale kaikille CNC-koneistuksessa, 3D-tulostuksessa ja ohutlevyvalmistuksessa eurooppalaisille yliopistoille, Formula Student -tiimeille ja tutkimuslaboratorioille.",
+  "seo_education_keywords": "CNC koneistus opiskelijaale, yliopiston valmistuskumppani, Formula Student osat, 3D-tulostus opiskelijaale, opiskelija valmistus, tarkkuusosat Eurooppa",
+  "navbar_education": "Koulutus",
+  "url_slug_education": "koulutus"
 }

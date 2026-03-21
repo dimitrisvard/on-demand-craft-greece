@@ -339,7 +339,7 @@
   "contact_email_us": "Envoyer un e-mail",
   "contact_email": "info@micinshub.eu",
   "contact_call_us": "Nous appeler",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Heures de bureau",
   "contact_hours_weekdays": "Lundi - vendredi: 9 h 00 - 18 h 00",
   "contact_hours_weekend": "Samedi - dimanche: fermé",
@@ -1255,5 +1255,10 @@
   "impressum_eu_dispute_text": "La Commission européenne fournit une plateforme de règlement en ligne des litiges (ODR) : https://ec.europa.eu/consumers/odr/. Vous pouvez trouver notre adresse e-mail dans les mentions légales ci-dessus.",
   "impressum_consumer_dispute": "Règlement des litiges des consommateurs/Commission d'arbitrage universelle",
   "impressum_consumer_dispute_text": "Nous ne sommes pas disposés ou obligés à participer à des procédures de règlement des litiges devant une commission d'arbitrage des consommateurs.",
-  "footer_impressum": "Mentions légales"
+  "footer_impressum": "Mentions légales",
+  "seo_education_title": "Éducation & Partenariats Universitaires | Microns Hub — Fabrication de Précision pour Étudiants",
+  "seo_education_description": "Remise éducative de 10 à 15% sur l'usinage CNC, l'impression 3D et la fabrication de tôlerie pour les universités européennes, les équipes Formula Student et les laboratoires de recherche.",
+  "seo_education_keywords": "réduction étudiante usinage CNC, partenaire fabrication universitaire, pièces Formula Student, impression 3D réduction éducative, fabrication étudiante, pièces de précision Europe",
+  "navbar_education": "Éducation",
+  "url_slug_education": "education"
 }

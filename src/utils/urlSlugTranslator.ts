@@ -23,6 +23,7 @@ export const SLUG_TRANSLATION_KEYS: Record<string, string> = {
   'surface-finishes': 'url_slug_surface_finishes',
   'rapid-prototyping': 'url_slug_rapid_prototyping',
   'legal-notice': 'url_slug_impressum',
+  'education': 'url_slug_education',
   // 'impressum' is handled as a legacy route and will reverse-translate to 'legal-notice'
 };
 

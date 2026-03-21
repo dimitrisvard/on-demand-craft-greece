@@ -23,7 +23,6 @@
   "learn_more": "Saber mais",
   "service_cnc-machining_title": "Processamento CNC",
   "service_cnc-machining_desc": "Processamento de alta precisão para peças complexas. Nossos modernos centros de processamento CNC de 3, 4 e 5 eixos podem produzir geometrias complexas com tolerâncias apertadas e excelentes superfícies.",
-  
   "comparison_title": "Por Que o Microns Hub Supera a Fabricação de Marketplace",
   "comparison_subtitle": "Descubra as principais vantagens de trabalhar diretamente com nossa equipe de fabricação interna versus plataformas de marketplace tradicionais.",
   "comparison_header_feature": "Recurso",
@@ -370,7 +369,7 @@
   "contact_email_us": "Envie email",
   "contact_email": "info@micronshub.eu",
   "contact_call_us": "Ligue para nós",
-      "contact_phone": "+302104447830",
+  "contact_phone": "+302104447830",
   "contact_business_hours": "Horário de negócios",
   "contact_hours_weekdays": "Segunda - sexta -feira: 9:00 - 18:00",
   "contact_hours_weekend": "Sábado - domingo: fechado",
@@ -1224,8 +1223,7 @@
   "service_surface-finishes_treatments_sandblasting_title": "Sandblast",
   "service_surface-finishes_treatments_sandblasting_desc": "O JateAvento de areia indica o Tratamento superficial de sobre o material pela aça dos agentes do Fister Ferrugum, Sujeira, Cor, Falha E os contaminantes ou para o design da superfície por Matt.",
   "service_surface-finishes_treatments_glassbead_title": "Raios de contas de vidro",
-  "service_surface-finishes_treatments_glassbead_desc": "Os Raios de Contas de Vidro São Tratamento de Superfície Mecânico Semelhann Ao Jateateno de Areia, sem qual qual Pequenas contas de Vidro São USADAS COMO AGENTE DE FEIXE PARA SUAVIZAR E COMPARFÍCIES."
-  ,
+  "service_surface-finishes_treatments_glassbead_desc": "Os Raios de Contas de Vidro São Tratamento de Superfície Mecânico Semelhann Ao Jateateno de Areia, sem qual qual Pequenas contas de Vidro São USADAS COMO AGENTE DE FEIXE PARA SUAVIZAR E COMPARFÍCIES.",
   "navbar_our_work": "Nosso trabalho",
   "our_work_title": "Nosso trabalho",
   "our_work_intro": "Aqui você pode ver uma seleção do nosso trabalho em chapa metálica, usinagem CNC, torneamento CNC e moldagem por injeção.",
@@ -1292,5 +1290,10 @@
   "impressum_eu_dispute_text": "A Comissão Europeia fornece uma plataforma para resolução de disputas online (ODR): https://ec.europa.eu/consumers/odr/. Você pode encontrar nosso endereço de e-mail no aviso legal acima.",
   "impressum_consumer_dispute": "Resolução de disputas de consumidores/Comissão de arbitragem universal",
   "impressum_consumer_dispute_text": "Não estamos dispostos nem obrigados a participar de procedimentos de resolução de disputas perante uma comissão de arbitragem de consumidores.",
-  "footer_impressum": "Aviso Legal"
+  "footer_impressum": "Aviso Legal",
+  "seo_education_title": "Educação e Parcerias Universitárias | Microns Hub — Manufatura de Precisão para Estudantes",
+  "seo_education_description": "Desconto educacional de 10-15% em usinagem CNC, impressão 3D e fabricação de chapa metálica para universidades europeias, equipes Formula Student e laboratórios de pesquisa.",
+  "seo_education_keywords": "desconto estudante usinagem CNC, parceiro fabricação universitária, peças Formula Student, impressão 3D desconto educacional, fabricação estudante, peças precisão Europa",
+  "navbar_education": "Educação",
+  "url_slug_education": "educacao"
 }

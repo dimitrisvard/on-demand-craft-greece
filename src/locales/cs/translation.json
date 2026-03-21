@@ -1290,5 +1290,10 @@
   "impressum_eu_dispute_text": "Evropská komise poskytuje platformu pro online řešení sporů (ODR): https://ec.europa.eu/consumers/odr/. Naši e-mailovou adresu najdete v právním upozornění výše.",
   "impressum_consumer_dispute": "Řešení spotřebitelských sporů/Univerzální rozhodčí komise",
   "impressum_consumer_dispute_text": "Nejsme ochotni ani povinni se účastnit řízení o řešení sporů před spotřebitelskou rozhodčí komisí.",
-  "footer_impressum": "Právní Upozornění"
+  "footer_impressum": "Právní Upozornění",
+  "seo_education_title": "Vzdělávání & Univerzitní Partnerství | Microns Hub — Přesná Výroba pro Studenty",
+  "seo_education_description": "10-15% vzdělávací sleva na CNC obrábění, 3D tisk a zpracování plechů pro evropské univerzity, týmy Formula Student a výzkumné laboratoře.",
+  "seo_education_keywords": "CNC obrábění studentská sleva, univerzitní výrobní partner, Formula Student díly, 3D tisk vzdělávací sleva, studentská výroba, přesné díly Evropa",
+  "navbar_education": "Vzdělávání",
+  "url_slug_education": "vzdelavani"
 }
