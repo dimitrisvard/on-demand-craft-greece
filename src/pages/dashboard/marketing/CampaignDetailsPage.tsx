@@ -188,6 +188,7 @@ const CampaignDetailsPage = () => {
   const bounceRate = sentCount > 0 ? Math.round((bounces / sentCount) * 100) : 0;
 
   return (
+    <>
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center gap-4">
         <Button 
@@ -465,6 +466,7 @@ const CampaignDetailsPage = () => {
         </div>
       </DialogContent>
     </Dialog>
+    </>
   );
 };
 
