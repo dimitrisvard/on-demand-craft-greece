@@ -23,9 +23,12 @@ const IndustryDetail: React.FC<IndustryDetailProps> = ({
   // Use translation keys for name, description, and applications
   const translatedName = t(`industry_${id}`, name);
   const translatedDescription = t(`industry_${id}_desc`, description || `Our precision manufacturing solutions provide exceptional results for the ${name} industry.`);
-  const translatedApplications = (t(`industry_${id}_applications`, undefined, { returnObjects: true }) as string[]) || applications || [
-    "Precision components", "Custom parts", "Prototyping services"
-  ];
+  const rawApplications = t(`industry_${id}_applications`, undefined, { returnObjects: true });
+  const translatedApplications = Array.isArray(rawApplications)
+    ? rawApplications
+    : typeof rawApplications === 'string'
+      ? rawApplications.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : applications || ["Precision components", "Custom parts", "Prototyping services"];
   return <div id={id} className={`grid grid-cols-1 ${isEven ? 'lg:grid-cols-[3fr_2fr]' : 'lg:grid-cols-[2fr_3fr] lg:flex-row-reverse'} gap-12 items-center`}>
       <div>
         <h2 className="text-3xl font-bold mb-6">{translatedName}</h2>

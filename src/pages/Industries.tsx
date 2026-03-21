@@ -62,10 +62,12 @@ const Industries = () => {
                 {...industry}
                 name={t(`industry_${industry.id}`, industry.name)}
                 description={t(`industry_${industry.id}_desc`, industryDescriptions[industry.id as keyof typeof industryDescriptions])}
-                applications={
-                  (t(`industry_${industry.id}_applications`, undefined, { returnObjects: true }) as string[]) ||
-                  industryApplications[industry.id as keyof typeof industryApplications]
-                }
+                applications={(() => {
+                  const raw = t(`industry_${industry.id}_applications`, undefined, { returnObjects: true });
+                  if (Array.isArray(raw)) return raw;
+                  if (typeof raw === 'string') return raw.split(',').map(s => s.trim()).filter(Boolean);
+                  return industryApplications[industry.id as keyof typeof industryApplications];
+                })()}
                 index={index}
               />
             ))}
