@@ -3,7 +3,7 @@ import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-
 import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Plus, Users, BarChart2, Mail, LayoutTemplate } from 'lucide-react';
+import { Plus, Users, BarChart2, Mail, LayoutTemplate, Globe } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import SubscribersTable from '@/components/dashboard/marketing/SubscribersTable';
@@ -70,6 +70,7 @@ const SettingsView = () => (
 );
 
 import CampaignDetailsPage from './marketing/CampaignDetailsPage';
+import EmailScraperView from '@/components/dashboard/marketing/EmailScraperView';
 
 const EmailMarketing = () => {
   const location = useLocation();
@@ -81,6 +82,7 @@ const EmailMarketing = () => {
     if (path.includes('/subscribers')) return 'subscribers';
     if (path.includes('/analytics')) return 'analytics';
     if (path.includes('/settings')) return 'settings';
+    if (path.includes('/scraper')) return 'scraper';
     if (path.includes('/campaigns')) return 'campaigns'; // Generic for list
     return 'overview'; // Default to overview/campaigns list
   };
@@ -98,6 +100,9 @@ const EmailMarketing = () => {
         break;
       case 'settings':
         navigate('/dashboard/email-marketing/settings');
+        break;
+      case 'scraper':
+        navigate('/dashboard/email-marketing/scraper');
         break;
       default:
         break;
@@ -132,6 +137,9 @@ const EmailMarketing = () => {
             <TabsTrigger value="settings" className="flex items-center gap-2">
               <LayoutTemplate className="h-4 w-4" /> Settings
             </TabsTrigger>
+            <TabsTrigger value="scraper" className="flex items-center gap-2">
+              <Globe className="h-4 w-4" /> Email Scraper
+            </TabsTrigger>
           </TabsList>
 
           <Routes>
@@ -139,6 +147,7 @@ const EmailMarketing = () => {
             <Route path="/subscribers" element={<SubscribersView />} />
             <Route path="/analytics" element={<AnalyticsView />} />
             <Route path="/settings" element={<SettingsView />} />
+            <Route path="/scraper" element={<EmailScraperView />} />
             <Route path="/campaigns/new" element={<CampaignWizard />} />
             <Route path="/campaigns/:id" element={<CampaignDetailsPage />} />
             {/* Redirect any unknown sub-routes to overview */}
