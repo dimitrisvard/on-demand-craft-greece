@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: 'What is the Microns Hub Engineering Knowledge Base?',
-    a: 'Our blog at micronshub.eu/en/blog is a massive, free engineering resource with 365+ articles and growing — we publish a new in-depth article every single day. Topics cover CNC machining fundamentals, material selection, surface finishing techniques, DFM best practices, CAD/CAM workflows, G-code programming, and AI in manufacturing. It\'s designed as a daily learning resource for engineering students, researchers, and competition teams. Subscribe free to get each new article delivered to your inbox.',
+    a: 'Our blog at micronshub.eu/en/blog is a massive, free engineering resource with 150+ articles and growing — we publish a new in-depth article every single day. Topics cover CNC machining fundamentals, material selection, surface finishing techniques, DFM best practices, CAD/CAM workflows, G-code programming, and AI in manufacturing. It\'s designed as a daily learning resource for engineering students, researchers, and competition teams. Subscribe free to get each new article delivered to your inbox.',
   },
 ];
 
@@ -60,7 +60,7 @@ const EduFAQ: React.FC = () => {
           <p className="text-[#6C757D] text-lg leading-relaxed">
             Everything you need to know about our education program. Can't find your answer?{' '}
             <a
-              href="mailto:education@micronshub.eu"
+              href="mailto:info@micronshub.eu"
               className="text-[#1F4690] font-semibold hover:underline"
             >
               Email us directly.

@@ -7,7 +7,7 @@ const trustBadges = [
   { icon: <Globe size={16} />, text: 'Delivery Across All of Europe' },
   { icon: <Clock size={16} />, text: '4–9 Working Day Lead Times' },
   { icon: <Percent size={16} />, text: '10–15% Educational Discount' },
-  { icon: <BookOpen size={16} />, text: '365+ Free Engineering Articles' },
+  { icon: <BookOpen size={16} />, text: '150+ Free Engineering Articles' },
 ];
 
 const EduHero: React.FC = () => {
@@ -62,7 +62,7 @@ const EduHero: React.FC = () => {
             student engineering projects across Europe. Get exclusive educational pricing,
             dedicated support, parts delivered in as fast as&nbsp;4 working days, and access
             to our daily engineering knowledge base with&nbsp;
-            <span className="text-white font-semibold">365+ free in-depth articles</span> on
+            <span className="text-white font-semibold">150+ free in-depth articles</span> on
             manufacturing, materials, and design.
           </p>
 
@@ -89,7 +89,7 @@ const EduHero: React.FC = () => {
             className="inline-flex items-center gap-2 text-white/70 hover:text-white transition-colors text-base font-medium"
           >
             <BookOpen size={16} />
-            Explore 365+ Free Engineering Articles
+            Explore 150+ Free Engineering Articles
             <ArrowRight size={14} />
           </a>
         </div>
