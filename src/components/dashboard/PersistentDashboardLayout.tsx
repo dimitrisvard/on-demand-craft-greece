@@ -19,7 +19,8 @@ import {
   Sparkles,
   Menu,
   X,
-  Radio
+  Radio,
+  Scan
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -72,6 +73,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/notifications') return 'notifications';
     if (path === '/dashboard/settings') return 'settings';
     if (path === '/dashboard/leads') return 'leads';
+    if (path === '/dashboard/company-scanner') return 'company-scanner';
     return 'overview';
   };
 
@@ -264,6 +266,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/leads")}
                       icon={<Radio className="h-4 w-4" />}
                       label="Lead Feed"
+                    />
+                    <NavButton
+                      active={activeModule === "company-scanner"}
+                      onClick={() => handleNavigation("/dashboard/company-scanner")}
+                      icon={<Scan className="h-4 w-4" />}
+                      label="Company Scanner"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -463,6 +471,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/leads")}
                       icon={<Radio className="h-4 w-4" />}
                       label="Lead Feed"
+                    />
+                    <NavButton
+                      active={activeModule === "company-scanner"}
+                      onClick={() => handleNavigation("/dashboard/company-scanner")}
+                      icon={<Scan className="h-4 w-4" />}
+                      label="Company Scanner"
                     />
                   </AccordionContent>
                 </AccordionItem>

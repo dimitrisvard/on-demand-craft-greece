@@ -493,6 +493,367 @@ server.tool(
   }
 );
 
+// ===== Tool 11: scan_directory =====
+server.tool(
+  "scan_directory",
+  "Scan Europages or wlw for companies matching a search URL. Returns a list of discovered companies and stores them in the database.",
+  {
+    url: z.string().describe("Search results URL from Europages (e.g. https://www.europages.co.uk/companies/germany/robotics.html) or wlw (e.g. https://www.wlw.com/en/search/robotics/country/germany)"),
+    maxPages: z.number().optional().default(3).describe("Maximum number of result pages to scan (default 3)"),
+    enrichProfiles: z.boolean().optional().default(false).describe("Visit each company profile to get website URL and contact details (slower but more data)"),
+  },
+  async ({ url, maxPages, enrichProfiles }) => {
+    // Detect source
+    const source = url.toLowerCase().includes("europages") ? "europages"
+      : (url.toLowerCase().includes("wlw.") ? "wlw" : "unknown");
+
+    if (source === "unknown") {
+      return { content: [{ type: "text", text: "❌ URL not recognized. Supported: europages.co.uk/de/fr/etc, wlw.com/de" }] };
+    }
+
+    // Build page URLs and scan via the Vercel API
+    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
+    let totalFound = 0;
+    let totalNew = 0;
+    const errors: string[] = [];
+
+    function buildPageUrl(baseUrl: string, page: number): string {
+      if (page === 1) return baseUrl;
+      if (source === "europages") {
+        const cleaned = baseUrl.replace(/\/p-\d+\.html$/, ".html").replace(/\.html$/, "");
+        return `${cleaned}/p-${page}.html`;
+      }
+      const cleaned = baseUrl.replace(/\/page\/\d+/, "").replace(/\/$/, "");
+      return `${cleaned}/page/${page}`;
+    }
+
+    for (let pg = 1; pg <= maxPages; pg++) {
+      const pageUrl = buildPageUrl(url, pg);
+      try {
+        const resp = await fetch(`${siteUrl}/api/scan-directory`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: pageUrl, source }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+          errors.push(`Page ${pg}: ${(err as any).error || "unknown"}`);
+          if (resp.status === 429 || resp.status === 403) break;
+          continue;
+        }
+
+        const data: any = await resp.json();
+        const companies = data.companies || [];
+        if (companies.length === 0) break;
+
+        totalFound += companies.length;
+
+        // Upsert into Supabase
+        const { data: upserted, error: upsertErr } = await supabase
+          .from("company_leads")
+          .upsert(companies, { onConflict: "source,source_url", ignoreDuplicates: false })
+          .select("id");
+
+        if (upsertErr) {
+          errors.push(`Page ${pg} DB: ${upsertErr.message}`);
+        } else {
+          totalNew += upserted?.length || 0;
+        }
+
+        if (!data.hasNextPage) break;
+
+        // Rate limiting
+        await new Promise(r => setTimeout(r, source === "wlw" ? 4000 : 2500));
+      } catch (err: any) {
+        errors.push(`Page ${pg}: ${err.message}`);
+      }
+    }
+
+    const text = [
+      `✅ Directory scan complete`,
+      `Source: ${source.toUpperCase()}`,
+      `URL: ${url}`,
+      `Pages scanned: up to ${maxPages}`,
+      `Companies found: ${totalFound}`,
+      `Companies stored (new): ${totalNew}`,
+      enrichProfiles ? `Note: Profile enrichment requested — run enrich_company_emails separately for website scraping.` : "",
+      errors.length > 0 ? `\n⚠️ Errors:\n${errors.join("\n")}` : "",
+    ].filter(Boolean).join("\n");
+
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+// ===== Tool 12: get_companies =====
+server.tool(
+  "get_companies",
+  "Get companies from the directory scanner database. Filter by source, country, email status, or outreach status.",
+  {
+    source: z.enum(["europages", "wlw", "all"]).optional().default("all"),
+    country: z.string().optional().describe("Filter by country (partial match)"),
+    outreach_status: z.enum(["new", "email_found", "contacted", "responded", "converted", "not_relevant", "all"]).optional().default("all"),
+    email_status: z.enum(["pending", "scraped", "no_emails", "failed", "all"]).optional().default("all"),
+    search: z.string().optional().describe("Search by company name"),
+    limit: z.number().optional().default(20),
+  },
+  async ({ source, country, outreach_status, email_status, search, limit }) => {
+    let query = supabase
+      .from("company_leads")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (source !== "all") query = query.eq("source", source);
+    if (outreach_status !== "all") query = query.eq("outreach_status", outreach_status);
+    if (email_status !== "all") query = query.eq("email_scrape_status", email_status);
+    if (country) query = query.ilike("country", `%${country}%`);
+    if (search) query = query.ilike("company_name", `%${search}%`);
+
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+
+    if (!data || data.length === 0) {
+      return { content: [{ type: "text", text: "No companies found matching the criteria." }] };
+    }
+
+    const formatted = data.map((c: any) => [
+      `🏢 ${c.company_name} [${c.source.toUpperCase()}]`,
+      `   📍 ${[c.city, c.country].filter(Boolean).join(", ") || "Location unknown"}`,
+      c.website_url ? `   🌐 ${c.website_url}` : "",
+      c.scraped_emails?.length ? `   📧 ${c.scraped_emails.join(", ")}` : (c.email ? `   📧 ${c.email} (directory)` : ""),
+      c.phone ? `   📞 ${c.phone}` : "",
+      c.employee_count ? `   👥 ${c.employee_count} employees` : "",
+      `   Status: ${c.outreach_status} | Email: ${c.email_scrape_status}`,
+      `   ID: ${c.id}`,
+    ].filter(Boolean).join("\n")).join("\n\n");
+
+    return {
+      content: [{ type: "text", text: `Found ${data.length} companies:\n\n${formatted}` }],
+    };
+  }
+);
+
+// ===== Tool 13: enrich_company_emails =====
+server.tool(
+  "enrich_company_emails",
+  "Trigger email scraping for companies that have a website URL but no emails yet. Uses the existing website email scraper.",
+  {
+    company_ids: z.array(z.string()).optional().describe("Specific company IDs to enrich"),
+    country: z.string().optional().describe("Enrich all pending companies from this country"),
+    limit: z.number().optional().default(10).describe("Max companies to enrich (default 10)"),
+  },
+  async ({ company_ids, country, limit }) => {
+    let query = supabase
+      .from("company_leads")
+      .select("id, company_name, website_url")
+      .not("website_url", "is", null)
+      .eq("email_scrape_status", "pending")
+      .limit(limit);
+
+    if (company_ids && company_ids.length > 0) {
+      query = supabase
+        .from("company_leads")
+        .select("id, company_name, website_url")
+        .in("id", company_ids)
+        .not("website_url", "is", null);
+    } else if (country) {
+      query = query.ilike("country", `%${country}%`);
+    }
+
+    const { data: toEnrich, error } = await query;
+    if (error) return { content: [{ type: "text", text: `Error fetching companies: ${error.message}` }] };
+    if (!toEnrich || toEnrich.length === 0) {
+      return { content: [{ type: "text", text: "No companies found to enrich (need website_url + pending status)." }] };
+    }
+
+    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
+    const results: string[] = [];
+
+    for (const company of toEnrich) {
+      try {
+        const resp = await fetch(`${siteUrl}/api/scrape-website`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ urls: [company.website_url] }),
+        });
+
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const result = data.results?.[0];
+          const emails: string[] = result?.emails || [];
+
+          await supabase.from("company_leads").update({
+            scraped_emails: emails,
+            email_scrape_status: emails.length > 0 ? "scraped" : "no_emails",
+            email_scraped_at: new Date().toISOString(),
+            outreach_status: emails.length > 0 ? "email_found" : undefined,
+          }).eq("id", company.id);
+
+          results.push(`${emails.length > 0 ? "✅" : "⚠️"} ${company.company_name}: ${emails.length > 0 ? emails.join(", ") : "no emails found"}`);
+        } else {
+          results.push(`❌ ${company.company_name}: scraper returned ${resp.status}`);
+          await supabase.from("company_leads").update({ email_scrape_status: "failed" }).eq("id", company.id);
+        }
+      } catch (err: any) {
+        results.push(`❌ ${company.company_name}: ${err.message}`);
+        await supabase.from("company_leads").update({ email_scrape_status: "failed" }).eq("id", company.id);
+      }
+
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    return {
+      content: [{
+        type: "text",
+        text: `Email enrichment complete for ${toEnrich.length} companies:\n\n${results.join("\n")}`,
+      }],
+    };
+  }
+);
+
+// ===== Tool 14: update_company =====
+server.tool(
+  "update_company",
+  "Update a company lead's outreach status or add notes.",
+  {
+    company_id: z.string().describe("Company UUID"),
+    outreach_status: z.enum(["new", "email_found", "contacted", "responded", "converted", "not_relevant"]).optional(),
+    notes: z.string().optional().describe("Notes to add/replace"),
+  },
+  async ({ company_id, outreach_status, notes }) => {
+    const updates: any = { updated_at: new Date().toISOString() };
+    if (outreach_status) updates.outreach_status = outreach_status;
+    if (notes) updates.outreach_notes = notes;
+    if (outreach_status === "contacted") updates.contacted_at = new Date().toISOString();
+
+    const { error } = await supabase.from("company_leads").update(updates).eq("id", company_id);
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+
+    return {
+      content: [{
+        type: "text",
+        text: `✅ Company ${company_id} updated${outreach_status ? ` — status: ${outreach_status}` : ""}${notes ? " — notes saved" : ""}`,
+      }],
+    };
+  }
+);
+
+// ===== Tool 15: get_saved_searches =====
+server.tool(
+  "get_saved_searches",
+  "List all saved directory search configurations.",
+  {},
+  async () => {
+    const { data, error } = await supabase
+      .from("saved_searches")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    if (!data || data.length === 0) {
+      return { content: [{ type: "text", text: "No saved searches found." }] };
+    }
+
+    const formatted = data.map((s: any) => [
+      `[${s.id}] ${s.name}`,
+      `   Source: ${s.source.toUpperCase()} | Keyword: ${s.keyword || "-"} | Country: ${s.country || "-"}`,
+      `   Max pages: ${s.max_pages} | Active: ${s.is_active ? "yes" : "no"}`,
+      `   Last run: ${s.last_run_at ? new Date(s.last_run_at).toLocaleDateString() : "never"} | Found: ${s.last_run_count || 0}`,
+      `   URL: ${s.search_url}`,
+    ].join("\n")).join("\n\n");
+
+    return { content: [{ type: "text", text: `SAVED SEARCHES (${data.length}):\n\n${formatted}` }] };
+  }
+);
+
+// ===== Tool 16: run_saved_search =====
+server.tool(
+  "run_saved_search",
+  "Re-run a saved search to find new companies.",
+  {
+    saved_search_id: z.number().describe("The saved search ID from get_saved_searches"),
+  },
+  async ({ saved_search_id }) => {
+    const { data: ss, error } = await supabase
+      .from("saved_searches")
+      .select("*")
+      .eq("id", saved_search_id)
+      .single();
+
+    if (error || !ss) {
+      return { content: [{ type: "text", text: `Saved search not found: ${saved_search_id}` }] };
+    }
+
+    const source = ss.source;
+    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
+    let totalFound = 0;
+    let totalNew = 0;
+    const errors: string[] = [];
+
+    function buildPageUrl(baseUrl: string, page: number): string {
+      if (page === 1) return baseUrl;
+      if (source === "europages") {
+        const cleaned = baseUrl.replace(/\/p-\d+\.html$/, ".html").replace(/\.html$/, "");
+        return `${cleaned}/p-${page}.html`;
+      }
+      const cleaned = baseUrl.replace(/\/page\/\d+/, "").replace(/\/$/, "");
+      return `${cleaned}/page/${page}`;
+    }
+
+    for (let pg = 1; pg <= ss.max_pages; pg++) {
+      const pageUrl = buildPageUrl(ss.search_url, pg);
+      try {
+        const resp = await fetch(`${siteUrl}/api/scan-directory`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: pageUrl, source }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+          errors.push(`Page ${pg}: ${(err as any).error || "unknown"}`);
+          if (resp.status === 429 || resp.status === 403) break;
+          continue;
+        }
+
+        const data: any = await resp.json();
+        const companies = data.companies || [];
+        if (companies.length === 0) break;
+
+        totalFound += companies.length;
+
+        const { data: upserted, error: upsertErr } = await supabase
+          .from("company_leads")
+          .upsert(companies, { onConflict: "source,source_url", ignoreDuplicates: false })
+          .select("id");
+
+        if (upsertErr) errors.push(`DB: ${upsertErr.message}`);
+        else totalNew += upserted?.length || 0;
+
+        if (!data.hasNextPage) break;
+        await new Promise(r => setTimeout(r, source === "wlw" ? 4000 : 2500));
+      } catch (err: any) {
+        errors.push(`Page ${pg}: ${err.message}`);
+      }
+    }
+
+    // Update last_run
+    await supabase.from("saved_searches").update({
+      last_run_at: new Date().toISOString(),
+      last_run_count: totalNew,
+    }).eq("id", saved_search_id);
+
+    const text = [
+      `✅ Saved search "${ss.name}" complete`,
+      `Found: ${totalFound} | New: ${totalNew}`,
+      errors.length > 0 ? `Errors: ${errors.join("; ")}` : "",
+    ].filter(Boolean).join("\n");
+
+    return { content: [{ type: "text", text }] };
+  }
+);
+
 // ===== Resources =====
 server.resource(
   "leads://today",
