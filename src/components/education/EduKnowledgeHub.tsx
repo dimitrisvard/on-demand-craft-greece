@@ -100,7 +100,7 @@ const EduKnowledgeHub: React.FC = () => {
               📚
             </div>
             <div>
-              <div className="text-white font-extrabold text-3xl">365+ Articles Published</div>
+              <div className="text-white font-extrabold text-3xl">150+ Articles Published</div>
               <div className="text-white/70 text-sm">A new in-depth article added every day</div>
             </div>
           </div>

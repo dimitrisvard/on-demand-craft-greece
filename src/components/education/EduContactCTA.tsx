@@ -36,7 +36,7 @@ const actions = [
     title: 'Start Learning',
     description:
       'Not ready to order yet? Explore our daily engineering articles and level up your manufacturing knowledge.',
-    cta: 'Browse 365+ Free Articles',
+    cta: 'Browse 150+ Free Articles',
     href: '/en/blog',
     primary: false,
     external: true,
@@ -108,10 +108,10 @@ const EduContactCTA: React.FC = () => {
           <p className="text-white/60 text-sm mb-3">Prefer to reach out directly?</p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
             <a
-              href="mailto:education@micronshub.eu"
+              href="mailto:info@micronshub.eu"
               className="text-white font-semibold hover:text-[#FF5722] transition-colors flex items-center gap-2"
             >
-              ✉️ education@micronshub.eu
+              ✉️ info@micronshub.eu
             </a>
             <span className="hidden sm:block text-white/30">|</span>
             <a
