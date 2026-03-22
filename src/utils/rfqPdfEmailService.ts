@@ -21,12 +21,12 @@ export const sendRFQPDFEmail = async (data: RFQPDFEmailData): Promise<{ success:
       pdfFileName: data.pdfFileName 
     });
     
-    const response = await fetch('/api/send-rfq-pdf-email', {
+    const response = await fetch('/api/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify({ ...data, action: 'rfq-pdf' })
     });
     
     console.log('Response status:', response.status);

@@ -11,13 +11,13 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { scoreTender } from './tender-lib/scoring.js';
-import { fetchNetherlands } from './tender-lib/connectors/netherlands.js';
-import { fetchIreland } from './tender-lib/connectors/ireland.js';
-import { fetchFrance } from './tender-lib/connectors/france.js';
-import { fetchGermany } from './tender-lib/connectors/germany.js';
-import { fetchSpain } from './tender-lib/connectors/spain.js';
-import { fetchCountry } from './tender-lib/connectors/generic.js';
+import { scoreTender } from '../lib/scoring.js';
+import { fetchNetherlands } from '../lib/connectors/netherlands.js';
+import { fetchIreland } from '../lib/connectors/ireland.js';
+import { fetchFrance } from '../lib/connectors/france.js';
+import { fetchGermany } from '../lib/connectors/germany.js';
+import { fetchSpain } from '../lib/connectors/spain.js';
+import { fetchCountry } from '../lib/connectors/generic.js';
 
 // ─── CORS ───────────────────────────────────────────
 function setCors(res) {

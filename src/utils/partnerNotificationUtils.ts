@@ -107,12 +107,12 @@ export async function sendPartnerNotification(notificationData: PartnerNotificat
     };
 
     // Send email via API
-    const response = await fetch('/api/send-partner-notification', {
+    const response = await fetch('/api/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(emailData),
+      body: JSON.stringify({ ...emailData, action: 'partner' }),
     });
 
     if (!response.ok) {

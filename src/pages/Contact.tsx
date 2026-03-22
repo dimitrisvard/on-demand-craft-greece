@@ -33,12 +33,12 @@ const Contact = () => {
     setIsSubmitting(true);
     
     try {
-      const response = await fetch('/api/email', {
+      const response = await fetch('/api/emails', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formState),
+        body: JSON.stringify({ ...formState, action: 'email' }),
       });
 
       if (!response.ok) {

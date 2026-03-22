@@ -33,13 +33,13 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
     
     console.log('Prepared email data:', emailData);
     
-    // Use the existing /api/email.js endpoint with RFQ data
-    const response = await fetch('/api/email', {
+    // Use the consolidated /api/emails endpoint with RFQ data
+    const response = await fetch('/api/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(emailData)
+      body: JSON.stringify({ ...emailData, action: 'email' })
     });
     
     console.log('Response status:', response.status);

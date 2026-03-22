@@ -979,12 +979,13 @@ export default function OrderDetailsPage() {
       try {
         const partner = partners.find(p => p.id === order.partner_id);
         if (partner) {
-          await fetch('/api/send-production-status-notification', {
+          await fetch('/api/notifications', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
+              action: 'production-status',
               partnerName: partner.company_name,
               orderId: order.id,
               orderTitle: order.title,

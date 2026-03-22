@@ -2,8 +2,8 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import sendRfqEmailsHandler from './api/send-rfq-emails.js';
-import sitemapHandler from './api/sitemap.xml.js';
+import emailsHandler from './api/emails.js';
+import sitemapHandler from './api/sitemap.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,14 +28,14 @@ async function createServer() {
 
   // API routes - register BEFORE Vite middleware to prevent SPA routing
   // Handle both /api/* and /en/api/* (and other language prefixes)
-  app.post('/api/send-rfq-emails', (req, res) => {
-    console.log('[API] POST /api/send-rfq-emails hit');
-    sendRfqEmailsHandler(req, res);
+  app.post('/api/emails', (req, res) => {
+    console.log('[API] POST /api/emails hit');
+    emailsHandler(req, res);
   });
 
-  app.post('/:lang/api/send-rfq-emails', (req, res) => {
-    console.log('[API] POST /:lang/api/send-rfq-emails hit');
-    sendRfqEmailsHandler(req, res);
+  app.post('/:lang/api/emails', (req, res) => {
+    console.log('[API] POST /:lang/api/emails hit');
+    emailsHandler(req, res);
   });
 
   // Simple health check

@@ -129,19 +129,19 @@
   "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap.xml"
+      "destination": "/api/sitemap?type=main"
     },
     {
       "source": "/sitemap-complete.xml",
-      "destination": "/api/sitemap-complete.xml"
+      "destination": "/api/sitemap?type=complete"
     },
     {
       "source": "/sitemap-index.xml",
-      "destination": "/api/sitemap-index.xml"
+      "destination": "/api/sitemap?type=index"
     },
     {
       "source": "/sitemap-:lang.xml",
-      "destination": "/api/sitemap-lang.xml"
+      "destination": "/api/sitemap?type=lang&lang=:lang"
     },
     {
       "source": "/robots.txt",
