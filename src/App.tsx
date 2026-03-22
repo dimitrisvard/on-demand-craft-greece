@@ -56,6 +56,7 @@ const AutoBlogDashboard = lazy(() => import('./pages/dashboard/AutoBlogDashboard
 const LeadMonitorPage = lazy(() => import('./pages/dashboard/LeadMonitorPage'));
 const CompanyScannerPage = lazy(() => import('./pages/dashboard/CompanyScannerPage'));
 const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage'));
+const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
 const Education = lazy(() => import('./pages/Education'));
 
 // Loading component
@@ -196,6 +197,7 @@ function AppContent() {
                 <Route path="/dashboard/leads" element={<LeadMonitorPage />} />
                 <Route path="/dashboard/company-scanner" element={<CompanyScannerPage />} />
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
+                <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />

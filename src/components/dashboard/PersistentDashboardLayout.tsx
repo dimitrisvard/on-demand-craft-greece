@@ -21,7 +21,8 @@ import {
   X,
   Radio,
   Scan,
-  Building2
+  Building2,
+  Rocket
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -76,6 +77,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/leads') return 'leads';
     if (path === '/dashboard/company-scanner') return 'company-scanner';
     if (path === '/dashboard/tenders') return 'tenders';
+    if (path === '/dashboard/funded-startups') return 'funded-startups';
     return 'overview';
   };
 
@@ -280,6 +282,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/tenders")}
                       icon={<Building2 className="h-4 w-4" />}
                       label="Tender Monitor"
+                    />
+                    <NavButton
+                      active={activeModule === "funded-startups"}
+                      onClick={() => handleNavigation("/dashboard/funded-startups")}
+                      icon={<Rocket className="h-4 w-4" />}
+                      label="Funded Startups"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -491,6 +499,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/tenders")}
                       icon={<Building2 className="h-4 w-4" />}
                       label="Tender Monitor"
+                    />
+                    <NavButton
+                      active={activeModule === "funded-startups"}
+                      onClick={() => handleNavigation("/dashboard/funded-startups")}
+                      icon={<Rocket className="h-4 w-4" />}
+                      label="Funded Startups"
                     />
                   </AccordionContent>
                 </AccordionItem>

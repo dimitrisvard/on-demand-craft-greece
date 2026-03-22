@@ -1327,6 +1327,246 @@ server.tool(
   }
 );
 
+// ===== Funded Startup Tools =====
+
+// Helper: format a funded startup for display
+function formatFundedStartup(s: any): string {
+  const flagMap: Record<string, string> = {
+    DE: "🇩🇪", FR: "🇫🇷", NL: "🇳🇱", SE: "🇸🇪", FI: "🇫🇮", DK: "🇩🇰",
+    NO: "🇳🇴", ES: "🇪🇸", IT: "🇮🇹", BE: "🇧🇪", AT: "🇦🇹", CH: "🇨🇭",
+    IE: "🇮🇪", PT: "🇵🇹", PL: "🇵🇱", CZ: "🇨🇿", EE: "🇪🇪", GR: "🇬🇷",
+    UK: "🇬🇧", EU: "🇪🇺",
+  };
+  const flag = flagMap[s.country_code] || "🌍";
+  const conf = s.hardware_confidence;
+  const confEmoji = conf >= 70 ? "🟢" : conf >= 40 ? "🟡" : "🟠";
+  const amount = s.funding_amount_millions ? `${s.funding_currency}${s.funding_amount_millions}M` : "undisclosed";
+  return [
+    `🚀 ${s.company_name || "Unknown"} ${flag}`,
+    `   💰 ${amount} ${s.funding_stage || ""}`,
+    `   🏷 ${(s.industry_tags || []).join(", ") || "N/A"}`,
+    `   ${confEmoji} Confidence: ${conf}/100 | Outreach: ${s.outreach_status}`,
+    s.company_website ? `   🌐 ${s.company_website}` : "",
+    `   📰 ${s.source_name}: ${s.article_title?.substring(0, 100)}`,
+    `   🔗 ${s.source_url}`,
+    `   ID: ${s.id}`,
+  ].filter(Boolean).join("\n");
+}
+
+// ===== Funded Startup Tool 1: get_funded_startups =====
+server.tool(
+  "get_funded_startups",
+  "Get recently funded European hardware startups. Filter by industry, country, funding stage, confidence score, and outreach status.",
+  {
+    industry: z.string().optional().describe("Industry tag: robotics, medtech, automotive, aerospace, drones, cleantech, iot, defense, agritech, biotech, industrial, semiconductor, deeptech"),
+    country: z.string().optional().describe("2-letter country code: DE, FR, NL, SE, ES, IT, BE, UK, etc."),
+    funding_stage: z.string().optional().describe("pre-seed, seed, series-a, series-b, series-c, grant"),
+    outreach_status: z.enum(["new", "researched", "contacted", "responded", "not_relevant", "all"]).optional().default("all"),
+    min_confidence: z.number().optional().default(0).describe("Minimum hardware confidence score 0-100"),
+    min_amount_millions: z.number().optional().describe("Minimum funding amount in millions"),
+    is_hardware_only: z.boolean().optional().default(false).describe("Only show startups classified as hardware"),
+    days_back: z.number().optional().default(30),
+    limit: z.number().optional().default(20),
+  },
+  async ({ industry, country, funding_stage, outreach_status, min_confidence, min_amount_millions, is_hardware_only, days_back, limit }) => {
+    const since = new Date(Date.now() - days_back * 86400 * 1000).toISOString();
+
+    let query = supabase
+      .from("funded_startups")
+      .select("*")
+      .gte("discovered_at", since)
+      .gte("hardware_confidence", min_confidence)
+      .order("discovered_at", { ascending: false })
+      .limit(limit);
+
+    if (industry) query = query.contains("industry_tags", [industry]);
+    if (country) query = query.eq("country_code", country.toUpperCase());
+    if (funding_stage) query = query.eq("funding_stage", funding_stage);
+    if (outreach_status !== "all") query = query.eq("outreach_status", outreach_status);
+    if (is_hardware_only) query = query.eq("is_hardware", true);
+    if (min_amount_millions) query = query.gte("funding_amount_millions", min_amount_millions);
+
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    if (!data || data.length === 0) return { content: [{ type: "text", text: "No funded startups found matching the criteria." }] };
+
+    const formatted = data.map(formatFundedStartup).join("\n\n");
+    return { content: [{ type: "text", text: `Found ${data.length} funded startups:\n\n${formatted}` }] };
+  }
+);
+
+// ===== Funded Startup Tool 2: get_funded_startup_detail =====
+server.tool(
+  "get_funded_startup_detail",
+  "Get full details of a specific funded startup including article excerpt, matched keywords, emails, and notes.",
+  {
+    startup_id: z.string().describe("The funded startup UUID"),
+  },
+  async ({ startup_id }) => {
+    const { data, error } = await supabase
+      .from("funded_startups")
+      .select("*")
+      .eq("id", startup_id)
+      .single();
+
+    if (error || !data) return { content: [{ type: "text", text: `Startup not found: ${startup_id}` }] };
+
+    const text = [
+      `=== FUNDED STARTUP DETAIL ===`,
+      `ID: ${data.id}`,
+      `Company: ${data.company_name || "Unknown"}`,
+      `Country: ${data.country_code} | City: ${data.city || "unknown"}`,
+      ``,
+      `=== FUNDING ===`,
+      `Amount: ${data.funding_amount_millions ? `${data.funding_currency}${data.funding_amount_millions}M` : "undisclosed"}`,
+      `Stage: ${data.funding_stage || "unknown"}`,
+      `Investors: ${(data.investors || []).join(", ") || "not listed"}`,
+      ``,
+      `=== CLASSIFICATION ===`,
+      `Is hardware: ${data.is_hardware ? "Yes" : "No"}`,
+      `Hardware confidence: ${data.hardware_confidence}/100`,
+      `Industry tags: ${(data.industry_tags || []).join(", ") || "none"}`,
+      `Matched keywords: ${(data.matched_keywords || []).join(", ") || "none"}`,
+      ``,
+      `=== CONTACT INFO ===`,
+      `Website: ${data.company_website || "not found"}`,
+      `Emails: ${(data.scraped_emails || []).join(", ") || "none scraped"}`,
+      `Email scrape status: ${data.email_scrape_status}`,
+      ``,
+      `=== OUTREACH ===`,
+      `Status: ${data.outreach_status}`,
+      `Contacted at: ${data.contacted_at || "not yet"}`,
+      `Notes: ${data.notes || "none"}`,
+      ``,
+      `=== SOURCE ===`,
+      `Source: ${data.source_name}`,
+      `URL: ${data.source_url}`,
+      `Title: ${data.article_title}`,
+      `Published: ${data.article_published_at || "unknown"}`,
+      `Discovered: ${data.discovered_at}`,
+      data.article_excerpt ? `\nExcerpt: ${data.article_excerpt}` : "",
+    ].filter(l => l !== null).join("\n");
+
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+// ===== Funded Startup Tool 3: update_startup_outreach =====
+server.tool(
+  "update_startup_outreach",
+  "Update the outreach status and/or notes for a funded startup.",
+  {
+    startup_id: z.string(),
+    outreach_status: z.enum(["new", "researched", "contacted", "responded", "not_relevant"]).optional(),
+    notes: z.string().optional(),
+    company_website: z.string().optional().describe("Add or update the company website URL"),
+  },
+  async ({ startup_id, outreach_status, notes, company_website }) => {
+    const updates: any = { updated_at: new Date().toISOString() };
+    if (outreach_status) updates.outreach_status = outreach_status;
+    if (notes) updates.notes = notes;
+    if (company_website) updates.company_website = company_website;
+    if (outreach_status === "contacted") updates.contacted_at = new Date().toISOString();
+
+    if (Object.keys(updates).length === 1) return { content: [{ type: "text", text: "No fields to update." }] };
+
+    const { error } = await supabase.from("funded_startups").update(updates).eq("id", startup_id);
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    return { content: [{ type: "text", text: `✅ Startup ${startup_id} updated.${outreach_status ? ` Status: ${outreach_status}` : ""}` }] };
+  }
+);
+
+// ===== Funded Startup Tool 4: get_funding_stats =====
+server.tool(
+  "get_funding_stats",
+  "Get statistics on European hardware startup funding trends: by stage, country, industry, and outreach pipeline.",
+  {
+    days_back: z.number().optional().default(30),
+  },
+  async ({ days_back }) => {
+    const since = new Date(Date.now() - days_back * 86400 * 1000).toISOString();
+
+    const [totalRes, periodRes, hwRes, stageRes, countryRes, outreachRes] = await Promise.all([
+      supabase.from("funded_startups").select("id", { count: "exact", head: true }),
+      supabase.from("funded_startups").select("id", { count: "exact", head: true }).gte("discovered_at", since),
+      supabase.from("funded_startups").select("id", { count: "exact", head: true }).eq("is_hardware", true).gte("discovered_at", since),
+      supabase.from("funded_startups").select("funding_stage").gte("discovered_at", since),
+      supabase.from("funded_startups").select("country_code").eq("is_hardware", true).gte("discovered_at", since),
+      supabase.from("funded_startups").select("outreach_status").gte("discovered_at", since),
+    ]);
+
+    const by_stage: Record<string, number> = {};
+    (stageRes.data || []).forEach((r: any) => { const s = r.funding_stage || "unknown"; by_stage[s] = (by_stage[s] || 0) + 1; });
+
+    const by_country: Record<string, number> = {};
+    (countryRes.data || []).forEach((r: any) => { const c = r.country_code || "EU"; by_country[c] = (by_country[c] || 0) + 1; });
+
+    const by_outreach: Record<string, number> = {};
+    (outreachRes.data || []).forEach((r: any) => { const o = r.outreach_status || "new"; by_outreach[o] = (by_outreach[o] || 0) + 1; });
+
+    const topCountries = Object.entries(by_country).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const topStages = Object.entries(by_stage).sort((a, b) => b[1] - a[1]);
+
+    const text = [
+      `📊 FUNDED STARTUP STATS — Last ${days_back} Days`,
+      ``,
+      `Total all time: ${totalRes.count || 0}`,
+      `Period total: ${periodRes.count || 0}`,
+      `Hardware companies: ${hwRes.count || 0}`,
+      ``,
+      `BY STAGE:`,
+      ...topStages.map(([s, n]) => `  ${s}: ${n}`),
+      ``,
+      `TOP HARDWARE COUNTRIES:`,
+      ...topCountries.map(([c, n]) => `  ${c}: ${n}`),
+      ``,
+      `OUTREACH PIPELINE:`,
+      ...Object.entries(by_outreach).map(([o, n]) => `  ${o}: ${n}`),
+      ``,
+      `Dashboard: https://micronshub.eu/dashboard/funded-startups`,
+    ].join("\n");
+
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+// ===== Funded Startup Tool 5: trigger_funding_scan =====
+server.tool(
+  "trigger_funding_scan",
+  "Trigger a live scan of European startup funding RSS feeds. Priority 1 scans the 3 main feeds (tech.eu, EU-Startups, TechCrunch). Priority 2 adds regional feeds.",
+  {
+    priority: z.number().optional().default(1).describe("Maximum feed priority to scan (1=P1 only, 2=P1+P2, 3=all)"),
+    api_base_url: z.string().optional().describe("Base URL of the deployment, e.g. https://micronshub.eu"),
+  },
+  async ({ priority, api_base_url }) => {
+    const baseUrl = api_base_url || process.env.SITE_URL || "https://micronshub.eu";
+    try {
+      const res = await fetch(`${baseUrl}/api/scan-funding`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority }),
+      });
+      const json = await res.json() as any;
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+      const text = [
+        `✅ Funding scan completed`,
+        `Feeds scanned: ${json.feeds_scanned}`,
+        `Articles found: ${json.articles_found}`,
+        `Relevant: ${json.articles_relevant}`,
+        `New startups stored: ${json.startups_new}`,
+        `Hardware companies: ${json.startups_hardware}`,
+        `Duration: ${json.duration_ms}ms`,
+        json.errors?.length ? `\n⚠️ Errors:\n${json.errors.join("\n")}` : "",
+      ].filter(Boolean).join("\n");
+
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ Scan failed: ${err.message}` }] };
+    }
+  }
+);
+
 // ===== Start server =====
 async function main() {
   const args = process.argv.slice(2);
