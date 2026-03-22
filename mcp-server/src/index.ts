@@ -1020,6 +1020,313 @@ Provide a concise, actionable review:`,
   }
 );
 
+// ═══════════════════════════════════════════════════════════════
+// TENDER MONITOR TOOLS
+// ═══════════════════════════════════════════════════════════════
+
+function formatTender(t: any): string {
+  const flagMap: Record<string, string> = {
+    NL: "🇳🇱", IE: "🇮🇪", FR: "🇫🇷", DE: "🇩🇪", IT: "🇮🇹",
+    ES: "🇪🇸", PL: "🇵🇱", BE: "🇧🇪", SE: "🇸🇪", AT: "🇦🇹",
+    DK: "🇩🇰", FI: "🇫🇮", PT: "🇵🇹", RO: "🇷🇴", EE: "🇪🇪",
+    NO: "🇳🇴", CZ: "🇨🇿", HU: "🇭🇺", HR: "🇭🇷", SK: "🇸🇰",
+    SI: "🇸🇮", BG: "🇧🇬", LT: "🇱🇹", LV: "🇱🇻", CY: "🇨🇾",
+    LU: "🇱🇺", MT: "🇲🇹",
+  };
+  const flag = flagMap[t.country_code] || "";
+  const scoreEmoji = t.relevance_score >= 70 ? "🟢" : t.relevance_score >= 40 ? "🟡" : "⚫";
+  const value = t.estimated_value_eur ? `€${Math.round(t.estimated_value_eur).toLocaleString()}` : "N/A";
+  const deadline = t.submission_deadline ? new Date(t.submission_deadline).toLocaleDateString("en-GB") : "N/A";
+  return [
+    `${scoreEmoji} [${t.relevance_score}] ${flag} ${t.country_name} — ${t.title}`,
+    `   🏢 ${t.buyer_name || "Unknown buyer"} | 💰 ${value} | 📅 ${deadline}`,
+    `   Status: ${t.status} | CPV: ${(t.cpv_codes || []).slice(0, 2).join(", ") || "N/A"}`,
+    `   Keywords: ${(t.matched_keywords || []).slice(0, 5).join(", ") || "none"}`,
+    `   ID: ${t.id}`,
+    t.portal_url ? `   🔗 ${t.portal_url}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+// ===== Tender Tool 1: get_tenders =====
+server.tool(
+  "get_tenders",
+  "Get procurement tenders from EU national portals. Filter by country, CPV code, value range, deadline, relevance score.",
+  {
+    country: z.string().optional().describe("ISO 2-letter country code: DE, FR, NL, IT, ES, PL, etc."),
+    cpv_prefix: z.string().optional().describe("CPV code category prefix, e.g. '42' for machinery, '44' for metal products"),
+    min_value: z.number().optional().describe("Minimum estimated value in EUR"),
+    max_value: z.number().optional().describe("Maximum estimated value in EUR"),
+    min_score: z.number().optional().default(0).describe("Minimum relevance score (0-100)"),
+    deadline_within_days: z.number().optional().describe("Only show tenders with deadline within N days"),
+    status: z.enum(["new", "reviewed", "interested", "bidding", "won", "lost", "expired", "not_relevant", "all"]).optional().default("all"),
+    relevant_only: z.boolean().optional().default(false),
+    search: z.string().optional().describe("Text search across title, description, buyer name"),
+    limit: z.number().optional().default(20),
+  },
+  async ({ country, cpv_prefix, min_value, max_value, min_score, deadline_within_days, status, relevant_only, search, limit }) => {
+    let query = supabase
+      .from("tenders")
+      .select("*")
+      .order("relevance_score", { ascending: false })
+      .limit(limit);
+
+    if (country) query = query.eq("country_code", country.toUpperCase());
+    if (status && status !== "all") query = query.eq("status", status);
+    if (relevant_only) query = query.eq("is_relevant", true);
+    if (min_score && min_score > 0) query = query.gte("relevance_score", min_score);
+    if (min_value) query = query.gte("estimated_value_eur", min_value);
+    if (max_value) query = query.lte("estimated_value_eur", max_value);
+    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%,buyer_name.ilike.%${search}%`);
+    if (deadline_within_days) {
+      const future = new Date(Date.now() + deadline_within_days * 86400000).toISOString();
+      query = query.gte("submission_deadline", new Date().toISOString()).lte("submission_deadline", future);
+    }
+
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    if (!data || data.length === 0) return { content: [{ type: "text", text: "No tenders found." }] };
+
+    let filtered = data;
+    if (cpv_prefix) {
+      filtered = data.filter((t: any) => (t.cpv_codes || []).some((c: string) => String(c).startsWith(cpv_prefix)));
+    }
+
+    return { content: [{ type: "text", text: `Found ${filtered.length} tenders:\n\n${filtered.map(formatTender).join("\n\n")}` }] };
+  }
+);
+
+// ===== Tender Tool 2: get_tender_detail =====
+server.tool(
+  "get_tender_detail",
+  "Get full details of a specific tender by its UUID.",
+  { tender_id: z.string().describe("Tender UUID or short ID prefix (8 chars)") },
+  async ({ tender_id }) => {
+    let query = supabase.from("tenders").select("*");
+    if (tender_id.length === 36) {
+      query = query.eq("id", tender_id);
+    } else {
+      query = query.ilike("id", `${tender_id}%`);
+    }
+    const { data, error } = await query.limit(1).single();
+    if (error || !data) return { content: [{ type: "text", text: `Tender not found: ${tender_id}` }] };
+
+    const t = data;
+    const text = [
+      `=== TENDER DETAIL ===`,
+      `ID: ${t.id}`,
+      `Country: ${t.country_name} (${t.country_code})`,
+      `Portal: ${t.portal_name}`,
+      `Reference: ${t.tender_reference || "N/A"}`,
+      `Title: ${t.title}`,
+      `Buyer: ${t.buyer_name || "N/A"} (${t.buyer_type || "N/A"})`,
+      ``,
+      `CPV Codes: ${(t.cpv_codes || []).join(", ") || "N/A"}`,
+      `Nature: ${t.nature_of_contract || "N/A"}`,
+      `Procedure: ${t.procedure_type || "N/A"}`,
+      ``,
+      `Value: €${t.estimated_value_eur ? Math.round(t.estimated_value_eur).toLocaleString() : "N/A"}`,
+      `Currency: ${t.currency || "EUR"}`,
+      ``,
+      `Published: ${t.publication_date ? new Date(t.publication_date).toLocaleDateString() : "N/A"}`,
+      `Deadline: ${t.submission_deadline ? new Date(t.submission_deadline).toLocaleString() : "N/A"}`,
+      `Place: ${t.place_of_performance || "N/A"} (NUTS: ${t.nuts_code || "N/A"})`,
+      ``,
+      `Relevance Score: ${t.relevance_score}/100`,
+      `Is Relevant: ${t.is_relevant}`,
+      `Matched Keywords: ${(t.matched_keywords || []).join(", ") || "none"}`,
+      `Matched CPV: ${(t.matched_cpv || []).join(", ") || "none"}`,
+      ``,
+      `Status: ${t.status}`,
+      t.notes ? `Notes: ${t.notes}` : "",
+      `Discovered: ${new Date(t.discovered_at).toLocaleString()}`,
+      ``,
+      t.description ? `=== DESCRIPTION ===\n${t.description.substring(0, 800)}` : "",
+      t.portal_url ? `\nPortal Link: ${t.portal_url}` : "",
+    ].filter(Boolean).join("\n");
+
+    return { content: [{ type: "text", text }] };
+  }
+);
+
+// ===== Tender Tool 3: update_tender_status =====
+server.tool(
+  "update_tender_status",
+  "Update the status of a tender (new, reviewed, interested, bidding, won, lost, expired, not_relevant) and optionally add notes.",
+  {
+    tender_id: z.string().describe("Tender UUID or short 8-char prefix"),
+    status: z.enum(["new", "reviewed", "interested", "bidding", "won", "lost", "expired", "not_relevant"]),
+    notes: z.string().optional(),
+  },
+  async ({ tender_id, status, notes }) => {
+    let query = supabase.from("tenders");
+    const updates: any = { status };
+    if (notes !== undefined) updates.notes = notes;
+
+    if (tender_id.length === 36) {
+      await query.update(updates).eq("id", tender_id);
+    } else {
+      const { data } = await supabase.from("tenders").select("id").ilike("id", `${tender_id}%`).limit(1).single();
+      if (!data) return { content: [{ type: "text", text: `Tender not found: ${tender_id}` }] };
+      await supabase.from("tenders").update(updates).eq("id", data.id);
+    }
+
+    return { content: [{ type: "text", text: `✅ Tender ${tender_id} status updated to "${status}"${notes ? " with notes" : ""}.` }] };
+  }
+);
+
+// ===== Tender Tool 4: get_tender_stats =====
+server.tool(
+  "get_tender_stats",
+  "Get tender statistics: counts by country, by status, trends, high-score tenders.",
+  { days_back: z.number().optional().default(30) },
+  async ({ days_back }) => {
+    const since = new Date(Date.now() - days_back * 86400000).toISOString();
+    const [
+      { count: total },
+      { count: relevant },
+      { count: recent },
+      { data: byCountry },
+      { data: highScore },
+    ] = await Promise.all([
+      supabase.from("tenders").select("*", { count: "exact", head: true }),
+      supabase.from("tenders").select("*", { count: "exact", head: true }).eq("is_relevant", true),
+      supabase.from("tenders").select("*", { count: "exact", head: true }).gte("discovered_at", since),
+      supabase.from("tenders").select("country_code, country_name").eq("is_relevant", true),
+      supabase.from("tenders").select("id, country_code, title, relevance_score, submission_deadline")
+        .gte("relevance_score", 70).eq("status", "new")
+        .order("relevance_score", { ascending: false }).limit(5),
+    ]);
+
+    const countryMap: Record<string, number> = {};
+    (byCountry || []).forEach((t: any) => {
+      countryMap[t.country_code] = (countryMap[t.country_code] || 0) + 1;
+    });
+    const topCountries = Object.entries(countryMap)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, 10)
+      .map(([cc, n]) => `  ${cc}: ${n}`)
+      .join("\n");
+
+    const topTenders = (highScore || [])
+      .map((t: any) => `  [${t.relevance_score}] ${t.country_code}: ${t.title.substring(0, 60)}`)
+      .join("\n");
+
+    return {
+      content: [{
+        type: "text",
+        text: `=== TENDER STATISTICS ===\n\nTotal: ${total || 0}\nRelevant: ${relevant || 0}\nLast ${days_back} days: ${recent || 0}\n\nTop countries (relevant):\n${topCountries || "  None"}\n\nTop unreviewed (score 70+):\n${topTenders || "  None"}`,
+      }],
+    };
+  }
+);
+
+// ===== Tender Tool 5: search_tenders =====
+server.tool(
+  "search_tenders",
+  "Full-text search across tender titles, descriptions, and buyer names.",
+  {
+    query: z.string().describe("Search text"),
+    limit: z.number().optional().default(20),
+    min_score: z.number().optional().default(0),
+  },
+  async ({ query: searchQuery, limit, min_score }) => {
+    const { data, error } = await supabase
+      .from("tenders")
+      .select("*")
+      .or(`title.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,buyer_name.ilike.%${searchQuery}%`)
+      .gte("relevance_score", min_score)
+      .order("relevance_score", { ascending: false })
+      .limit(limit);
+
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+    if (!data || data.length === 0) return { content: [{ type: "text", text: `No tenders matching "${searchQuery}".` }] };
+
+    return { content: [{ type: "text", text: `Found ${data.length} tenders for "${searchQuery}":\n\n${data.map(formatTender).join("\n\n")}` }] };
+  }
+);
+
+// ===== Tender Tool 6: get_connector_status =====
+server.tool(
+  "get_connector_status",
+  "Check the status of all country connectors — last scan time, errors, active/inactive.",
+  {},
+  async () => {
+    const { data, error } = await supabase
+      .from("tender_connectors")
+      .select("country_code, country_name, portal_name, access_method, is_active, last_scan_at, last_scan_count, last_error, scan_frequency_hours")
+      .order("country_code");
+
+    if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+
+    const lines = (data || []).map((c: any) => {
+      const hoursSince = c.last_scan_at ? Math.round((Date.now() - new Date(c.last_scan_at).getTime()) / 3600000) : null;
+      const health = !c.is_active ? "⭕ inactive" : !c.last_scan_at ? "⏳ never scanned" : c.last_error ? "⚠️ error" : "✅ ok";
+      return `${health} ${c.country_code} — ${c.portal_name} | ${hoursSince !== null ? `${hoursSince}h ago` : "never"} | ${c.last_scan_count || 0} found${c.last_error ? ` | ERR: ${c.last_error.substring(0, 60)}` : ""}`;
+    });
+
+    return { content: [{ type: "text", text: `=== CONNECTOR STATUS ===\n\n${lines.join("\n")}` }] };
+  }
+);
+
+// ===== Tender Tool 7: trigger_country_scan =====
+server.tool(
+  "trigger_country_scan",
+  "Manually trigger a scan for a specific country connector to fetch new tenders.",
+  {
+    country_code: z.string().describe("ISO 2-letter country code, e.g. DE, FR, NL"),
+    api_base_url: z.string().optional().describe("Base URL of the API, defaults to https://micronshub.eu"),
+  },
+  async ({ country_code, api_base_url }) => {
+    const baseUrl = api_base_url || "https://micronshub.eu";
+    try {
+      const resp = await fetch(`${baseUrl}/api/tender-scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country_code: country_code.toUpperCase() }),
+        signal: AbortSignal.timeout(55000),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        return { content: [{ type: "text", text: `Scan failed for ${country_code}: HTTP ${resp.status} — ${text.substring(0, 200)}` }] };
+      }
+
+      const result = await resp.json();
+      return {
+        content: [{
+          type: "text",
+          text: `✅ Scan complete for ${country_code}:\n  Found: ${result.tenders_found}\n  New: ${result.tenders_new}\n  Relevant: ${result.tenders_relevant}\n  Errors: ${(result.errors || []).join("; ") || "none"}\n  Duration: ${result.duration_ms}ms`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `Scan error for ${country_code}: ${err.message}` }] };
+    }
+  }
+);
+
+// ===== Tender Tool 8: export_tenders_csv =====
+server.tool(
+  "export_tenders_csv",
+  "Get a URL to download filtered tenders as CSV.",
+  {
+    country: z.string().optional(),
+    min_score: z.number().optional(),
+    status: z.string().optional(),
+    relevant_only: z.boolean().optional(),
+    api_base_url: z.string().optional(),
+  },
+  async ({ country, min_score, status, relevant_only, api_base_url }) => {
+    const baseUrl = api_base_url || "https://micronshub.eu";
+    const params = new URLSearchParams();
+    if (country) params.set("country", country);
+    if (min_score) params.set("min_score", String(min_score));
+    if (status) params.set("status", status);
+    if (relevant_only) params.set("relevant_only", "true");
+    const url = `${baseUrl}/api/tenders-export?${params.toString()}`;
+    return { content: [{ type: "text", text: `CSV export URL:\n${url}\n\nOpen this URL in a browser to download the CSV file.` }] };
+  }
+);
+
 // ===== Start server =====
 async function main() {
   const args = process.argv.slice(2);

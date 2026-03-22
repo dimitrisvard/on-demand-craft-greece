@@ -20,7 +20,8 @@ import {
   Menu,
   X,
   Radio,
-  Scan
+  Scan,
+  Building2
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -74,6 +75,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/settings') return 'settings';
     if (path === '/dashboard/leads') return 'leads';
     if (path === '/dashboard/company-scanner') return 'company-scanner';
+    if (path === '/dashboard/tenders') return 'tenders';
     return 'overview';
   };
 
@@ -272,6 +274,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/company-scanner")}
                       icon={<Scan className="h-4 w-4" />}
                       label="Company Scanner"
+                    />
+                    <NavButton
+                      active={activeModule === "tenders"}
+                      onClick={() => handleNavigation("/dashboard/tenders")}
+                      icon={<Building2 className="h-4 w-4" />}
+                      label="Tender Monitor"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -477,6 +485,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/company-scanner")}
                       icon={<Scan className="h-4 w-4" />}
                       label="Company Scanner"
+                    />
+                    <NavButton
+                      active={activeModule === "tenders"}
+                      onClick={() => handleNavigation("/dashboard/tenders")}
+                      icon={<Building2 className="h-4 w-4" />}
+                      label="Tender Monitor"
                     />
                   </AccordionContent>
                 </AccordionItem>
