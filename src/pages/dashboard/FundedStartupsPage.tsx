@@ -467,7 +467,7 @@ export default function FundedStartupsPage() {
     setScanning(true);
     setScanResult(null);
     try {
-      const res = await fetch(`/api/scan-funding`, {
+      const res = await fetch(`/api/funded-startups`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
         body: JSON.stringify({ priority }),

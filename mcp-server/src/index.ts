@@ -1541,7 +1541,7 @@ server.tool(
   async ({ priority, api_base_url }) => {
     const baseUrl = api_base_url || process.env.SITE_URL || "https://micronshub.eu";
     try {
-      const res = await fetch(`${baseUrl}/api/scan-funding`, {
+      const res = await fetch(`${baseUrl}/api/funded-startups`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priority }),
