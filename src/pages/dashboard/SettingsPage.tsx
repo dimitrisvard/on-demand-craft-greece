@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Settings, Globe, RefreshCw, CheckCircle, ExternalLink, FileText, AlertCircle } from 'lucide-react';
+import { Settings, Globe, RefreshCw, CheckCircle, ExternalLink, FileText, AlertCircle, Plug, Eye, EyeOff, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +11,43 @@ import { useToast } from '@/components/ui/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import ImpressumSettingsForm from '@/components/dashboard/ImpressumSettingsForm';
+
+// ── Integration settings stored in Supabase app_settings table ──────────────
+
+interface AppSetting {
+  key: string;
+  value: string | null;
+  description: string | null;
+  is_secret: boolean;
+}
+
+const INTEGRATION_KEYS = [
+  'apollo_api_key',
+  'apollo_base_url',
+  'reddit_client_id',
+  'reddit_client_secret',
+  'reddit_user_agent',
+  'telegram_bot_token',
+  'telegram_chat_id',
+  'resend_api_key',
+  'eu_procurement_countries',
+  'scraper_request_delay_ms',
+] as const;
+
+const SETTING_LABELS: Record<string, string> = {
+  apollo_api_key: 'Apollo.io API Key',
+  apollo_base_url: 'Apollo.io Base URL',
+  reddit_client_id: 'Reddit Client ID',
+  reddit_client_secret: 'Reddit Client Secret',
+  reddit_user_agent: 'Reddit User-Agent',
+  telegram_bot_token: 'Telegram Bot Token',
+  telegram_chat_id: 'Telegram Chat ID',
+  resend_api_key: 'Resend API Key',
+  eu_procurement_countries: 'EU Tender Countries (ISO codes)',
+  scraper_request_delay_ms: 'Scraper Delay (ms)',
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 
 interface SitemapResult {
   stats: {
@@ -33,6 +70,72 @@ const SettingsPage = () => {
   const { toast } = useToast();
   const [generatingSitemap, setGeneratingSitemap] = useState(false);
   const [sitemapResult, setSitemapResult] = useState<SitemapResult | null>(null);
+
+  // ── Integration settings state ──────────────────────────────────────────
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [loadingSettings, setLoadingSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
+  const [settingsMeta, setSettingsMeta] = useState<Record<string, AppSetting>>({});
+
+  const loadSettings = useCallback(async () => {
+    setLoadingSettings(true);
+    try {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('key, value, description, is_secret')
+        .in('key', INTEGRATION_KEYS as unknown as string[]);
+
+      if (error) throw error;
+
+      const map: Record<string, string> = {};
+      const meta: Record<string, AppSetting> = {};
+      (data ?? []).forEach((row: AppSetting) => {
+        map[row.key] = row.value ?? '';
+        meta[row.key] = row;
+      });
+      setSettings(map);
+      setSettingsMeta(meta);
+    } catch (err: any) {
+      toast({ title: 'Failed to load integration settings', description: err.message, variant: 'destructive' });
+    } finally {
+      setLoadingSettings(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const saveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      const upserts = Object.entries(settings).map(([key, value]) => ({
+        key,
+        value: value || null,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert(upserts, { onConflict: 'key' });
+
+      if (error) throw error;
+
+      toast({ title: 'Integration settings saved', description: 'All API keys and config values have been saved.' });
+    } catch (err: any) {
+      toast({ title: 'Failed to save settings', description: err.message, variant: 'destructive' });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const toggleReveal = (key: string) => {
+    setRevealedKeys(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+  // ────────────────────────────────────────────────────────────────────────
 
   const handleGenerateSitemap = async () => {
     setGeneratingSitemap(true);
@@ -101,6 +204,7 @@ const SettingsPage = () => {
         <Tabs defaultValue="account" className="w-full">
           <TabsList className="flex w-full overflow-x-auto h-auto flex-wrap gap-1 justify-start">
             <TabsTrigger value="account" className="shrink-0">Account</TabsTrigger>
+            <TabsTrigger value="integrations" className="shrink-0">Integrations</TabsTrigger>
             <TabsTrigger value="seo" className="shrink-0">SEO & Sitemap</TabsTrigger>
             <TabsTrigger value="legal" className="shrink-0">Legal Notice</TabsTrigger>
             <TabsTrigger value="notifications" className="shrink-0">Notifications</TabsTrigger>
@@ -127,6 +231,219 @@ const SettingsPage = () => {
                 <Button>Save Changes</Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ── INTEGRATIONS TAB ── */}
+          <TabsContent value="integrations" className="space-y-4 mt-4">
+
+            {/* Apollo.io */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plug className="h-5 w-5 text-orange-500" />
+                  Apollo.io
+                </CardTitle>
+                <CardDescription>
+                  Connect Apollo.io to enrich leads, search contacts, and push discovered companies to your CRM.
+                  Get your API key at <strong>app.apollo.io → Settings → API Keys</strong>.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingSettings ? (
+                  <p className="text-sm text-muted-foreground">Loading settings…</p>
+                ) : (
+                  <>
+                    {/* Apollo-specific fields */}
+                    {(['apollo_api_key', 'apollo_base_url'] as const).map(key => {
+                      const meta = settingsMeta[key];
+                      const isSecret = meta?.is_secret ?? (key === 'apollo_api_key');
+                      const revealed = revealedKeys.has(key);
+                      return (
+                        <div key={key} className="space-y-1">
+                          <Label htmlFor={key}>{SETTING_LABELS[key]}</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={key}
+                              type={isSecret && !revealed ? 'password' : 'text'}
+                              placeholder={isSecret ? '••••••••••••••••' : undefined}
+                              value={settings[key] ?? ''}
+                              onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                              className="font-mono text-sm"
+                            />
+                            {isSecret && (
+                              <Button variant="ghost" size="icon" onClick={() => toggleReveal(key)} type="button">
+                                {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            )}
+                          </div>
+                          {meta?.description && (
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Reddit Lead Monitor */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plug className="h-5 w-5 text-red-500" />
+                  Reddit Lead Monitor
+                </CardTitle>
+                <CardDescription>
+                  OAuth2 credentials for the Reddit API. Create an app at{' '}
+                  <strong>reddit.com/prefs/apps</strong> (type: "script").
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingSettings ? (
+                  <p className="text-sm text-muted-foreground">Loading settings…</p>
+                ) : (
+                  <>
+                    {(['reddit_client_id', 'reddit_client_secret', 'reddit_user_agent'] as const).map(key => {
+                      const meta = settingsMeta[key];
+                      const isSecret = meta?.is_secret ?? false;
+                      const revealed = revealedKeys.has(key);
+                      return (
+                        <div key={key} className="space-y-1">
+                          <Label htmlFor={key}>{SETTING_LABELS[key]}</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={key}
+                              type={isSecret && !revealed ? 'password' : 'text'}
+                              value={settings[key] ?? ''}
+                              onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                              className="font-mono text-sm"
+                            />
+                            {isSecret && (
+                              <Button variant="ghost" size="icon" onClick={() => toggleReveal(key)} type="button">
+                                {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            )}
+                          </div>
+                          {meta?.description && (
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Telegram Notifications */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plug className="h-5 w-5 text-blue-500" />
+                  Telegram Notifications
+                </CardTitle>
+                <CardDescription>
+                  Receive instant alerts for new leads and tenders via Telegram.
+                  Create a bot with <strong>@BotFather</strong>, then add it to your channel and get the chat ID.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingSettings ? (
+                  <p className="text-sm text-muted-foreground">Loading settings…</p>
+                ) : (
+                  <>
+                    {(['telegram_bot_token', 'telegram_chat_id'] as const).map(key => {
+                      const meta = settingsMeta[key];
+                      const isSecret = meta?.is_secret ?? (key === 'telegram_bot_token');
+                      const revealed = revealedKeys.has(key);
+                      return (
+                        <div key={key} className="space-y-1">
+                          <Label htmlFor={key}>{SETTING_LABELS[key]}</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={key}
+                              type={isSecret && !revealed ? 'password' : 'text'}
+                              placeholder={key === 'telegram_chat_id' ? '-100xxxxxxxxxx' : undefined}
+                              value={settings[key] ?? ''}
+                              onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                              className="font-mono text-sm"
+                            />
+                            {isSecret && (
+                              <Button variant="ghost" size="icon" onClick={() => toggleReveal(key)} type="button">
+                                {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            )}
+                          </div>
+                          {meta?.description && (
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Email / Scraper config */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Plug className="h-5 w-5 text-green-500" />
+                  Email & Scraper Config
+                </CardTitle>
+                <CardDescription>
+                  Resend API key for transactional email, EU tender country list, and scraper rate-limit delay.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loadingSettings ? (
+                  <p className="text-sm text-muted-foreground">Loading settings…</p>
+                ) : (
+                  <>
+                    {(['resend_api_key', 'eu_procurement_countries', 'scraper_request_delay_ms'] as const).map(key => {
+                      const meta = settingsMeta[key];
+                      const isSecret = meta?.is_secret ?? (key === 'resend_api_key');
+                      const revealed = revealedKeys.has(key);
+                      return (
+                        <div key={key} className="space-y-1">
+                          <Label htmlFor={key}>{SETTING_LABELS[key]}</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              id={key}
+                              type={isSecret && !revealed ? 'password' : 'text'}
+                              value={settings[key] ?? ''}
+                              onChange={e => setSettings(prev => ({ ...prev, [key]: e.target.value }))}
+                              className="font-mono text-sm"
+                            />
+                            {isSecret && (
+                              <Button variant="ghost" size="icon" onClick={() => toggleReveal(key)} type="button">
+                                {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </Button>
+                            )}
+                          </div>
+                          {meta?.description && (
+                            <p className="text-xs text-muted-foreground">{meta.description}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Save all */}
+            <div className="flex justify-end">
+              <Button onClick={saveSettings} disabled={savingSettings || loadingSettings} size="lg">
+                {savingSettings ? (
+                  <><RefreshCw className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+                ) : (
+                  <><Save className="h-4 w-4 mr-2" />Save All Integration Settings</>
+                )}
+              </Button>
+            </div>
           </TabsContent>
 
           <TabsContent value="seo" className="space-y-4 mt-4">
