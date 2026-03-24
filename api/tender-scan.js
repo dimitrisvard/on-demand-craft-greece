@@ -63,6 +63,9 @@ const CONNECTORS = {
   CY: () => fetchCountry('CY'),
   LU: () => fetchCountry('LU'),
   MT: () => fetchCountry('MT'),
+  CH: () => fetchCountry('CH'),
+  EU: () => fetchCountry('EU'),
+  GR: () => fetchCountry('GR'),
 };
 
 // ─── Main handler ────────────────────────────────────
