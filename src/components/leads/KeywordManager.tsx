@@ -39,6 +39,7 @@ export default function KeywordManager({ keywords, onAdd, onRemove, onToggle }: 
   const [newCategory, setNewCategory] = useState("sourcing_intent");
   const [newWeight, setNewWeight] = useState(2);
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const byCategory: Record<string, LeadKeyword[]> = {};
   for (const kw of keywords) {
@@ -49,8 +50,13 @@ export default function KeywordManager({ keywords, onAdd, onRemove, onToggle }: 
   async function handleAdd() {
     if (!newKeyword.trim()) return;
     setAdding(true);
-    await onAdd(newKeyword.trim(), newCategory, newWeight);
-    setNewKeyword("");
+    setAddError(null);
+    try {
+      await onAdd(newKeyword.trim(), newCategory, newWeight);
+      setNewKeyword("");
+    } catch (e: any) {
+      setAddError(e?.message || "Failed to add keyword");
+    }
     setAdding(false);
   }
 
@@ -77,7 +83,7 @@ export default function KeywordManager({ keywords, onAdd, onRemove, onToggle }: 
             <Input
               placeholder="New keyword..."
               value={newKeyword}
-              onChange={(e) => setNewKeyword(e.target.value)}
+              onChange={(e) => { setNewKeyword(e.target.value); setAddError(null); }}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
               className="flex-1 min-w-48 h-8 text-sm"
             />
@@ -105,9 +111,12 @@ export default function KeywordManager({ keywords, onAdd, onRemove, onToggle }: 
             </Select>
             <Button size="sm" onClick={handleAdd} disabled={adding || !newKeyword.trim()} className="h-8">
               <Plus className="h-3 w-3 mr-1" />
-              Add
+              {adding ? "Adding..." : "Add"}
             </Button>
           </div>
+          {addError && (
+            <p className="text-xs text-red-600 mt-1">{addError}</p>
+          )}
 
           {/* Keywords by category */}
           <div className="space-y-3 max-h-80 overflow-y-auto">

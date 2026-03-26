@@ -17,6 +17,7 @@ import {
   Radio,
   AlertCircle,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Lead, LeadFilters, LeadStats, MonitoredSubreddit, LeadKeyword } from "@/types/leads";
@@ -66,6 +67,8 @@ export default function LeadMonitorPage() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [keywords, setKeywords] = useState<LeadKeyword[]>([]);
   const [subreddits, setSubreddits] = useState<MonitoredSubreddit[]>([]);
+  const [clearing, setClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -225,7 +228,8 @@ export default function LeadMonitorPage() {
 
   // ===== Keyword management =====
   async function addKeyword(keyword: string, category: string, weight: number) {
-    await supabase.from("lead_keywords").insert({ keyword, category, weight });
+    const { error } = await supabase.from("lead_keywords").insert({ keyword, category, weight, is_active: true });
+    if (error) throw new Error(error.message);
     await fetchKeywords();
   }
 
@@ -242,11 +246,13 @@ export default function LeadMonitorPage() {
   // ===== Subreddit management =====
   async function addSubreddit(subredditName: string, tier: number) {
     const intervalMap: Record<number, number> = { 1: 15, 2: 30, 3: 30, 4: 60, 5: 120 };
-    await supabase.from("monitored_subreddits").insert({
+    const { error } = await supabase.from("monitored_subreddits").insert({
       subreddit: subredditName,
       tier,
       scan_interval_minutes: intervalMap[tier] || 30,
+      is_active: true,
     });
+    if (error) throw new Error(error.message);
     await fetchSubreddits();
   }
 
@@ -258,6 +264,19 @@ export default function LeadMonitorPage() {
   async function toggleSubreddit(id: number, isActive: boolean) {
     await supabase.from("monitored_subreddits").update({ is_active: isActive }).eq("id", id);
     await fetchSubreddits();
+  }
+
+  // ===== Clear leads =====
+  async function clearLeads() {
+    setClearing(true);
+    const { error } = await supabase.from("leads").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    if (!error) {
+      setLeads([]);
+      setTotal(0);
+      await fetchStats();
+    }
+    setClearing(false);
+    setConfirmClear(false);
   }
 
   // ===== Chart data =====
@@ -305,6 +324,34 @@ export default function LeadMonitorPage() {
               <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
+            {confirmClear ? (
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-muted-foreground">Delete all leads?</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={clearLeads}
+                  disabled={clearing}
+                  className="h-8"
+                >
+                  {clearing ? <Loader2 className="h-3 w-3 animate-spin" /> : "Yes, clear"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirmClear(false)} className="h-8">
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmClear(true)}
+                disabled={total === 0}
+                className="text-red-600 hover:text-red-700 hover:border-red-300"
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" />
+                Clear Leads
+              </Button>
+            )}
             <Button
               size="sm"
               onClick={triggerCollection}

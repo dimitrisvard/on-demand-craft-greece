@@ -29,6 +29,7 @@ export default function SubredditManager({ subreddits, onAdd, onRemove, onToggle
   const [newSubreddit, setNewSubreddit] = useState("");
   const [newTier, setNewTier] = useState(3);
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const byTier: Record<number, MonitoredSubreddit[]> = {};
   for (const sub of subreddits) {
@@ -39,8 +40,13 @@ export default function SubredditManager({ subreddits, onAdd, onRemove, onToggle
   async function handleAdd() {
     if (!newSubreddit.trim()) return;
     setAdding(true);
-    await onAdd(newSubreddit.trim().replace(/^r\//, ""), newTier);
-    setNewSubreddit("");
+    setAddError(null);
+    try {
+      await onAdd(newSubreddit.trim().replace(/^r\//, ""), newTier);
+      setNewSubreddit("");
+    } catch (e: any) {
+      setAddError(e?.message || "Failed to add subreddit");
+    }
     setAdding(false);
   }
 
@@ -69,7 +75,7 @@ export default function SubredditManager({ subreddits, onAdd, onRemove, onToggle
             <Input
               placeholder="subreddit name (without r/)"
               value={newSubreddit}
-              onChange={(e) => setNewSubreddit(e.target.value)}
+              onChange={(e) => { setNewSubreddit(e.target.value); setAddError(null); }}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
               className="flex-1 min-w-48 h-8 text-sm"
             />
@@ -87,9 +93,12 @@ export default function SubredditManager({ subreddits, onAdd, onRemove, onToggle
             </Select>
             <Button size="sm" onClick={handleAdd} disabled={adding || !newSubreddit.trim()} className="h-8">
               <Plus className="h-3 w-3 mr-1" />
-              Add
+              {adding ? "Adding..." : "Add"}
             </Button>
           </div>
+          {addError && (
+            <p className="text-xs text-red-600 mt-1">{addError}</p>
+          )}
 
           {/* Subreddits by tier */}
           <div className="space-y-3 max-h-80 overflow-y-auto">
