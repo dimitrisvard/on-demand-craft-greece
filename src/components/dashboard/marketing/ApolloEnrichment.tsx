@@ -197,7 +197,7 @@ export default function ApolloEnrichment() {
     setSelectedContactIds(new Set());
 
     try {
-      const resp = await fetch("/api/apollo-enrich", {
+      const resp = await fetch("/api/marketing?action=apollo-enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companies, titles: selectedTitles }),
