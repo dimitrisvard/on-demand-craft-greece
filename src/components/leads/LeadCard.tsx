@@ -114,6 +114,10 @@ export default function LeadCard({ lead, onUpdate }: LeadCardProps) {
     setSaving(false);
   }
 
+  const resolvedUrl = lead.source_url
+    || (lead.source === "reddit" && lead.source_id ? `https://reddit.com/comments/${lead.source_id}` : null)
+    || (lead.source === "hackernews" && lead.source_id ? `https://news.ycombinator.com/item?id=${lead.source_id}` : null);
+
   const isDismissed = lead.status === "dismissed";
 
   return (
@@ -152,14 +156,18 @@ export default function LeadCard({ lead, onUpdate }: LeadCardProps) {
 
             {/* Title */}
             <h3 className="font-semibold text-sm leading-snug mb-1.5">
-              <a
-                href={lead.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-brand-primary transition-colors"
-              >
-                {highlightKeywords(lead.title, lead.matched_keywords || [])}
-              </a>
+              {resolvedUrl ? (
+                <a
+                  href={resolvedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-brand-primary transition-colors"
+                >
+                  {highlightKeywords(lead.title, lead.matched_keywords || [])}
+                </a>
+              ) : (
+                <span>{highlightKeywords(lead.title, lead.matched_keywords || [])}</span>
+              )}
             </h3>
 
             {/* Excerpt */}
@@ -303,15 +311,22 @@ export default function LeadCard({ lead, onUpdate }: LeadCardProps) {
               >
                 {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </Button>
-              <a
-                href={lead.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Open
-              </a>
+              {resolvedUrl ? (
+                <a
+                  href={resolvedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground cursor-not-allowed opacity-50">
+                  <ExternalLink className="h-3 w-3" />
+                  Open
+                </span>
+              )}
             </div>
 
             {/* Response textarea */}

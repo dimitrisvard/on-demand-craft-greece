@@ -31,7 +31,19 @@ import {
   Bookmark,
   Scan,
   Users,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
 
 // ─────────────────────────────────────────────
@@ -118,14 +130,25 @@ function extractMeta(url: string, source: string) {
 
 function buildPageUrl(baseUrl: string, page: number, source: string): string {
   if (page === 1) return baseUrl;
+
   if (source === "europages") {
-    const cleaned = baseUrl.replace(/\/p-\d+\.html$/, ".html").replace(/\.html$/, "");
+    // Strip any existing page token: /p-N.html, /p-N, or ?page=N
+    let cleaned = baseUrl
+      .replace(/\/p-\d+\.html/i, "")
+      .replace(/\/p-\d+/i, "")
+      .replace(/[?&]page=\d+/i, "");
+    // Remove trailing .html so we can append /p-N.html cleanly
+    cleaned = cleaned.replace(/\.html$/i, "");
+    // Remove trailing slash
+    cleaned = cleaned.replace(/\/+$/, "");
     return `${cleaned}/p-${page}.html`;
   }
+
   if (source === "wlw") {
-    const cleaned = baseUrl.replace(/\/page\/\d+/, "").replace(/\/$/, "");
+    let cleaned = baseUrl.replace(/\/page\/\d+/, "").replace(/\/+$/, "");
     return `${cleaned}/page/${page}`;
   }
+
   return baseUrl;
 }
 
@@ -149,8 +172,6 @@ const EMAIL_STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
-const PAGE_SIZE = 25;
-
 // ─────────────────────────────────────────────
 // Main Page Component
 // ─────────────────────────────────────────────
@@ -171,6 +192,7 @@ export default function CompanyScannerPage() {
   const [companies, setCompanies] = useState<CompanyLead[]>([]);
   const [totalCompanies, setTotalCompanies] = useState(0);
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     source: "all",
@@ -186,6 +208,9 @@ export default function CompanyScannerPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [enrichingIds, setEnrichingIds] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<"selected" | "all">("selected");
+  const [deleting, setDeleting] = useState(false);
 
   // Detect source from URL
   const detectedSource = detectSource(scanUrl);
@@ -201,7 +226,7 @@ export default function CompanyScannerPage() {
       .from("company_leads")
       .select("*", { count: "exact" })
       .order("created_at", { ascending: false })
-      .range(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE - 1);
+      .range(currentPage * pageSize, (currentPage + 1) * pageSize - 1);
 
     if (filters.source !== "all") query = query.eq("source", filters.source);
     if (filters.outreachStatus !== "all") query = query.eq("outreach_status", filters.outreachStatus);
@@ -215,7 +240,7 @@ export default function CompanyScannerPage() {
       setTotalCompanies(count || 0);
     }
     setLoading(false);
-  }, [page, filters]);
+  }, [page, pageSize, filters]);
 
   useEffect(() => {
     fetchCompanies();
@@ -435,35 +460,53 @@ export default function CompanyScannerPage() {
     fetchSavedSearches();
   };
 
-  // ─── CSV Export ───
+  // ─── Excel Export ───
   const handleExport = () => {
     const rows = companies.filter(c => selectedIds.size === 0 || selectedIds.has(c.id));
-    const headers = ["Company Name", "Source", "Country", "City", "Website", "Phone", "Email", "Scraped Emails", "Employee Count", "Industry Tags", "Outreach Status", "Description"];
-    const csv = [
-      headers.join(","),
-      ...rows.map(c => [
-        `"${(c.company_name || "").replace(/"/g, '""')}"`,
-        c.source,
-        c.country || "",
-        c.city || "",
-        c.website_url || "",
-        c.phone || "",
-        c.email || "",
-        (c.scraped_emails || []).join("|"),
-        c.employee_count || "",
-        (c.industry_tags || []).join("|"),
-        c.outreach_status,
-        `"${(c.description || "").replace(/"/g, '""').slice(0, 100)}"`,
-      ].join(","))
-    ].join("\n");
+    const data = rows.map(c => ({
+      "Company Name": c.company_name || "",
+      "Website URL": c.website_url || "",
+      "Email": c.email || (c.scraped_emails?.[0] || ""),
+    }));
 
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `company-leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const ws = XLSX.utils.json_to_sheet(data);
+    // Auto-width columns
+    ws["!cols"] = [{ wch: 40 }, { wch: 50 }, { wch: 40 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Companies");
+    XLSX.writeFile(wb, `company-leads-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // ─── Delete ───
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      if (deleteMode === "selected" && selectedIds.size > 0) {
+        const { error } = await supabase
+          .from("company_leads")
+          .delete()
+          .in("id", [...selectedIds]);
+        if (!error) setSelectedIds(new Set());
+      } else if (deleteMode === "all") {
+        let query = supabase.from("company_leads").delete();
+        if (filters.source !== "all") query = query.eq("source", filters.source);
+        if (filters.outreachStatus !== "all") query = query.eq("outreach_status", filters.outreachStatus);
+        if (filters.emailStatus !== "all") query = query.eq("email_scrape_status", filters.emailStatus);
+        if (filters.country) query = query.ilike("country", `%${filters.country}%`);
+        if (filters.search) query = query.ilike("company_name", `%${filters.search}%`);
+        // Supabase delete requires at least one filter or .neq for safety
+        if (filters.source === "all" && filters.outreachStatus === "all" && filters.emailStatus === "all" && !filters.country && !filters.search) {
+          query = query.neq("id", "00000000-0000-0000-0000-000000000000");
+        }
+        await query;
+        setSelectedIds(new Set());
+      }
+      fetchCompanies(true);
+    } catch (err) {
+      console.error("Delete failed:", err);
+    }
+    setDeleting(false);
+    setDeleteDialogOpen(false);
   };
 
   // ─── Toggle select ───
@@ -721,16 +764,26 @@ export default function CompanyScannerPage() {
                     </Button>
                     <Button variant="outline" size="sm" onClick={handleExport} className="h-7 gap-1">
                       <Download className="h-3.5 w-3.5" />
-                      Export CSV
+                      Export Excel
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => { setDeleteMode("selected"); setDeleteDialogOpen(true); }} className="h-7 gap-1">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete Selected
                     </Button>
                   </>
                 )}
 
                 {selectedIds.size === 0 && (
-                  <Button variant="outline" size="sm" onClick={handleExport} className="h-7 gap-1">
-                    <Download className="h-3.5 w-3.5" />
-                    Export All CSV
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={handleExport} className="h-7 gap-1">
+                      <Download className="h-3.5 w-3.5" />
+                      Export All Excel
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => { setDeleteMode("all"); setDeleteDialogOpen(true); }} className="h-7 gap-1 text-destructive border-destructive/30 hover:bg-destructive/10">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete All
+                    </Button>
+                  </>
                 )}
               </div>
             )}
@@ -763,18 +816,34 @@ export default function CompanyScannerPage() {
             )}
 
             {/* Pagination */}
-            {totalCompanies > PAGE_SIZE && (
-              <div className="flex items-center justify-between pt-2">
+            {totalCompanies > 0 && (
+              <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
                 <p className="text-sm text-muted-foreground">
-                  Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCompanies)} of {totalCompanies}
+                  Showing {page * pageSize + 1}–{Math.min((page + 1) * pageSize, totalCompanies)} of {totalCompanies}
                 </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
-                    Previous
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= totalCompanies}>
-                    Next
-                  </Button>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>Show</span>
+                    <Select value={String(pageSize)} onValueChange={v => { setPageSize(Number(v)); setPage(0); }}>
+                      <SelectTrigger className="w-20 h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="25">25</SelectItem>
+                        <SelectItem value="50">50</SelectItem>
+                        <SelectItem value="100">100</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span>entries</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+                      Previous
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * pageSize >= totalCompanies}>
+                      Next
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -827,6 +896,34 @@ export default function CompanyScannerPage() {
             )}
           </TabsContent>
         </Tabs>
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {deleteMode === "selected"
+                  ? `Delete ${selectedIds.size} selected companies?`
+                  : `Delete all ${totalCompanies} companies?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. {deleteMode === "all"
+                  ? "All companies matching your current filters will be permanently deleted."
+                  : "The selected companies will be permanently deleted."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                disabled={deleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </PersistentDashboardLayout>
   );

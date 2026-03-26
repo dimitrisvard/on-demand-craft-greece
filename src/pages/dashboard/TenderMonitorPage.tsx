@@ -238,7 +238,15 @@ export default function TenderMonitorPage() {
     setScanning(countryCode);
     try {
       const result = await apiPost("/tender-scan", { country_code: countryCode });
-      alert(`Scan complete: ${result.tenders_new} new, ${result.tenders_relevant} relevant tenders.`);
+      const scanErrors = result.errors || [];
+      let message = `Scan complete: ${result.tenders_found || 0} found, ${result.tenders_new || 0} new, ${result.tenders_relevant || 0} relevant.`;
+      if (scanErrors.length > 0) {
+        message += `\n\nWarnings (${scanErrors.length}):\n` + scanErrors.slice(0, 5).map((e: string) => `- ${e}`).join('\n');
+        if (scanErrors.length > 5) {
+          message += `\n...and ${scanErrors.length - 5} more`;
+        }
+      }
+      alert(message);
       fetchTenders(true);
       fetchStats();
       fetchConnectors();

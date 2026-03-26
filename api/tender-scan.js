@@ -18,6 +18,7 @@ import { fetchFrance } from '../lib/connectors/france.js';
 import { fetchGermany } from '../lib/connectors/germany.js';
 import { fetchSpain } from '../lib/connectors/spain.js';
 import { fetchCountry } from '../lib/connectors/generic.js';
+import { fetchTed } from '../lib/connectors/ted.js';
 
 // ─── CORS ───────────────────────────────────────────
 function setCors(res) {
@@ -102,11 +103,32 @@ export default async function handler(req, res) {
 
     // Run the connector
     console.log(`[tender-scan] Starting scan for ${code}`);
-    const { tenders: rawTenders, errors } = await connector();
+    let { tenders: rawTenders, errors } = await connector();
     logEntry.errors = errors;
     logEntry.tenders_found = rawTenders.length;
 
     console.log(`[tender-scan] ${code}: found ${rawTenders.length} tenders, ${errors.length} errors`);
+
+    // TED fallback: if the primary connector found 0 tenders and had errors, try TED
+    if (rawTenders.length === 0 && errors.length > 0) {
+      console.log(`[tender-scan] ${code}: primary connector failed, trying TED fallback...`);
+      try {
+        const tedResult = await fetchTed(code);
+        if (tedResult.tenders.length > 0) {
+          rawTenders = tedResult.tenders;
+          logEntry.tenders_found = rawTenders.length;
+          console.log(`[tender-scan] ${code}: TED fallback found ${rawTenders.length} tenders`);
+        }
+        if (tedResult.errors.length > 0) {
+          errors.push(...tedResult.errors);
+          logEntry.errors = errors;
+        }
+      } catch (tedErr) {
+        console.error(`[tender-scan] ${code}: TED fallback error:`, tedErr.message);
+        errors.push(`TED fallback: ${tedErr.message}`);
+        logEntry.errors = errors;
+      }
+    }
 
     // Score and upsert tenders
     let newCount = 0;

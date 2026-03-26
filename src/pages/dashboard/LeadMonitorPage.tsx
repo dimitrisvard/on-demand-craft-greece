@@ -177,23 +177,28 @@ export default function LeadMonitorPage() {
 
   // ===== Update lead =====
   async function updateLead(id: string, updates: Partial<Lead>) {
-    const { error } = await supabase
-      .from("leads")
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq("id", id);
+    try {
+      const resp = await fetch(
+        `${supabaseUrl}/functions/v1/leads-api/leads/${id}`,
+        {
+          method: "PATCH",
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(updates),
+        }
+      );
 
-    if (!error) {
-      setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates } : l)));
-
-      // Log activity
-      if (updates.status) {
-        await supabase.from("lead_activity").insert({
-          lead_id: id,
-          action: "status_changed",
-          new_value: updates.status,
-          performed_by: "dashboard",
-        });
+      if (resp.ok) {
+        const data = await resp.json();
+        setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates } : l)));
+      } else {
+        console.error("Failed to update lead:", await resp.text());
       }
+    } catch (e) {
+      console.error("Lead update error:", e);
     }
   }
 

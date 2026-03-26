@@ -3,8 +3,28 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const redditClientId = Deno.env.get("REDDIT_CLIENT_ID")!;
-const redditClientSecret = Deno.env.get("REDDIT_CLIENT_SECRET")!;
+let redditClientId = Deno.env.get("REDDIT_CLIENT_ID") || "";
+let redditClientSecret = Deno.env.get("REDDIT_CLIENT_SECRET") || "";
+
+async function ensureCredentials() {
+  if (redditClientId && redditClientSecret) return;
+
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["reddit_client_id", "reddit_client_secret"]);
+
+  if (data) {
+    for (const row of data) {
+      if (row.key === "reddit_client_id") redditClientId = row.value;
+      if (row.key === "reddit_client_secret") redditClientSecret = row.value;
+    }
+  }
+
+  if (!redditClientId || !redditClientSecret) {
+    throw new Error("Reddit API credentials not configured. Set them in Dashboard > Settings > Integrations.");
+  }
+}
 const redditUserAgent = Deno.env.get("REDDIT_USER_AGENT") || "MicronsHubLeadMonitor/1.0 by MicronsHub";
 const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const telegramChatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -261,6 +281,9 @@ serve(async (req) => {
   }
 
   try {
+    // Ensure Reddit credentials are available (env vars or app_settings fallback)
+    await ensureCredentials();
+
     // Check Reddit credentials
     if (!redditClientId || !redditClientSecret) {
       return new Response(JSON.stringify({ error: "Reddit API credentials not configured" }), {

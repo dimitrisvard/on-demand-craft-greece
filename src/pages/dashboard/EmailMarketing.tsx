@@ -3,7 +3,7 @@ import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-
 import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Plus, Users, BarChart2, Mail, LayoutTemplate, Globe } from 'lucide-react';
+import { Plus, Users, BarChart2, Mail, LayoutTemplate, Globe, Zap } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import SubscribersTable from '@/components/dashboard/marketing/SubscribersTable';
@@ -71,6 +71,7 @@ const SettingsView = () => (
 
 import CampaignDetailsPage from './marketing/CampaignDetailsPage';
 import EmailScraperView from '@/components/dashboard/marketing/EmailScraperView';
+import ApolloEnrichment from '@/components/dashboard/marketing/ApolloEnrichment';
 
 const EmailMarketing = () => {
   const location = useLocation();
@@ -83,6 +84,7 @@ const EmailMarketing = () => {
     if (path.includes('/analytics')) return 'analytics';
     if (path.includes('/settings')) return 'settings';
     if (path.includes('/scraper')) return 'scraper';
+    if (path.includes('/apollo')) return 'apollo';
     if (path.includes('/campaigns')) return 'campaigns'; // Generic for list
     return 'overview'; // Default to overview/campaigns list
   };
@@ -103,6 +105,9 @@ const EmailMarketing = () => {
         break;
       case 'scraper':
         navigate('/dashboard/email-marketing/scraper');
+        break;
+      case 'apollo':
+        navigate('/dashboard/email-marketing/apollo');
         break;
       default:
         break;
@@ -140,6 +145,9 @@ const EmailMarketing = () => {
             <TabsTrigger value="scraper" className="flex items-center gap-2">
               <Globe className="h-4 w-4" /> Email Scraper
             </TabsTrigger>
+            <TabsTrigger value="apollo" className="flex items-center gap-2">
+              <Zap className="h-4 w-4" /> Apollo Enrichment
+            </TabsTrigger>
           </TabsList>
 
           <Routes>
@@ -148,6 +156,7 @@ const EmailMarketing = () => {
             <Route path="/analytics" element={<AnalyticsView />} />
             <Route path="/settings" element={<SettingsView />} />
             <Route path="/scraper" element={<EmailScraperView />} />
+            <Route path="/apollo" element={<ApolloEnrichment />} />
             <Route path="/campaigns/new" element={<CampaignWizard />} />
             <Route path="/campaigns/:id" element={<CampaignDetailsPage />} />
             {/* Redirect any unknown sub-routes to overview */}
