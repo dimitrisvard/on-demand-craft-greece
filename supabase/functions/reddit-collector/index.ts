@@ -3,8 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-// Use a descriptive user-agent as required by Reddit's API terms
-const redditUserAgent = Deno.env.get("REDDIT_USER_AGENT") || "MicronsHubLeadMonitor/1.0 by MicronsHub";
 const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const telegramChatId = Deno.env.get("TELEGRAM_CHAT_ID");
 
@@ -15,6 +13,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
+
+// PullPush.io — free Reddit archive API (no auth needed, not blocked by Reddit)
+const PULLPUSH_BASE = "https://api.pullpush.io/reddit/search/submission";
 
 interface RedditPost {
   id: string;
@@ -27,14 +28,6 @@ interface RedditPost {
   num_comments: number;
   created_utc: number;
   subreddit: string;
-}
-
-interface RedditResponse {
-  data: {
-    children: Array<{ data: RedditPost }>;
-    after: string | null;
-    before: string | null;
-  };
 }
 
 // ===== Keyword Matching =====
@@ -73,7 +66,7 @@ function matchKeywords(text: string, keywords: Keyword[]): { matched: string[]; 
   const hasGeoEurope = categories.includes("geographic_europe");
   const hasCompetitorComplaint = categories.includes("competitor_complaints");
   const hasCompetitorMention = categories.includes("competitor_mentions");
-  const hasMaterialSpecific = categories.includes("material_specific");
+  const hasMaterialSpecific = categories.includes("material_specific") || categories.includes("industry_specific");
   const hasCompetitionTeam = categories.includes("competition_teams");
 
   if (matchedKeywords.length === 0) {
@@ -104,98 +97,118 @@ async function sendTelegramNotification(post: RedditPost, matchResult: { matched
   if (!telegramBotToken || !telegramChatId) return;
 
   const timeAgo = Math.round((Date.now() / 1000 - post.created_utc) / 60);
-  const timeStr = timeAgo < 60 ? `${timeAgo} min ago` : `${Math.round(timeAgo / 60)} hr ago`;
+  const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`;
   const excerpt = (post.selftext || "").slice(0, 300).replace(/\n/g, " ").trim();
   const postUrl = `https://reddit.com${post.permalink}`;
 
   const scoreEmoji = matchResult.score === "high" ? "🔴" : matchResult.score === "medium" ? "🟡" : "🟢";
-  const message = `${scoreEmoji} ${matchResult.score.toUpperCase()} INTENT LEAD\n\n` +
-    `📍 r/${post.subreddit}\n` +
-    `⏰ ${timeStr}  👤 u/${post.author}\n\n` +
-    `📌 ${post.title}\n\n` +
-    (excerpt ? `💬 "${excerpt}${post.selftext.length > 300 ? "..." : ""}"\n\n` : "") +
-    `🏷 ${matchResult.matched.slice(0, 5).join(", ")}\n` +
-    `🔗 ${postUrl}`;
+  const message = `${scoreEmoji} ${matchResult.score.toUpperCase()} LEAD\n\n` +
+    `r/${post.subreddit} · ${timeStr} · u/${post.author}\n\n` +
+    `${post.title}\n\n` +
+    (excerpt ? `"${excerpt}${post.selftext.length > 300 ? "..." : ""}"\n\n` : "") +
+    `Keywords: ${matchResult.matched.slice(0, 5).join(", ")}\n` +
+    `${postUrl}`;
 
-  await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: telegramChatId,
-      text: message,
-      disable_web_page_preview: true,
-    }),
-  });
+  try {
+    await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: telegramChatId, text: message, disable_web_page_preview: true }),
+    });
+  } catch (_) { /* ignore telegram errors */ }
 }
 
-// ===== Fetch from public Reddit JSON API (no OAuth required) =====
+// ===== Fetch posts via PullPush.io =====
 async function collectSubreddit(
   subredditName: string,
-  lastPostId: string | null,
+  lastScannedAt: string | null,
   keywords: Keyword[],
-  forceAll = false,
-): Promise<{ newPosts: number; lastId: string | null }> {
-  // Use the public JSON endpoint — no API credentials needed
-  let url = `https://www.reddit.com/r/${subredditName}/new.json?limit=100`;
-  if (lastPostId && !forceAll) {
-    url += `&before=t3_${lastPostId}`;
+): Promise<{ newPosts: number; newestTimestamp: number | null }> {
+  // Build PullPush URL: fetch posts from this subreddit, newest first
+  const params = new URLSearchParams({
+    subreddit: subredditName,
+    sort: "new",
+    sort_type: "created_utc",
+    size: "100",
+  });
+
+  // For incremental fetching: only get posts newer than last scan
+  if (lastScannedAt) {
+    const afterEpoch = Math.floor(new Date(lastScannedAt).getTime() / 1000);
+    params.set("after", String(afterEpoch));
   }
 
+  const url = `${PULLPUSH_BASE}?${params.toString()}`;
+  console.log(`Fetching: ${url}`);
+
   const resp = await fetch(url, {
-    headers: { "User-Agent": redditUserAgent },
+    headers: { "User-Agent": "MicronsHubLeadMonitor/1.0" },
   });
 
   if (!resp.ok) {
-    console.error(`Failed to fetch r/${subredditName}: ${resp.status}`);
-    return { newPosts: 0, lastId: lastPostId };
+    const body = await resp.text();
+    console.error(`PullPush error for r/${subredditName}: ${resp.status} — ${body.slice(0, 200)}`);
+    return { newPosts: 0, newestTimestamp: null };
   }
 
-  const json: RedditResponse = await resp.json();
-  const posts = json.data?.children?.map((c) => c.data) ?? [];
+  const json = await resp.json();
+  // PullPush returns { data: [post, post, ...] }
+  const posts: RedditPost[] = json.data ?? [];
 
-  if (posts.length === 0) return { newPosts: 0, lastId: lastPostId };
+  console.log(`r/${subredditName}: ${posts.length} posts fetched from PullPush`);
 
-  const newLastId = posts[0].id;
+  if (posts.length === 0) return { newPosts: 0, newestTimestamp: null };
+
+  // Track the newest post timestamp for incremental fetching
+  let newestTimestamp = 0;
   let newPostsCount = 0;
-  const highIntentPosts: Array<{ post: RedditPost; matchResult: ReturnType<typeof matchKeywords> }> = [];
 
   for (const post of posts) {
-    const text = `${post.title} ${post.selftext}`;
+    if (post.created_utc > newestTimestamp) newestTimestamp = post.created_utc;
+
+    const text = `${post.title} ${post.selftext || ""}`;
     const matchResult = matchKeywords(text, keywords);
     if (matchResult.score === "noise") continue;
 
-    const sourceUrl = `https://reddit.com${post.permalink}`;
+    const permalink = post.permalink || `/r/${post.subreddit}/comments/${post.id}/`;
+    const sourceUrl = `https://reddit.com${permalink}`;
     const postCreatedAt = new Date(post.created_utc * 1000).toISOString();
 
     const { error } = await supabase.from("leads").upsert({
       source: "reddit",
+      external_id: post.id,
       source_url: sourceUrl,
       source_id: post.id,
       subreddit: `r/${post.subreddit}`,
       title: post.title,
       body: post.selftext || null,
+      url: sourceUrl,
       author: post.author,
       author_url: `https://reddit.com/u/${post.author}`,
+      score: post.score,
+      num_comments: post.num_comments,
       upvotes: post.score,
       comments_count: post.num_comments,
+      lead_score: matchResult.score,
       auto_score: matchResult.score,
       matched_keywords: matchResult.matched,
       matched_categories: matchResult.categories,
       post_created_at: postCreatedAt,
+      posted_at: postCreatedAt,
     }, { onConflict: "source_url", ignoreDuplicates: true });
 
     if (!error) {
       newPostsCount++;
-      if (matchResult.score === "high") highIntentPosts.push({ post, matchResult });
+      if (matchResult.score === "high") {
+        await sendTelegramNotification(post, matchResult);
+      }
+    } else {
+      console.error(`Upsert error for ${post.id}:`, error.message);
     }
   }
 
-  for (const { post, matchResult } of highIntentPosts) {
-    try { await sendTelegramNotification(post, matchResult); } catch (_) { /* ignore */ }
-  }
-
   // Update keyword match counts
-  const allMatched = posts.flatMap((p) => matchKeywords(`${p.title} ${p.selftext}`, keywords).matched);
+  const allMatched = posts.flatMap((p) => matchKeywords(`${p.title} ${p.selftext || ""}`, keywords).matched);
   if (allMatched.length > 0) {
     const counts: Record<string, number> = {};
     for (const kw of allMatched) counts[kw] = (counts[kw] || 0) + 1;
@@ -204,7 +217,8 @@ async function collectSubreddit(
     }
   }
 
-  return { newPosts: newPostsCount, lastId: newLastId };
+  console.log(`r/${subredditName}: ${newPostsCount} new leads saved (of ${posts.length} fetched)`);
+  return { newPosts: newPostsCount, newestTimestamp };
 }
 
 serve(async (req) => {
@@ -215,38 +229,43 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
 
-    // Single subreddit targeted scan (e.g. ?subreddit=engineering)
+    // ===== Single subreddit targeted scan (e.g. ?subreddit=engineering) =====
     const targetSubreddit = url.searchParams.get("subreddit");
     if (targetSubreddit) {
       const keywords = await loadKeywords();
+
+      // Get last scan time (if exists)
       const { data: sub } = await supabase
         .from("monitored_subreddits")
-        .select("subreddit, last_post_id")
+        .select("subreddit, last_scanned_at")
         .eq("subreddit", targetSubreddit)
         .single();
 
-      const result = await collectSubreddit(sub?.subreddit ?? targetSubreddit, null, keywords, true);
+      // For targeted scan, always fetch last 100 posts regardless of last scan
+      const result = await collectSubreddit(targetSubreddit, null, keywords);
 
+      // Update last_scanned_at
       if (sub) {
         await supabase.from("monitored_subreddits")
-          .update({ last_post_id: result.lastId, last_scanned_at: new Date().toISOString() })
+          .update({ last_scanned_at: new Date().toISOString() })
           .eq("subreddit", targetSubreddit);
       }
 
-      return new Response(JSON.stringify({ success: true, subredditsScanned: 1, totalNewLeads: result.newPosts, results: { [targetSubreddit]: result } }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ success: true, subredditsScanned: 1, totalNewLeads: result.newPosts, results: { [targetSubreddit]: result } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    // Batch scan: optional tier filter
+    // ===== Batch scan: tier-based =====
     const tierFilter = url.searchParams.get("tier");
     const maxTier = tierFilter ? parseInt(tierFilter) : 5;
-    // Cap at 40 to safely stay within edge function timeout (40 × ~2s = ~80s)
+    // Cap at 40 subreddits to stay within edge function timeout (~1s per sub)
     const maxSubreddits = parseInt(url.searchParams.get("max") || "40");
 
     const { data: allSubreddits, error: subError } = await supabase
       .from("monitored_subreddits")
-      .select("subreddit, tier, last_post_id, scan_interval_minutes, last_scanned_at")
+      .select("subreddit, tier, scan_interval_minutes, last_scanned_at")
       .eq("is_active", true)
       .eq("source", "reddit")
       .lte("tier", maxTier)
@@ -256,7 +275,7 @@ serve(async (req) => {
       throw new Error(`Failed to load subreddits: ${subError?.message}`);
     }
 
-    // Only scan subreddits due for a refresh based on their scan_interval_minutes
+    // Only scan subreddits due for a refresh
     const now = Date.now();
     const subreddits = allSubreddits
       .filter((sub) => {
@@ -266,25 +285,27 @@ serve(async (req) => {
       })
       .slice(0, maxSubreddits);
 
+    console.log(`Batch scan: ${subreddits.length} due (of ${allSubreddits.length} total, tier <= ${maxTier})`);
+
     const keywords = await loadKeywords();
-    const results: Record<string, { newPosts: number; lastId: string | null }> = {};
+    const results: Record<string, { newPosts: number }> = {};
     let totalNew = 0;
 
     for (const sub of subreddits) {
       try {
-        const result = await collectSubreddit(sub.subreddit, sub.last_post_id, keywords);
-        results[sub.subreddit] = result;
+        const result = await collectSubreddit(sub.subreddit, sub.last_scanned_at, keywords);
+        results[sub.subreddit] = { newPosts: result.newPosts };
         totalNew += result.newPosts;
 
         await supabase.from("monitored_subreddits")
-          .update({ last_post_id: result.lastId, last_scanned_at: new Date().toISOString() })
+          .update({ last_scanned_at: new Date().toISOString() })
           .eq("subreddit", sub.subreddit);
 
-        // ~2s delay for unauthenticated Reddit public API rate limit
-        await new Promise((r) => setTimeout(r, 2000));
+        // PullPush has generous rate limits, but add small delay
+        await new Promise((r) => setTimeout(r, 500));
       } catch (e) {
         console.error(`Error collecting r/${sub.subreddit}:`, e);
-        results[sub.subreddit] = { newPosts: 0, lastId: sub.last_post_id };
+        results[sub.subreddit] = { newPosts: 0 };
       }
     }
 
