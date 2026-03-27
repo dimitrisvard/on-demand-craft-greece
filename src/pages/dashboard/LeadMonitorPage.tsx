@@ -7,6 +7,7 @@ import KeywordManager from "@/components/leads/KeywordManager";
 import SubredditManager from "@/components/leads/SubredditManager";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -69,6 +70,9 @@ export default function LeadMonitorPage() {
   const [subreddits, setSubreddits] = useState<MonitoredSubreddit[]>([]);
   const [clearing, setClearing] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [selectedSubreddit, setSelectedSubreddit] = useState<string>("");
+  const [scanningSubreddit, setScanningSubreddit] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -208,6 +212,7 @@ export default function LeadMonitorPage() {
   // ===== Trigger collection =====
   async function triggerCollection() {
     setCollecting(true);
+    setScanResult(null);
     try {
       const resp = await fetch(
         `${supabaseUrl}/functions/v1/leads-api/collect?source=all`,
@@ -224,6 +229,31 @@ export default function LeadMonitorPage() {
       console.error("Collection trigger failed:", e);
     }
     setCollecting(false);
+  }
+
+  async function triggerSubredditScan() {
+    if (!selectedSubreddit) return;
+    setScanningSubreddit(true);
+    setScanResult(null);
+    try {
+      const resp = await fetch(
+        `${supabaseUrl}/functions/v1/reddit-collector?subreddit=${encodeURIComponent(selectedSubreddit)}`,
+        { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+      );
+      const data = await resp.json();
+      if (resp.ok) {
+        const count = data.totalNewLeads ?? 0;
+        setScanResult(`r/${selectedSubreddit}: ${count} new lead${count !== 1 ? "s" : ""} found`);
+        await fetchLeads(true);
+        await fetchStats();
+      } else {
+        setScanResult(`Error: ${data.error || "Scan failed"}`);
+      }
+    } catch (e) {
+      setScanResult("Scan failed — check console");
+      console.error("Subreddit scan failed:", e);
+    }
+    setScanningSubreddit(false);
   }
 
   // ===== Keyword management =====
@@ -355,7 +385,7 @@ export default function LeadMonitorPage() {
             <Button
               size="sm"
               onClick={triggerCollection}
-              disabled={collecting}
+              disabled={collecting || scanningSubreddit}
               className="bg-brand-primary hover:bg-brand-primary/90"
             >
               {collecting ? (
@@ -363,9 +393,40 @@ export default function LeadMonitorPage() {
               ) : (
                 <Download className="h-4 w-4 mr-1.5" />
               )}
-              {collecting ? "Collecting..." : "Collect Now"}
+              {collecting ? "Collecting..." : "Collect All"}
             </Button>
+            {/* Targeted subreddit scan */}
+            <div className="flex items-center gap-1.5">
+              <Select value={selectedSubreddit} onValueChange={setSelectedSubreddit}>
+                <SelectTrigger className="h-8 w-44 text-xs">
+                  <SelectValue placeholder="Pick subreddit…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subreddits
+                    .filter((s) => s.is_active)
+                    .sort((a, b) => a.tier - b.tier || a.subreddit.localeCompare(b.subreddit))
+                    .map((s) => (
+                      <SelectItem key={s.subreddit} value={s.subreddit} className="text-xs">
+                        r/{s.subreddit} <span className="text-muted-foreground ml-1">T{s.tier}</span>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={triggerSubredditScan}
+                disabled={!selectedSubreddit || scanningSubreddit || collecting}
+                className="h-8 text-xs px-2.5"
+              >
+                {scanningSubreddit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                <span className="ml-1">Scan</span>
+              </Button>
+            </div>
           </div>
+          {scanResult && (
+            <p className="text-xs mt-1 text-right text-muted-foreground">{scanResult}</p>
+          )}
         </div>
 
         {/* Stats Bar */}

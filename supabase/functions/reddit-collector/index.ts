@@ -3,28 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-let redditClientId = Deno.env.get("REDDIT_CLIENT_ID") || "";
-let redditClientSecret = Deno.env.get("REDDIT_CLIENT_SECRET") || "";
-
-async function ensureCredentials() {
-  if (redditClientId && redditClientSecret) return;
-
-  const { data } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["reddit_client_id", "reddit_client_secret"]);
-
-  if (data) {
-    for (const row of data) {
-      if (row.key === "reddit_client_id") redditClientId = row.value;
-      if (row.key === "reddit_client_secret") redditClientSecret = row.value;
-    }
-  }
-
-  if (!redditClientId || !redditClientSecret) {
-    throw new Error("Reddit API credentials not configured. Set them in Dashboard > Settings > Integrations.");
-  }
-}
+// Use a descriptive user-agent as required by Reddit's API terms
 const redditUserAgent = Deno.env.get("REDDIT_USER_AGENT") || "MicronsHubLeadMonitor/1.0 by MicronsHub";
 const telegramBotToken = Deno.env.get("TELEGRAM_BOT_TOKEN");
 const telegramChatId = Deno.env.get("TELEGRAM_CHAT_ID");
@@ -34,6 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
 interface RedditPost {
@@ -47,7 +27,6 @@ interface RedditPost {
   num_comments: number;
   created_utc: number;
   subreddit: string;
-  subreddit_name_prefixed: string;
 }
 
 interface RedditResponse {
@@ -56,37 +35,6 @@ interface RedditResponse {
     after: string | null;
     before: string | null;
   };
-}
-
-// ===== Reddit OAuth =====
-let cachedToken: { token: string; expiresAt: number } | null = null;
-
-async function getRedditToken(): Promise<string> {
-  if (cachedToken && Date.now() < cachedToken.expiresAt) {
-    return cachedToken.token;
-  }
-
-  const credentials = btoa(`${redditClientId}:${redditClientSecret}`);
-  const resp = await fetch("https://www.reddit.com/api/v1/access_token", {
-    method: "POST",
-    headers: {
-      "Authorization": `Basic ${credentials}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": redditUserAgent,
-    },
-    body: "grant_type=client_credentials",
-  });
-
-  if (!resp.ok) {
-    throw new Error(`Reddit auth failed: ${resp.status} ${await resp.text()}`);
-  }
-
-  const data = await resp.json();
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 60) * 1000,
-  };
-  return cachedToken.token;
 }
 
 // ===== Keyword Matching =====
@@ -118,7 +66,6 @@ function matchKeywords(text: string, keywords: Keyword[]): { matched: string[]; 
     }
   }
 
-  // Scoring logic
   const categories = Array.from(matchedCategories);
   let autoScore = "noise";
 
@@ -163,15 +110,12 @@ async function sendTelegramNotification(post: RedditPost, matchResult: { matched
 
   const scoreEmoji = matchResult.score === "high" ? "🔴" : matchResult.score === "medium" ? "🟡" : "🟢";
   const message = `${scoreEmoji} ${matchResult.score.toUpperCase()} INTENT LEAD\n\n` +
-    `📍 Source: r/${post.subreddit}\n` +
-    `⏰ Posted: ${timeStr}\n` +
-    `👤 Author: u/${post.author}\n\n` +
-    `📌 Title: ${post.title}\n\n` +
-    (excerpt ? `💬 Excerpt: "${excerpt}${post.selftext.length > 300 ? "..." : ""}"\n\n` : "") +
-    `🏷 Keywords: ${matchResult.matched.slice(0, 5).join(", ")}\n` +
-    `📊 Categories: ${matchResult.categories.join(", ")}\n\n` +
-    `🔗 Post: ${postUrl}\n\n` +
-    `Open Dashboard: /dashboard/leads`;
+    `📍 r/${post.subreddit}\n` +
+    `⏰ ${timeStr}  👤 u/${post.author}\n\n` +
+    `📌 ${post.title}\n\n` +
+    (excerpt ? `💬 "${excerpt}${post.selftext.length > 300 ? "..." : ""}"\n\n` : "") +
+    `🏷 ${matchResult.matched.slice(0, 5).join(", ")}\n` +
+    `🔗 ${postUrl}`;
 
   await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
     method: "POST",
@@ -179,26 +123,26 @@ async function sendTelegramNotification(post: RedditPost, matchResult: { matched
     body: JSON.stringify({
       chat_id: telegramChatId,
       text: message,
-      parse_mode: "HTML",
       disable_web_page_preview: true,
     }),
   });
 }
 
-// ===== Main collector =====
-async function collectSubreddit(subredditName: string, lastPostId: string | null, keywords: Keyword[]): Promise<{ newPosts: number; lastId: string | null }> {
-  const token = await getRedditToken();
-
-  let url = `https://oauth.reddit.com/r/${subredditName}/new.json?limit=100`;
-  if (lastPostId) {
+// ===== Fetch from public Reddit JSON API (no OAuth required) =====
+async function collectSubreddit(
+  subredditName: string,
+  lastPostId: string | null,
+  keywords: Keyword[],
+  forceAll = false,
+): Promise<{ newPosts: number; lastId: string | null }> {
+  // Use the public JSON endpoint — no API credentials needed
+  let url = `https://www.reddit.com/r/${subredditName}/new.json?limit=100`;
+  if (lastPostId && !forceAll) {
     url += `&before=t3_${lastPostId}`;
   }
 
   const resp = await fetch(url, {
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "User-Agent": redditUserAgent,
-    },
+    headers: { "User-Agent": redditUserAgent },
   });
 
   if (!resp.ok) {
@@ -207,24 +151,22 @@ async function collectSubreddit(subredditName: string, lastPostId: string | null
   }
 
   const json: RedditResponse = await resp.json();
-  const posts = json.data.children.map((c) => c.data);
+  const posts = json.data?.children?.map((c) => c.data) ?? [];
 
   if (posts.length === 0) return { newPosts: 0, lastId: lastPostId };
 
   const newLastId = posts[0].id;
   let newPostsCount = 0;
-  const highIntentPosts: Array<{ post: RedditPost; matchResult: { matched: string[]; categories: string[]; score: string } }> = [];
+  const highIntentPosts: Array<{ post: RedditPost; matchResult: ReturnType<typeof matchKeywords> }> = [];
 
   for (const post of posts) {
     const text = `${post.title} ${post.selftext}`;
     const matchResult = matchKeywords(text, keywords);
-
     if (matchResult.score === "noise") continue;
 
     const sourceUrl = `https://reddit.com${post.permalink}`;
     const postCreatedAt = new Date(post.created_utc * 1000).toISOString();
 
-    // Upsert (dedup by source_url)
     const { error } = await supabase.from("leads").upsert({
       source: "reddit",
       source_url: sourceUrl,
@@ -244,29 +186,19 @@ async function collectSubreddit(subredditName: string, lastPostId: string | null
 
     if (!error) {
       newPostsCount++;
-      if (matchResult.score === "high") {
-        highIntentPosts.push({ post, matchResult });
-      }
+      if (matchResult.score === "high") highIntentPosts.push({ post, matchResult });
     }
   }
 
-  // Send Telegram notifications for high-intent leads
   for (const { post, matchResult } of highIntentPosts) {
-    try {
-      await sendTelegramNotification(post, matchResult);
-    } catch (e) {
-      console.error("Telegram notification failed:", e);
-    }
+    try { await sendTelegramNotification(post, matchResult); } catch (_) { /* ignore */ }
   }
 
   // Update keyword match counts
-  const allMatchedKeywords = posts
-    .flatMap((p) => matchKeywords(`${p.title} ${p.selftext}`, keywords).matched);
-  if (allMatchedKeywords.length > 0) {
+  const allMatched = posts.flatMap((p) => matchKeywords(`${p.title} ${p.selftext}`, keywords).matched);
+  if (allMatched.length > 0) {
     const counts: Record<string, number> = {};
-    for (const kw of allMatchedKeywords) {
-      counts[kw] = (counts[kw] || 0) + 1;
-    }
+    for (const kw of allMatched) counts[kw] = (counts[kw] || 0) + 1;
     for (const [keyword, count] of Object.entries(counts)) {
       await supabase.rpc("increment_keyword_match_count", { p_keyword: keyword, p_count: count }).maybeSingle();
     }
@@ -281,25 +213,37 @@ serve(async (req) => {
   }
 
   try {
-    // Ensure Reddit credentials are available (env vars or app_settings fallback)
-    await ensureCredentials();
+    const url = new URL(req.url);
 
-    // Check Reddit credentials
-    if (!redditClientId || !redditClientSecret) {
-      return new Response(JSON.stringify({ error: "Reddit API credentials not configured" }), {
-        status: 500,
+    // Single subreddit targeted scan (e.g. ?subreddit=engineering)
+    const targetSubreddit = url.searchParams.get("subreddit");
+    if (targetSubreddit) {
+      const keywords = await loadKeywords();
+      const { data: sub } = await supabase
+        .from("monitored_subreddits")
+        .select("subreddit, last_post_id")
+        .eq("subreddit", targetSubreddit)
+        .single();
+
+      const result = await collectSubreddit(sub?.subreddit ?? targetSubreddit, null, keywords, true);
+
+      if (sub) {
+        await supabase.from("monitored_subreddits")
+          .update({ last_post_id: result.lastId, last_scanned_at: new Date().toISOString() })
+          .eq("subreddit", targetSubreddit);
+      }
+
+      return new Response(JSON.stringify({ success: true, subredditsScanned: 1, totalNewLeads: result.newPosts, results: { [targetSubreddit]: result } }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Parse optional tier filter from request
-    const url = new URL(req.url);
+    // Batch scan: optional tier filter
     const tierFilter = url.searchParams.get("tier");
     const maxTier = tierFilter ? parseInt(tierFilter) : 5;
-    // Cap to avoid edge function timeout: each subreddit takes ~1.1s, limit to 50 max
-    const maxSubreddits = parseInt(url.searchParams.get("max") || "50");
+    // Cap at 40 to safely stay within edge function timeout (40 × ~2s = ~80s)
+    const maxSubreddits = parseInt(url.searchParams.get("max") || "40");
 
-    // Load active subreddits
     const { data: allSubreddits, error: subError } = await supabase
       .from("monitored_subreddits")
       .select("subreddit, tier, last_post_id, scan_interval_minutes, last_scanned_at")
@@ -312,7 +256,7 @@ serve(async (req) => {
       throw new Error(`Failed to load subreddits: ${subError?.message}`);
     }
 
-    // Only scan subreddits that are due (haven't been scanned within their interval)
+    // Only scan subreddits due for a refresh based on their scan_interval_minutes
     const now = Date.now();
     const subreddits = allSubreddits
       .filter((sub) => {
@@ -322,30 +266,22 @@ serve(async (req) => {
       })
       .slice(0, maxSubreddits);
 
-    // Load keywords once
     const keywords = await loadKeywords();
-
     const results: Record<string, { newPosts: number; lastId: string | null }> = {};
     let totalNew = 0;
 
-    // Process subreddits with rate limiting (max 60 req/min for Reddit OAuth)
     for (const sub of subreddits) {
       try {
         const result = await collectSubreddit(sub.subreddit, sub.last_post_id, keywords);
         results[sub.subreddit] = result;
         totalNew += result.newPosts;
 
-        // Update last_post_id and last_scanned_at
-        await supabase
-          .from("monitored_subreddits")
-          .update({
-            last_post_id: result.lastId,
-            last_scanned_at: new Date().toISOString(),
-          })
+        await supabase.from("monitored_subreddits")
+          .update({ last_post_id: result.lastId, last_scanned_at: new Date().toISOString() })
           .eq("subreddit", sub.subreddit);
 
-        // Delay to stay within Reddit's 60 req/min OAuth rate limit
-        await new Promise((r) => setTimeout(r, 1100));
+        // ~2s delay for unauthenticated Reddit public API rate limit
+        await new Promise((r) => setTimeout(r, 2000));
       } catch (e) {
         console.error(`Error collecting r/${sub.subreddit}:`, e);
         results[sub.subreddit] = { newPosts: 0, lastId: sub.last_post_id };
