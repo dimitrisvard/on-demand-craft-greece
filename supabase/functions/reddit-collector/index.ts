@@ -189,7 +189,7 @@ async function sendTelegramNotification(post: RedditPost, matchResult: { matched
 async function collectSubreddit(subredditName: string, lastPostId: string | null, keywords: Keyword[]): Promise<{ newPosts: number; lastId: string | null }> {
   const token = await getRedditToken();
 
-  let url = `https://oauth.reddit.com/r/${subredditName}/new.json?limit=25`;
+  let url = `https://oauth.reddit.com/r/${subredditName}/new.json?limit=100`;
   if (lastPostId) {
     url += `&before=t3_${lastPostId}`;
   }
@@ -296,20 +296,31 @@ serve(async (req) => {
     const url = new URL(req.url);
     const tierFilter = url.searchParams.get("tier");
     const maxTier = tierFilter ? parseInt(tierFilter) : 5;
+    // Cap to avoid edge function timeout: each subreddit takes ~1.1s, limit to 50 max
+    const maxSubreddits = parseInt(url.searchParams.get("max") || "50");
 
     // Load active subreddits
-    let query = supabase
+    const { data: allSubreddits, error: subError } = await supabase
       .from("monitored_subreddits")
-      .select("subreddit, tier, last_post_id, scan_interval_minutes")
+      .select("subreddit, tier, last_post_id, scan_interval_minutes, last_scanned_at")
       .eq("is_active", true)
       .eq("source", "reddit")
-      .lte("tier", maxTier);
+      .lte("tier", maxTier)
+      .order("tier", { ascending: true });
 
-    const { data: subreddits, error: subError } = await query;
-
-    if (subError || !subreddits) {
+    if (subError || !allSubreddits) {
       throw new Error(`Failed to load subreddits: ${subError?.message}`);
     }
+
+    // Only scan subreddits that are due (haven't been scanned within their interval)
+    const now = Date.now();
+    const subreddits = allSubreddits
+      .filter((sub) => {
+        if (!sub.last_scanned_at) return true;
+        const intervalMs = (sub.scan_interval_minutes || 30) * 60 * 1000;
+        return now - new Date(sub.last_scanned_at).getTime() >= intervalMs;
+      })
+      .slice(0, maxSubreddits);
 
     // Load keywords once
     const keywords = await loadKeywords();
@@ -317,7 +328,7 @@ serve(async (req) => {
     const results: Record<string, { newPosts: number; lastId: string | null }> = {};
     let totalNew = 0;
 
-    // Process subreddits with rate limiting (max 60 req/min)
+    // Process subreddits with rate limiting (max 60 req/min for Reddit OAuth)
     for (const sub of subreddits) {
       try {
         const result = await collectSubreddit(sub.subreddit, sub.last_post_id, keywords);
@@ -333,7 +344,7 @@ serve(async (req) => {
           })
           .eq("subreddit", sub.subreddit);
 
-        // Small delay to avoid rate limits
+        // Delay to stay within Reddit's 60 req/min OAuth rate limit
         await new Promise((r) => setTimeout(r, 1100));
       } catch (e) {
         console.error(`Error collecting r/${sub.subreddit}:`, e);
@@ -345,6 +356,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         subredditsScanned: subreddits.length,
+        subredditsSkipped: allSubreddits.length - subreddits.length,
         totalNewLeads: totalNew,
         results,
       }),
