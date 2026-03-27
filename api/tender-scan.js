@@ -65,9 +65,9 @@ const CONNECTORS = {
   LU: () => fetchCountry('LU'),
   MT: () => fetchCountry('MT'),
   CH: () => fetchCountry('CH'),
-  EU: () => fetchCountry('EU'),
+  // EU connector uses TED directly (no country filter — broad EU-wide search)
+  EU: () => fetchTed('EU'),
   GR: () => fetchCountry('GR'),
-  CH: () => fetchCountry('CH'),
 };
 
 // ─── Main handler ────────────────────────────────────
@@ -111,8 +111,8 @@ export default async function handler(req, res) {
     console.log(`[tender-scan] ${code}: found ${rawTenders.length} tenders, ${errors.length} errors`);
 
     // TED fallback: run if national portal found fewer than 5 tenders (not just on error).
-    // CH is not in TED (not EU member), so skip TED for CH.
-    if (rawTenders.length < 5 && code !== 'CH') {
+    // CH is not in TED (not EU member), EU already calls fetchTed directly — skip both.
+    if (rawTenders.length < 5 && code !== 'CH' && code !== 'EU') {
       console.log(`[tender-scan] ${code}: primary connector failed, trying TED fallback...`);
       try {
         const tedResult = await fetchTed(code);
