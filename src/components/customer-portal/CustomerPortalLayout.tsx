@@ -1,6 +1,7 @@
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, Navigate } from 'react-router-dom';
 import { Home, FolderOpen, Database, Wallet, Plus, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CustomerPortalLayoutProps {
   children: React.ReactNode;
@@ -17,6 +18,21 @@ const portalNavItems = [
 
 const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLayoutProps) => {
   const location = useLocation();
+  const { user, loading } = useAuth();
+
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-primary"></div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

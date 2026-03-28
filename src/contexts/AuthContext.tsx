@@ -20,9 +20,32 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   updateProfile: (data: { firstName?: string; lastName?: string; }) => Promise<void>;
   hasRole: (role: UserRole | UserRole[]) => boolean;
+  isAdmin: () => boolean;
+  isPartner: () => boolean;
+  isCustomer: () => boolean;
+  getDefaultRoute: () => string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Determine the correct landing page based on user role
+function getRouteForRole(role?: UserRole): string {
+  switch (role) {
+    case 'admin':
+    case 'sales_rep':
+    case 'production_manager':
+    case 'accountant':
+      return '/dashboard';
+    case 'partner_seller':
+    case 'supplier':
+      return '/partner/jobs';
+    case 'customer':
+      return '/customer/dashboard';
+    default:
+      // Unknown or no role — default to customer portal
+      return '/customer/dashboard';
+  }
+}
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserWithRole | null>(null);
@@ -31,39 +54,33 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const navigate = useNavigate();
 
   useEffect(() => {
-    console.log("Setting up auth state listener");
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        console.log("Auth state changed:", event, session?.user?.email);
         setSession(session);
-        
+
         if (session?.user) {
-          // Fetch user role when user is logged in
           fetchUserRole(session.user.id).then(role => {
             setUser({ ...session.user, role });
           });
         } else {
           setUser(null);
         }
-        
+
         setLoading(false);
       }
     );
 
-    console.log("Checking for existing session");
     supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log("Existing session:", session?.user?.email);
       setSession(session);
-      
+
       if (session?.user) {
-        // Fetch user role for existing session
         fetchUserRole(session.user.id).then(role => {
           setUser({ ...session.user, role });
         });
       } else {
         setUser(null);
       }
-      
+
       setLoading(false);
     });
 
@@ -78,7 +95,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         .eq('user_id', userId)
         .maybeSingle();
       if (error) throw error;
-      return data?.role;
+      return data?.role as UserRole | undefined;
     } catch (error) {
       console.error("Error fetching user role:", error);
       return undefined;
@@ -86,26 +103,22 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   };
 
   const signIn = async (email: string, password: string) => {
-    console.log("Attempting login with:", email);
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
-    
+
     if (error) {
-      console.error("Login error:", error.message);
       throw error;
     }
-    
-    console.log("Login successful:", data.user?.email);
 
-    // Fetch user role after successful login
+    // Fetch user role and navigate to the correct portal
     if (data.user) {
       const role = await fetchUserRole(data.user.id);
       setUser({ ...data.user, role });
+      const targetRoute = getRouteForRole(role);
+      navigate(targetRoute);
     }
-
-    navigate('/dashboard');
   };
 
   const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
@@ -119,13 +132,12 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         }
       }
     });
-    
+
     if (error) {
       throw error;
     }
 
-    // By default, new users will be assigned the 'viewer' role
-    // This would be handled by a database trigger in a real implementation
+    // The database trigger (handle_new_user_role) auto-assigns 'customer' role
     toast({
       title: "Account created",
       description: "Please check your email to verify your account.",
@@ -133,13 +145,10 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   };
 
   const signOut = async () => {
-    console.log("Signing out");
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error("Logout error:", error.message);
       throw error;
     }
-    console.log("Sign out successful");
     navigate('/login');
   };
 
@@ -188,17 +197,37 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     return user.role === roleRequirement;
   };
 
+  const isAdmin = (): boolean => {
+    return hasRole(['admin', 'sales_rep', 'production_manager', 'accountant']);
+  };
+
+  const isPartner = (): boolean => {
+    return hasRole(['partner_seller', 'supplier']);
+  };
+
+  const isCustomer = (): boolean => {
+    return hasRole('customer') || (!user?.role && !!user);
+  };
+
+  const getDefaultRoute = (): string => {
+    return getRouteForRole(user?.role);
+  };
+
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      session, 
-      loading, 
-      signIn, 
+    <AuthContext.Provider value={{
+      user,
+      session,
+      loading,
+      signIn,
       signUp,
       signOut,
       resetPassword,
       updateProfile,
-      hasRole
+      hasRole,
+      isAdmin,
+      isPartner,
+      isCustomer,
+      getDefaultRoute,
     }}>
       {children}
     </AuthContext.Provider>

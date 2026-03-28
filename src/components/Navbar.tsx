@@ -19,7 +19,7 @@ import {
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin, isPartner, isCustomer } = useAuth();
   const { t } = useTranslation();
   const { getLocalizedPath, getPathWithoutLanguage } = useLanguage();
 
@@ -114,31 +114,59 @@ const Navbar = () => {
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
                     <ul className="w-[220px] p-2 bg-white">
-                      <li>
-                        <Link to="/customer/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                          <span className="flex items-center gap-2"><FolderOpen className="h-4 w-4" /> My Dashboard</span>
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/customer/projects" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                          <span className="flex items-center gap-2"><Database className="h-4 w-4" /> My Projects</span>
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/customer/parts-library" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                          <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> Parts Library</span>
-                        </Link>
-                      </li>
-                      <li>
-                        <Link to="/customer/finance" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                          <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> My Finance</span>
-                        </Link>
-                      </li>
-                      <li className="border-t mt-1 pt-1">
-                        <Link to="/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                          <span className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Admin Dashboard</span>
-                        </Link>
-                      </li>
+                      {/* Customer links - shown to customers and admins */}
+                      {(isCustomer() || isAdmin()) && (
+                        <>
+                          <li>
+                            <Link to="/customer/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><FolderOpen className="h-4 w-4" /> My Dashboard</span>
+                            </Link>
+                          </li>
+                          <li>
+                            <Link to="/customer/projects" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><Database className="h-4 w-4" /> My Projects</span>
+                            </Link>
+                          </li>
+                          <li>
+                            <Link to="/customer/parts-library" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><Database className="h-4 w-4" /> Parts Library</span>
+                            </Link>
+                          </li>
+                          <li>
+                            <Link to="/customer/finance" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> My Finance</span>
+                            </Link>
+                          </li>
+                        </>
+                      )}
+                      {/* Partner links - shown to partners */}
+                      {isPartner() && (
+                        <>
+                          <li>
+                            <Link to="/partner/jobs" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Job Board</span>
+                            </Link>
+                          </li>
+                          <li>
+                            <Link to="/orders" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><FolderOpen className="h-4 w-4" /> My Orders</span>
+                            </Link>
+                          </li>
+                          <li>
+                            <Link to="/partner/finance" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                              <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> Finance</span>
+                            </Link>
+                          </li>
+                        </>
+                      )}
+                      {/* Admin dashboard - shown to admins only */}
+                      {isAdmin() && (
+                        <li className="border-t mt-1 pt-1">
+                          <Link to="/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                            <span className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Admin Dashboard</span>
+                          </Link>
+                        </li>
+                      )}
                       <li className="border-t mt-1 pt-1">
                         <button onClick={signOut} className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-red-600 flex items-center gap-2">
                           <LogOut className="h-4 w-4" /> Logout
@@ -188,11 +216,24 @@ const Navbar = () => {
             <>
               <div className="border-t pt-2 mt-2">
                 <div className="font-medium text-brand-dark py-2">My Account</div>
-                <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
-                <MobileNavLink to="/customer/projects" label="My Projects" />
-                <MobileNavLink to="/customer/parts-library" label="Parts Library" />
-                <MobileNavLink to="/customer/finance" label="My Finance" />
-                <MobileNavLink to="/dashboard" label="Admin Dashboard" />
+                {(isCustomer() || isAdmin()) && (
+                  <>
+                    <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
+                    <MobileNavLink to="/customer/projects" label="My Projects" />
+                    <MobileNavLink to="/customer/parts-library" label="Parts Library" />
+                    <MobileNavLink to="/customer/finance" label="My Finance" />
+                  </>
+                )}
+                {isPartner() && (
+                  <>
+                    <MobileNavLink to="/partner/jobs" label="Job Board" />
+                    <MobileNavLink to="/orders" label="My Orders" />
+                    <MobileNavLink to="/partner/finance" label="Finance" />
+                  </>
+                )}
+                {isAdmin() && (
+                  <MobileNavLink to="/dashboard" label="Admin Dashboard" />
+                )}
               </div>
               <Button
                 variant="ghost"
