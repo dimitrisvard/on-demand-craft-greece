@@ -527,9 +527,63 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
   );
 }
 
-// ── STEP loader + viewer ───────────────────────────────────────────────────────
+// ── STEP geometry component (Canvas-safe — only renders THREE objects) ─────────
 
-function StepModelInner({ url, wireframe, clippingPlanes }: { url: string; wireframe?: boolean; clippingPlanes?: Plane[] }) {
+function StepMeshes({ geometries, wireframe, clippingPlanes }: {
+  geometries: BufferGeometry[];
+  wireframe: boolean;
+  clippingPlanes?: Plane[];
+}) {
+  return (
+    <>
+      {geometries.map((geom, i) => (
+        <CADMesh key={i} geometry={geom} wireframe={wireframe} clippingPlanes={clippingPlanes} />
+      ))}
+    </>
+  );
+}
+
+// ── Shared status overlay (rendered OUTSIDE Canvas) ────────────────────────────
+
+const statusContainerStyle: React.CSSProperties = {
+  height: 560,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: '#e4e7eb',
+  borderRadius: 8,
+};
+
+function StatusOverlay({ type, message, detail }: { type: 'loading' | 'error' | 'empty'; message: string; detail?: string }) {
+  return (
+    <div style={statusContainerStyle}>
+      <div style={{ textAlign: 'center', maxWidth: 320 }}>
+        {type === 'loading' && (
+          <div style={{
+            width: 40, height: 40,
+            border: '3px solid #d1d5db', borderTopColor: '#6b7280',
+            borderRadius: '50%',
+            margin: '0 auto 16px',
+            animation: 'viewer-spin 0.8s linear infinite',
+          }} />
+        )}
+        <div style={{
+          fontSize: 15,
+          fontWeight: type === 'error' ? 600 : 500,
+          color: type === 'error' ? '#dc2626' : '#374151',
+        }}>
+          {message}
+        </div>
+        {detail && <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>{detail}</div>}
+        <style>{`@keyframes viewer-spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    </div>
+  );
+}
+
+// ── STEP viewer: loading/error handled as HTML overlay, geometry in Canvas ─────
+
+function useStepGeometries(url: string) {
   const [meshes, setMeshes] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -545,7 +599,7 @@ function StepModelInner({ url, wireframe, clippingPlanes }: { url: string; wiref
         if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
         const buffer = await response.arrayBuffer();
 
-        // Pass tessellation params for higher quality meshing
+        // Pass tessellation params for higher quality meshing if supported
         const params = new (occt.ReadStepFileParams || Object.constructor)();
         if (params.setLinearDeflection) params.setLinearDeflection(0.1);
         if (params.setAngularDeflection) params.setAngularDeflection(0.5);
@@ -572,56 +626,18 @@ function StepModelInner({ url, wireframe, clippingPlanes }: { url: string; wiref
       geom.setAttribute('position', new Float32BufferAttribute(mesh.attributes.position.array, 3));
       if (mesh.attributes.normal) {
         geom.setAttribute('normal', new Float32BufferAttribute(mesh.attributes.normal.array, 3));
-      } else {
-        geom.computeVertexNormals();
       }
       if (mesh.index) {
         geom.setIndex(Array.from(mesh.index.array));
       }
-      // Always recompute for smooth shading even if normals exist
+      // Always recompute for smooth shading
       geom.computeVertexNormals();
       return geom;
     });
   }, [meshes]);
 
-  if (loading) return (
-    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ width: 40, height: 40, border: '3px solid #d1d5db', borderTopColor: '#6b7280', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
-        <div style={{ fontSize: 15, fontWeight: 500, color: '#374151' }}>Loading STEP file...</div>
-        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Parsing geometry</div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    </div>
-  );
-
-  if (error) return (
-    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
-      <div style={{ textAlign: 'center', maxWidth: 320 }}>
-        <div style={{ color: '#dc2626', fontWeight: 600, fontSize: 15 }}>Error loading 3D model</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>{error}</div>
-      </div>
-    </div>
-  );
-
-  if (!geometries.length) return (
-    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 15, color: '#374151' }}>No geometry found in STEP file.</div>
-      </div>
-    </div>
-  );
-
-  return (
-    <>
-      {geometries.map((geom, i) => (
-        <CADMesh key={i} geometry={geom} wireframe={wireframe || false} clippingPlanes={clippingPlanes} />
-      ))}
-    </>
-  );
+  return { geometries, loading, error };
 }
-
-// ── Wrapper that handles STEP's async loading outside Canvas ───────────────────
 
 function StepViewer({ url, state, onStateChange, onResetView }: {
   url: string;
@@ -629,9 +645,17 @@ function StepViewer({ url, state, onStateChange, onResetView }: {
   onStateChange: (s: Partial<ViewerState>) => void;
   onResetView: () => void;
 }) {
+  const { geometries, loading, error } = useStepGeometries(url);
+
+  // Loading/error/empty states rendered as plain HTML (outside Canvas)
+  if (loading) return <StatusOverlay type="loading" message="Loading STEP file..." detail="Parsing geometry" />;
+  if (error) return <StatusOverlay type="error" message="Error loading 3D model" detail={error} />;
+  if (!geometries.length) return <StatusOverlay type="empty" message="No geometry found in STEP file." />;
+
+  // Geometry ready — render inside Canvas via ViewerScene
   return (
     <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView}>
-      <StepModelInner url={url} />
+      <StepMeshes geometries={geometries} wireframe={state.wireframe} />
     </ViewerScene>
   );
 }
