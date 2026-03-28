@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
-import { useGLTF, Environment, ContactShadows, GizmoHelper, GizmoViewport, Grid } from '@react-three/drei';
+import { useGLTF, Environment, ContactShadows, GizmoHelper, GizmoViewcube, Grid } from '@react-three/drei';
 // @ts-expect-error: no types for TrackballControls
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
 import {
@@ -16,12 +16,17 @@ import {
   Color,
   ACESFilmicToneMapping,
   Group,
+  Plane,
+  DoubleSide,
+  FrontSide,
 } from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for STLLoader
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { useLoader } from '@react-three/fiber';
+
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ThreeDViewerModalProps {
   open: boolean;
@@ -31,122 +36,48 @@ interface ThreeDViewerModalProps {
   fileName: string | null;
 }
 
+interface ViewerState {
+  wireframe: boolean;
+  clipping: boolean;
+  projection: 'perspective' | 'orthographic';
+}
+
+// ── File type helpers ──────────────────────────────────────────────────────────
+
 const isSTL = (name: string) => name.toLowerCase().endsWith('.stl');
 const isOBJ = (name: string) => name.toLowerCase().endsWith('.obj');
 const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
 
-// HOOPS-style material — darker steel/gunmetal with clearcoat for that polished CAD look
-function createCADMaterial() {
+// ── Materials ──────────────────────────────────────────────────────────────────
+
+// Machined aluminum — Xometry-style blue-grey with subtle metallic reflectivity
+function createCADMaterial(wireframe = false) {
   return new MeshPhysicalMaterial({
-    color: new Color('#5A6E7F'),
-    metalness: 0.25,
-    roughness: 0.35,
-    clearcoat: 0.3,
-    clearcoatRoughness: 0.2,
+    color: new Color('#a8b8c8'),
+    metalness: 0.35,
+    roughness: 0.55,
+    clearcoat: 0.15,
+    clearcoatRoughness: 0.3,
     envMapIntensity: 0.8,
-    side: 2, // DoubleSide
+    side: DoubleSide,
+    wireframe,
+    flatShading: false,
   });
 }
 
-// Sharper edge lines — HOOPS uses prominent dark edges
 function createEdgeMaterial() {
   return new LineBasicMaterial({
-    color: new Color('#1A2A3A'),
-    linewidth: 1,
+    color: new Color('#4a5568'),
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.18,
+    depthTest: true,
   });
 }
 
-// Register TrackballControls for R3F
-extend({ TrackballControls });
+// ── OCCT WASM loader ──────────────────────────────────────────────────────────
 
-// Auto-fit camera + bottom-align model on grid plane
-function AutoFrame({ children, onBoundsReady }: { children: React.ReactNode; onBoundsReady?: (size: number) => void }) {
-  const groupRef = useRef<Group>(null);
-  const { camera } = useThree();
-  const hasFramed = useRef(false);
-
-  useFrame(() => {
-    if (hasFramed.current || !groupRef.current) return;
-    const box = new Box3().setFromObject(groupRef.current);
-    if (box.isEmpty()) return;
-
-    hasFramed.current = true;
-    const size = box.getSize(new Vector3());
-    const center = box.getCenter(new Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-
-    // Shift model so its bottom sits on y=0 (the grid plane)
-    groupRef.current.position.y -= box.min.y;
-    // Center horizontally
-    groupRef.current.position.x -= center.x;
-    groupRef.current.position.z -= center.z;
-
-    // Position camera — elevated isometric view
-    const distance = maxDim * 2.0;
-    const modelCenterY = size.y / 2;
-    camera.position.set(
-      distance * 0.6,
-      modelCenterY + distance * 0.45,
-      distance * 0.6
-    );
-    camera.lookAt(0, modelCenterY, 0);
-    camera.updateProjectionMatrix();
-
-    onBoundsReady?.(maxDim);
-  });
-
-  return <group ref={groupRef}>{children}</group>;
-}
-
-// R3F-compatible TrackballControls — true unrestricted 360° rotation
-function FreeControls() {
-  const { camera, gl } = useThree();
-  const controlsRef = useRef<any>(null);
-
-  useEffect(() => {
-    const controls = new TrackballControls(camera, gl.domElement);
-    controls.rotateSpeed = 3.0;
-    controls.zoomSpeed = 1.5;
-    controls.panSpeed = 1.0;
-    controls.dynamicDampingFactor = 0.15;
-    controls.noPan = false;
-    controls.noZoom = false;
-    controls.noRotate = false;
-    controls.minDistance = 0.1;
-    controls.maxDistance = 10000;
-    controlsRef.current = controls;
-
-    return () => controls.dispose();
-  }, [camera, gl]);
-
-  useFrame(() => {
-    controlsRef.current?.update();
-  });
-
-  return null;
-}
-
-// Mesh with edge lines for crisp CAD look
-function CADMesh({ geometry }: { geometry: BufferGeometry }) {
-  const edges = useMemo(() => new EdgesGeometry(geometry, 12), [geometry]);
-
-  return (
-    <group>
-      <mesh geometry={geometry} castShadow receiveShadow>
-        <primitive object={createCADMaterial()} attach="material" />
-      </mesh>
-      <lineSegments geometry={edges}>
-        <primitive object={createEdgeMaterial()} attach="material" />
-      </lineSegments>
-    </group>
-  );
-}
-
-// Helper to load occt-import-js WASM only once
 let occtPromise: Promise<any> | null = null;
 function loadOcct() {
   if (!occtPromise) {
@@ -155,35 +86,21 @@ function loadOcct() {
         resolve((window as any).occtimportjs());
         return;
       }
-
       const existingScript = document.querySelector('script[src="/occt-import-js.js"]');
       if (existingScript) {
-        const checkInterval = setInterval(() => {
-          if ((window as any).occtimportjs) {
-            clearInterval(checkInterval);
-            resolve((window as any).occtimportjs());
-          }
+        const check = setInterval(() => {
+          if ((window as any).occtimportjs) { clearInterval(check); resolve((window as any).occtimportjs()); }
         }, 50);
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          reject(new Error('occt-import-js failed to initialize after timeout'));
-        }, 5000);
+        setTimeout(() => { clearInterval(check); reject(new Error('occt-import-js timeout')); }, 10000);
         return;
       }
-
       const script = document.createElement('script');
       script.src = '/occt-import-js.js';
       script.onload = () => {
-        const checkInterval = setInterval(() => {
-          if ((window as any).occtimportjs) {
-            clearInterval(checkInterval);
-            resolve((window as any).occtimportjs());
-          }
+        const check = setInterval(() => {
+          if ((window as any).occtimportjs) { clearInterval(check); resolve((window as any).occtimportjs()); }
         }, 50);
-        setTimeout(() => {
-          clearInterval(checkInterval);
-          reject(new Error('occt-import-js failed to initialize after timeout'));
-        }, 5000);
+        setTimeout(() => { clearInterval(check); reject(new Error('occt-import-js timeout')); }, 10000);
       };
       script.onerror = () => reject(new Error('Failed to load occt-import-js.js'));
       document.body.appendChild(script);
@@ -192,156 +109,427 @@ function loadOcct() {
   return occtPromise;
 }
 
-// Adaptive grid that scales to model size
+// ── Register TrackballControls ─────────────────────────────────────────────────
+
+extend({ TrackballControls });
+
+// ── Scene internals ────────────────────────────────────────────────────────────
+
+// Unrestricted 360° rotation with no gimbal lock
+function FreeControls({ targetRef }: { targetRef: React.MutableRefObject<Vector3> }) {
+  const { camera, gl } = useThree();
+  const controlsRef = useRef<any>(null);
+
+  useEffect(() => {
+    const controls = new TrackballControls(camera, gl.domElement);
+    controls.rotateSpeed = 2.5;
+    controls.zoomSpeed = 1.2;
+    controls.panSpeed = 0.8;
+    controls.dynamicDampingFactor = 0.12;
+    controls.noPan = false;
+    controls.noZoom = false;
+    controls.noRotate = false;
+    controls.minDistance = 0.01;
+    controls.maxDistance = 50000;
+    // Set target to model center
+    controls.target.copy(targetRef.current);
+    controlsRef.current = controls;
+    return () => controls.dispose();
+  }, [camera, gl, targetRef]);
+
+  useFrame(() => { controlsRef.current?.update(); });
+
+  return null;
+}
+
+// Auto-fit camera to model, bottom-align on grid, report bounds
+function AutoFrame({ children, onReady }: {
+  children: React.ReactNode;
+  onReady?: (info: { size: number; center: Vector3; dims: Vector3 }) => void;
+}) {
+  const groupRef = useRef<Group>(null);
+  const { camera } = useThree();
+  const done = useRef(false);
+
+  useFrame(() => {
+    if (done.current || !groupRef.current) return;
+    const box = new Box3().setFromObject(groupRef.current);
+    if (box.isEmpty()) return;
+    done.current = true;
+
+    const size = box.getSize(new Vector3());
+    const center = box.getCenter(new Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    // Bottom-align on y=0, center horizontally
+    groupRef.current.position.set(-center.x, -box.min.y, -center.z);
+
+    // Isometric-ish default camera — 45° azimuth, 30° elevation
+    const dist = maxDim * 1.8;
+    const camY = size.y * 0.5 + dist * 0.4;
+    camera.position.set(dist * 0.65, camY, dist * 0.65);
+    camera.lookAt(0, size.y * 0.35, 0);
+    camera.updateProjectionMatrix();
+
+    onReady?.({ size: maxDim, center: new Vector3(0, size.y * 0.35, 0), dims: size });
+  });
+
+  return <group ref={groupRef}>{children}</group>;
+}
+
+// CAD mesh with optional edge lines and clipping
+function CADMesh({ geometry, wireframe, clippingPlanes }: {
+  geometry: BufferGeometry;
+  wireframe: boolean;
+  clippingPlanes?: Plane[];
+}) {
+  const edges = useMemo(() => new EdgesGeometry(geometry, 15), [geometry]);
+
+  const material = useMemo(() => {
+    const mat = createCADMaterial(wireframe);
+    if (clippingPlanes?.length) mat.clippingPlanes = clippingPlanes;
+    return mat;
+  }, [wireframe, clippingPlanes]);
+
+  const edgeMat = useMemo(() => {
+    const mat = createEdgeMaterial();
+    if (clippingPlanes?.length) mat.clippingPlanes = clippingPlanes;
+    return mat;
+  }, [clippingPlanes]);
+
+  return (
+    <group>
+      <mesh geometry={geometry} castShadow receiveShadow>
+        <primitive object={material} attach="material" />
+      </mesh>
+      {!wireframe && (
+        <lineSegments geometry={edges}>
+          <primitive object={edgeMat} attach="material" />
+        </lineSegments>
+      )}
+    </group>
+  );
+}
+
+function applyCADMaterialToObj(obj: any, wireframe: boolean, clippingPlanes?: Plane[]) {
+  obj.traverse((child: any) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      const mat = createCADMaterial(wireframe);
+      if (clippingPlanes?.length) mat.clippingPlanes = clippingPlanes;
+      child.material = mat;
+      if (!wireframe) {
+        const edgesGeo = new EdgesGeometry(child.geometry, 15);
+        const edgeMat = createEdgeMaterial();
+        if (clippingPlanes?.length) edgeMat.clippingPlanes = clippingPlanes;
+        child.add(new LineSegments(edgesGeo, edgeMat));
+      }
+    }
+  });
+}
+
+// ── Model components ───────────────────────────────────────────────────────────
+
+function STLModel({ url, wireframe, clippingPlanes }: { url: string; wireframe: boolean; clippingPlanes?: Plane[] }) {
+  const geometry = useLoader(STLLoader, url);
+  geometry.computeVertexNormals();
+  return <CADMesh geometry={geometry} wireframe={wireframe} clippingPlanes={clippingPlanes} />;
+}
+
+function OBJModel({ url, wireframe, clippingPlanes }: { url: string; wireframe: boolean; clippingPlanes?: Plane[] }) {
+  const obj = useLoader(OBJLoader, url);
+  useMemo(() => applyCADMaterialToObj(obj, wireframe, clippingPlanes), [obj, wireframe, clippingPlanes]);
+  return <primitive object={obj} />;
+}
+
+function GLTFModel({ url, wireframe, clippingPlanes }: { url: string; wireframe: boolean; clippingPlanes?: Plane[] }) {
+  const { scene } = useGLTF(url);
+  useMemo(() => applyCADMaterialToObj(scene, wireframe, clippingPlanes), [scene, wireframe, clippingPlanes]);
+  return <primitive object={scene} />;
+}
+
+// ── Toolbar ────────────────────────────────────────────────────────────────────
+
+const toolbarStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: 10,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  background: 'rgba(30, 36, 44, 0.82)',
+  backdropFilter: 'blur(8px)',
+  borderRadius: 8,
+  padding: '6px 5px',
+  zIndex: 20,
+  boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
+};
+
+const btnStyle: React.CSSProperties = {
+  width: 34,
+  height: 34,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 6,
+  color: '#d1d5db',
+  cursor: 'pointer',
+  fontSize: 16,
+  transition: 'background 0.15s, color 0.15s',
+};
+
+const btnActiveStyle: React.CSSProperties = {
+  ...btnStyle,
+  background: 'rgba(96, 165, 250, 0.25)',
+  color: '#60a5fa',
+};
+
+function ViewerToolbar({
+  state,
+  onToggleWireframe,
+  onToggleClipping,
+  onToggleProjection,
+  onResetView,
+  onFitToScreen,
+}: {
+  state: ViewerState;
+  onToggleWireframe: () => void;
+  onToggleClipping: () => void;
+  onToggleProjection: () => void;
+  onResetView: () => void;
+  onFitToScreen: () => void;
+}) {
+  return (
+    <div style={toolbarStyle}>
+      <button
+        style={btnStyle}
+        onClick={onResetView}
+        title="Reset View"
+        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+      </button>
+      <button
+        style={btnStyle}
+        onClick={onFitToScreen}
+        title="Fit to Screen"
+        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+      </button>
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '2px 4px' }} />
+      <button
+        style={state.wireframe ? btnActiveStyle : btnStyle}
+        onClick={onToggleWireframe}
+        title="Toggle Wireframe"
+        onMouseEnter={e => { if (!state.wireframe) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { if (!state.wireframe) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
+      </button>
+      <button
+        style={state.clipping ? btnActiveStyle : btnStyle}
+        onClick={onToggleClipping}
+        title="Cross Section"
+        onMouseEnter={e => { if (!state.clipping) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { if (!state.clipping) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.12 8.12 17 17"/><path d="M16 2l6 6"/><path d="M2 16l6 6"/></svg>
+      </button>
+      <button
+        style={state.projection === 'orthographic' ? btnActiveStyle : btnStyle}
+        onClick={onToggleProjection}
+        title={state.projection === 'perspective' ? 'Orthographic View' : 'Perspective View'}
+        onMouseEnter={e => { if (state.projection === 'perspective') e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { if (state.projection === 'perspective') e.currentTarget.style.background = 'transparent'; }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>
+      </button>
+    </div>
+  );
+}
+
+// ── Clipping plane helper ──────────────────────────────────────────────────────
+
+function ClipPlaneHelper({ plane, size }: { plane: Plane; size: number }) {
+  return (
+    <mesh position={[0, plane.constant * -plane.normal.y, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <planeGeometry args={[size * 2, size * 2]} />
+      <meshBasicMaterial color="#ef4444" transparent opacity={0.06} side={DoubleSide} depthWrite={false} />
+    </mesh>
+  );
+}
+
+// ── Enable GL clipping ─────────────────────────────────────────────────────────
+
+function EnableClipping({ enabled }: { enabled: boolean }) {
+  const { gl } = useThree();
+  useEffect(() => { gl.localClippingEnabled = enabled; }, [gl, enabled]);
+  return null;
+}
+
+// ── Adaptive ground grid ───────────────────────────────────────────────────────
+
 function AdaptiveGrid({ modelSize }: { modelSize: number }) {
   const cellSize = modelSize > 0 ? Math.pow(10, Math.floor(Math.log10(modelSize)) - 1) : 1;
   const sectionSize = cellSize * 5;
-  const fadeDistance = modelSize * 3;
-
   return (
     <Grid
-      position={[0, 0, 0]}
+      position={[0, -0.001, 0]}
       args={[200, 200]}
       cellSize={cellSize}
-      cellThickness={0.6}
-      cellColor="#b8bcc0"
+      cellThickness={0.5}
+      cellColor="#c8ccd0"
       sectionSize={sectionSize}
-      sectionThickness={1.2}
-      sectionColor="#909498"
-      fadeDistance={fadeDistance}
-      fadeStrength={1}
+      sectionThickness={1}
+      sectionColor="#a0a8b0"
+      fadeDistance={modelSize * 4}
+      fadeStrength={1.2}
       infiniteGrid
     />
   );
 }
 
-// HOOPS-style scene: studio lighting, ground grid, orientation gizmo, free rotation
-function ViewerScene({ children }: { children: React.ReactNode }) {
-  const [modelSize, setModelSize] = useState(10);
+// ── Main scene wrapper ─────────────────────────────────────────────────────────
+
+function ViewerScene({ children, state, onStateChange, onResetView }: {
+  children: React.ReactNode;
+  state: ViewerState;
+  onStateChange: (s: Partial<ViewerState>) => void;
+  onResetView: () => void;
+}) {
+  const [bounds, setBounds] = useState<{ size: number; center: Vector3; dims: Vector3 } | null>(null);
+  const targetRef = useRef(new Vector3(0, 0, 0));
+
+  const clippingPlanes = useMemo(() => {
+    if (!state.clipping || !bounds) return undefined;
+    return [new Plane(new Vector3(0, -1, 0), bounds.dims.y * 0.5)];
+  }, [state.clipping, bounds]);
+
+  const handleReady = (info: { size: number; center: Vector3; dims: Vector3 }) => {
+    setBounds(info);
+    targetRef.current.copy(info.center);
+  };
+
+  // Clone children with wireframe/clipping props
+  const enhancedChildren = React.Children.map(children, (child) => {
+    if (React.isValidElement(child)) {
+      return React.cloneElement(child as React.ReactElement<any>, {
+        wireframe: state.wireframe,
+        clippingPlanes,
+      });
+    }
+    return child;
+  });
 
   return (
-    <div style={{ height: 500, borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: '#dde0e4' }}>
+      {/* Toolbar overlay */}
+      <ViewerToolbar
+        state={state}
+        onToggleWireframe={() => onStateChange({ wireframe: !state.wireframe })}
+        onToggleClipping={() => onStateChange({ clipping: !state.clipping })}
+        onToggleProjection={() => onStateChange({ projection: state.projection === 'perspective' ? 'orthographic' : 'perspective' })}
+        onResetView={onResetView}
+        onFitToScreen={onResetView}
+      />
+
       <Canvas
         camera={{ position: [0, 0, 100], fov: 45, near: 0.001, far: 100000 }}
-        style={{ height: 500 }}
-        dpr={[1, 2]}
+        style={{ height: 560 }}
+        dpr={[1.5, 2]}
         shadows
         gl={{
           antialias: true,
           alpha: false,
           powerPreference: 'high-performance',
           toneMapping: ACESFilmicToneMapping,
-          toneMappingExposure: 1.0,
+          toneMappingExposure: 1.05,
           outputColorSpace: 'srgb',
-          pixelRatio: window.devicePixelRatio,
         }}
       >
-        {/* HOOPS-style background — light warm gray */}
-        <color attach="background" args={['#e8eaed']} />
+        <EnableClipping enabled={state.clipping} />
 
-        {/* Studio lighting setup matching HOOPS Communicator */}
-        <hemisphereLight
-          args={[new Color('#c4d4e0'), new Color('#a09890'), 0.4]}
-        />
-        <ambientLight intensity={0.25} />
-        {/* Key light — top-right, warm */}
+        {/* Gradient-style background — clean light grey */}
+        <color attach="background" args={['#e4e7eb']} />
+
+        {/* 3-point lighting + hemisphere fill */}
+        <hemisphereLight args={[new Color('#dce4ec'), new Color('#b0a898'), 0.35]} />
+        <ambientLight intensity={0.35} />
+        {/* Key light — upper-right-front, warm */}
         <directionalLight
-          position={[8, 12, 6]}
-          intensity={1.2}
+          position={[10, 15, 8]}
+          intensity={1.1}
           castShadow
           shadow-mapSize-width={2048}
           shadow-mapSize-height={2048}
           shadow-bias={-0.0001}
           shadow-camera-near={0.1}
-          shadow-camera-far={1000}
-          color={new Color('#fff8f0')}
+          shadow-camera-far={500}
+          color={new Color('#fff6ee')}
         />
-        {/* Fill light — left side, cool */}
-        <directionalLight
-          position={[-6, 4, -4]}
-          intensity={0.5}
-          color={new Color('#e0e8f0')}
-        />
-        {/* Rim/back light — behind and below */}
-        <directionalLight
-          position={[0, -3, -8]}
-          intensity={0.3}
-          color={new Color('#d0d8e0')}
-        />
-        {/* Bottom fill to reduce harsh shadows underneath */}
-        <directionalLight
-          position={[0, -8, 4]}
-          intensity={0.15}
-        />
+        {/* Fill light — left, cooler */}
+        <directionalLight position={[-8, 5, -3]} intensity={0.45} color={new Color('#e4ecf4')} />
+        {/* Rim light — behind */}
+        <directionalLight position={[-2, -4, -10]} intensity={0.25} color={new Color('#d8e0e8')} />
+        {/* Subtle bottom fill */}
+        <directionalLight position={[0, -10, 5]} intensity={0.12} />
 
-        {/* HDRI environment for realistic reflections */}
+        {/* Studio HDRI for reflections */}
         <Environment preset="studio" />
 
         <Suspense fallback={null}>
-          <AutoFrame onBoundsReady={setModelSize}>
-            {children}
+          <AutoFrame onReady={handleReady}>
+            {enhancedChildren}
           </AutoFrame>
         </Suspense>
 
-        {/* Ground grid — adapts to model scale */}
-        <AdaptiveGrid modelSize={modelSize} />
+        {/* Ground grid */}
+        {bounds && <AdaptiveGrid modelSize={bounds.size} />}
 
-        {/* Contact shadow for grounding */}
-        <ContactShadows
-          position={[0, 0, 0]}
-          opacity={0.35}
-          scale={modelSize * 4}
-          blur={2.5}
-          far={modelSize * 0.5}
-        />
+        {/* Contact shadow */}
+        {bounds && (
+          <ContactShadows
+            position={[0, 0, 0]}
+            opacity={0.3}
+            scale={bounds.size * 3}
+            blur={2}
+            far={bounds.size * 0.4}
+          />
+        )}
 
-        {/* HOOPS-style orientation gizmo (ViewCube equivalent) */}
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport
-            axisColors={['#e74c3c', '#2ecc71', '#3498db']}
-            labelColor="white"
+        {/* Clipping plane visual */}
+        {state.clipping && bounds && clippingPlanes && (
+          <ClipPlaneHelper plane={clippingPlanes[0]} size={bounds.size} />
+        )}
+
+        {/* NavCube — Xometry-style orientation cube */}
+        <GizmoHelper alignment="top-right" margin={[70, 70]}>
+          <GizmoViewcube
+            color="#e8eaed"
+            strokeColor="#9ca3af"
+            textColor="#374151"
+            opacity={0.92}
+            hoverColor="#bfdbfe"
           />
         </GizmoHelper>
 
-        {/* TrackballControls — true unrestricted 360° rotation, no gimbal lock */}
-        <FreeControls />
+        {/* Unrestricted orbit */}
+        <FreeControls targetRef={targetRef} />
       </Canvas>
     </div>
   );
 }
 
-function applyCADMaterial(obj: any) {
-  obj.traverse((child: any) => {
-    if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
-      child.material = createCADMaterial();
-      const edgesGeo = new EdgesGeometry(child.geometry, 12);
-      const edgeLines = new LineSegments(edgesGeo, createEdgeMaterial());
-      child.add(edgeLines);
-    }
-  });
-}
+// ── STEP loader + viewer ───────────────────────────────────────────────────────
 
-function STLModel({ url }: { url: string }) {
-  const geometry = useLoader(STLLoader, url);
-  geometry.computeVertexNormals();
-  return <CADMesh geometry={geometry} />;
-}
-
-function OBJModel({ url }: { url: string }) {
-  const obj = useLoader(OBJLoader, url);
-  useMemo(() => applyCADMaterial(obj), [obj]);
-  return <primitive object={obj} />;
-}
-
-function GLTFModel({ url }: { url: string }) {
-  const { scene } = useGLTF(url);
-  useMemo(() => applyCADMaterial(scene), [scene]);
-  return <primitive object={scene} />;
-}
-
-function StepModelInner({ url }: { url: string }) {
+function StepModelInner({ url, wireframe, clippingPlanes }: { url: string; wireframe?: boolean; clippingPlanes?: Plane[] }) {
   const [meshes, setMeshes] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -354,14 +542,19 @@ function StepModelInner({ url }: { url: string }) {
       try {
         const occt = await loadOcct();
         const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
         const buffer = await response.arrayBuffer();
-        const result = occt.ReadStepFile(new Uint8Array(buffer), null);
-        if (!result.success) {
-          throw new Error('Failed to parse STEP file. The file may be corrupted or in an unsupported format.');
-        }
+
+        // Pass tessellation params for higher quality meshing
+        const params = new (occt.ReadStepFileParams || Object.constructor)();
+        if (params.setLinearDeflection) params.setLinearDeflection(0.1);
+        if (params.setAngularDeflection) params.setAngularDeflection(0.5);
+
+        const result = (params.setLinearDeflection)
+          ? occt.ReadStepFile(new Uint8Array(buffer), params)
+          : occt.ReadStepFile(new Uint8Array(buffer), null);
+
+        if (!result.success) throw new Error('Failed to parse STEP file.');
         if (!cancelled) setMeshes(result.meshes || []);
       } catch (e: any) {
         if (!cancelled) setError(e.message || 'Failed to load STEP file.');
@@ -385,104 +578,133 @@ function StepModelInner({ url }: { url: string }) {
       if (mesh.index) {
         geom.setIndex(Array.from(mesh.index.array));
       }
+      // Always recompute for smooth shading even if normals exist
+      geom.computeVertexNormals();
       return geom;
     });
   }, [meshes]);
 
   if (loading) return (
-    <div style={{ padding: 32, textAlign: 'center' }}>
-      <div style={{ fontSize: 16, fontWeight: 500, color: '#374151' }}>Loading STEP file...</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>This may take a few moments for large files</div>
+    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ width: 40, height: 40, border: '3px solid #d1d5db', borderTopColor: '#6b7280', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+        <div style={{ fontSize: 15, fontWeight: 500, color: '#374151' }}>Loading STEP file...</div>
+        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Parsing geometry</div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
     </div>
   );
 
   if (error) return (
-    <div style={{ padding: 32, textAlign: 'center' }}>
-      <div style={{ color: '#b91c1c', fontWeight: 600, fontSize: 16 }}>Error loading 3D model</div>
-      <div style={{ fontSize: 14, color: '#6b7280', marginTop: 8 }}>{error}</div>
-      {error.includes('occt-import-js') && (
-        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
-          STEP file support requires the OCCT library. Please try refreshing the page.
-        </div>
-      )}
+    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+      <div style={{ textAlign: 'center', maxWidth: 320 }}>
+        <div style={{ color: '#dc2626', fontWeight: 600, fontSize: 15 }}>Error loading 3D model</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>{error}</div>
+      </div>
     </div>
   );
 
   if (!geometries.length) return (
-    <div style={{ padding: 32, textAlign: 'center' }}>
-      <div style={{ fontSize: 16, color: '#374151' }}>No geometry found in STEP file.</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>The file may be empty or contain no 3D geometry</div>
+    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 15, color: '#374151' }}>No geometry found in STEP file.</div>
+      </div>
     </div>
   );
 
   return (
-    <ViewerScene>
+    <>
       {geometries.map((geom, i) => (
-        <CADMesh key={i} geometry={geom} />
+        <CADMesh key={i} geometry={geom} wireframe={wireframe || false} clippingPlanes={clippingPlanes} />
       ))}
+    </>
+  );
+}
+
+// ── Wrapper that handles STEP's async loading outside Canvas ───────────────────
+
+function StepViewer({ url, state, onStateChange, onResetView }: {
+  url: string;
+  state: ViewerState;
+  onStateChange: (s: Partial<ViewerState>) => void;
+  onResetView: () => void;
+}) {
+  return (
+    <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView}>
+      <StepModelInner url={url} />
     </ViewerScene>
   );
 }
 
+// ── Main modal ─────────────────────────────────────────────────────────────────
+
 const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
+  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false, projection: 'perspective' });
+  const [viewKey, setViewKey] = useState(0);
+
+  const handleStateChange = (partial: Partial<ViewerState>) => setState(prev => ({ ...prev, ...partial }));
+  const handleResetView = () => setViewKey(k => k + 1);
+
+  // Reset state when file changes
+  useEffect(() => {
+    setState({ wireframe: false, clipping: false, projection: 'perspective' });
+    setViewKey(0);
+    setViewerError(null);
+  }, [fileUrl]);
 
   let content: React.ReactNode = null;
 
   if (!fileUrl || !fileName) {
     content = (
-      <div style={{ padding: 32, textAlign: 'center', color: '#6b7280' }}>
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8, color: '#9ca3af' }}>
         No file selected.
       </div>
     );
   } else if (viewerError) {
     content = (
-      <div style={{ padding: 32, textAlign: 'center' }}>
-        <div style={{ color: '#b91c1c', fontWeight: 600, fontSize: 16 }}>3D Viewer Error</div>
-        <div style={{ fontSize: 14, color: '#6b7280', marginTop: 8 }}>{viewerError}</div>
-        <button
-          onClick={() => setViewerError(null)}
-          style={{
-            marginTop: 16,
-            padding: '8px 20px',
-            backgroundColor: '#3b82f6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 500,
-          }}
-        >
-          Try Again
-        </button>
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ color: '#dc2626', fontWeight: 600 }}>3D Viewer Error</div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8, maxWidth: 280 }}>{viewerError}</div>
+          <button
+            onClick={() => { setViewerError(null); handleResetView(); }}
+            style={{
+              marginTop: 14, padding: '7px 18px', backgroundColor: '#3b82f6', color: 'white',
+              border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 500, fontSize: 13,
+            }}
+          >
+            Try Again
+          </button>
+        </div>
       </div>
     );
   } else if (isSTEP(fileName)) {
-    content = <StepModelInner url={fileUrl} />;
+    content = <StepViewer key={viewKey} url={fileUrl} state={state} onStateChange={handleStateChange} onResetView={handleResetView} />;
   } else if (isSTL(fileName)) {
     content = (
-      <ViewerScene>
-        <STLModel url={fileUrl} />
+      <ViewerScene key={viewKey} state={state} onStateChange={handleStateChange} onResetView={handleResetView}>
+        <STLModel url={fileUrl} wireframe={state.wireframe} />
       </ViewerScene>
     );
   } else if (isOBJ(fileName)) {
     content = (
-      <ViewerScene>
-        <OBJModel url={fileUrl} />
+      <ViewerScene key={viewKey} state={state} onStateChange={handleStateChange} onResetView={handleResetView}>
+        <OBJModel url={fileUrl} wireframe={state.wireframe} />
       </ViewerScene>
     );
   } else if (isGLB(fileName) || isGLTF(fileName)) {
     content = (
-      <ViewerScene>
-        <GLTFModel url={fileUrl} />
+      <ViewerScene key={viewKey} state={state} onStateChange={handleStateChange} onResetView={handleResetView}>
+        <GLTFModel url={fileUrl} wireframe={state.wireframe} />
       </ViewerScene>
     );
   } else {
     content = (
-      <div style={{ padding: 32, textAlign: 'center' }}>
-        <div style={{ fontSize: 16, color: '#374151' }}>Unsupported 3D file type.</div>
-        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>
-          Supported formats: STL, OBJ, GLB, GLTF, STEP
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 15, color: '#374151' }}>Unsupported 3D file type.</div>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Supported: STL, OBJ, GLB, GLTF, STEP</div>
         </div>
       </div>
     );
@@ -490,14 +712,14 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{fileName}</DialogTitle>
-          <DialogDescription>
-            Left-click to rotate, scroll to zoom, right-click to pan. Use the orientation gizmo to snap views.
+      <DialogContent className="max-w-4xl" style={{ padding: '16px 16px 12px' }}>
+        <DialogHeader style={{ paddingBottom: 6 }}>
+          <DialogTitle style={{ fontSize: 15 }}>{fileName}</DialogTitle>
+          <DialogDescription style={{ fontSize: 12, color: '#9ca3af' }}>
+            Left-click drag to rotate freely, scroll to zoom, right-click drag to pan.
           </DialogDescription>
         </DialogHeader>
-        <div style={{ minHeight: 500, minWidth: 400 }}>{content}</div>
+        {content}
       </DialogContent>
     </Dialog>
   );
