@@ -1,11 +1,11 @@
-import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
+import React, { Suspense, useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, ContactShadows, Center } from '@react-three/drei';
+import { OrbitControls, useGLTF, Environment, ContactShadows, Center, GizmoHelper, GizmoViewport, Grid } from '@react-three/drei';
 import {
   BufferGeometry,
   Float32BufferAttribute,
-  MeshStandardMaterial,
+  MeshPhysicalMaterial,
   EdgesGeometry,
   LineBasicMaterial,
   LineSegments,
@@ -14,7 +14,6 @@ import {
   Color,
   ACESFilmicToneMapping,
   Group,
-  Mesh,
 } from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
@@ -36,28 +35,30 @@ const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
 
-// Professional CAD material — metallic gray with subtle reflections
+// HOOPS-style material — darker steel/gunmetal with clearcoat for that polished CAD look
 function createCADMaterial() {
-  return new MeshStandardMaterial({
-    color: new Color('#8BADC4'),
-    metalness: 0.15,
-    roughness: 0.45,
-    envMapIntensity: 0.6,
+  return new MeshPhysicalMaterial({
+    color: new Color('#5A6E7F'),
+    metalness: 0.25,
+    roughness: 0.35,
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.2,
+    envMapIntensity: 0.8,
     side: 2, // DoubleSide
   });
 }
 
-// Edge line material for CAD-style outlines
+// Sharper edge lines — HOOPS uses prominent dark edges
 function createEdgeMaterial() {
   return new LineBasicMaterial({
-    color: new Color('#3A5A7C'),
+    color: new Color('#1A2A3A'),
     linewidth: 1,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.4,
   });
 }
 
-// Auto-fit camera to model bounds
+// Auto-fit camera to model bounds with HOOPS-style isometric angle
 function AutoFrame({ children }: { children: React.ReactNode }) {
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
@@ -65,7 +66,6 @@ function AutoFrame({ children }: { children: React.ReactNode }) {
 
   useFrame(() => {
     if (hasFramed.current || !groupRef.current) return;
-    // Wait one frame for geometry to be ready
     const box = new Box3().setFromObject(groupRef.current);
     if (box.isEmpty()) return;
 
@@ -73,9 +73,14 @@ function AutoFrame({ children }: { children: React.ReactNode }) {
     const center = box.getCenter(new Vector3());
     const size = box.getSize(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const distance = maxDim * 2.2;
+    const distance = maxDim * 2.0;
 
-    camera.position.set(center.x + distance * 0.5, center.y + distance * 0.4, center.z + distance * 0.7);
+    // HOOPS-style default view angle — slightly elevated isometric
+    camera.position.set(
+      center.x + distance * 0.6,
+      center.y + distance * 0.45,
+      center.z + distance * 0.6
+    );
     camera.lookAt(center);
     camera.updateProjectionMatrix();
   });
@@ -85,11 +90,11 @@ function AutoFrame({ children }: { children: React.ReactNode }) {
 
 // Mesh with edge lines for crisp CAD look
 function CADMesh({ geometry }: { geometry: BufferGeometry }) {
-  const edges = useMemo(() => new EdgesGeometry(geometry, 15), [geometry]);
+  const edges = useMemo(() => new EdgesGeometry(geometry, 12), [geometry]);
 
   return (
     <group>
-      <mesh geometry={geometry}>
+      <mesh geometry={geometry} castShadow receiveShadow>
         <primitive object={createCADMaterial()} attach="material" />
       </mesh>
       <lineSegments geometry={edges}>
@@ -145,44 +150,63 @@ function loadOcct() {
   return occtPromise;
 }
 
-// Shared scene wrapper with lighting, controls, background
+// HOOPS-style scene: studio lighting, ground grid, orientation gizmo, unrestricted orbit
 function ViewerScene({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ height: 450, borderRadius: '8px', overflow: 'hidden' }}>
+    <div style={{ height: 500, borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
       <Canvas
-        camera={{ position: [0, 0, 100], fov: 45 }}
-        style={{ height: 450 }}
+        camera={{ position: [0, 0, 100], fov: 45, near: 0.01, far: 10000 }}
+        style={{ height: 500 }}
         shadows
         gl={{
           antialias: true,
           alpha: false,
           powerPreference: 'high-performance',
           toneMapping: ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          toneMappingExposure: 1.0,
           outputColorSpace: 'srgb',
         }}
       >
-        {/* Gradient background */}
-        <color attach="background" args={['#f0f4f8']} />
+        {/* HOOPS-style gradient background — light warm gray */}
+        <color attach="background" args={['#e8eaed']} />
 
-        {/* Lighting — 3-point + hemisphere for natural fill */}
+        {/* Studio lighting setup matching HOOPS Communicator */}
         <hemisphereLight
-          args={[new Color('#b1d8f5'), new Color('#e8e0d4'), 0.5]}
+          args={[new Color('#c4d4e0'), new Color('#a09890'), 0.4]}
         />
-        <ambientLight intensity={0.3} />
+        <ambientLight intensity={0.25} />
+        {/* Key light — top-right, warm */}
         <directionalLight
-          position={[5, 8, 5]}
-          intensity={1.0}
+          position={[8, 12, 6]}
+          intensity={1.2}
           castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
           shadow-bias={-0.0001}
+          shadow-camera-near={0.1}
+          shadow-camera-far={100}
+          color={new Color('#fff8f0')}
         />
-        <directionalLight position={[-4, 3, -3]} intensity={0.4} />
-        <directionalLight position={[0, -2, 5]} intensity={0.2} />
+        {/* Fill light — left side, cool */}
+        <directionalLight
+          position={[-6, 4, -4]}
+          intensity={0.5}
+          color={new Color('#e0e8f0')}
+        />
+        {/* Rim/back light — behind and below */}
+        <directionalLight
+          position={[0, -3, -8]}
+          intensity={0.3}
+          color={new Color('#d0d8e0')}
+        />
+        {/* Bottom fill to reduce harsh shadows underneath */}
+        <directionalLight
+          position={[0, -8, 4]}
+          intensity={0.15}
+        />
 
-        {/* Soft environment reflections */}
-        <Environment preset="city" />
+        {/* HDRI environment for realistic reflections */}
+        <Environment preset="studio" />
 
         <Suspense fallback={null}>
           <AutoFrame>
@@ -190,26 +214,54 @@ function ViewerScene({ children }: { children: React.ReactNode }) {
           </AutoFrame>
         </Suspense>
 
-        {/* Contact shadow for grounding */}
-        <ContactShadows
-          position={[0, -0.5, 0]}
-          opacity={0.3}
-          scale={20}
-          blur={2}
-          far={4}
+        {/* Ground grid — HOOPS-style reference plane */}
+        <Grid
+          position={[0, -0.01, 0]}
+          args={[100, 100]}
+          cellSize={1}
+          cellThickness={0.5}
+          cellColor="#c0c4c8"
+          sectionSize={5}
+          sectionThickness={1}
+          sectionColor="#a0a4a8"
+          fadeDistance={40}
+          fadeStrength={1}
+          infiniteGrid
         />
 
+        {/* Contact shadow for grounding */}
+        <ContactShadows
+          position={[0, -0.02, 0]}
+          opacity={0.35}
+          scale={30}
+          blur={2.5}
+          far={6}
+        />
+
+        {/* HOOPS-style orientation gizmo (ViewCube equivalent) */}
+        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+          <GizmoViewport
+            axisColors={['#e74c3c', '#2ecc71', '#3498db']}
+            labelColor="white"
+          />
+        </GizmoHelper>
+
+        {/* Full 360° unrestricted orbit — no polar angle limits */}
         <OrbitControls
           enablePan
           enableZoom
           enableRotate
-          minDistance={0.5}
-          maxDistance={1000}
+          minDistance={0.1}
+          maxDistance={5000}
+          minPolarAngle={0}
+          maxPolarAngle={Math.PI}
+          minAzimuthAngle={-Infinity}
+          maxAzimuthAngle={Infinity}
           enableDamping
-          dampingFactor={0.08}
-          rotateSpeed={0.7}
-          zoomSpeed={1.0}
-          panSpeed={0.7}
+          dampingFactor={0.1}
+          rotateSpeed={0.8}
+          zoomSpeed={1.2}
+          panSpeed={0.8}
           makeDefault
         />
       </Canvas>
@@ -223,8 +275,7 @@ function applyCADMaterial(obj: any) {
       child.castShadow = true;
       child.receiveShadow = true;
       child.material = createCADMaterial();
-      // Add edge lines
-      const edgesGeo = new EdgesGeometry(child.geometry, 15);
+      const edgesGeo = new EdgesGeometry(child.geometry, 12);
       const edgeLines = new LineSegments(edgesGeo, createEdgeMaterial());
       child.add(edgeLines);
     }
@@ -281,7 +332,6 @@ function StepModelInner({ url }: { url: string }) {
     return () => { cancelled = true; };
   }, [url]);
 
-  // Build ALL geometries from the STEP file (not just first mesh)
   const geometries = useMemo(() => {
     return meshes.map((mesh) => {
       const geom = new BufferGeometry();
@@ -367,7 +417,6 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
       </div>
     );
   } else if (isSTEP(fileName)) {
-    // STEP has its own loading flow outside ViewerScene
     content = <StepModelInner url={fileUrl} />;
   } else if (isSTL(fileName)) {
     content = (
@@ -400,14 +449,14 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>3D Viewer: {fileName}</DialogTitle>
+          <DialogTitle>{fileName}</DialogTitle>
           <DialogDescription>
-            Rotate with left-click, zoom with scroll, pan with right-click.
+            Left-click to rotate, scroll to zoom, right-click to pan. Use the orientation gizmo to snap views.
           </DialogDescription>
         </DialogHeader>
-        <div style={{ minHeight: 450, minWidth: 400 }}>{content}</div>
+        <div style={{ minHeight: 500, minWidth: 400 }}>{content}</div>
       </DialogContent>
     </Dialog>
   );
