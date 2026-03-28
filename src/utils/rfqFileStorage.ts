@@ -55,44 +55,12 @@ export const uploadRfqFile = async (
     
     console.log('File metadata saved successfully');
 
-    // Trigger async STEP→GLB conversion (fire-and-forget, non-blocking)
-    const lowerName = file.name.toLowerCase();
-    if (lowerName.endsWith('.step') || lowerName.endsWith('.stp')) {
-      triggerStepConversion(filePath).catch((err) =>
-        console.warn('STEP→GLB conversion failed (non-blocking):', err)
-      );
-    }
-
     return { path: filePath, success: true };
   } catch (error) {
     console.error('Exception during file upload:', error);
     return { path: null, success: false, error };
   }
 };
-
-/**
- * Trigger server-side STEP→GLB conversion (async, non-blocking).
- * The converted GLB is stored in the same S3 folder as the original STEP.
- * The viewer will use the GLB if available, falling back to client-side STEP parsing.
- */
-async function triggerStepConversion(filePath: string): Promise<void> {
-  try {
-    const response = await fetch('/api/convert-step', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      console.warn('STEP conversion response:', response.status, data);
-    } else {
-      const data = await response.json();
-      console.log('STEP→GLB conversion complete:', data.glbPath);
-    }
-  } catch (err) {
-    console.warn('STEP conversion request failed:', err);
-  }
-}
 
 /**
  * Get a list of files for a specific RFQ or part
