@@ -16,6 +16,7 @@
     "@aws-sdk/lib-storage": "^3.864.0",
     "@aws-sdk/s3-request-presigner": "^3.864.0",
     "@formkit/auto-animate": "^0.8.1",
+    "@gltf-transform/core": "^4.3.0",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",

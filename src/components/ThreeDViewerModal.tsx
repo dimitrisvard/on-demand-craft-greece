@@ -1,13 +1,15 @@
 import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
-import { useGLTF, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { useGLTF, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 // @ts-expect-error: no types for TrackballControls
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
+// @ts-expect-error: no types for BufferGeometryUtils
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils';
 import {
   BufferGeometry,
   Float32BufferAttribute,
-  MeshStandardMaterial,
+  MeshPhongMaterial,
   EdgesGeometry,
   LineBasicMaterial,
   LineSegments,
@@ -34,6 +36,7 @@ interface ThreeDViewerModalProps {
   fileUrl: string | null;
   fileType: string | null;
   fileName: string | null;
+  glbUrl?: string | null; // Pre-converted GLB URL (Phase 2)
 }
 
 interface ViewerState {
@@ -51,14 +54,15 @@ const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.to
 
 // ── Materials ──────────────────────────────────────────────────────────────────
 
-// MeshStandardMaterial — proven combo for CAD. Same approach as Online3DViewer.
-// MeshPhysicalMaterial was causing visual artifacts on low-poly OCCT tessellation.
+// MeshPhongMaterial — same approach as Online3DViewer and occt-import-js examples.
+// Phong interpolates normals per-pixel without PBR complexity, producing the
+// cleanest look on tessellated CAD geometry. MeshStandard/PhysicalMaterial require
+// high-quality environment maps to look good; Phong looks great with simple lights.
 function createCADMaterial(wireframe = false) {
-  return new MeshStandardMaterial({
-    color: new Color('#b0bec5'),    // machined aluminum blue-grey
-    metalness: 0.3,
-    roughness: 0.55,
-    envMapIntensity: 1.0,
+  return new MeshPhongMaterial({
+    color: new Color('#b0bec5'),     // machined aluminum blue-grey
+    specular: new Color('#333333'),
+    shininess: 45,
     side: DoubleSide,
     wireframe,
     flatShading: false,
@@ -69,9 +73,20 @@ function createEdgeMaterial() {
   return new LineBasicMaterial({
     color: new Color('#546e7a'),
     transparent: true,
-    opacity: 0.2,
+    opacity: 0.15,
     depthTest: true,
   });
+}
+
+// ── Smooth geometry processing ─────────────────────────────────────────────────
+
+// THE critical step that was missing: mergeVertices() before computeVertexNormals().
+// Without merging, each triangle has isolated vertices → flat normals per face.
+// After merging, shared vertices get averaged normals → smooth shading across faces.
+function smoothGeometry(geom: BufferGeometry): BufferGeometry {
+  let merged = mergeVertices(geom);
+  merged.computeVertexNormals();
+  return merged;
 }
 
 // ── OCCT WASM loader ──────────────────────────────────────────────────────────
@@ -137,7 +152,6 @@ function FreeControls({ targetRef }: { targetRef: React.MutableRefObject<Vector3
   return null;
 }
 
-// Auto-fit camera to model, bottom-align on grid
 function AutoFrame({ children, onReady }: {
   children: React.ReactNode;
   onReady?: (info: { size: number; center: Vector3; dims: Vector3 }) => void;
@@ -156,10 +170,8 @@ function AutoFrame({ children, onReady }: {
     const center = box.getCenter(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
-    // Bottom-align on y=0, center horizontally
     groupRef.current.position.set(-center.x, -box.min.y, -center.z);
 
-    // Isometric default camera
     const dist = maxDim * 1.8;
     const camY = size.y * 0.5 + dist * 0.4;
     camera.position.set(dist * 0.65, camY, dist * 0.65);
@@ -172,28 +184,20 @@ function AutoFrame({ children, onReady }: {
   return <group ref={groupRef}>{children}</group>;
 }
 
-// THREE.GridHelper — simple line-based grid that renders behind everything.
-// Replaces drei <Grid> which uses a custom shader that bleeds through model surfaces.
+// Line-based grid — renders behind everything via renderOrder, no shader bleeding
 function SimpleGrid({ modelSize }: { modelSize: number }) {
-  const ref = useRef<any>(null);
+  const gridRef = useRef<any>(null);
 
-  useEffect(() => {
-    if (!ref.current) return;
-    // Push grid to render first (behind everything)
-    ref.current.renderOrder = -1;
-    ref.current.material.depthWrite = false;
-  }, []);
+  const grid = useMemo(() => {
+    const gridSize = modelSize * 4;
+    const divisions = 20;
+    const g = new GridHelper(gridSize, divisions, '#a0a8b0', '#d0d4d8');
+    g.renderOrder = -1;
+    g.material.forEach ? g.material.forEach((m: any) => { m.depthWrite = false; }) : ((g.material as any).depthWrite = false);
+    return g;
+  }, [modelSize]);
 
-  const gridSize = modelSize * 4;
-  const divisions = 20;
-
-  return (
-    <primitive
-      ref={ref}
-      object={new GridHelper(gridSize, divisions, '#a0a8b0', '#c8ccd0')}
-      position={[0, 0, 0]}
-    />
-  );
+  return <primitive ref={gridRef} object={grid} position={[0, 0, 0]} />;
 }
 
 // CAD mesh with edge lines
@@ -250,8 +254,8 @@ function applyCADMaterialToObj(obj: any, wireframe: boolean, clippingPlanes?: Pl
 
 function STLModel({ url, wireframe, clippingPlanes }: { url: string; wireframe: boolean; clippingPlanes?: Plane[] }) {
   const geometry = useLoader(STLLoader, url);
-  geometry.computeVertexNormals();
-  return <CADMesh geometry={geometry} wireframe={wireframe} clippingPlanes={clippingPlanes} />;
+  const smooth = useMemo(() => smoothGeometry(geometry), [geometry]);
+  return <CADMesh geometry={smooth} wireframe={wireframe} clippingPlanes={clippingPlanes} />;
 }
 
 function OBJModel({ url, wireframe, clippingPlanes }: { url: string; wireframe: boolean; clippingPlanes?: Plane[] }) {
@@ -411,24 +415,20 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
       >
         <EnableClipping enabled={state.clipping} />
 
-        {/* Clean gradient-style background */}
+        {/* Clean background */}
         <color attach="background" args={['#eef1f5']} />
 
-        {/* Hemisphere for natural sky/ground fill */}
-        <hemisphereLight args={[new Color('#ffffff'), new Color('#8090a0'), 0.6]} />
-        <ambientLight intensity={0.4} />
-
-        {/* Key light — upper-right-front, slightly warm */}
-        <directionalLight position={[10, 15, 8]} intensity={1.0} color={new Color('#fffaf5')} />
-        {/* Fill light — left, cool */}
-        <directionalLight position={[-8, 5, -3]} intensity={0.4} color={new Color('#e8f0f8')} />
-        {/* Rim light — behind and above */}
-        <directionalLight position={[-2, 8, -10]} intensity={0.3} />
-        {/* Bottom fill */}
-        <directionalLight position={[0, -8, 5]} intensity={0.15} />
-
-        {/* Environment map for PBR reflections — critical for MeshStandardMaterial */}
-        <Environment preset="city" />
+        {/* Simple lighting — same approach as Online3DViewer.
+            No Environment preset (causes artifacts on CAD geometry).
+            Phong material + these lights = clean, consistent look. */}
+        <ambientLight intensity={0.5} color={new Color('#e0e4e8')} />
+        <hemisphereLight args={[new Color('#ffffff'), new Color('#607080'), 0.45]} />
+        {/* Key light */}
+        <directionalLight position={[10, 15, 8]} intensity={0.9} color={new Color('#ffffff')} />
+        {/* Fill light */}
+        <directionalLight position={[-8, 5, -3]} intensity={0.4} color={new Color('#e8f0ff')} />
+        {/* Rim light */}
+        <directionalLight position={[-2, 8, -10]} intensity={0.25} />
 
         <Suspense fallback={null}>
           <AutoFrame onReady={handleReady}>
@@ -436,15 +436,12 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
           </AutoFrame>
         </Suspense>
 
-        {/* Simple line-based grid — renders behind everything, no shader bleeding */}
         {bounds && <SimpleGrid modelSize={bounds.size} />}
 
-        {/* Clipping plane visual */}
         {state.clipping && bounds && clippingPlanes && (
           <ClipPlaneHelper plane={clippingPlanes[0]} size={bounds.size} />
         )}
 
-        {/* NavCube */}
         <GizmoHelper alignment="top-right" margin={[70, 70]}>
           <GizmoViewcube
             color="#e8eaed"
@@ -461,7 +458,7 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
   );
 }
 
-// ── STEP mesh component (Canvas-safe) ──────────────────────────────────────────
+// ── STEP mesh component ────────────────────────────────────────────────────────
 
 function StepMeshes({ geometries, wireframe, clippingPlanes }: {
   geometries: BufferGeometry[];
@@ -477,7 +474,7 @@ function StepMeshes({ geometries, wireframe, clippingPlanes }: {
   );
 }
 
-// ── Status overlay (plain HTML, outside Canvas) ────────────────────────────────
+// ── Status overlay ─────────────────────────────────────────────────────────────
 
 function StatusOverlay({ type, message, detail }: { type: 'loading' | 'error' | 'empty'; message: string; detail?: string }) {
   return (
@@ -506,7 +503,7 @@ function StatusOverlay({ type, message, detail }: { type: 'loading' | 'error' | 
   );
 }
 
-// ── STEP hook + viewer ─────────────────────────────────────────────────────────
+// ── STEP hook ──────────────────────────────────────────────────────────────────
 
 function useStepGeometries(url: string) {
   const [meshes, setMeshes] = useState<any[]>([]);
@@ -524,14 +521,12 @@ function useStepGeometries(url: string) {
         if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
         const buffer = await response.arrayBuffer();
 
-        // occt-import-js accepts a plain object for tessellation params:
-        //   linearDeflection: smaller = smoother mesh (default ~0.5 of bbox)
-        //   linearDeflectionType: "absolute_value" for direct control
-        //   angularDeflection: in radians, smaller = smoother curves
+        // occt-import-js tessellation params (plain object):
+        // bounding_box_ratio: deflection as fraction of avg bounding box dimension
+        // 0.001 = 0.1% of bbox = smooth on any model size
         const result = occt.ReadStepFile(new Uint8Array(buffer), {
-          linearDeflection: 0.1,
-          linearDeflectionType: 'absolute_value',
-          angularDeflection: 0.3,
+          linearDeflection: 0.001,
+          linearDeflectionType: 'bounding_box_ratio',
         });
 
         if (!result.success) throw new Error('Failed to parse STEP file.');
@@ -546,26 +541,46 @@ function useStepGeometries(url: string) {
     return () => { cancelled = true; };
   }, [url]);
 
+  // Build geometries with mergeVertices → computeVertexNormals for smooth shading
   const geometries = useMemo(() => {
     return meshes.map((mesh) => {
       const geom = new BufferGeometry();
       geom.setAttribute('position', new Float32BufferAttribute(mesh.attributes.position.array, 3));
-      if (mesh.attributes.normal) {
-        geom.setAttribute('normal', new Float32BufferAttribute(mesh.attributes.normal.array, 3));
-      }
       if (mesh.index) {
         geom.setIndex(Array.from(mesh.index.array));
       }
-      // Recompute smooth normals — critical for non-faceted appearance
-      geom.computeVertexNormals();
-      return geom;
+      // Don't use OCCT's normals — they're per-face (flat).
+      // mergeVertices + computeVertexNormals produces proper smooth normals.
+      return smoothGeometry(geom);
     });
   }, [meshes]);
 
   return { geometries, loading, error };
 }
 
-function StepViewer({ url, state, onStateChange, onResetView }: {
+// ── STEP viewer (GLB-first with STEP fallback) ────────────────────────────────
+
+function StepViewer({ url, glbUrl, state, onStateChange, onResetView }: {
+  url: string;
+  glbUrl?: string | null;
+  state: ViewerState;
+  onStateChange: (s: Partial<ViewerState>) => void;
+  onResetView: () => void;
+}) {
+  // If pre-converted GLB exists, render it directly (Phase 2 — fast + high quality)
+  if (glbUrl) {
+    return (
+      <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView}>
+        <GLTFModel url={glbUrl} wireframe={state.wireframe} />
+      </ViewerScene>
+    );
+  }
+
+  // Otherwise, client-side STEP parsing with Phase 1 quality fixes
+  return <StepViewerClient url={url} state={state} onStateChange={onStateChange} onResetView={onResetView} />;
+}
+
+function StepViewerClient({ url, state, onStateChange, onResetView }: {
   url: string;
   state: ViewerState;
   onStateChange: (s: Partial<ViewerState>) => void;
@@ -586,7 +601,7 @@ function StepViewer({ url, state, onStateChange, onResetView }: {
 
 // ── Main modal ─────────────────────────────────────────────────────────────────
 
-const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName }) => {
+const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName, glbUrl }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
   const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false });
   const [viewKey, setViewKey] = useState(0);
@@ -624,7 +639,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
       </div>
     );
   } else if (isSTEP(fileName)) {
-    content = <StepViewer key={viewKey} url={fileUrl} state={state} onStateChange={handleStateChange} onResetView={handleResetView} />;
+    content = <StepViewer key={viewKey} url={fileUrl} glbUrl={glbUrl} state={state} onStateChange={handleStateChange} onResetView={handleResetView} />;
   } else if (isSTL(fileName)) {
     content = (
       <ViewerScene key={viewKey} state={state} onStateChange={handleStateChange} onResetView={handleResetView}>
