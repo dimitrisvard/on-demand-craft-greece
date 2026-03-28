@@ -1,7 +1,9 @@
-import React, { Suspense, useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, useGLTF, Environment, ContactShadows, Center, GizmoHelper, GizmoViewport, Grid } from '@react-three/drei';
+import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
+import { useGLTF, Environment, ContactShadows, GizmoHelper, GizmoViewport, Grid } from '@react-three/drei';
+// @ts-expect-error: no types for TrackballControls
+import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
 import {
   BufferGeometry,
   Float32BufferAttribute,
@@ -58,8 +60,11 @@ function createEdgeMaterial() {
   });
 }
 
-// Auto-fit camera to model bounds with HOOPS-style isometric angle
-function AutoFrame({ children }: { children: React.ReactNode }) {
+// Register TrackballControls for R3F
+extend({ TrackballControls });
+
+// Auto-fit camera + bottom-align model on grid plane
+function AutoFrame({ children, onBoundsReady }: { children: React.ReactNode; onBoundsReady?: (size: number) => void }) {
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
   const hasFramed = useRef(false);
@@ -70,22 +75,59 @@ function AutoFrame({ children }: { children: React.ReactNode }) {
     if (box.isEmpty()) return;
 
     hasFramed.current = true;
-    const center = box.getCenter(new Vector3());
     const size = box.getSize(new Vector3());
+    const center = box.getCenter(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const distance = maxDim * 2.0;
 
-    // HOOPS-style default view angle — slightly elevated isometric
+    // Shift model so its bottom sits on y=0 (the grid plane)
+    groupRef.current.position.y -= box.min.y;
+    // Center horizontally
+    groupRef.current.position.x -= center.x;
+    groupRef.current.position.z -= center.z;
+
+    // Position camera — elevated isometric view
+    const distance = maxDim * 2.0;
+    const modelCenterY = size.y / 2;
     camera.position.set(
-      center.x + distance * 0.6,
-      center.y + distance * 0.45,
-      center.z + distance * 0.6
+      distance * 0.6,
+      modelCenterY + distance * 0.45,
+      distance * 0.6
     );
-    camera.lookAt(center);
+    camera.lookAt(0, modelCenterY, 0);
     camera.updateProjectionMatrix();
+
+    onBoundsReady?.(maxDim);
   });
 
   return <group ref={groupRef}>{children}</group>;
+}
+
+// R3F-compatible TrackballControls — true unrestricted 360° rotation
+function FreeControls() {
+  const { camera, gl } = useThree();
+  const controlsRef = useRef<any>(null);
+
+  useEffect(() => {
+    const controls = new TrackballControls(camera, gl.domElement);
+    controls.rotateSpeed = 3.0;
+    controls.zoomSpeed = 1.5;
+    controls.panSpeed = 1.0;
+    controls.dynamicDampingFactor = 0.15;
+    controls.noPan = false;
+    controls.noZoom = false;
+    controls.noRotate = false;
+    controls.minDistance = 0.1;
+    controls.maxDistance = 10000;
+    controlsRef.current = controls;
+
+    return () => controls.dispose();
+  }, [camera, gl]);
+
+  useFrame(() => {
+    controlsRef.current?.update();
+  });
+
+  return null;
 }
 
 // Mesh with edge lines for crisp CAD look
@@ -150,13 +192,39 @@ function loadOcct() {
   return occtPromise;
 }
 
-// HOOPS-style scene: studio lighting, ground grid, orientation gizmo, unrestricted orbit
+// Adaptive grid that scales to model size
+function AdaptiveGrid({ modelSize }: { modelSize: number }) {
+  const cellSize = modelSize > 0 ? Math.pow(10, Math.floor(Math.log10(modelSize)) - 1) : 1;
+  const sectionSize = cellSize * 5;
+  const fadeDistance = modelSize * 3;
+
+  return (
+    <Grid
+      position={[0, 0, 0]}
+      args={[200, 200]}
+      cellSize={cellSize}
+      cellThickness={0.6}
+      cellColor="#b8bcc0"
+      sectionSize={sectionSize}
+      sectionThickness={1.2}
+      sectionColor="#909498"
+      fadeDistance={fadeDistance}
+      fadeStrength={1}
+      infiniteGrid
+    />
+  );
+}
+
+// HOOPS-style scene: studio lighting, ground grid, orientation gizmo, free rotation
 function ViewerScene({ children }: { children: React.ReactNode }) {
+  const [modelSize, setModelSize] = useState(10);
+
   return (
     <div style={{ height: 500, borderRadius: '8px', overflow: 'hidden', position: 'relative' }}>
       <Canvas
-        camera={{ position: [0, 0, 100], fov: 45, near: 0.01, far: 10000 }}
+        camera={{ position: [0, 0, 100], fov: 45, near: 0.001, far: 100000 }}
         style={{ height: 500 }}
+        dpr={[1, 2]}
         shadows
         gl={{
           antialias: true,
@@ -165,9 +233,10 @@ function ViewerScene({ children }: { children: React.ReactNode }) {
           toneMapping: ACESFilmicToneMapping,
           toneMappingExposure: 1.0,
           outputColorSpace: 'srgb',
+          pixelRatio: window.devicePixelRatio,
         }}
       >
-        {/* HOOPS-style gradient background — light warm gray */}
+        {/* HOOPS-style background — light warm gray */}
         <color attach="background" args={['#e8eaed']} />
 
         {/* Studio lighting setup matching HOOPS Communicator */}
@@ -184,7 +253,7 @@ function ViewerScene({ children }: { children: React.ReactNode }) {
           shadow-mapSize-height={2048}
           shadow-bias={-0.0001}
           shadow-camera-near={0.1}
-          shadow-camera-far={100}
+          shadow-camera-far={1000}
           color={new Color('#fff8f0')}
         />
         {/* Fill light — left side, cool */}
@@ -209,33 +278,21 @@ function ViewerScene({ children }: { children: React.ReactNode }) {
         <Environment preset="studio" />
 
         <Suspense fallback={null}>
-          <AutoFrame>
-            <Center>{children}</Center>
+          <AutoFrame onBoundsReady={setModelSize}>
+            {children}
           </AutoFrame>
         </Suspense>
 
-        {/* Ground grid — HOOPS-style reference plane */}
-        <Grid
-          position={[0, -0.01, 0]}
-          args={[100, 100]}
-          cellSize={1}
-          cellThickness={0.5}
-          cellColor="#c0c4c8"
-          sectionSize={5}
-          sectionThickness={1}
-          sectionColor="#a0a4a8"
-          fadeDistance={40}
-          fadeStrength={1}
-          infiniteGrid
-        />
+        {/* Ground grid — adapts to model scale */}
+        <AdaptiveGrid modelSize={modelSize} />
 
         {/* Contact shadow for grounding */}
         <ContactShadows
-          position={[0, -0.02, 0]}
+          position={[0, 0, 0]}
           opacity={0.35}
-          scale={30}
+          scale={modelSize * 4}
           blur={2.5}
-          far={6}
+          far={modelSize * 0.5}
         />
 
         {/* HOOPS-style orientation gizmo (ViewCube equivalent) */}
@@ -246,24 +303,8 @@ function ViewerScene({ children }: { children: React.ReactNode }) {
           />
         </GizmoHelper>
 
-        {/* Full 360° unrestricted orbit — no polar angle limits */}
-        <OrbitControls
-          enablePan
-          enableZoom
-          enableRotate
-          minDistance={0.1}
-          maxDistance={5000}
-          minPolarAngle={0}
-          maxPolarAngle={Math.PI}
-          minAzimuthAngle={-Infinity}
-          maxAzimuthAngle={Infinity}
-          enableDamping
-          dampingFactor={0.1}
-          rotateSpeed={0.8}
-          zoomSpeed={1.2}
-          panSpeed={0.8}
-          makeDefault
-        />
+        {/* TrackballControls — true unrestricted 360° rotation, no gimbal lock */}
+        <FreeControls />
       </Canvas>
     </div>
   );
