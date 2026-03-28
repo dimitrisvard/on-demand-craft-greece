@@ -1,12 +1,26 @@
-import React, { Suspense, useEffect, useState, useRef } from 'react';
+import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Canvas, useLoader, useThree } from '@react-three/fiber';
-import { OrbitControls, useGLTF } from '@react-three/drei';
-import { BufferGeometry, Float32BufferAttribute, ShaderMaterial, Vector3, Color, NoToneMapping, MeshBasicMaterial, MeshLambertMaterial } from 'three';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { OrbitControls, useGLTF, Environment, ContactShadows, Center } from '@react-three/drei';
+import {
+  BufferGeometry,
+  Float32BufferAttribute,
+  MeshStandardMaterial,
+  EdgesGeometry,
+  LineBasicMaterial,
+  LineSegments,
+  Vector3,
+  Box3,
+  Color,
+  ACESFilmicToneMapping,
+  Group,
+  Mesh,
+} from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for STLLoader
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+import { useLoader } from '@react-three/fiber';
 
 interface ThreeDViewerModalProps {
   open: boolean;
@@ -22,45 +36,67 @@ const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
 
-// Toon material color palette (darkest to lightest) - improved for better visibility
-const TOON_COLORS = [
-  new Color('#2A4A6B'), // Dark blue-gray (darker areas)
-  new Color('#4A7B9B'), // Medium blue-gray (shadows)
-  new Color('#6BA3C7'), // Light blue-gray (mid-tones)
-  new Color('#9BC7E3'), // Very light blue-gray (highlights)
-  new Color('#E8F4F8')  // Almost white (brightest areas)
-];
-
-// Create toon material using built-in Three.js materials - improved version
-function createToonMaterial() {
-  // Use MeshLambertMaterial for better lighting response and visibility
-  const material = new MeshLambertMaterial({
-    color: TOON_COLORS[2], // Use light blue-gray as base color for better visibility
-    transparent: false,
+// Professional CAD material — metallic gray with subtle reflections
+function createCADMaterial() {
+  return new MeshStandardMaterial({
+    color: new Color('#8BADC4'),
+    metalness: 0.15,
+    roughness: 0.45,
+    envMapIntensity: 0.6,
     side: 2, // DoubleSide
-    depthTest: true,
-    depthWrite: true,
-    emissive: new Color('#1A2A3A'), // Add subtle emissive for better visibility
-    emissiveIntensity: 0.1,
   });
-  
-  return material;
 }
 
-// Alternative: Create a simple toon material with custom colors
-function createSimpleToonMaterial() {
-  // Use MeshLambertMaterial for simple lighting with toon effect
-  const material = new MeshLambertMaterial({
-    color: TOON_COLORS[2], // Light blue-gray
-    transparent: false,
-    side: 2, // DoubleSide
-    depthTest: true,
-    depthWrite: true,
-    emissive: new Color('#1A2A3A'), // Add subtle emissive
-    emissiveIntensity: 0.1,
+// Edge line material for CAD-style outlines
+function createEdgeMaterial() {
+  return new LineBasicMaterial({
+    color: new Color('#3A5A7C'),
+    linewidth: 1,
+    transparent: true,
+    opacity: 0.35,
   });
-  
-  return material;
+}
+
+// Auto-fit camera to model bounds
+function AutoFrame({ children }: { children: React.ReactNode }) {
+  const groupRef = useRef<Group>(null);
+  const { camera } = useThree();
+  const hasFramed = useRef(false);
+
+  useFrame(() => {
+    if (hasFramed.current || !groupRef.current) return;
+    // Wait one frame for geometry to be ready
+    const box = new Box3().setFromObject(groupRef.current);
+    if (box.isEmpty()) return;
+
+    hasFramed.current = true;
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const distance = maxDim * 2.2;
+
+    camera.position.set(center.x + distance * 0.5, center.y + distance * 0.4, center.z + distance * 0.7);
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+  });
+
+  return <group ref={groupRef}>{children}</group>;
+}
+
+// Mesh with edge lines for crisp CAD look
+function CADMesh({ geometry }: { geometry: BufferGeometry }) {
+  const edges = useMemo(() => new EdgesGeometry(geometry, 15), [geometry]);
+
+  return (
+    <group>
+      <mesh geometry={geometry}>
+        <primitive object={createCADMaterial()} attach="material" />
+      </mesh>
+      <lineSegments geometry={edges}>
+        <primitive object={createEdgeMaterial()} attach="material" />
+      </lineSegments>
+    </group>
+  );
 }
 
 // Helper to load occt-import-js WASM only once
@@ -68,43 +104,35 @@ let occtPromise: Promise<any> | null = null;
 function loadOcct() {
   if (!occtPromise) {
     occtPromise = new Promise((resolve, reject) => {
-      // Check if already loaded
       if ((window as any).occtimportjs) {
         resolve((window as any).occtimportjs());
         return;
       }
-      
-      // Check if script is already loaded
+
       const existingScript = document.querySelector('script[src="/occt-import-js.js"]');
       if (existingScript) {
-        // Wait for the script to initialize
         const checkInterval = setInterval(() => {
           if ((window as any).occtimportjs) {
             clearInterval(checkInterval);
             resolve((window as any).occtimportjs());
           }
         }, 50);
-        
-        // Timeout after 5 seconds
         setTimeout(() => {
           clearInterval(checkInterval);
           reject(new Error('occt-import-js failed to initialize after timeout'));
         }, 5000);
         return;
       }
-      
+
       const script = document.createElement('script');
       script.src = '/occt-import-js.js';
       script.onload = () => {
-        // Wait for the script to initialize
         const checkInterval = setInterval(() => {
           if ((window as any).occtimportjs) {
             clearInterval(checkInterval);
             resolve((window as any).occtimportjs());
           }
         }, 50);
-        
-        // Timeout after 5 seconds
         setTimeout(() => {
           clearInterval(checkInterval);
           reject(new Error('occt-import-js failed to initialize after timeout'));
@@ -117,95 +145,114 @@ function loadOcct() {
   return occtPromise;
 }
 
+// Shared scene wrapper with lighting, controls, background
+function ViewerScene({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ height: 450, borderRadius: '8px', overflow: 'hidden' }}>
+      <Canvas
+        camera={{ position: [0, 0, 100], fov: 45 }}
+        style={{ height: 450 }}
+        shadows
+        gl={{
+          antialias: true,
+          alpha: false,
+          powerPreference: 'high-performance',
+          toneMapping: ACESFilmicToneMapping,
+          toneMappingExposure: 1.1,
+          outputColorSpace: 'srgb',
+        }}
+      >
+        {/* Gradient background */}
+        <color attach="background" args={['#f0f4f8']} />
+
+        {/* Lighting — 3-point + hemisphere for natural fill */}
+        <hemisphereLight
+          args={[new Color('#b1d8f5'), new Color('#e8e0d4'), 0.5]}
+        />
+        <ambientLight intensity={0.3} />
+        <directionalLight
+          position={[5, 8, 5]}
+          intensity={1.0}
+          castShadow
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
+          shadow-bias={-0.0001}
+        />
+        <directionalLight position={[-4, 3, -3]} intensity={0.4} />
+        <directionalLight position={[0, -2, 5]} intensity={0.2} />
+
+        {/* Soft environment reflections */}
+        <Environment preset="city" />
+
+        <Suspense fallback={null}>
+          <AutoFrame>
+            <Center>{children}</Center>
+          </AutoFrame>
+        </Suspense>
+
+        {/* Contact shadow for grounding */}
+        <ContactShadows
+          position={[0, -0.5, 0]}
+          opacity={0.3}
+          scale={20}
+          blur={2}
+          far={4}
+        />
+
+        <OrbitControls
+          enablePan
+          enableZoom
+          enableRotate
+          minDistance={0.5}
+          maxDistance={1000}
+          enableDamping
+          dampingFactor={0.08}
+          rotateSpeed={0.7}
+          zoomSpeed={1.0}
+          panSpeed={0.7}
+          makeDefault
+        />
+      </Canvas>
+    </div>
+  );
+}
+
+function applyCADMaterial(obj: any) {
+  obj.traverse((child: any) => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      child.material = createCADMaterial();
+      // Add edge lines
+      const edgesGeo = new EdgesGeometry(child.geometry, 15);
+      const edgeLines = new LineSegments(edgesGeo, createEdgeMaterial());
+      child.add(edgeLines);
+    }
+  });
+}
+
 function STLModel({ url }: { url: string }) {
-  try {
-    const geometry = useLoader(STLLoader, url);
-    return (
-      <mesh geometry={geometry} castShadow receiveShadow>
-        <primitive object={createToonMaterial()} attach="material" />
-      </mesh>
-    );
-  } catch (error) {
-    console.error('Error loading STL model:', error);
-    return (
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[1, 1, 1]} />
-        <primitive object={createToonMaterial()} attach="material" />
-      </mesh>
-    );
-  }
+  const geometry = useLoader(STLLoader, url);
+  geometry.computeVertexNormals();
+  return <CADMesh geometry={geometry} />;
 }
 
 function OBJModel({ url }: { url: string }) {
-  try {
-    const obj = useLoader(OBJLoader, url);
-    // Apply toon materials to all meshes in the OBJ
-    obj.traverse((child: any) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        if (child.material) {
-          child.material = createToonMaterial();
-        }
-      }
-    });
-    return <primitive object={obj} />;
-  } catch (error) {
-    console.error('Error loading OBJ model:', error);
-    return (
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[1, 1, 1]} />
-        <primitive object={createToonMaterial()} attach="material" />
-      </mesh>
-    );
-  }
+  const obj = useLoader(OBJLoader, url);
+  useMemo(() => applyCADMaterial(obj), [obj]);
+  return <primitive object={obj} />;
 }
 
 function GLTFModel({ url }: { url: string }) {
-  try {
-    const { scene } = useGLTF(url);
-    // Apply toon materials to all meshes in the GLTF
-    scene.traverse((child: any) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        if (child.material) {
-          child.material = createToonMaterial();
-        }
-      }
-    });
-    return <primitive object={scene} />;
-  } catch (error) {
-    console.error('Error loading GLTF model:', error);
-    return (
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[1, 1, 1]} />
-        <primitive object={createToonMaterial()} attach="material" />
-      </mesh>
-    );
-  }
+  const { scene } = useGLTF(url);
+  useMemo(() => applyCADMaterial(scene), [scene]);
+  return <primitive object={scene} />;
 }
 
-function StepModel({ url }: { url: string }) {
+function StepModelInner({ url }: { url: string }) {
   const [meshes, setMeshes] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Convert mesh data to three.js BufferGeometry - moved to top to follow Rules of Hooks
-  const mesh = meshes[0];
-  const geometry = React.useMemo(() => {
-    if (!mesh) return null;
-    
-    const geom = new BufferGeometry();
-    geom.setAttribute('position', new Float32BufferAttribute(mesh.attributes.position.array, 3));
-    if (mesh.attributes.normal) {
-      geom.setAttribute('normal', new Float32BufferAttribute(mesh.attributes.normal.array, 3));
-    }
-    if (mesh.index) {
-      geom.setIndex(mesh.index.array);
-    }
-    return geom;
-  }, [mesh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,31 +260,19 @@ function StepModel({ url }: { url: string }) {
       setLoading(true);
       setError(null);
       try {
-        console.log('Loading OCCT library...');
         const occt = await loadOcct();
-        console.log('OCCT library loaded, fetching STEP file...');
-        
         const response = await fetch(url);
         if (!response.ok) {
           throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
         }
-        
         const buffer = await response.arrayBuffer();
-        const fileBuffer = new Uint8Array(buffer);
-        console.log('Parsing STEP file...');
-        
-        const result = occt.ReadStepFile(fileBuffer, null);
+        const result = occt.ReadStepFile(new Uint8Array(buffer), null);
         if (!result.success) {
           throw new Error('Failed to parse STEP file. The file may be corrupted or in an unsupported format.');
         }
-        
-        console.log('STEP file parsed successfully, meshes:', result.meshes?.length || 0);
-        setMeshes(result.meshes || []);
+        if (!cancelled) setMeshes(result.meshes || []);
       } catch (e: any) {
-        console.error('Error loading STEP file:', e);
-        if (!cancelled) {
-          setError(e.message || 'Failed to load STEP file. Please check the file format and try again.');
-        }
+        if (!cancelled) setError(e.message || 'Failed to load STEP file.');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -246,317 +281,118 @@ function StepModel({ url }: { url: string }) {
     return () => { cancelled = true; };
   }, [url]);
 
+  // Build ALL geometries from the STEP file (not just first mesh)
+  const geometries = useMemo(() => {
+    return meshes.map((mesh) => {
+      const geom = new BufferGeometry();
+      geom.setAttribute('position', new Float32BufferAttribute(mesh.attributes.position.array, 3));
+      if (mesh.attributes.normal) {
+        geom.setAttribute('normal', new Float32BufferAttribute(mesh.attributes.normal.array, 3));
+      } else {
+        geom.computeVertexNormals();
+      }
+      if (mesh.index) {
+        geom.setIndex(Array.from(mesh.index.array));
+      }
+      return geom;
+    });
+  }, [meshes]);
+
   if (loading) return (
-    <div style={{padding: 24, textAlign: 'center'}}>
-      <div>Loading STEP file...</div>
-      <div style={{fontSize: 12, color: '#666', marginTop: 8}}>This may take a few moments for large files</div>
+    <div style={{ padding: 32, textAlign: 'center' }}>
+      <div style={{ fontSize: 16, fontWeight: 500, color: '#374151' }}>Loading STEP file...</div>
+      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>This may take a few moments for large files</div>
     </div>
   );
-  
+
   if (error) return (
-    <div style={{padding: 24, color: '#b91c1c', fontWeight: 500, fontSize: 16, textAlign: 'center'}}>
-      <div>Error loading 3D model</div>
-      <div style={{fontSize: 14, fontWeight: 400, marginTop: 8}}>{error}</div>
+    <div style={{ padding: 32, textAlign: 'center' }}>
+      <div style={{ color: '#b91c1c', fontWeight: 600, fontSize: 16 }}>Error loading 3D model</div>
+      <div style={{ fontSize: 14, color: '#6b7280', marginTop: 8 }}>{error}</div>
       {error.includes('occt-import-js') && (
-        <div style={{fontSize: 12, color: '#666', marginTop: 8}}>
+        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
           STEP file support requires the OCCT library. Please try refreshing the page.
         </div>
       )}
     </div>
   );
-  
-  if (!meshes.length) return (
-    <div style={{padding: 24, textAlign: 'center'}}>
-      <div>No geometry found in STEP file.</div>
-      <div style={{fontSize: 12, color: '#666', marginTop: 8}}>The file may be empty or contain no 3D geometry</div>
+
+  if (!geometries.length) return (
+    <div style={{ padding: 32, textAlign: 'center' }}>
+      <div style={{ fontSize: 16, color: '#374151' }}>No geometry found in STEP file.</div>
+      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>The file may be empty or contain no 3D geometry</div>
     </div>
   );
 
   return (
-    <Canvas 
-      camera={{ position: [0, 0, 100], fov: 50 }} 
-      style={{ height: 400, background: '#ffffff' }}
-      shadows={false}
-      gl={{ 
-        antialias: true, 
-        alpha: false,
-        powerPreference: "high-performance",
-        toneMapping: NoToneMapping,
-        outputColorSpace: 'srgb'
-      }}
-    >
-      <BackgroundColor />
-      {/* Enhanced lighting for better toon material visibility */}
-      <ambientLight intensity={0.8} />
-      <directionalLight 
-        position={[1, 1, 1]} 
-        intensity={1.2} 
-        castShadow={false}
-      />
-      <directionalLight 
-        position={[-1, -1, -1]} 
-        intensity={0.6} 
-        castShadow={false}
-      />
-      <directionalLight 
-        position={[0, 1, 0]} 
-        intensity={0.4} 
-        castShadow={false}
-      />
-      
-      <Suspense fallback={null}>
-        {geometry && <mesh geometry={geometry} castShadow={false} receiveShadow={false}>
-          <primitive object={createToonMaterial()} attach="material" />
-        </mesh>}
-      </Suspense>
-      
-      <OrbitControls 
-        enablePan={true}
-        enableZoom={true}
-        enableRotate={true}
-        minDistance={1}
-        maxDistance={500}
-        enableDamping={true}
-        dampingFactor={0.05}
-        rotateSpeed={0.8}
-        zoomSpeed={0.8}
-        panSpeed={0.8}
-      />
-    </Canvas>
+    <ViewerScene>
+      {geometries.map((geom, i) => (
+        <CADMesh key={i} geometry={geom} />
+      ))}
+    </ViewerScene>
   );
-}
-
-// Component to set background color
-function BackgroundColor() {
-  const { gl } = useThree();
-  
-  useEffect(() => {
-    gl.setClearColor('#ffffff', 1);
-  }, [gl]);
-  
-  return null;
 }
 
 const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
 
   let content: React.ReactNode = null;
-  
+
   if (!fileUrl || !fileName) {
     content = (
-      <div style={{padding: 24, textAlign: 'center'}}>
-        <div>No file selected.</div>
+      <div style={{ padding: 32, textAlign: 'center', color: '#6b7280' }}>
+        No file selected.
       </div>
     );
   } else if (viewerError) {
     content = (
-      <div style={{padding: 24, textAlign: 'center'}}>
-        <div style={{color: '#b91c1c', fontWeight: 500, fontSize: 16}}>3D Viewer Error</div>
-        <div style={{fontSize: 14, marginTop: 8}}>{viewerError}</div>
-        <button 
+      <div style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ color: '#b91c1c', fontWeight: 600, fontSize: 16 }}>3D Viewer Error</div>
+        <div style={{ fontSize: 14, color: '#6b7280', marginTop: 8 }}>{viewerError}</div>
+        <button
           onClick={() => setViewerError(null)}
           style={{
             marginTop: 16,
-            padding: '8px 16px',
+            padding: '8px 20px',
             backgroundColor: '#3b82f6',
             color: 'white',
             border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 500,
           }}
         >
           Try Again
         </button>
       </div>
     );
+  } else if (isSTEP(fileName)) {
+    // STEP has its own loading flow outside ViewerScene
+    content = <StepModelInner url={fileUrl} />;
   } else if (isSTL(fileName)) {
     content = (
-      <div style={{ height: 400, background: '#ffffff', borderRadius: '8px', overflow: 'hidden' }}>
-        <Canvas 
-          camera={{ position: [0, 0, 100], fov: 50 }} 
-          style={{ height: 400, background: '#ffffff' }}
-          shadows={false}
-          gl={{ 
-            antialias: true, 
-            alpha: false,
-            powerPreference: "high-performance",
-            toneMapping: NoToneMapping,
-            outputColorSpace: 'srgb'
-          }}
-          onError={(error) => {
-            console.error('Canvas error:', error);
-            setViewerError('Failed to initialize 3D viewer');
-          }}
-        >
-          <BackgroundColor />
-          {/* Enhanced lighting for better toon material visibility */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[1, 1, 1]} 
-            intensity={1.2} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[-1, -1, -1]} 
-            intensity={0.6} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.4} 
-            castShadow={false}
-          />
-          
-          <Suspense fallback={
-            <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
-          }>
-            <STLModel url={fileUrl} />
-          </Suspense>
-          
-          <OrbitControls 
-            enablePan={true}
-            enableZoom={true}
-            enableRotate={true}
-            minDistance={1}
-            maxDistance={500}
-            enableDamping={true}
-            dampingFactor={0.05}
-            rotateSpeed={0.8}
-            zoomSpeed={0.8}
-            panSpeed={0.8}
-          />
-        </Canvas>
-      </div>
+      <ViewerScene>
+        <STLModel url={fileUrl} />
+      </ViewerScene>
     );
   } else if (isOBJ(fileName)) {
     content = (
-      <div style={{ height: 400, background: '#ffffff', borderRadius: '8px', overflow: 'hidden' }}>
-        <Canvas 
-          camera={{ position: [0, 0, 100], fov: 50 }} 
-          style={{ height: 400, background: '#ffffff' }}
-          shadows={false}
-          gl={{ 
-            antialias: true, 
-            alpha: false,
-            powerPreference: "high-performance",
-            toneMapping: NoToneMapping,
-            outputColorSpace: 'srgb'
-          }}
-          onError={(error) => {
-            console.error('Canvas error:', error);
-            setViewerError('Failed to initialize 3D viewer');
-          }}
-        >
-          <BackgroundColor />
-          {/* Enhanced lighting for better toon material visibility */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[1, 1, 1]} 
-            intensity={1.2} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[-1, -1, -1]} 
-            intensity={0.6} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.4} 
-            castShadow={false}
-          />
-          
-          <Suspense fallback={
-            <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
-          }>
-            <OBJModel url={fileUrl} />
-          </Suspense>
-          
-          <OrbitControls 
-            enablePan={true}
-            enableZoom={true}
-            enableRotate={true}
-            minDistance={1}
-            maxDistance={500}
-            enableDamping={true}
-            dampingFactor={0.05}
-            rotateSpeed={0.8}
-            zoomSpeed={0.8}
-            panSpeed={0.8}
-          />
-        </Canvas>
-      </div>
+      <ViewerScene>
+        <OBJModel url={fileUrl} />
+      </ViewerScene>
     );
   } else if (isGLB(fileName) || isGLTF(fileName)) {
     content = (
-      <div style={{ height: 400, background: '#ffffff', borderRadius: '8px', overflow: 'hidden' }}>
-        <Canvas 
-          camera={{ position: [0, 0, 100], fov: 50 }} 
-          style={{ height: 400, background: '#ffffff' }}
-          shadows={false}
-          gl={{ 
-            antialias: true, 
-            alpha: false,
-            powerPreference: "high-performance",
-            toneMapping: NoToneMapping,
-            outputColorSpace: 'srgb'
-          }}
-          onError={(error) => {
-            console.error('Canvas error:', error);
-            setViewerError('Failed to initialize 3D viewer');
-          }}
-        >
-          <BackgroundColor />
-          {/* Enhanced lighting for better toon material visibility */}
-          <ambientLight intensity={0.8} />
-          <directionalLight 
-            position={[1, 1, 1]} 
-            intensity={1.2} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[-1, -1, -1]} 
-            intensity={0.6} 
-            castShadow={false}
-          />
-          <directionalLight 
-            position={[0, 1, 0]} 
-            intensity={0.4} 
-            castShadow={false}
-          />
-          
-          <Suspense fallback={
-            <div style={{padding: 24, textAlign: 'center'}}>Loading 3D model...</div>
-          }>
-            <GLTFModel url={fileUrl} />
-          </Suspense>
-          
-          <OrbitControls 
-            enablePan={true}
-            enableZoom={true}
-            enableRotate={true}
-            minDistance={1}
-            maxDistance={500}
-            enableDamping={true}
-            dampingFactor={0.05}
-            rotateSpeed={0.8}
-            zoomSpeed={0.8}
-            panSpeed={0.8}
-          />
-        </Canvas>
-      </div>
+      <ViewerScene>
+        <GLTFModel url={fileUrl} />
+      </ViewerScene>
     );
-  } else if (isSTEP(fileName)) {
-    content = <StepModel url={fileUrl} />;
   } else {
     content = (
-      <div style={{padding: 24, textAlign: 'center'}}>
-        <div>Unsupported 3D file type.</div>
-        <div style={{fontSize: 12, color: '#666', marginTop: 8}}>
+      <div style={{ padding: 32, textAlign: 'center' }}>
+        <div style={{ fontSize: 16, color: '#374151' }}>Unsupported 3D file type.</div>
+        <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8 }}>
           Supported formats: STL, OBJ, GLB, GLTF, STEP
-        </div>
-        <div style={{fontSize: 11, color: '#999', marginTop: 4}}>
-          STEP files require the OCCT library to load properly
         </div>
       </div>
     );
@@ -568,13 +404,13 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
         <DialogHeader>
           <DialogTitle>3D Viewer: {fileName}</DialogTitle>
           <DialogDescription>
-            Interactive 3D model viewer for {fileName}. Use mouse to rotate freely, scroll to zoom, and right-click to pan.
+            Rotate with left-click, zoom with scroll, pan with right-click.
           </DialogDescription>
         </DialogHeader>
-        <div style={{ minHeight: 420, minWidth: 400 }}>{content}</div>
+        <div style={{ minHeight: 450, minWidth: 400 }}>{content}</div>
       </DialogContent>
     </Dialog>
   );
 };
 
-export default ThreeDViewerModal; 
+export default ThreeDViewerModal;
