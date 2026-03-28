@@ -1,13 +1,13 @@
 import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
-import { useGLTF, Environment, ContactShadows, GizmoHelper, GizmoViewcube, Grid } from '@react-three/drei';
+import { useGLTF, Environment, GizmoHelper, GizmoViewcube } from '@react-three/drei';
 // @ts-expect-error: no types for TrackballControls
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
 import {
   BufferGeometry,
   Float32BufferAttribute,
-  MeshPhysicalMaterial,
+  MeshStandardMaterial,
   EdgesGeometry,
   LineBasicMaterial,
   LineSegments,
@@ -18,7 +18,7 @@ import {
   Group,
   Plane,
   DoubleSide,
-  FrontSide,
+  GridHelper,
 } from 'three';
 // @ts-expect-error: no types for OBJLoader
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
@@ -39,7 +39,6 @@ interface ThreeDViewerModalProps {
 interface ViewerState {
   wireframe: boolean;
   clipping: boolean;
-  projection: 'perspective' | 'orthographic';
 }
 
 // ── File type helpers ──────────────────────────────────────────────────────────
@@ -52,15 +51,14 @@ const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.to
 
 // ── Materials ──────────────────────────────────────────────────────────────────
 
-// Machined aluminum — Xometry-style blue-grey with subtle metallic reflectivity
+// MeshStandardMaterial — proven combo for CAD. Same approach as Online3DViewer.
+// MeshPhysicalMaterial was causing visual artifacts on low-poly OCCT tessellation.
 function createCADMaterial(wireframe = false) {
-  return new MeshPhysicalMaterial({
-    color: new Color('#a8b8c8'),
-    metalness: 0.35,
+  return new MeshStandardMaterial({
+    color: new Color('#b0bec5'),    // machined aluminum blue-grey
+    metalness: 0.3,
     roughness: 0.55,
-    clearcoat: 0.15,
-    clearcoatRoughness: 0.3,
-    envMapIntensity: 0.8,
+    envMapIntensity: 1.0,
     side: DoubleSide,
     wireframe,
     flatShading: false,
@@ -69,9 +67,9 @@ function createCADMaterial(wireframe = false) {
 
 function createEdgeMaterial() {
   return new LineBasicMaterial({
-    color: new Color('#4a5568'),
+    color: new Color('#546e7a'),
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.2,
     depthTest: true,
   });
 }
@@ -115,7 +113,6 @@ extend({ TrackballControls });
 
 // ── Scene internals ────────────────────────────────────────────────────────────
 
-// Unrestricted 360° rotation with no gimbal lock
 function FreeControls({ targetRef }: { targetRef: React.MutableRefObject<Vector3> }) {
   const { camera, gl } = useThree();
   const controlsRef = useRef<any>(null);
@@ -131,18 +128,16 @@ function FreeControls({ targetRef }: { targetRef: React.MutableRefObject<Vector3
     controls.noRotate = false;
     controls.minDistance = 0.01;
     controls.maxDistance = 50000;
-    // Set target to model center
     controls.target.copy(targetRef.current);
     controlsRef.current = controls;
     return () => controls.dispose();
   }, [camera, gl, targetRef]);
 
   useFrame(() => { controlsRef.current?.update(); });
-
   return null;
 }
 
-// Auto-fit camera to model, bottom-align on grid, report bounds
+// Auto-fit camera to model, bottom-align on grid
 function AutoFrame({ children, onReady }: {
   children: React.ReactNode;
   onReady?: (info: { size: number; center: Vector3; dims: Vector3 }) => void;
@@ -164,7 +159,7 @@ function AutoFrame({ children, onReady }: {
     // Bottom-align on y=0, center horizontally
     groupRef.current.position.set(-center.x, -box.min.y, -center.z);
 
-    // Isometric-ish default camera — 45° azimuth, 30° elevation
+    // Isometric default camera
     const dist = maxDim * 1.8;
     const camY = size.y * 0.5 + dist * 0.4;
     camera.position.set(dist * 0.65, camY, dist * 0.65);
@@ -177,7 +172,31 @@ function AutoFrame({ children, onReady }: {
   return <group ref={groupRef}>{children}</group>;
 }
 
-// CAD mesh with optional edge lines and clipping
+// THREE.GridHelper — simple line-based grid that renders behind everything.
+// Replaces drei <Grid> which uses a custom shader that bleeds through model surfaces.
+function SimpleGrid({ modelSize }: { modelSize: number }) {
+  const ref = useRef<any>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    // Push grid to render first (behind everything)
+    ref.current.renderOrder = -1;
+    ref.current.material.depthWrite = false;
+  }, []);
+
+  const gridSize = modelSize * 4;
+  const divisions = 20;
+
+  return (
+    <primitive
+      ref={ref}
+      object={new GridHelper(gridSize, divisions, '#a0a8b0', '#c8ccd0')}
+      position={[0, 0, 0]}
+    />
+  );
+}
+
+// CAD mesh with edge lines
 function CADMesh({ geometry, wireframe, clippingPlanes }: {
   geometry: BufferGeometry;
   wireframe: boolean;
@@ -199,7 +218,7 @@ function CADMesh({ geometry, wireframe, clippingPlanes }: {
 
   return (
     <group>
-      <mesh geometry={geometry} castShadow receiveShadow>
+      <mesh geometry={geometry}>
         <primitive object={material} attach="material" />
       </mesh>
       {!wireframe && (
@@ -214,8 +233,6 @@ function CADMesh({ geometry, wireframe, clippingPlanes }: {
 function applyCADMaterialToObj(obj: any, wireframe: boolean, clippingPlanes?: Plane[]) {
   obj.traverse((child: any) => {
     if (child.isMesh) {
-      child.castShadow = true;
-      child.receiveShadow = true;
       const mat = createCADMaterial(wireframe);
       if (clippingPlanes?.length) mat.clippingPlanes = clippingPlanes;
       child.material = mat;
@@ -267,7 +284,7 @@ const toolbarStyle: React.CSSProperties = {
   boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
 };
 
-const btnStyle: React.CSSProperties = {
+const btnBase: React.CSSProperties = {
   width: 34,
   height: 34,
   display: 'flex',
@@ -279,83 +296,50 @@ const btnStyle: React.CSSProperties = {
   color: '#d1d5db',
   cursor: 'pointer',
   fontSize: 16,
-  transition: 'background 0.15s, color 0.15s',
 };
 
-const btnActiveStyle: React.CSSProperties = {
-  ...btnStyle,
-  background: 'rgba(96, 165, 250, 0.25)',
-  color: '#60a5fa',
-};
+function ToolBtn({ active, onClick, title, children }: {
+  active?: boolean; onClick: () => void; title: string; children: React.ReactNode;
+}) {
+  return (
+    <button
+      style={{ ...btnBase, ...(active ? { background: 'rgba(96,165,250,0.25)', color: '#60a5fa' } : {}) }}
+      onClick={onClick}
+      title={title}
+      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+      onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+    >
+      {children}
+    </button>
+  );
+}
 
-function ViewerToolbar({
-  state,
-  onToggleWireframe,
-  onToggleClipping,
-  onToggleProjection,
-  onResetView,
-  onFitToScreen,
-}: {
+function ViewerToolbar({ state, onToggleWireframe, onToggleClipping, onResetView }: {
   state: ViewerState;
   onToggleWireframe: () => void;
   onToggleClipping: () => void;
-  onToggleProjection: () => void;
   onResetView: () => void;
-  onFitToScreen: () => void;
 }) {
   return (
     <div style={toolbarStyle}>
-      <button
-        style={btnStyle}
-        onClick={onResetView}
-        title="Reset View"
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-      >
+      <ToolBtn onClick={onResetView} title="Reset View">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-      </button>
-      <button
-        style={btnStyle}
-        onClick={onFitToScreen}
-        title="Fit to Screen"
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-      >
+      </ToolBtn>
+      <ToolBtn onClick={onResetView} title="Fit to Screen">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
-      </button>
+      </ToolBtn>
       <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '2px 4px' }} />
-      <button
-        style={state.wireframe ? btnActiveStyle : btnStyle}
-        onClick={onToggleWireframe}
-        title="Toggle Wireframe"
-        onMouseEnter={e => { if (!state.wireframe) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={e => { if (!state.wireframe) e.currentTarget.style.background = 'transparent'; }}
-      >
+      <ToolBtn active={state.wireframe} onClick={onToggleWireframe} title="Toggle Wireframe">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
-      </button>
-      <button
-        style={state.clipping ? btnActiveStyle : btnStyle}
-        onClick={onToggleClipping}
-        title="Cross Section"
-        onMouseEnter={e => { if (!state.clipping) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={e => { if (!state.clipping) e.currentTarget.style.background = 'transparent'; }}
-      >
+      </ToolBtn>
+      <ToolBtn active={state.clipping} onClick={onToggleClipping} title="Cross Section">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.12 8.12 17 17"/><path d="M16 2l6 6"/><path d="M2 16l6 6"/></svg>
-      </button>
-      <button
-        style={state.projection === 'orthographic' ? btnActiveStyle : btnStyle}
-        onClick={onToggleProjection}
-        title={state.projection === 'perspective' ? 'Orthographic View' : 'Perspective View'}
-        onMouseEnter={e => { if (state.projection === 'perspective') e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={e => { if (state.projection === 'perspective') e.currentTarget.style.background = 'transparent'; }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>
-      </button>
+      </ToolBtn>
     </div>
   );
 }
 
-// ── Clipping plane helper ──────────────────────────────────────────────────────
+// ── Clipping ───────────────────────────────────────────────────────────────────
 
 function ClipPlaneHelper({ plane, size }: { plane: Plane; size: number }) {
   return (
@@ -366,37 +350,13 @@ function ClipPlaneHelper({ plane, size }: { plane: Plane; size: number }) {
   );
 }
 
-// ── Enable GL clipping ─────────────────────────────────────────────────────────
-
 function EnableClipping({ enabled }: { enabled: boolean }) {
   const { gl } = useThree();
   useEffect(() => { gl.localClippingEnabled = enabled; }, [gl, enabled]);
   return null;
 }
 
-// ── Adaptive ground grid ───────────────────────────────────────────────────────
-
-function AdaptiveGrid({ modelSize }: { modelSize: number }) {
-  const cellSize = modelSize > 0 ? Math.pow(10, Math.floor(Math.log10(modelSize)) - 1) : 1;
-  const sectionSize = cellSize * 5;
-  return (
-    <Grid
-      position={[0, -0.001, 0]}
-      args={[200, 200]}
-      cellSize={cellSize}
-      cellThickness={0.5}
-      cellColor="#c8ccd0"
-      sectionSize={sectionSize}
-      sectionThickness={1}
-      sectionColor="#a0a8b0"
-      fadeDistance={modelSize * 4}
-      fadeStrength={1.2}
-      infiniteGrid
-    />
-  );
-}
-
-// ── Main scene wrapper ─────────────────────────────────────────────────────────
+// ── Main scene ─────────────────────────────────────────────────────────────────
 
 function ViewerScene({ children, state, onStateChange, onResetView }: {
   children: React.ReactNode;
@@ -417,7 +377,6 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
     targetRef.current.copy(info.center);
   };
 
-  // Clone children with wireframe/clipping props
   const enhancedChildren = React.Children.map(children, (child) => {
     if (React.isValidElement(child)) {
       return React.cloneElement(child as React.ReactElement<any>, {
@@ -429,60 +388,47 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
   });
 
   return (
-    <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: '#dde0e4' }}>
-      {/* Toolbar overlay */}
+    <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: '#e8ecf0' }}>
       <ViewerToolbar
         state={state}
         onToggleWireframe={() => onStateChange({ wireframe: !state.wireframe })}
         onToggleClipping={() => onStateChange({ clipping: !state.clipping })}
-        onToggleProjection={() => onStateChange({ projection: state.projection === 'perspective' ? 'orthographic' : 'perspective' })}
         onResetView={onResetView}
-        onFitToScreen={onResetView}
       />
 
       <Canvas
         camera={{ position: [0, 0, 100], fov: 45, near: 0.001, far: 100000 }}
         style={{ height: 560 }}
         dpr={[1.5, 2]}
-        shadows
         gl={{
           antialias: true,
           alpha: false,
           powerPreference: 'high-performance',
           toneMapping: ACESFilmicToneMapping,
-          toneMappingExposure: 1.05,
+          toneMappingExposure: 1.1,
           outputColorSpace: 'srgb',
         }}
       >
         <EnableClipping enabled={state.clipping} />
 
-        {/* Gradient-style background — clean light grey */}
-        <color attach="background" args={['#e4e7eb']} />
+        {/* Clean gradient-style background */}
+        <color attach="background" args={['#eef1f5']} />
 
-        {/* 3-point lighting + hemisphere fill */}
-        <hemisphereLight args={[new Color('#dce4ec'), new Color('#b0a898'), 0.35]} />
-        <ambientLight intensity={0.35} />
-        {/* Key light — upper-right-front, warm */}
-        <directionalLight
-          position={[10, 15, 8]}
-          intensity={1.1}
-          castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
-          shadow-bias={-0.0001}
-          shadow-camera-near={0.1}
-          shadow-camera-far={500}
-          color={new Color('#fff6ee')}
-        />
-        {/* Fill light — left, cooler */}
-        <directionalLight position={[-8, 5, -3]} intensity={0.45} color={new Color('#e4ecf4')} />
-        {/* Rim light — behind */}
-        <directionalLight position={[-2, -4, -10]} intensity={0.25} color={new Color('#d8e0e8')} />
-        {/* Subtle bottom fill */}
-        <directionalLight position={[0, -10, 5]} intensity={0.12} />
+        {/* Hemisphere for natural sky/ground fill */}
+        <hemisphereLight args={[new Color('#ffffff'), new Color('#8090a0'), 0.6]} />
+        <ambientLight intensity={0.4} />
 
-        {/* Studio HDRI for reflections */}
-        <Environment preset="studio" />
+        {/* Key light — upper-right-front, slightly warm */}
+        <directionalLight position={[10, 15, 8]} intensity={1.0} color={new Color('#fffaf5')} />
+        {/* Fill light — left, cool */}
+        <directionalLight position={[-8, 5, -3]} intensity={0.4} color={new Color('#e8f0f8')} />
+        {/* Rim light — behind and above */}
+        <directionalLight position={[-2, 8, -10]} intensity={0.3} />
+        {/* Bottom fill */}
+        <directionalLight position={[0, -8, 5]} intensity={0.15} />
+
+        {/* Environment map for PBR reflections — critical for MeshStandardMaterial */}
+        <Environment preset="city" />
 
         <Suspense fallback={null}>
           <AutoFrame onReady={handleReady}>
@@ -490,26 +436,15 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
           </AutoFrame>
         </Suspense>
 
-        {/* Ground grid */}
-        {bounds && <AdaptiveGrid modelSize={bounds.size} />}
-
-        {/* Contact shadow */}
-        {bounds && (
-          <ContactShadows
-            position={[0, 0, 0]}
-            opacity={0.3}
-            scale={bounds.size * 3}
-            blur={2}
-            far={bounds.size * 0.4}
-          />
-        )}
+        {/* Simple line-based grid — renders behind everything, no shader bleeding */}
+        {bounds && <SimpleGrid modelSize={bounds.size} />}
 
         {/* Clipping plane visual */}
         {state.clipping && bounds && clippingPlanes && (
           <ClipPlaneHelper plane={clippingPlanes[0]} size={bounds.size} />
         )}
 
-        {/* NavCube — Xometry-style orientation cube */}
+        {/* NavCube */}
         <GizmoHelper alignment="top-right" margin={[70, 70]}>
           <GizmoViewcube
             color="#e8eaed"
@@ -520,14 +455,13 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
           />
         </GizmoHelper>
 
-        {/* Unrestricted orbit */}
         <FreeControls targetRef={targetRef} />
       </Canvas>
     </div>
   );
 }
 
-// ── STEP geometry component (Canvas-safe — only renders THREE objects) ─────────
+// ── STEP mesh component (Canvas-safe) ──────────────────────────────────────────
 
 function StepMeshes({ geometries, wireframe, clippingPlanes }: {
   geometries: BufferGeometry[];
@@ -543,32 +477,23 @@ function StepMeshes({ geometries, wireframe, clippingPlanes }: {
   );
 }
 
-// ── Shared status overlay (rendered OUTSIDE Canvas) ────────────────────────────
-
-const statusContainerStyle: React.CSSProperties = {
-  height: 560,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  background: '#e4e7eb',
-  borderRadius: 8,
-};
+// ── Status overlay (plain HTML, outside Canvas) ────────────────────────────────
 
 function StatusOverlay({ type, message, detail }: { type: 'loading' | 'error' | 'empty'; message: string; detail?: string }) {
   return (
-    <div style={statusContainerStyle}>
+    <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>
       <div style={{ textAlign: 'center', maxWidth: 320 }}>
         {type === 'loading' && (
           <div style={{
-            width: 40, height: 40,
+            width: 36, height: 36,
             border: '3px solid #d1d5db', borderTopColor: '#6b7280',
             borderRadius: '50%',
-            margin: '0 auto 16px',
+            margin: '0 auto 14px',
             animation: 'viewer-spin 0.8s linear infinite',
           }} />
         )}
         <div style={{
-          fontSize: 15,
+          fontSize: 14,
           fontWeight: type === 'error' ? 600 : 500,
           color: type === 'error' ? '#dc2626' : '#374151',
         }}>
@@ -581,7 +506,7 @@ function StatusOverlay({ type, message, detail }: { type: 'loading' | 'error' | 
   );
 }
 
-// ── STEP viewer: loading/error handled as HTML overlay, geometry in Canvas ─────
+// ── STEP hook + viewer ─────────────────────────────────────────────────────────
 
 function useStepGeometries(url: string) {
   const [meshes, setMeshes] = useState<any[]>([]);
@@ -599,14 +524,15 @@ function useStepGeometries(url: string) {
         if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
         const buffer = await response.arrayBuffer();
 
-        // Pass tessellation params for higher quality meshing if supported
-        const params = new (occt.ReadStepFileParams || Object.constructor)();
-        if (params.setLinearDeflection) params.setLinearDeflection(0.1);
-        if (params.setAngularDeflection) params.setAngularDeflection(0.5);
-
-        const result = (params.setLinearDeflection)
-          ? occt.ReadStepFile(new Uint8Array(buffer), params)
-          : occt.ReadStepFile(new Uint8Array(buffer), null);
+        // occt-import-js accepts a plain object for tessellation params:
+        //   linearDeflection: smaller = smoother mesh (default ~0.5 of bbox)
+        //   linearDeflectionType: "absolute_value" for direct control
+        //   angularDeflection: in radians, smaller = smoother curves
+        const result = occt.ReadStepFile(new Uint8Array(buffer), {
+          linearDeflection: 0.1,
+          linearDeflectionType: 'absolute_value',
+          angularDeflection: 0.3,
+        });
 
         if (!result.success) throw new Error('Failed to parse STEP file.');
         if (!cancelled) setMeshes(result.meshes || []);
@@ -630,7 +556,7 @@ function useStepGeometries(url: string) {
       if (mesh.index) {
         geom.setIndex(Array.from(mesh.index.array));
       }
-      // Always recompute for smooth shading
+      // Recompute smooth normals — critical for non-faceted appearance
       geom.computeVertexNormals();
       return geom;
     });
@@ -647,12 +573,10 @@ function StepViewer({ url, state, onStateChange, onResetView }: {
 }) {
   const { geometries, loading, error } = useStepGeometries(url);
 
-  // Loading/error/empty states rendered as plain HTML (outside Canvas)
   if (loading) return <StatusOverlay type="loading" message="Loading STEP file..." detail="Parsing geometry" />;
   if (error) return <StatusOverlay type="error" message="Error loading 3D model" detail={error} />;
   if (!geometries.length) return <StatusOverlay type="empty" message="No geometry found in STEP file." />;
 
-  // Geometry ready — render inside Canvas via ViewerScene
   return (
     <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView}>
       <StepMeshes geometries={geometries} wireframe={state.wireframe} />
@@ -664,15 +588,14 @@ function StepViewer({ url, state, onStateChange, onResetView }: {
 
 const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
-  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false, projection: 'perspective' });
+  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false });
   const [viewKey, setViewKey] = useState(0);
 
   const handleStateChange = (partial: Partial<ViewerState>) => setState(prev => ({ ...prev, ...partial }));
   const handleResetView = () => setViewKey(k => k + 1);
 
-  // Reset state when file changes
   useEffect(() => {
-    setState({ wireframe: false, clipping: false, projection: 'perspective' });
+    setState({ wireframe: false, clipping: false });
     setViewKey(0);
     setViewerError(null);
   }, [fileUrl]);
@@ -681,22 +604,19 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
 
   if (!fileUrl || !fileName) {
     content = (
-      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8, color: '#9ca3af' }}>
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8, color: '#9ca3af' }}>
         No file selected.
       </div>
     );
   } else if (viewerError) {
     content = (
-      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ color: '#dc2626', fontWeight: 600 }}>3D Viewer Error</div>
           <div style={{ fontSize: 13, color: '#6b7280', marginTop: 8, maxWidth: 280 }}>{viewerError}</div>
           <button
             onClick={() => { setViewerError(null); handleResetView(); }}
-            style={{
-              marginTop: 14, padding: '7px 18px', backgroundColor: '#3b82f6', color: 'white',
-              border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 500, fontSize: 13,
-            }}
+            style={{ marginTop: 14, padding: '7px 18px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 500, fontSize: 13 }}
           >
             Try Again
           </button>
@@ -725,7 +645,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
     );
   } else {
     content = (
-      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e4e7eb', borderRadius: 8 }}>
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 15, color: '#374151' }}>Unsupported 3D file type.</div>
           <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Supported: STL, OBJ, GLB, GLTF, STEP</div>
@@ -740,7 +660,7 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
         <DialogHeader style={{ paddingBottom: 6 }}>
           <DialogTitle style={{ fontSize: 15 }}>{fileName}</DialogTitle>
           <DialogDescription style={{ fontSize: 12, color: '#9ca3af' }}>
-            Left-click drag to rotate freely, scroll to zoom, right-click drag to pan.
+            Left-click drag to rotate, scroll to zoom, right-click drag to pan.
           </DialogDescription>
         </DialogHeader>
         {content}
