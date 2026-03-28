@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, LogOut, ChevronDown, Cog, Square, Box, Layers } from 'lucide-react';
+import { Menu, X, LogOut, ChevronDown, Cog, Square, Box, Layers, User, FolderOpen, Database, Wallet, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
@@ -105,14 +105,57 @@ const Navbar = () => {
             </Button>
           </Link>
           {user && (
-            <Button 
-              variant="ghost" 
-              onClick={signOut}
-              className="flex items-center gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
+            <NavigationMenu>
+              <NavigationMenuList>
+                <NavigationMenuItem>
+                  <NavigationMenuTrigger className="bg-transparent hover:bg-transparent text-sm font-medium text-brand-dark hover:text-brand-primary data-[state=open]:bg-transparent px-3 py-2 h-auto">
+                    <User className="h-4 w-4 mr-1" />
+                    {t('navbar_my_account', 'My Account')}
+                  </NavigationMenuTrigger>
+                  <NavigationMenuContent>
+                    <ul className="w-[220px] p-2 bg-white">
+                      <li>
+                        <Link to="/customer/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                          <span className="flex items-center gap-2"><FolderOpen className="h-4 w-4" /> My Dashboard</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link to="/customer/projects" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                          <span className="flex items-center gap-2"><Database className="h-4 w-4" /> My Projects</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link to="/customer/parts-library" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                          <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> Parts Library</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link to="/customer/finance" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                          <span className="flex items-center gap-2"><Wallet className="h-4 w-4" /> My Finance</span>
+                        </Link>
+                      </li>
+                      <li className="border-t mt-1 pt-1">
+                        <Link to="/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                          <span className="flex items-center gap-2"><Briefcase className="h-4 w-4" /> Admin Dashboard</span>
+                        </Link>
+                      </li>
+                      <li className="border-t mt-1 pt-1">
+                        <button onClick={signOut} className="w-full text-left px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-red-600 flex items-center gap-2">
+                          <LogOut className="h-4 w-4" /> Logout
+                        </button>
+                      </li>
+                    </ul>
+                  </NavigationMenuContent>
+                </NavigationMenuItem>
+              </NavigationMenuList>
+            </NavigationMenu>
+          )}
+          {!user && (
+            <Link to="/login">
+              <Button size="sm" variant="outline" className="text-sm">
+                Login
+              </Button>
+            </Link>
           )}
           <LanguageSwitcher />
         </div>
@@ -142,14 +185,27 @@ const Navbar = () => {
           <MobileNavLink to={getLocalizedPath('/contact')} label={t('navbar_contact')} />
           <Link to={getLocalizedPath('/quote')} className="btn-primary text-center">{t('navbar_get_quote')}</Link>
           {user && (
-            <Button 
-              variant="ghost" 
-              onClick={signOut}
-              className="flex items-center justify-center gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
+            <>
+              <div className="border-t pt-2 mt-2">
+                <div className="font-medium text-brand-dark py-2">My Account</div>
+                <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
+                <MobileNavLink to="/customer/projects" label="My Projects" />
+                <MobileNavLink to="/customer/parts-library" label="Parts Library" />
+                <MobileNavLink to="/customer/finance" label="My Finance" />
+                <MobileNavLink to="/dashboard" label="Admin Dashboard" />
+              </div>
+              <Button
+                variant="ghost"
+                onClick={signOut}
+                className="flex items-center justify-center gap-2 text-red-600"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </>
+          )}
+          {!user && (
+            <Link to="/login" className="btn-primary text-center">Login</Link>
           )}
           <div className="w-full px-2">
             <LanguageSwitcher />

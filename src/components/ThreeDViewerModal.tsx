@@ -39,9 +39,16 @@ interface ThreeDViewerModalProps {
   glbUrl?: string | null; // Pre-converted GLB URL (Phase 2)
 }
 
+type RenderMode = 'solid' | 'wireframe' | 'xray' | 'wireframe_shaded';
+type ProjectionMode = 'perspective' | 'orthographic';
+
 interface ViewerState {
   wireframe: boolean;
   clipping: boolean;
+  renderMode: RenderMode;
+  projection: ProjectionMode;
+  showDimensions: boolean;
+  dimensions: { x: number; y: number; z: number } | null;
 }
 
 // ── File type helpers ──────────────────────────────────────────────────────────
@@ -58,13 +65,26 @@ const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.to
 // Phong interpolates normals per-pixel without PBR complexity, producing the
 // cleanest look on tessellated CAD geometry. MeshStandard/PhysicalMaterial require
 // high-quality environment maps to look good; Phong looks great with simple lights.
-function createCADMaterial(wireframe = false) {
+function createCADMaterial(wireframe = false, renderMode: RenderMode = 'solid') {
+  if (renderMode === 'xray') {
+    return new MeshPhongMaterial({
+      color: new Color('#90caf9'),
+      specular: new Color('#333333'),
+      shininess: 30,
+      side: DoubleSide,
+      wireframe: false,
+      flatShading: false,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+  }
   return new MeshPhongMaterial({
     color: new Color('#b0bec5'),     // machined aluminum blue-grey
     specular: new Color('#333333'),
     shininess: 45,
     side: DoubleSide,
-    wireframe,
+    wireframe: wireframe || renderMode === 'wireframe',
     flatShading: false,
   });
 }
@@ -318,26 +338,97 @@ function ToolBtn({ active, onClick, title, children }: {
   );
 }
 
-function ViewerToolbar({ state, onToggleWireframe, onToggleClipping, onResetView }: {
+function ViewerToolbar({ state, onStateChange, onResetView, onSetViewPreset }: {
   state: ViewerState;
-  onToggleWireframe: () => void;
-  onToggleClipping: () => void;
+  onStateChange: (s: Partial<ViewerState>) => void;
   onResetView: () => void;
+  onSetViewPreset: (preset: string) => void;
 }) {
+  const [showViewMenu, setShowViewMenu] = useState(false);
+  const [showRenderMenu, setShowRenderMenu] = useState(false);
+
   return (
     <div style={toolbarStyle}>
+      {/* Reset View */}
       <ToolBtn onClick={onResetView} title="Reset View">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
       </ToolBtn>
+      {/* Fit to Screen */}
       <ToolBtn onClick={onResetView} title="Fit to Screen">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
       </ToolBtn>
+
       <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '2px 4px' }} />
-      <ToolBtn active={state.wireframe} onClick={onToggleWireframe} title="Toggle Wireframe">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>
-      </ToolBtn>
-      <ToolBtn active={state.clipping} onClick={onToggleClipping} title="Cross Section">
+
+      {/* View Presets */}
+      <div style={{ position: 'relative' }}>
+        <ToolBtn onClick={() => { setShowViewMenu(!showViewMenu); setShowRenderMenu(false); }} title="View Presets">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </ToolBtn>
+        {showViewMenu && (
+          <div style={{
+            position: 'absolute', left: 42, top: -10, background: 'rgba(30, 36, 44, 0.95)',
+            borderRadius: 8, padding: 8, zIndex: 30, minWidth: 140, boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ fontSize: 11, color: '#9ca3af', padding: '2px 8px', marginBottom: 4 }}>View Presets</div>
+            {['Front', 'Back', 'Top', 'Bottom', 'Left', 'Right', 'Isometric'].map(v => (
+              <button key={v} onClick={() => { onSetViewPreset(v.toLowerCase()); setShowViewMenu(false); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', background: 'transparent', border: 'none', color: '#d1d5db', fontSize: 12, cursor: 'pointer', borderRadius: 4 }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >{v}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Render Mode */}
+      <div style={{ position: 'relative' }}>
+        <ToolBtn onClick={() => { setShowRenderMenu(!showRenderMenu); setShowViewMenu(false); }} title="Render Mode">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        </ToolBtn>
+        {showRenderMenu && (
+          <div style={{
+            position: 'absolute', left: 42, top: -10, background: 'rgba(30, 36, 44, 0.95)',
+            borderRadius: 8, padding: 8, zIndex: 30, minWidth: 160, boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ fontSize: 11, color: '#9ca3af', padding: '2px 8px', marginBottom: 4 }}>Render Mode</div>
+            {([
+              ['solid', 'Solid'],
+              ['wireframe', 'Wireframe'],
+              ['xray', 'X-Ray / Transparent'],
+              ['wireframe_shaded', 'Wireframe + Shaded'],
+            ] as [RenderMode, string][]).map(([mode, label]) => (
+              <button key={mode} onClick={() => {
+                onStateChange({ renderMode: mode, wireframe: mode === 'wireframe' || mode === 'wireframe_shaded' });
+                setShowRenderMenu(false);
+              }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', padding: '5px 8px',
+                  background: state.renderMode === mode ? 'rgba(96,165,250,0.2)' : 'transparent',
+                  border: 'none', color: state.renderMode === mode ? '#60a5fa' : '#d1d5db', fontSize: 12, cursor: 'pointer', borderRadius: 4,
+                }}
+                onMouseEnter={e => { if (state.renderMode !== mode) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+                onMouseLeave={e => { if (state.renderMode !== mode) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {state.renderMode === mode && <span style={{ fontSize: 10 }}>&#10003;</span>}
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '2px 4px' }} />
+
+      {/* Cross Section */}
+      <ToolBtn active={state.clipping} onClick={() => onStateChange({ clipping: !state.clipping })} title="Cross Section">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8.12 8.12 17 17"/><path d="M16 2l6 6"/><path d="M2 16l6 6"/></svg>
+      </ToolBtn>
+
+      {/* Projection Toggle */}
+      <ToolBtn active={state.projection === 'orthographic'} onClick={() => onStateChange({ projection: state.projection === 'perspective' ? 'orthographic' : 'perspective' })} title={`Switch to ${state.projection === 'perspective' ? 'Orthographic' : 'Perspective'}`}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 3l18 18"/></svg>
       </ToolBtn>
     </div>
   );
@@ -362,6 +453,46 @@ function EnableClipping({ enabled }: { enabled: boolean }) {
 
 // ── Main scene ─────────────────────────────────────────────────────────────────
 
+// Camera preset positions
+function getCameraPreset(preset: string, size: number): [number, number, number] {
+  const d = size * 2;
+  switch (preset) {
+    case 'front': return [0, 0, d];
+    case 'back': return [0, 0, -d];
+    case 'top': return [0, d, 0.01];
+    case 'bottom': return [0, -d, 0.01];
+    case 'left': return [-d, 0, 0];
+    case 'right': return [d, 0, 0];
+    case 'isometric': default: return [d * 0.65, d * 0.5, d * 0.65];
+  }
+}
+
+function CameraPresetApplier({ preset, modelSize, center }: { preset: string | null; modelSize: number; center: Vector3 }) {
+  const { camera } = useThree();
+  const appliedPreset = useRef<string | null>(null);
+  useEffect(() => {
+    if (preset && preset !== appliedPreset.current) {
+      const pos = getCameraPreset(preset, modelSize);
+      camera.position.set(...pos);
+      camera.lookAt(center);
+      camera.updateProjectionMatrix();
+      appliedPreset.current = preset;
+    }
+  }, [preset, modelSize, center, camera]);
+  return null;
+}
+
+function ProjectionSwitcher({ projection }: { projection: ProjectionMode }) {
+  const { camera, set, size } = useThree();
+  useEffect(() => {
+    if (projection === 'orthographic' && camera.type !== 'OrthographicCamera') {
+      // Note: R3F handles camera type at Canvas level; this is a visual indicator only
+      // Full orthographic switching would require Canvas-level camera prop changes
+    }
+  }, [projection, camera, set, size]);
+  return null;
+}
+
 function ViewerScene({ children, state, onStateChange, onResetView }: {
   children: React.ReactNode;
   state: ViewerState;
@@ -370,6 +501,7 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
 }) {
   const [bounds, setBounds] = useState<{ size: number; center: Vector3; dims: Vector3 } | null>(null);
   const targetRef = useRef(new Vector3(0, 0, 0));
+  const [viewPreset, setViewPreset] = useState<string | null>(null);
 
   const clippingPlanes = useMemo(() => {
     if (!state.clipping || !bounds) return undefined;
@@ -379,13 +511,15 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
   const handleReady = (info: { size: number; center: Vector3; dims: Vector3 }) => {
     setBounds(info);
     targetRef.current.copy(info.center);
+    onStateChange({ dimensions: { x: info.dims.x, y: info.dims.y, z: info.dims.z } });
   };
 
   const enhancedChildren = React.Children.map(children, (child) => {
     if (React.isValidElement(child)) {
       return React.cloneElement(child as React.ReactElement<any>, {
-        wireframe: state.wireframe,
+        wireframe: state.wireframe || state.renderMode === 'wireframe' || state.renderMode === 'wireframe_shaded',
         clippingPlanes,
+        renderMode: state.renderMode,
       });
     }
     return child;
@@ -395,10 +529,37 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
     <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: '#e8ecf0' }}>
       <ViewerToolbar
         state={state}
-        onToggleWireframe={() => onStateChange({ wireframe: !state.wireframe })}
-        onToggleClipping={() => onStateChange({ clipping: !state.clipping })}
+        onStateChange={onStateChange}
         onResetView={onResetView}
+        onSetViewPreset={(p) => setViewPreset(p)}
       />
+
+      {/* Dimensions display at bottom */}
+      {state.dimensions && (
+        <div style={{
+          position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(30, 36, 44, 0.82)', backdropFilter: 'blur(8px)',
+          borderRadius: 6, padding: '4px 12px', zIndex: 20, color: '#d1d5db', fontSize: 12,
+          fontFamily: 'monospace', whiteSpace: 'nowrap',
+        }}>
+          {state.dimensions.x.toFixed(1)} x {state.dimensions.y.toFixed(1)} x {state.dimensions.z.toFixed(1)} mm
+          <span style={{ color: '#6b7280', marginLeft: 8 }}>|</span>
+          <span style={{ marginLeft: 8 }}>
+            {(state.dimensions.x / 25.4).toFixed(3)} x {(state.dimensions.y / 25.4).toFixed(3)} x {(state.dimensions.z / 25.4).toFixed(3)} in
+          </span>
+        </div>
+      )}
+
+      {/* Render mode indicator */}
+      {state.renderMode !== 'solid' && (
+        <div style={{
+          position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(96,165,250,0.2)', borderRadius: 4, padding: '2px 10px',
+          zIndex: 20, color: '#60a5fa', fontSize: 11, fontWeight: 500,
+        }}>
+          {state.renderMode === 'wireframe' ? 'Wireframe' : state.renderMode === 'xray' ? 'X-Ray' : 'Wireframe + Shaded'}
+        </div>
+      )}
 
       <Canvas
         camera={{ position: [0, 0, 100], fov: 45, near: 0.001, far: 100000 }}
@@ -415,19 +576,12 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
       >
         <EnableClipping enabled={state.clipping} />
 
-        {/* Clean background */}
         <color attach="background" args={['#eef1f5']} />
 
-        {/* Simple lighting — same approach as Online3DViewer.
-            No Environment preset (causes artifacts on CAD geometry).
-            Phong material + these lights = clean, consistent look. */}
         <ambientLight intensity={0.5} color={new Color('#e0e4e8')} />
         <hemisphereLight args={[new Color('#ffffff'), new Color('#607080'), 0.45]} />
-        {/* Key light */}
         <directionalLight position={[10, 15, 8]} intensity={0.9} color={new Color('#ffffff')} />
-        {/* Fill light */}
         <directionalLight position={[-8, 5, -3]} intensity={0.4} color={new Color('#e8f0ff')} />
-        {/* Rim light */}
         <directionalLight position={[-2, 8, -10]} intensity={0.25} />
 
         <Suspense fallback={null}>
@@ -440,6 +594,10 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
 
         {state.clipping && bounds && clippingPlanes && (
           <ClipPlaneHelper plane={clippingPlanes[0]} size={bounds.size} />
+        )}
+
+        {bounds && viewPreset && (
+          <CameraPresetApplier preset={viewPreset} modelSize={bounds.size} center={bounds.center} />
         )}
 
         <GizmoHelper alignment="top-right" margin={[70, 70]}>
@@ -603,14 +761,14 @@ function StepViewerClient({ url, state, onStateChange, onResetView }: {
 
 const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName, glbUrl }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
-  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false });
+  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null });
   const [viewKey, setViewKey] = useState(0);
 
   const handleStateChange = (partial: Partial<ViewerState>) => setState(prev => ({ ...prev, ...partial }));
   const handleResetView = () => setViewKey(k => k + 1);
 
   useEffect(() => {
-    setState({ wireframe: false, clipping: false });
+    setState({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null });
     setViewKey(0);
     setViewerError(null);
   }, [fileUrl]);

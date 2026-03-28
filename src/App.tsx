@@ -11,6 +11,8 @@ import ScrollToTop from './components/ScrollToTop';
 import CookieConsentBanner from './components/CookieConsentBanner';
 import TranslatedRouteMatcher from './components/TranslatedRouteMatcher';
 import SEORedirects from './components/SEORedirects';
+import CustomerPortalLayout from './components/customer-portal/CustomerPortalLayout';
+import PartnerPortalLayout from './components/partner-portal/PartnerPortalLayout';
 
 // Lazy load pages to reduce initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -59,6 +61,20 @@ const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
 const Education = lazy(() => import('./pages/Education'));
 
+// Customer Portal Pages
+const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
+const MyProjectsPage = lazy(() => import('./pages/customer/MyProjectsPage'));
+const QuoteDetailPage = lazy(() => import('./pages/customer/QuoteDetailPage'));
+const PartsLibraryPage = lazy(() => import('./pages/customer/PartsLibraryPage'));
+const MyFinancePage = lazy(() => import('./pages/customer/MyFinancePage'));
+const PartConfigurationPage = lazy(() => import('./pages/customer/PartConfigurationPage'));
+const CheckoutPage = lazy(() => import('./pages/customer/CheckoutPage'));
+
+// Partner Portal Pages
+const PartnerJobBoard = lazy(() => import('./pages/partner/PartnerJobBoard'));
+const PartnerFinancePage = lazy(() => import('./pages/partner/PartnerFinancePage'));
+const PartnerOrderDetailPage = lazy(() => import('./pages/partner/PartnerOrderDetailPage'));
+
 // Loading component
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -74,13 +90,15 @@ function ConditionalFooter() {
   const path = location.pathname;
   
   // Don't show footer on dashboard routes
-  const isDashboardRoute = path.startsWith('/dashboard') || 
+  const isDashboardRoute = path.startsWith('/dashboard') ||
                           path.startsWith('/orders') ||
                           path.startsWith('/customers') ||
                           path.startsWith('/partners') ||
                           path.startsWith('/calendar') ||
                           path.startsWith('/products') ||
-                          path.startsWith('/rfq');
+                          path.startsWith('/rfq') ||
+                          path.startsWith('/customer') ||
+                          path.startsWith('/partner');
   
   if (isDashboardRoute) {
     return null;
@@ -167,6 +185,20 @@ function AppContent() {
                 <Route path="/services/3d-printing" element={<ThreeDPrinting />} />
                 <Route path="/services/injection-molding" element={<InjectionMolding />} />
                 <Route path="/services/rapid-prototyping" element={<RapidPrototyping />} />
+
+                {/* Customer Portal routes */}
+                <Route path="/customer/dashboard" element={<CustomerPortalLayout><CustomerDashboard /></CustomerPortalLayout>} />
+                <Route path="/customer/projects" element={<CustomerPortalLayout><MyProjectsPage /></CustomerPortalLayout>} />
+                <Route path="/customer/quotes/:id" element={<CustomerPortalLayout><QuoteDetailPage /></CustomerPortalLayout>} />
+                <Route path="/customer/quotes/:quoteId/parts/:partIndex" element={<CustomerPortalLayout><PartConfigurationPage /></CustomerPortalLayout>} />
+                <Route path="/customer/parts-library" element={<CustomerPortalLayout><PartsLibraryPage /></CustomerPortalLayout>} />
+                <Route path="/customer/finance" element={<CustomerPortalLayout><MyFinancePage /></CustomerPortalLayout>} />
+                <Route path="/customer/checkout/:id" element={<CustomerPortalLayout><CheckoutPage /></CustomerPortalLayout>} />
+
+                {/* Partner Portal routes */}
+                <Route path="/partner/jobs" element={<PartnerPortalLayout><PartnerJobBoard /></PartnerPortalLayout>} />
+                <Route path="/partner/orders/:id" element={<PartnerPortalLayout><PartnerOrderDetailPage /></PartnerPortalLayout>} />
+                <Route path="/partner/finance" element={<PartnerPortalLayout><PartnerFinancePage /></PartnerPortalLayout>} />
 
                 {/* Dashboard routes (language-agnostic) */}
                 <Route path="/dashboard" element={<Dashboard />} />
