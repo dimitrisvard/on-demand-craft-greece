@@ -83,9 +83,9 @@ function createCADMaterial(wireframe = false, renderMode: RenderMode = 'solid') 
     });
   }
   return new MeshPhongMaterial({
-    color: new Color('#b0bec5'),     // machined aluminum blue-grey
-    specular: new Color('#333333'),
-    shininess: 45,
+    color: new Color('#546e7a'),     // darker blue-grey for better visibility
+    specular: new Color('#222222'),
+    shininess: 50,
     side: DoubleSide,
     wireframe: wireframe || renderMode === 'wireframe',
     flatShading: false,

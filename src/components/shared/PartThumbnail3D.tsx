@@ -33,9 +33,9 @@ const isOBJ = (name: string) => /\.obj$/i.test(name);
 const isSupported = (name: string) => isSTL(name) || isSTEP(name) || isDXF(name) || isOBJ(name);
 
 const cadMaterial = new MeshPhongMaterial({
-  color: new Color('#b0bec5'),
-  specular: new Color('#333333'),
-  shininess: 45,
+  color: new Color('#546e7a'),
+  specular: new Color('#222222'),
+  shininess: 50,
   side: DoubleSide,
 });
 

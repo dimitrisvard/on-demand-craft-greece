@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { getSignedUrl } from '@/utils/awsS3Storage';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Save, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Save, Loader2, FileText, Download } from 'lucide-react';
 import {
   materialOptions,
   surfaceRoughnessOptions,
@@ -19,6 +20,41 @@ import {
 } from '@/components/quote-form/constants/materialOptions';
 import type { RFQ, RfqItem } from '@/types/customer';
 import { useToast } from '@/hooks/use-toast';
+
+const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
+const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
+
+interface RfqFile {
+  id: string;
+  rfq_id: string;
+  part_id?: string | null;
+  file_name: string;
+  file_path: string;
+  file_type: string;
+  file_size: number;
+  created_at: string;
+}
+
+const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+
+const thicknessOptions = [
+  { value: '0.5', label: '0.5 mm' },
+  { value: '0.8', label: '0.8 mm' },
+  { value: '1', label: '1.0 mm' },
+  { value: '1.5', label: '1.5 mm' },
+  { value: '2', label: '2.0 mm' },
+  { value: '2.5', label: '2.5 mm' },
+  { value: '3', label: '3.0 mm' },
+  { value: '4', label: '4.0 mm' },
+  { value: '5', label: '5.0 mm' },
+  { value: '6', label: '6.0 mm' },
+  { value: '8', label: '8.0 mm' },
+  { value: '10', label: '10.0 mm' },
+  { value: '12', label: '12.0 mm' },
+  { value: '15', label: '15.0 mm' },
+  { value: '20', label: '20.0 mm' },
+  { value: '25', label: '25.0 mm' },
+];
 
 const manufacturingProcessOptions = [
   { value: 'cnc-milling', label: 'CNC Milling' },
@@ -41,6 +77,11 @@ export default function PartConfigurationPage() {
   const [rfq, setRfq] = useState<RFQ | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Files state
+  const [partFiles, setPartFiles] = useState<RfqFile[]>([]);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [viewerOpen, setViewerOpen] = useState(false);
+
   // Form state
   const [quantity, setQuantity] = useState(1);
   const [process, setProcess] = useState('');
@@ -49,6 +90,8 @@ export default function PartConfigurationPage() {
   const [surfaceTreatment, setSurfaceTreatment] = useState('none');
   const [tolerance, setTolerance] = useState('');
   const [surfaceRoughness, setSurfaceRoughness] = useState('');
+  const [thickness, setThickness] = useState('');
+  const [needsBending, setNeedsBending] = useState(false);
   const [partMarking, setPartMarking] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [deliverySpeed, setDeliverySpeed] = useState('standard');
@@ -65,15 +108,14 @@ export default function PartConfigurationPage() {
   const fetchRfq = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('rfqs')
-        .select('*')
-        .eq('id', quoteId!)
-        .single();
+      const [rfqRes, filesRes] = await Promise.all([
+        supabase.from('rfqs').select('*').eq('id', quoteId!).single(),
+        supabase.from('rfq_files').select('*').eq('rfq_id', quoteId!),
+      ]);
 
-      if (error) throw error;
+      if (rfqRes.error) throw rfqRes.error;
 
-      const rfqData = data as unknown as RFQ;
+      const rfqData = rfqRes.data as unknown as RFQ;
       setRfq(rfqData);
 
       // Pre-fill form from existing part data
@@ -81,7 +123,42 @@ export default function PartConfigurationPage() {
       const part = parts[idx];
       if (part) {
         setQuantity(part.quantity || 1);
+
+        // Pre-fill from original_values if available
+        const ov = part.original_values as Record<string, any> | undefined;
+        if (ov) {
+          if (ov.process) setProcess(ov.process);
+          if (ov.material) setMaterialCategory(ov.material);
+          if (ov.materialSubtype) setMaterialSubtype(ov.materialSubtype);
+          if (ov.surfaceTreatment) setSurfaceTreatment(ov.surfaceTreatment);
+          if (ov.tolerance) setTolerance(ov.tolerance);
+          if (ov.surfaceRoughness) setSurfaceRoughness(ov.surfaceRoughness);
+          if (ov.thickness) setThickness(ov.thickness);
+          if (ov.needsBending !== undefined) setNeedsBending(!!ov.needsBending);
+          if (ov.partMarking) setPartMarking(ov.partMarking.split(', ').filter(Boolean));
+          if (ov.notes) setNotes(ov.notes);
+          if (ov.deliverySpeed) setDeliverySpeed(ov.deliverySpeed);
+        }
       }
+
+      // Filter files for this part
+      const allFiles = (filesRes.data as unknown as RfqFile[]) || [];
+      const partId = part?.part_id;
+      const filesForPart = partId
+        ? allFiles.filter((f) => f.part_id === partId)
+        : allFiles;
+      setPartFiles(filesForPart);
+
+      // Generate signed URLs for 3D files
+      const urlMap: Record<string, string> = {};
+      const threeDFiles = filesForPart.filter((f) => is3DFile(f.file_name));
+      await Promise.all(
+        threeDFiles.map(async (f) => {
+          const url = await getSignedUrl(f.file_path);
+          if (url) urlMap[f.id] = url;
+        })
+      );
+      setSignedUrls(urlMap);
     } catch (err: any) {
       toast({ title: 'Error loading quote', description: err.message, variant: 'destructive' });
     } finally {
@@ -92,6 +169,10 @@ export default function PartConfigurationPage() {
   const part: RfqItem | undefined = rfq?.parts_details?.[idx];
 
   const selectedMaterial = materialOptions.find((m) => m.value === materialCategory);
+
+  // Find the primary 3D file for this part
+  const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+  const threeDFileUrl = threeDFile ? signedUrls[threeDFile.id] : null;
 
   const handlePartMarkingToggle = (markingId: string) => {
     setPartMarking((prev) =>
@@ -113,6 +194,8 @@ export default function PartConfigurationPage() {
           surfaceTreatment && surfaceTreatment !== 'none' && `Surface Treatment: ${surfaceTreatment}`,
           tolerance && `Tolerance: ${tolerance}`,
           surfaceRoughness && `Surface Roughness: ${surfaceRoughness}`,
+          thickness && `Thickness: ${thickness} mm`,
+          needsBending && `Requires Bending: Yes`,
           partMarking.length > 0 && `Part Marking: ${partMarking.join(', ')}`,
           notes && `Notes: ${notes}`,
         ].filter(Boolean).join('\n'),
@@ -123,6 +206,8 @@ export default function PartConfigurationPage() {
           surfaceTreatment,
           tolerance,
           surfaceRoughness,
+          thickness,
+          needsBending,
           partMarking: partMarking.join(', '),
           notes,
           deliverySpeed,
@@ -300,6 +385,40 @@ export default function PartConfigurationPage() {
             </CardContent>
           </Card>
 
+          {/* Thickness & Bending Section */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Thickness &amp; Bending</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="thickness">Material Thickness</Label>
+                <Select value={thickness} onValueChange={setThickness}>
+                  <SelectTrigger id="thickness">
+                    <SelectValue placeholder="Select thickness" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {thicknessOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="needsBending"
+                  checked={needsBending}
+                  onCheckedChange={(checked) => setNeedsBending(!!checked)}
+                />
+                <Label htmlFor="needsBending" className="text-sm font-normal cursor-pointer">
+                  This part requires bending
+                </Label>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Finish Section */}
           <Card>
             <CardHeader className="pb-3">
@@ -472,15 +591,53 @@ export default function PartConfigurationPage() {
                 <CardTitle className="text-base">3D Preview</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="bg-muted rounded-lg flex items-center justify-center h-48">
-                  <Box className="h-12 w-12 text-muted-foreground/40" />
-                </div>
-                <p className="text-xs text-center text-muted-foreground">XXX &times; YYY &times; ZZZ mm</p>
-                <Button variant="outline" className="w-full" size="sm">
+                {threeDFile && threeDFileUrl ? (
+                  <div className="flex justify-center">
+                    <Suspense
+                      fallback={
+                        <div className="bg-muted rounded-lg flex items-center justify-center h-48 w-full">
+                          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        </div>
+                      }
+                    >
+                      <PartThumbnail3D
+                        fileUrl={threeDFileUrl}
+                        fileName={threeDFile.file_name}
+                      />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <>
+                    <div className="bg-muted rounded-lg flex items-center justify-center h-48">
+                      <Box className="h-12 w-12 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-xs text-center text-muted-foreground">No 3D file available</p>
+                  </>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                  disabled={!threeDFile || !threeDFileUrl}
+                  onClick={() => setViewerOpen(true)}
+                >
                   Open 3D Viewer
                 </Button>
               </CardContent>
             </Card>
+
+            {/* 3D Viewer Modal */}
+            {viewerOpen && threeDFile && threeDFileUrl && (
+              <Suspense fallback={null}>
+                <ThreeDViewerModal
+                  open={viewerOpen}
+                  onClose={() => setViewerOpen(false)}
+                  fileUrl={threeDFileUrl}
+                  fileType={threeDFile.file_type}
+                  fileName={threeDFile.file_name}
+                />
+              </Suspense>
+            )}
 
             {/* File Management */}
             <Card>
@@ -493,7 +650,29 @@ export default function PartConfigurationPage() {
                   <p className="text-sm font-medium">Drag &amp; drop files</p>
                   <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
                 </div>
-                <p className="text-xs text-muted-foreground">No files attached yet.</p>
+                {partFiles.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {partFiles.length} file{partFiles.length !== 1 ? 's' : ''} attached
+                    </p>
+                    {partFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="flex items-center justify-between p-2 rounded-md border text-sm"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="truncate">{file.file_name}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                          {(file.file_size / 1024).toFixed(0)} KB
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No files attached yet.</p>
+                )}
               </CardContent>
             </Card>
 
