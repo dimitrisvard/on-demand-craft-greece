@@ -65,10 +65,11 @@ const Education = lazy(() => import('./pages/Education'));
 const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
 const MyProjectsPage = lazy(() => import('./pages/customer/MyProjectsPage'));
 const QuoteDetailPage = lazy(() => import('./pages/customer/QuoteDetailPage'));
-const PartsLibraryPage = lazy(() => import('./pages/customer/PartsLibraryPage'));
+
 const MyFinancePage = lazy(() => import('./pages/customer/MyFinancePage'));
 const PartConfigurationPage = lazy(() => import('./pages/customer/PartConfigurationPage'));
 const CheckoutPage = lazy(() => import('./pages/customer/CheckoutPage'));
+const CustomerQuotePage = lazy(() => import('./pages/customer/CustomerQuotePage'));
 
 // Partner Portal Pages
 const PartnerJobBoard = lazy(() => import('./pages/partner/PartnerJobBoard'));
@@ -192,8 +193,10 @@ function AppContent() {
                 <Route path="/customer/projects" element={<CustomerPortalLayout><MyProjectsPage /></CustomerPortalLayout>} />
                 <Route path="/customer/quotes/:id" element={<CustomerPortalLayout><QuoteDetailPage /></CustomerPortalLayout>} />
                 <Route path="/customer/quotes/:quoteId/parts/:partIndex" element={<CustomerPortalLayout><PartConfigurationPage /></CustomerPortalLayout>} />
-                <Route path="/customer/parts-library" element={<CustomerPortalLayout><PartsLibraryPage /></CustomerPortalLayout>} />
+
                 <Route path="/customer/finance" element={<CustomerPortalLayout><MyFinancePage /></CustomerPortalLayout>} />
+                <Route path="/customer/quote" element={<CustomerPortalLayout><CustomerQuotePage /></CustomerPortalLayout>} />
+                <Route path="/customer/order" element={<CustomerPortalLayout><CustomerQuotePage /></CustomerPortalLayout>} />
                 <Route path="/customer/checkout/:id" element={<CustomerPortalLayout><CheckoutPage /></CustomerPortalLayout>} />
 
                 {/* Partner Portal routes */}

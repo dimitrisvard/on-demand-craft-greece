@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
-import { Plus, Eye, Copy, Trash2, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Eye, Copy, Trash2, FileText, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import type { RFQ } from '@/types/customer';
@@ -29,16 +29,19 @@ export default function MyProjectsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
     fetchRfqs();
   }, []);
 
-  // Reset to page 1 when tab or page size changes
+  // Reset to page 1 when tab, page size, or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, pageSize]);
+  }, [activeTab, pageSize, searchQuery, dateFrom, dateTo]);
 
   const fetchRfqs = async () => {
     try {
@@ -86,19 +89,45 @@ export default function MyProjectsPage() {
     }
   };
 
-  // Filter RFQs by tab
-  const filteredRfqs = rfqs.filter((rfq) => {
-    switch (activeTab) {
-      case 'quotes':
-        return ['draft', 'sent', 'received'].includes(rfq.status);
-      case 'ordered':
-        return rfq.status === 'approved';
-      case 'completed':
-        return rfq.status === 'rejected'; // placeholder until a completed status exists
-      default:
-        return true;
+  // Filter RFQs by tab, search, and date range
+  const filteredRfqs = useMemo(() => {
+    let result = rfqs.filter((rfq) => {
+      switch (activeTab) {
+        case 'quotes':
+          return ['draft', 'sent', 'received'].includes(rfq.status);
+        case 'orders':
+          return rfq.status === 'approved';
+        default:
+          return true;
+      }
+    });
+
+    // Search by PO number or RFQ number
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      result = result.filter((rfq) => {
+        const rfqNumber = (rfq.rfq_number || '').toLowerCase();
+        const title = (rfq.title || '').toLowerCase();
+        return rfqNumber.includes(query) || title.includes(query);
+      });
     }
-  });
+
+    // Date range filter
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      result = result.filter((rfq) => new Date(rfq.created_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter((rfq) => new Date(rfq.created_at) <= to);
+    }
+
+    // Sort by latest (created_at desc) - default
+    result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    return result;
+  }, [rfqs, activeTab, searchQuery, dateFrom, dateTo]);
 
   // Pagination
   const totalItems = filteredRfqs.length;
@@ -112,11 +141,38 @@ export default function MyProjectsPage() {
     return first.product_name || null;
   };
 
+  const getPartsQtySummary = (rfq: RFQ): string | null => {
+    if (!rfq.parts_details || rfq.parts_details.length === 0) return null;
+    const partsCount = rfq.parts_details.length;
+    const totalQty = rfq.parts_details.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    return `${partsCount} / ${totalQty}`;
+  };
+
   const renderStatusBadge = (status: RfqStatus) => {
     const config = STATUS_CONFIG[status];
     return (
       <Badge variant={config.variant} className={config.className}>
         {config.label}
+      </Badge>
+    );
+  };
+
+  const renderOrderBadge = (rfq: RFQ) => {
+    // For the Orders tab, show production status badges
+    if (activeTab !== 'orders') return renderStatusBadge(rfq.status);
+
+    if (rfq.status === 'approved') {
+      return (
+        <Badge variant="default" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">
+          In Production
+        </Badge>
+      );
+    }
+
+    // Fallback (for future completed status)
+    return (
+      <Badge variant="default" className="bg-green-100 text-green-700 hover:bg-green-100">
+        Completed
       </Badge>
     );
   };
@@ -131,7 +187,7 @@ export default function MyProjectsPage() {
         Get started by requesting a quote for your manufacturing project. Upload your CAD files and receive competitive pricing.
       </p>
       <Button asChild className="bg-accent hover:bg-accent/90 text-accent-foreground">
-        <Link to="/quote">
+        <Link to="/customer/quote">
           <Plus className="mr-2 h-4 w-4" />
           Start New Quote
         </Link>
@@ -141,6 +197,7 @@ export default function MyProjectsPage() {
 
   const renderQuoteCard = (rfq: RFQ) => {
     const process = getManufacturingProcess(rfq);
+    const partsQty = getPartsQtySummary(rfq);
     const isDeleteConfirm = deleteConfirmId === rfq.id;
 
     return (
@@ -156,7 +213,7 @@ export default function MyProjectsPage() {
                 >
                   {rfq.rfq_number || rfq.title || `Quote ${rfq.id.slice(0, 8)}`}
                 </Link>
-                {renderStatusBadge(rfq.status)}
+                {activeTab === 'orders' ? renderOrderBadge(rfq) : renderStatusBadge(rfq.status)}
               </div>
 
               <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
@@ -172,8 +229,15 @@ export default function MyProjectsPage() {
               </div>
             </div>
 
-            {/* Right section: total + actions */}
+            {/* Right section: qty, total + actions */}
             <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
+              {partsQty && (
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Parts / Qty</p>
+                  <p className="text-sm font-medium">{partsQty}</p>
+                </div>
+              )}
+
               <div className="text-right">
                 <p className="text-lg font-semibold">
                   {new Intl.NumberFormat('de-DE', { style: 'currency', currency: rfq.currency || 'EUR' }).format(rfq.total_amount || 0)}
@@ -333,8 +397,7 @@ export default function MyProjectsPage() {
   };
 
   const quotesCount = rfqs.filter((r) => ['draft', 'sent', 'received'].includes(r.status)).length;
-  const orderedCount = rfqs.filter((r) => r.status === 'approved').length;
-  const completedCount = rfqs.filter((r) => r.status === 'rejected').length;
+  const ordersCount = rfqs.filter((r) => r.status === 'approved').length;
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-5xl">
@@ -342,11 +405,45 @@ export default function MyProjectsPage() {
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold tracking-tight">My Projects</h1>
         <Button asChild className="bg-accent hover:bg-accent/90 text-accent-foreground">
-          <Link to="/quote">
+          <Link to="/customer/quote">
             <Plus className="mr-2 h-4 w-4" />
             New Quote
           </Link>
         </Button>
+      </div>
+
+      {/* Search and Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by PO or RFQ number..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground whitespace-nowrap">From</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <label className="text-sm text-muted-foreground whitespace-nowrap">To</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground whitespace-nowrap">Sort:</span>
+          <span className="text-sm font-medium">Latest</span>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -360,27 +457,18 @@ export default function MyProjectsPage() {
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="ordered">
-            Ordered
-            {orderedCount > 0 && (
+          <TabsTrigger value="orders">
+            Orders
+            {ordersCount > 0 && (
               <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">
-                {orderedCount}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="completed">
-            Completed
-            {completedCount > 0 && (
-              <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">
-                {completedCount}
+                {ordersCount}
               </span>
             )}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="quotes">{renderTabContent()}</TabsContent>
-        <TabsContent value="ordered">{renderTabContent()}</TabsContent>
-        <TabsContent value="completed">{renderTabContent()}</TabsContent>
+        <TabsContent value="orders">{renderTabContent()}</TabsContent>
       </Tabs>
     </div>
   );

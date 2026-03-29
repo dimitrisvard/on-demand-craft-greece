@@ -1,12 +1,12 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Upload, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box } from 'lucide-react';
+import { ArrowLeft, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import PartSpecsCard from '@/components/shared/PartSpecsCard';
@@ -84,6 +84,7 @@ function formatCurrency(amount: number, currency: string = 'EUR'): string {
 
 export default function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [rfq, setRfq] = useState<RFQ | null>(null);
   const [files, setFiles] = useState<RfqFile[]>([]);
@@ -157,6 +158,40 @@ export default function QuoteDetailPage() {
 
   const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
 
+  const handleDuplicatePart = async (index: number) => {
+    if (!rfq) return;
+    try {
+      const partToDuplicate = { ...parts[index] };
+      const updatedParts = [...parts, partToDuplicate];
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ parts_details: updatedParts as any })
+        .eq('id', rfq.id);
+      if (error) throw error;
+      toast({ title: 'Part duplicated', description: `"${partToDuplicate.product_name || `Part ${index + 1}`}" has been duplicated.` });
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: 'Failed to duplicate part', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeletePart = async (index: number) => {
+    if (!rfq) return;
+    try {
+      const partToDelete = parts[index];
+      const updatedParts = parts.filter((_, i) => i !== index);
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ parts_details: updatedParts as any })
+        .eq('id', rfq.id);
+      if (error) throw error;
+      toast({ title: 'Part deleted', description: `"${partToDelete.product_name || `Part ${index + 1}`}" has been removed.` });
+      await fetchData();
+    } catch (err: any) {
+      toast({ title: 'Failed to delete part', description: err.message, variant: 'destructive' });
+    }
+  };
+
   const handleView3D = (partFiles: RfqFile[]) => {
     const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
     if (threeDFile) {
@@ -195,20 +230,6 @@ export default function QuoteDetailPage() {
           </p>
         )}
       </div>
-
-      {/* File Upload Placeholder */}
-      <Card className="mb-6 border-dashed border-2">
-        <CardContent className="flex flex-col items-center justify-center py-8 sm:py-10 text-center">
-          <Upload className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground mb-3" />
-          <p className="text-base font-medium mb-1">Add new parts to quote</p>
-          <p className="text-sm text-muted-foreground">
-            Drag &amp; Drop your designs or{' '}
-            <Link to="/quote" className="text-primary underline hover:text-primary/80">
-              Browse
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
 
       {/* Two-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -249,9 +270,9 @@ export default function QuoteDetailPage() {
                     fileCount: partFiles.length,
                   }}
                   onView3D={has3DFile ? () => handleView3D(partFiles) : undefined}
-                  onEdit={() => {}}
-                  onDuplicate={() => {}}
-                  onDelete={() => {}}
+                  onEdit={() => navigate(`/customer/quotes/${rfq.id}/parts/${index}`)}
+                  onDuplicate={() => handleDuplicatePart(index)}
+                  onDelete={() => handleDeletePart(index)}
                   showPricing
                   showActions
                 />

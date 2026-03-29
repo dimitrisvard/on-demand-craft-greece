@@ -8,7 +8,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Upload,
   Package,
-  Database,
   Headphones,
   ChevronDown,
   ChevronUp,
@@ -24,6 +23,7 @@ interface RfqRow {
   quantity: number | null;
   estimated_value: number | null;
   created_at: string;
+  parts_details: any[] | null;
 }
 
 const getStatusColor = (status: string) => {
@@ -37,6 +37,18 @@ const getStatusColor = (status: string) => {
     default:
       return 'bg-blue-100 text-blue-800 border-blue-200';
   }
+};
+
+const getPartsQtyDisplay = (rfq: RfqRow): string => {
+  if (rfq.parts_details && Array.isArray(rfq.parts_details) && rfq.parts_details.length > 0) {
+    const numberOfParts = rfq.parts_details.length;
+    const totalQuantity = rfq.parts_details.reduce((sum, part) => {
+      const qty = typeof part.quantity === 'number' ? part.quantity : 0;
+      return sum + qty;
+    }, 0);
+    return `${numberOfParts} / ${totalQuantity}`;
+  }
+  return rfq.quantity != null ? `1 / ${rfq.quantity}` : '—';
 };
 
 const CustomerDashboard = () => {
@@ -92,13 +104,12 @@ const CustomerDashboard = () => {
           onClick={() => setShowQuotePanel(!showQuotePanel)}
         >
           <div>
-            <CardTitle>Get an Instant Quote</CardTitle>
+            <CardTitle>Get a Quote or Order</CardTitle>
             {showQuotePanel && (
               <CardDescription className="mt-1">
-                Upload your CAD files and get instant pricing for CNC Machining,
-                Sheet Metal Fabrication, and 3D Printing. Our network of
-                certified manufacturers delivers precision parts with fast
-                turnaround.
+                Upload your CAD files to get a quote or place an order. Our
+                network of certified manufacturers delivers precision parts with
+                fast turnaround.
               </CardDescription>
             )}
           </div>
@@ -112,12 +123,14 @@ const CustomerDashboard = () => {
         </CardHeader>
         {showQuotePanel && (
           <CardContent className="flex items-center gap-4">
-            <Button onClick={() => navigate('/quote')}>Get Quote</Button>
+            <Button onClick={() => navigate('/customer/quote')}>
+              Get Quote
+            </Button>
             <Button
               variant="outline"
-              onClick={() => setShowQuotePanel(false)}
+              onClick={() => navigate('/customer/order')}
             >
-              Hide
+              Place an Order
             </Button>
           </CardContent>
         )}
@@ -144,7 +157,7 @@ const CustomerDashboard = () => {
                       <th className="pb-2 pr-4 font-medium">Quote ID</th>
                       <th className="pb-2 pr-4 font-medium">Process</th>
                       <th className="pb-2 pr-4 font-medium">Status</th>
-                      <th className="pb-2 pr-4 font-medium text-right">Qty</th>
+                      <th className="pb-2 pr-4 font-medium text-right">Parts / Qty</th>
                       <th className="pb-2 font-medium text-right">Value (EUR)</th>
                     </tr>
                   </thead>
@@ -166,7 +179,7 @@ const CustomerDashboard = () => {
                           </Badge>
                         </td>
                         <td className="py-3 pr-4 text-right">
-                          {rfq.quantity ?? '—'}
+                          {getPartsQtyDisplay(rfq)}
                         </td>
                         <td className="py-3 text-right">
                           {rfq.estimated_value != null
@@ -183,7 +196,7 @@ const CustomerDashboard = () => {
             )}
             <div className="mt-4">
               <Link
-                to="/projects"
+                to="/customer/projects"
                 className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800"
               >
                 Go to My Projects
@@ -219,10 +232,10 @@ const CustomerDashboard = () => {
       </div>
 
       {/* Quick Actions Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card
           className="cursor-pointer transition-shadow hover:shadow-md"
-          onClick={() => navigate('/quote')}
+          onClick={() => navigate('/customer/quote')}
         >
           <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
             <Upload className="h-8 w-8 text-blue-600" />
@@ -232,21 +245,11 @@ const CustomerDashboard = () => {
 
         <Card
           className="cursor-pointer transition-shadow hover:shadow-md"
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/customer/projects?tab=orders')}
         >
           <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
             <Package className="h-8 w-8 text-blue-600" />
             <span className="font-medium">View Orders</span>
-          </CardContent>
-        </Card>
-
-        <Card
-          className="cursor-pointer transition-shadow hover:shadow-md"
-          onClick={() => navigate('/parts-library')}
-        >
-          <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
-            <Database className="h-8 w-8 text-blue-600" />
-            <span className="font-medium">Parts Library</span>
           </CardContent>
         </Card>
 

@@ -107,11 +107,13 @@ const Navbar = () => {
         </div>
 
         <div className="hidden xl:flex items-center space-x-4">
-          <Link to={getLocalizedPath('/quote')}>
-            <Button size="sm" variant="default" className="text-white bg-brand-accent hover:bg-brand-accent/90 px-4 font-bold shadow-sm">
-              {t('navbar_get_quote')}
-            </Button>
-          </Link>
+          {(!user || !isCustomer()) && (
+            <Link to={getLocalizedPath('/quote')}>
+              <Button size="sm" variant="default" className="text-white bg-brand-accent hover:bg-brand-accent/90 px-4 font-bold shadow-sm">
+                {t('navbar_get_quote')}
+              </Button>
+            </Link>
+          )}
           {user && (
             <NavigationMenu>
               <NavigationMenuList>
@@ -133,11 +135,6 @@ const Navbar = () => {
                           <li>
                             <Link to="/customer/projects" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
                               <span className="flex items-center gap-2"><Database className="h-4 w-4" /> My Projects</span>
-                            </Link>
-                          </li>
-                          <li>
-                            <Link to="/customer/parts-library" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
-                              <span className="flex items-center gap-2"><Database className="h-4 w-4" /> Parts Library</span>
                             </Link>
                           </li>
                           <li>
@@ -236,7 +233,6 @@ const Navbar = () => {
                   <>
                     <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
                     <MobileNavLink to="/customer/projects" label="My Projects" />
-                    <MobileNavLink to="/customer/parts-library" label="Parts Library" />
                     <MobileNavLink to="/customer/finance" label="My Finance" />
                   </>
                 )}

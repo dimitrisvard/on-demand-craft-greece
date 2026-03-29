@@ -1,6 +1,5 @@
 import { Link, NavLink, useLocation, Navigate } from 'react-router-dom';
-import { Home, FolderOpen, Database, Wallet, Plus, ChevronRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Home, FolderOpen, Wallet, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface CustomerPortalLayoutProps {
@@ -12,7 +11,6 @@ interface CustomerPortalLayoutProps {
 const portalNavItems = [
   { to: '/customer/dashboard', label: 'Dashboard', icon: Home },
   { to: '/customer/projects', label: 'My Projects', icon: FolderOpen },
-  { to: '/customer/parts-library', label: 'Parts Library', icon: Database },
   { to: '/customer/finance', label: 'My Finance', icon: Wallet },
 ];
 
@@ -36,8 +34,8 @@ const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLa
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Secondary navigation bar - sticky below the main Navbar */}
-      <nav className="sticky top-[73px] z-40 bg-white border-b border-gray-200">
+      {/* Secondary navigation bar - fixed below the main Navbar */}
+      <nav className="fixed top-[73px] left-0 right-0 z-40 bg-white border-b border-gray-200">
         <div className="container-custom">
           <div className="flex items-center justify-between h-14">
             {/* Navigation links */}
@@ -62,23 +60,12 @@ const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLa
                 );
               })}
             </div>
-
-            {/* Get a Quote accent button */}
-            <Link to="/quote">
-              <Button
-                size="sm"
-                className="bg-brand-accent hover:bg-brand-accent/90 text-white font-semibold shadow-sm"
-              >
-                <Plus className="h-4 w-4 mr-1.5" />
-                Get a Quote
-              </Button>
-            </Link>
           </div>
         </div>
       </nav>
 
       {/* Content area */}
-      <main className="container-custom py-6">
+      <main className="container-custom py-6 pt-[57px]">
         {/* Breadcrumbs */}
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav aria-label="Breadcrumb" className="mb-4">
