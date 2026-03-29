@@ -148,73 +148,113 @@ function EmbeddedSTEP({ url, onDims }: { url: string; onDims: (d: { x: number; y
   );
 }
 
-// Embedded 3D preview panel
-function Embedded3DPreview({ file }: { file: File | null }) {
+const isViewableSTL = (n: string) => /\.stl$/i.test(n);
+const isViewableSTEP = (n: string) => /\.(step|stp)$/i.test(n);
+const isViewableDXF = (n: string) => /\.dxf$/i.test(n);
+const isViewableOBJ = (n: string) => /\.obj$/i.test(n);
+const isViewable3D = (n: string) => isViewableSTL(n) || isViewableSTEP(n) || isViewableOBJ(n);
+
+// Embedded 3D preview panel - shows first 3D file from the files array
+function Embedded3DPreview({ files }: { files: File[] }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  const [previewFileName, setPreviewFileName] = useState<string | null>(null);
 
-  const isSTL = (n: string) => /\.stl$/i.test(n);
-  const isSTEP = (n: string) => /\.(step|stp)$/i.test(n);
-  const isDXF = (n: string) => /\.dxf$/i.test(n);
+  // Find the first viewable 3D file (STL, STEP/STP, OBJ -- NOT DXF)
+  const first3DFile = useMemo(() => {
+    if (!files || files.length === 0) return null;
+    return files.find((f: File) => isViewable3D(f.name)) || null;
+  }, [files]);
+
+  // Check if there's only a DXF (no viewable 3D file)
+  const firstDxfFile = useMemo(() => {
+    if (!files || files.length === 0) return null;
+    if (first3DFile) return null;
+    return files.find((f: File) => isViewableDXF(f.name)) || null;
+  }, [files, first3DFile]);
 
   useEffect(() => {
-    if (file && !isDXF(file.name)) {
-      const url = URL.createObjectURL(file);
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+    }
+    setDims(null);
+
+    if (first3DFile) {
+      const url = URL.createObjectURL(first3DFile);
       setBlobUrl(url);
-      setDims(null);
-      setLoadError(false);
-      return () => URL.revokeObjectURL(url);
+      setPreviewFileName(first3DFile.name);
     } else {
       setBlobUrl(null);
-      setDims(null);
+      setPreviewFileName(null);
     }
-  }, [file]);
 
-  if (!file) {
-    return (
-      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center">
-        <BoxIcon className="h-10 w-10 text-slate-300 mb-2" />
-        <p className="text-sm text-slate-400 font-medium">3D Preview</p>
-        <p className="text-xs text-slate-400">Upload a file to preview</p>
-      </div>
-    );
-  }
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [first3DFile]);
 
-  if (isDXF(file.name)) {
+  // No 3D file but there is a DXF
+  if (firstDxfFile) {
     return (
-      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-300 flex flex-col items-center justify-center">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
           <line x1="16" y1="13" x2="8" y2="13"/>
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
-        <span className="text-sm text-slate-500 mt-2 font-medium">2D Drawing (DXF)</span>
+        <span className="text-sm text-slate-500 mt-2 font-medium">2D Drawing</span>
+        <span className="text-xs text-slate-400 mt-1">{firstDxfFile.name}</span>
       </div>
     );
   }
 
-  if (!blobUrl) return null;
+  // No file at all
+  if (!first3DFile || !blobUrl) {
+    return (
+      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center">
+        <BoxIcon className="h-10 w-10 text-slate-300 mb-2" />
+        <span className="text-sm text-slate-400">Upload a 3D file to preview</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col">
-      <div className="rounded-lg overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 border border-teal-300" style={{ height: 200 }}>
-        <Canvas camera={{ position: [5, 5, 5], fov: 40 }} gl={{ antialias: true, alpha: true }}>
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[5, 10, 7]} intensity={1.2} />
-          <directionalLight position={[-5, -3, -5]} intensity={0.4} />
-          <Suspense fallback={null}>
-            {isSTL(file.name) && <EmbeddedSTL url={blobUrl} onDims={setDims} />}
-            {isSTEP(file.name) && <EmbeddedSTEP url={blobUrl} onDims={setDims} />}
-          </Suspense>
-          <OrbitControls enableZoom enablePan={false} autoRotate={false} />
-        </Canvas>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 min-h-0 rounded-lg overflow-hidden bg-slate-100 border border-teal-300" style={{ minHeight: 200 }}>
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-full w-full">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
+            </div>
+          }
+        >
+          <Canvas
+            camera={{ position: [5, 5, 5], fov: 40 }}
+            style={{ width: '100%', height: '100%', minHeight: 180 }}
+            gl={{ antialias: true, alpha: true }}
+          >
+            <ambientLight intensity={0.5} />
+            <directionalLight position={[5, 10, 7]} intensity={1} />
+            <directionalLight position={[-5, -3, -5]} intensity={0.3} />
+            {previewFileName && isViewableSTL(previewFileName) && (
+              <EmbeddedSTL url={blobUrl} onDims={setDims} />
+            )}
+            {previewFileName && isViewableSTEP(previewFileName) && (
+              <EmbeddedSTEP url={blobUrl} onDims={setDims} />
+            )}
+            {previewFileName && isViewableOBJ(previewFileName) && (
+              <EmbeddedSTL url={blobUrl} onDims={setDims} />
+            )}
+            <OrbitControls enableZoom={true} enablePan={true} />
+          </Canvas>
+        </Suspense>
       </div>
       {dims && (
-        <p className="text-xs text-center text-muted-foreground mt-1.5">
+        <div className="text-xs text-slate-500 text-center py-1.5">
           {dims.x.toFixed(1)} &times; {dims.y.toFixed(1)} &times; {dims.z.toFixed(1)} mm
-        </p>
+        </div>
       )}
     </div>
   );
@@ -701,7 +741,7 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                             {/* Right: Embedded 3D Preview */}
                             <div>
                               <Embedded3DPreview
-                                file={part.files?.find((f: File) => is3DFile(f.name)) || null}
+                                files={part.files || []}
                               />
                             </div>
                           </div>
