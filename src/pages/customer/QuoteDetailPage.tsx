@@ -41,6 +41,8 @@ interface ParsedSpecs {
   surfaceRoughness?: string;
   surfaceTreatment?: string;
   tolerance?: string;
+  thickness?: string;
+  needsBending?: boolean;
 }
 
 function parseSpecsFromDescription(description: string): ParsedSpecs {
@@ -60,20 +62,26 @@ function parseSpecsFromDescription(description: string): ParsedSpecs {
       specs.surfaceTreatment = line.split(':').slice(1).join(':').trim();
     } else if (lower.startsWith('tolerance:') || lower.startsWith('tolerances:')) {
       specs.tolerance = line.split(':').slice(1).join(':').trim();
+    } else if (lower.startsWith('thickness:')) {
+      specs.thickness = line.split(':').slice(1).join(':').trim().replace(/\s*mm\s*$/i, '');
+    } else if (lower.startsWith('bending:')) {
+      specs.needsBending = line.split(':').slice(1).join(':').trim().toLowerCase() === 'yes';
     }
   }
   return specs;
 }
 
-function parseSpecsFromOriginalValues(original: Record<string, string>): ParsedSpecs {
+function parseSpecsFromOriginalValues(original: Record<string, string | boolean>): ParsedSpecs {
   const specs: ParsedSpecs = {};
   for (const [key, value] of Object.entries(original)) {
     const lower = key.toLowerCase();
-    if (lower.includes('process')) specs.process = value;
-    else if (lower.includes('material')) specs.material = value;
-    else if (lower.includes('roughness')) specs.surfaceRoughness = value;
-    else if (lower.includes('treatment') || lower.includes('finishing')) specs.surfaceTreatment = value;
-    else if (lower.includes('tolerance')) specs.tolerance = value;
+    if (lower.includes('process')) specs.process = String(value);
+    else if (lower.includes('material')) specs.material = String(value);
+    else if (lower.includes('roughness')) specs.surfaceRoughness = String(value);
+    else if (lower.includes('treatment') || lower.includes('finishing')) specs.surfaceTreatment = String(value);
+    else if (lower.includes('tolerance')) specs.tolerance = String(value);
+    else if (lower === 'thickness') specs.thickness = String(value);
+    else if (lower === 'needsbending') specs.needsBending = value === true || value === 'true';
   }
   return specs;
 }
@@ -292,6 +300,8 @@ export default function QuoteDetailPage() {
                         tolerance: specs.tolerance,
                         surfaceRoughness: specs.surfaceRoughness,
                         surfaceTreatment: specs.surfaceTreatment,
+                        thickness: specs.thickness,
+                        needsBending: specs.needsBending,
                         fileCount: partFiles.length,
                       }}
                       onView3D={has3DFile ? () => handleView3D(partFiles) : undefined}

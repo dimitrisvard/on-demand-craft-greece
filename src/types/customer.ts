@@ -70,6 +70,7 @@ export type RfqItem = {
   total_price: number;
   created_at: string;
   updated_at: string;
+  original_values?: Record<string, string | boolean>;
 };
 
 // Add Order type

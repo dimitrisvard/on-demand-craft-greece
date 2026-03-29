@@ -19,6 +19,8 @@ export interface PartSpecs {
   tolerance?: string;
   surfaceRoughness?: string;
   surfaceTreatment?: string;
+  thickness?: string;
+  needsBending?: boolean;
   dimensions?: { x: number; y: number; z: number };
   volume?: number; // mm³
   surfaceArea?: number; // mm²
@@ -197,6 +199,18 @@ export default function PartSpecsCard({
                 <div>
                   <span className="text-muted-foreground block text-xs uppercase tracking-wide">Surface Treatment</span>
                   <span className="font-medium">{part.surfaceTreatment}</span>
+                </div>
+              )}
+              {part.thickness && (
+                <div>
+                  <span className="text-muted-foreground block text-xs uppercase tracking-wide">Thickness</span>
+                  <span className="font-medium">{part.thickness} mm</span>
+                </div>
+              )}
+              {part.needsBending && (
+                <div>
+                  <span className="text-muted-foreground block text-xs uppercase tracking-wide">Bending</span>
+                  <span className="font-medium text-orange-600">Yes - Requires Bending</span>
                 </div>
               )}
               {part.dimensions && (

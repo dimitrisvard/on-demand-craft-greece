@@ -52,6 +52,8 @@ export interface PartDetails {
   comments: string;
   userModifiedName: boolean;
   surfaceTreatmentOther: string;
+  thickness: string;
+  needsBending: boolean;
 }
 
 export interface StepComponentProps {

@@ -102,6 +102,8 @@ const initialValues: FormValues = {
     userModifiedName: false,
     tolerance: '',
     surfaceTreatmentOther: '',
+    thickness: '',
+    needsBending: false,
   }],
   generalNotes: '',
   internalRequestNumber: '',
@@ -265,10 +267,11 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
     try {
       console.log('Starting form submission...');
       
-      // Validate all steps before submission
-      for (const schema of validationSchemas) {
-        console.log('Validating with schema:', schema);
-        await schema.validate(values, { abortEarly: false });
+      // Validate all steps before submission (skip step 0 if company step is skipped)
+      const startSchema = skipCompanyStep ? 1 : 0;
+      for (let i = startSchema; i < validationSchemas.length; i++) {
+        console.log('Validating with schema:', i);
+        await validationSchemas[i].validate(values, { abortEarly: false });
       }
 
       // Generate RFQ/ORD number
@@ -354,6 +357,8 @@ Material: ${materialLabel}${materialSubtypeLabel ? ` (${materialSubtypeLabel})` 
 ${surfaceRoughnessLabel ? `Surface Roughness: ${surfaceRoughnessLabel}` : ''}
 ${surfaceTreatmentLabel ? `Surface Treatment: ${surfaceTreatmentLabel}` : ''}
 ${toleranceLabel ? `Tolerance: ${toleranceLabel}` : ''}
+${part.thickness ? `Thickness: ${part.thickness} mm` : ''}
+${part.needsBending ? `Bending: Yes` : ''}
 ${part.documentation ? `Documentation: ${part.documentation}` : ''}
 ${part.comments ? `Comments: ${part.comments}` : ''}`,
           quantity: part.quantity * (part.multiplier || 1),
@@ -377,6 +382,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             toleranceLabel,
             documentation: part.documentation,
             comments: part.comments,
+            thickness: part.thickness,
+            needsBending: part.needsBending,
           }
         };
       });
@@ -399,7 +406,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             contact_email: values.contact?.email,
             contact_phone: values.contact?.phone,
             mobile: values.contact?.mobile,
-            customer_id: user?.id || null,
+            customer_id: null,
             status: isOrder ? 'approved' : 'draft',
             currency: 'EUR',
             due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),

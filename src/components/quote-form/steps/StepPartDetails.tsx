@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense, useMemo } from 'react';
 import { FormikProps, FieldArray } from 'formik';
-import { Plus, Trash2, FileText, X, MoreHorizontal, Check } from 'lucide-react';
+import { Plus, Trash2, FileText, X, MoreHorizontal, Check, RotateCcw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -24,12 +25,37 @@ import { Upload as UploadIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from 'react-i18next';
 
+const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
+
+const thicknessOptions = [
+  { value: '0.5', label: '0.5 mm' },
+  { value: '0.8', label: '0.8 mm' },
+  { value: '1', label: '1.0 mm' },
+  { value: '1.5', label: '1.5 mm' },
+  { value: '2', label: '2.0 mm' },
+  { value: '2.5', label: '2.5 mm' },
+  { value: '3', label: '3.0 mm' },
+  { value: '4', label: '4.0 mm' },
+  { value: '5', label: '5.0 mm' },
+  { value: '6', label: '6.0 mm' },
+  { value: '8', label: '8.0 mm' },
+  { value: '10', label: '10.0 mm' },
+  { value: '12', label: '12.0 mm' },
+  { value: '15', label: '15.0 mm' },
+  { value: '20', label: '20.0 mm' },
+  { value: '25', label: '25.0 mm' },
+];
+
+const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+
 const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
   const { values, errors, touched, handleChange, setFieldValue } = formikProps;
   const { toast } = useToast();
   const { t } = useTranslation();
   const [materialSubtypes, setMaterialSubtypes] = useState<any[]>([]);
   const [expandedAccordions, setExpandedAccordions] = useState<string[]>(['part-0']);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
 
   const handleMaterialChange = (partIndex: number, value: string) => {
     const selectedMaterial = materialOptions.find((m) => m.value === value);
@@ -372,6 +398,50 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                           </div>
                         </div>
 
+                        {/* Thickness & Bending */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                          <div>
+                            <Label htmlFor={`parts[${index}].thickness`}>
+                              Material Thickness
+                            </Label>
+                            <Select
+                              value={part.thickness || ''}
+                              onValueChange={(value) =>
+                                setFieldValue(`parts[${index}].thickness`, value)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select thickness" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {thicknessOptions.map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="flex items-end pb-2">
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`parts[${index}].needsBending`}
+                                checked={part.needsBending || false}
+                                onCheckedChange={(checked) =>
+                                  setFieldValue(`parts[${index}].needsBending`, !!checked)
+                                }
+                              />
+                              <Label
+                                htmlFor={`parts[${index}].needsBending`}
+                                className="text-sm font-normal cursor-pointer"
+                              >
+                                This part requires bending
+                              </Label>
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="mb-6">
                           <Label htmlFor={`parts[${index}].comments`}>
                             {t('quote_form_comments')}
@@ -417,23 +487,44 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                             <div className="mt-4">
                               <h4 className="text-sm font-medium mb-2">{t('quote_form_files_uploaded')}:</h4>
                               <div className="space-y-2">
-                                {part.files.map((file: any, fileIndex: number) => (
-                                  <div key={fileIndex} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                                    <div className="flex items-center">
-                                      <FileText className="h-4 w-4 text-gray-500 mr-2" />
-                                      <span className="text-sm">{file.name}</span>
+                                {part.files.map((file: any, fileIndex: number) => {
+                                  const canPreview3D = is3DFile(file.name);
+                                  return (
+                                    <div key={fileIndex} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                      <div className="flex items-center">
+                                        <FileText className="h-4 w-4 text-gray-500 mr-2" />
+                                        <span className="text-sm">{file.name}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        {canPreview3D && (
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => {
+                                              const url = URL.createObjectURL(file);
+                                              setViewerFile({ url, name: file.name });
+                                              setViewerOpen(true);
+                                            }}
+                                            className="h-7 px-2 text-teal-600 hover:text-teal-700"
+                                          >
+                                            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                                            <span className="text-xs">3D View</span>
+                                          </Button>
+                                        )}
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={() => removeFile(index, fileIndex)}
+                                          className="h-6 w-6 p-0"
+                                        >
+                                          <X className="h-4 w-4" />
+                                        </Button>
+                                      </div>
                                     </div>
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => removeFile(index, fileIndex)}
-                                      className="h-6 w-6 p-0"
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
                             </div>
                           )}
@@ -465,6 +556,8 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                     userModifiedName: false,
                     tolerance: '',
                     surfaceTreatmentOther: '',
+                    thickness: '',
+                    needsBending: false,
                   });
                   // Auto-open the new part accordion
                   setTimeout(() => {
@@ -498,6 +591,21 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
         </div>
       </div>
+
+      {/* 3D Viewer Modal for file preview */}
+      <Suspense fallback={null}>
+        <ThreeDViewerModal
+          open={viewerOpen}
+          onClose={() => {
+            setViewerOpen(false);
+            if (viewerFile?.url) URL.revokeObjectURL(viewerFile.url);
+            setViewerFile(null);
+          }}
+          fileUrl={viewerFile?.url || null}
+          fileType={null}
+          fileName={viewerFile?.name || null}
+        />
+      </Suspense>
     </div>
   );
 };
