@@ -47,9 +47,16 @@ const Login = () => {
       await signIn(email, password);
       // Navigation is handled by AuthContext based on user role
     } catch (error: any) {
+      console.error('Login error:', error);
+      let description = error?.message || "Please check your credentials and try again";
+      if (description.includes('Invalid login credentials')) {
+        description = "Invalid email or password. Please check your credentials and try again.";
+      } else if (description.includes('Email not confirmed')) {
+        description = "Your email is not verified yet. Please check your inbox for the verification link.";
+      }
       toast({
         title: "Login Failed",
-        description: error.message || "Please check your credentials and try again",
+        description,
         variant: "destructive",
       });
     } finally {
@@ -148,9 +155,20 @@ const Login = () => {
         });
       }
     } catch (error: any) {
+      console.error('Registration error:', error);
+      const message = error?.message || "An error occurred during registration";
+      // Provide user-friendly messages for common errors
+      let description = message;
+      if (message.includes('unexpected_failure') || error?.status === 500) {
+        description = "Server error during registration. Please try again in a moment or contact support.";
+      } else if (message.includes('already registered') || message.includes('already been registered')) {
+        description = "This email is already registered. Please sign in instead.";
+      } else if (message.includes('rate limit') || message.includes('too many')) {
+        description = "Too many attempts. Please wait a moment and try again.";
+      }
       toast({
         title: "Registration failed",
-        description: error.message || "An error occurred during registration",
+        description,
         variant: "destructive",
       });
     } finally {
