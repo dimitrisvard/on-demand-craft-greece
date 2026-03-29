@@ -18,7 +18,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle 
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import html2pdf from 'html2pdf.js';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import RfqFileList from '@/components/rfq/RfqFileList';
 import RfqFileUpload from '@/components/rfq/RfqFileUpload';
@@ -958,19 +957,19 @@ const RfqDetails = (props: RfqDetailsProps) => {
         ],
       },
       buyer: {
-        name: customer.first_name + ' ' + customer.last_name,
-        company: customer.company_name,
-        address_lines: [customer.street_address, customer.city + ', ' + customer.zip_code],
-        country: customer.country,
+        name: (customer.first_name || '') + ' ' + (customer.last_name || ''),
+        company: customer.company_name || '',
+        address_lines: [customer.street_address || '', (customer.city || '') + ', ' + (customer.zip_code || '')],
+        country: customer.country || '',
       },
       project_no: rfq.project_no || '',
       receipt_no: rfqNumber,
       date: rfq.created_at,
       inquiry_date: rfq.inquiry_date || rfq.created_at,
       contact_partner: {
-        name: customer.first_name + ' ' + customer.last_name,
+        name: (customer.first_name || '') + ' ' + (customer.last_name || ''),
         phone: customer.phone || '',
-        email: customer.email,
+        email: customer.email || '',
       },
       items: rfqItems.map((item) => {
         const filesForPartArr = (partFiles[item.id] || []).map(f => {
@@ -1183,7 +1182,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
       const link = document.createElement('a');
       link.href = `data:application/pdf;base64,${pdfBase64}`;
       link.download = `offer_${rfq.rfq_number || rfq.id}.pdf`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
 
       toast({
         title: 'Success',

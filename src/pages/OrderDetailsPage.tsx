@@ -662,10 +662,10 @@ export default function OrderDetailsPage() {
         address_lines: [''],
         country: '',
       } : {
-        name: customer.first_name + ' ' + customer.last_name,
-        company: customer.company_name,
-        address_lines: [customer.street_address, customer.city + ', ' + customer.zip_code],
-        country: customer.country,
+        name: (customer.first_name || '') + ' ' + (customer.last_name || ''),
+        company: customer.company_name || '',
+        address_lines: [customer.street_address || '', (customer.city || '') + ', ' + (customer.zip_code || '')],
+        country: customer.country || '',
       },
       order_id: generateOrderId(),
       title: order.title,
@@ -845,6 +845,8 @@ export default function OrderDetailsPage() {
     });
     } catch (error) {
       console.error('Error generating PDF:', error);
+      // Clean up container if it was added to the DOM
+      try { document.body.removeChild(container); } catch (_) {}
       toast({
         title: 'Error',
         description: 'Failed to generate PDF. Please try again.',
