@@ -29,6 +29,7 @@ const Login = () => {
   const [regPhone, setRegPhone] = useState("");
   const [regCountry, setRegCountry] = useState("");
   const [showRegPassword, setShowRegPassword] = useState(false);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,13 +111,17 @@ const Login = () => {
 
       // If user was created and confirmed immediately (no email verification required)
       if (data.user && data.session) {
-        // Save customer profile data
-        await supabase.from('customer_profiles').upsert({
-          user_id: data.user.id,
-          company_name: regCompanyName,
-          phone: regPhone,
-          country: regCountry,
-        });
+        // Save customer profile data (non-blocking - don't let this fail registration)
+        try {
+          await supabase.from('customer_profiles').upsert({
+            user_id: data.user.id,
+            company_name: regCompanyName,
+            phone: regPhone,
+            country: regCountry,
+          });
+        } catch (profileError) {
+          console.warn('Could not save customer profile:', profileError);
+        }
 
         toast({
           title: "Account created!",
@@ -127,11 +132,19 @@ const Login = () => {
         setTimeout(() => {
           navigate('/customer/dashboard');
         }, 500);
-      } else {
-        // Email verification required
+      } else if (data.user && !data.session) {
+        // Email verification required - show persistent message
+        setRegistrationSuccess(true);
         toast({
           title: "Account created!",
           description: "Please check your email to verify your account before logging in.",
+        });
+      } else {
+        // User already exists or other edge case
+        setRegistrationSuccess(true);
+        toast({
+          title: "Check your email",
+          description: "If an account with this email exists, you'll receive a verification email. Otherwise, try signing in.",
         });
       }
     } catch (error: any) {
@@ -246,6 +259,25 @@ const Login = () => {
 
             {/* REGISTER TAB */}
             <TabsContent value="register">
+              {registrationSuccess ? (
+                <CardContent className="py-8 text-center space-y-4">
+                  <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                    <Mail className="h-8 w-8 text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-green-800">Account Created Successfully!</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                    We've sent a verification email to <strong>{regEmail}</strong>.
+                    Please check your inbox (and spam folder) and click the verification link to activate your account.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => setRegistrationSuccess(false)}
+                    className="mt-4"
+                  >
+                    Back to Registration
+                  </Button>
+                </CardContent>
+              ) : (
               <form onSubmit={handleRegister}>
                 <CardContent className="space-y-4">
                   {/* Name fields */}
@@ -398,6 +430,7 @@ const Login = () => {
                   </Button>
                 </CardFooter>
               </form>
+              )}
             </TabsContent>
           </Tabs>
         </Card>
