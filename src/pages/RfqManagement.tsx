@@ -1,23 +1,30 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RFQ, RfqItem } from "@/types/customer";
 import { Database } from '@/integrations/supabase/types';
-import { Briefcase, FileText, Calendar, Package } from "lucide-react";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  FilePlus,
+  Search,
+  MoreHorizontal,
+  Eye,
+  Trash2,
+  Send,
+  FileCheck,
+  UserPlus,
+  FileText,
+  Package,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Download,
+  Copy,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
@@ -33,33 +40,41 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { 
-  ChevronLeft, 
-  ChevronDown, 
-  ChevronUp,
-  FilePlus, 
-  Search, 
-  MoreHorizontal, 
-  Edit, 
-  FileText, 
-  Trash, 
-  Plus,
-  Download,
-  Send,
-  FileCheck,
-  UserPlus
-} from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { CustomerSearchAssign } from "@/components/customers/CustomerSearchAssign";
 import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
+import { format } from "date-fns";
 
 type RfqStatus = "draft" | "sent" | "received" | "approved" | "rejected";
+type RfqRow = Database['public']['Tables']['rfqs']['Row'];
 
 type Customer = {
   id: string;
   company_name: string;
 };
 
-type RfqRow = Database['public']['Tables']['rfqs']['Row'];
+// Status config matching customer-side
+const RFQ_STATUS_CONFIG: Record<RfqStatus, { label: string; className: string }> = {
+  draft: { label: 'Draft', className: 'bg-gray-100 text-gray-700 hover:bg-gray-100' },
+  sent: { label: 'Quoted', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+  received: { label: 'Under Review', className: 'bg-orange-100 text-orange-700 hover:bg-orange-100' },
+  approved: { label: 'Approved', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
+  rejected: { label: 'Rejected', className: 'bg-red-100 text-red-700 hover:bg-red-100' },
+};
+
+const ORDER_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
+  new: { label: 'New', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+  in_progress: { label: 'In Progress', className: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100' },
+  completed: { label: 'Completed', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
+  cancelled: { label: 'Cancelled', className: 'bg-red-100 text-red-700 hover:bg-red-100' },
+};
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+
+function formatCurrency(amount: number, currency: string = 'EUR'): string {
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency }).format(amount);
+}
 
 export default function RfqManagement() {
   const [rfqs, setRfqs] = useState<RFQ[]>([]);
@@ -68,27 +83,30 @@ export default function RfqManagement() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedRfq, setSelectedRfq] = useState<RFQ | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
-  const [expandedRfqId, setExpandedRfqId] = useState<string | null>(null);
   const [isRfqDialogOpen, setIsRfqDialogOpen] = useState(false);
   const [isItemDialogOpen, setIsItemDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isConvertToOrderDialogOpen, setIsConvertToOrderDialogOpen] = useState(false);
   const [isCustomerAssignDialogOpen, setIsCustomerAssignDialogOpen] = useState(false);
   const [isOrderCustomerAssignDialogOpen, setIsOrderCustomerAssignDialogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<RfqStatus | "all">("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [statusFilter, setStatusFilter] = useState<RfqStatus | "all">("all");
   const [mainTab, setMainTab] = useState<"rfqs" | "orders">("rfqs");
-  
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
   const [newRfq, setNewRfq] = useState<Partial<RFQ>>({
     title: "",
     customer_id: "",
     status: "draft" as RfqStatus,
-    currency: "USD",
+    currency: "EUR",
     due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     version: 1
   });
-  
+
   const [newItem, setNewItem] = useState<Partial<RfqItem>>({
     product_name: "",
     description: "",
@@ -96,7 +114,7 @@ export default function RfqManagement() {
     unit_price: 0,
     total_price: 0
   });
-  
+
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -106,107 +124,56 @@ export default function RfqManagement() {
     fetchOrders();
   }, []);
 
-  useEffect(() => {
-    fetchRfqs();
-  }, [activeTab, searchQuery]);
-
-  useEffect(() => {
-    if (expandedRfqId) {
-      fetchRfqItems(expandedRfqId);
-    }
-  }, [expandedRfqId]);
+  useEffect(() => { setCurrentPage(1); }, [mainTab, pageSize, searchQuery, dateFrom, dateTo, statusFilter]);
 
   useEffect(() => {
     if (newItem.unit_price !== undefined && newItem.quantity !== undefined) {
-      setNewItem({
-        ...newItem,
-        total_price: newItem.unit_price * newItem.quantity
-      });
+      setNewItem(prev => ({ ...prev, total_price: (prev.unit_price || 0) * (prev.quantity || 0) }));
     }
   }, [newItem.unit_price, newItem.quantity]);
 
+  // ── Data fetching ──────────────────────────────────────────
   async function fetchRfqs() {
     try {
       setLoading(true);
-      
-      let query = supabase
+      const { data, error } = await supabase
         .from('rfqs')
-        .select('*, customers(company_name)');
-      
-      if (activeTab !== "all") {
-        query = query.eq('status', activeTab);
-      }
-      
-      if (searchQuery) {
-        query = query.or(`title.ilike.%${searchQuery}%,customers.company_name.ilike.%${searchQuery}%`);
-      }
-      
-      const { data, error } = await query.order('created_at', { ascending: false });
+        .select('*, customers(company_name, email, phone, vat_tax_id)')
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      
-      const transformedData: RFQ[] = data.map(item => ({
+
+      const transformedData: RFQ[] = (data || []).map(item => ({
         id: item.id,
         title: item.title,
         customer_id: item.customer_id,
-        customer_name: item.customers?.company_name || 'Unknown',
+        customer_name: item.customers?.company_name || 'Unassigned',
+        rfq_number: (item as any).rfq_number,
         status: item.status as RfqStatus,
         total_amount: item.total_amount || 0,
-        currency: item.currency || 'USD',
+        currency: item.currency || 'EUR',
         created_at: item.created_at,
         due_date: item.due_date || new Date().toISOString(),
         version: item.version || 1,
-        parts_details: (item as unknown as { parts_details: RfqItem[] }).parts_details || []
+        parts_details: (item as unknown as { parts_details: RfqItem[] }).parts_details || [],
+        customer: item.customers as any,
       }));
-      
+
       setRfqs(transformedData);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to load RFQs",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to load RFQs", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchRfqItems(rfqId: string) {
-    try {
-      const { data, error } = await supabase
-        .from('rfqs')
-        .select('parts_details')
-        .eq('id', rfqId)
-        .single();
-
-      if (error) throw error;
-      
-      const partsDetails = ((data as unknown as { parts_details: RfqItem[] })?.parts_details || []) as RfqItem[];
-      setRfqItems(partsDetails);
-    } catch (error: any) {
-      toast({
-        title: "Error", 
-        description: error.message || "Failed to load RFQ items",
-        variant: "destructive",
-      });
-    }
-  }
-
   async function fetchCustomers() {
     try {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('id, company_name')
-        .order('company_name', { ascending: true });
-
+      const { data, error } = await supabase.from('customers').select('id, company_name').order('company_name', { ascending: true });
       if (error) throw error;
       setCustomers(data as Customer[]);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to load customers",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to load customers", variant: "destructive" });
     }
   }
 
@@ -214,26 +181,79 @@ export default function RfqManagement() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*, customers(company_name, vat_tax_id)')
+        .select('*, customers(company_name, email, phone, vat_tax_id)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      const transformedOrders = (data || []).map(item => ({
+      const transformed = (data || []).map(item => ({
         ...item,
         customer_name: item.customers?.company_name || 'Unassigned',
+        customer_email: item.customers?.email,
+        customer_phone: item.customers?.phone,
         customer_vat: item.customers?.vat_tax_id,
       }));
-      setOrders(transformedOrders);
+      setOrders(transformed);
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to load orders",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to load orders", variant: "destructive" });
     }
   }
 
+  // ── Filtered & paginated data ──────────────────────────────
+  const filteredRfqs = useMemo(() => {
+    let result = [...rfqs];
+
+    if (statusFilter !== "all") {
+      result = result.filter(r => r.status === statusFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(r =>
+        (r.rfq_number || '').toLowerCase().includes(q) ||
+        (r.title || '').toLowerCase().includes(q) ||
+        (r.customer_name || '').toLowerCase().includes(q)
+      );
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      result = result.filter(r => new Date(r.created_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter(r => new Date(r.created_at) <= to);
+    }
+    return result;
+  }, [rfqs, statusFilter, searchQuery, dateFrom, dateTo]);
+
+  const filteredOrders = useMemo(() => {
+    let result = [...orders];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(o =>
+        generateOrderId(o).toLowerCase().includes(q) ||
+        (o.title || '').toLowerCase().includes(q) ||
+        (o.customer_name || '').toLowerCase().includes(q)
+      );
+    }
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      result = result.filter(o => new Date(o.created_at) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter(o => new Date(o.created_at) <= to);
+    }
+    return result;
+  }, [orders, searchQuery, dateFrom, dateTo]);
+
+  const currentItems = mainTab === 'rfqs' ? filteredRfqs : filteredOrders;
+  const totalItems = currentItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedItems = currentItems.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  // ── Order ID generation ────────────────────────────────────
   const generateOrderId = (order: any) => {
     const orderDate = new Date(order.created_at);
     const day = String(orderDate.getDate()).padStart(2, '0');
@@ -241,220 +261,77 @@ export default function RfqManagement() {
     const year = orderDate.getFullYear();
     const dateStr = `${day}${month}${year}`;
 
-    // Find all orders on the same date and determine sequence number
     const sameDateOrders = orders
       .filter(o => {
         const d = new Date(o.created_at);
-        return d.getDate() === orderDate.getDate() &&
-               d.getMonth() === orderDate.getMonth() &&
-               d.getFullYear() === orderDate.getFullYear();
+        return d.getDate() === orderDate.getDate() && d.getMonth() === orderDate.getMonth() && d.getFullYear() === orderDate.getFullYear();
       })
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
     const seqIndex = sameDateOrders.findIndex(o => o.id === order.id);
-    const seqNum = seqIndex >= 0 ? seqIndex + 1 : 1;
-
-    return `PO-${dateStr}-${seqNum}`;
+    return `PO-${dateStr}-${seqIndex >= 0 ? seqIndex + 1 : 1}`;
   };
 
-  const getOrderStatusBadge = (status: string) => {
-    switch (status) {
-      case 'new':
-        return <Badge>New</Badge>;
-      case 'in_progress':
-        return <Badge variant="default">In Progress</Badge>;
-      case 'completed':
-        return <Badge variant="secondary">Completed</Badge>;
-      case 'cancelled':
-        return <Badge variant="destructive">Cancelled</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
+  // ── RFQ Actions ────────────────────────────────────────────
   const handleAddRfq = async () => {
     try {
       if (!newRfq.title || !newRfq.customer_id) {
-        toast({
-          title: "Error",
-          description: "Title and customer are required",
-          variant: "destructive",
-        });
+        toast({ title: "Error", description: "Title and customer are required", variant: "destructive" });
         return;
       }
-
       const { data, error } = await supabase
         .from('rfqs')
-        .insert([
-          {
-            title: newRfq.title,
-            customer_id: newRfq.customer_id,
-            status: newRfq.status,
-            currency: newRfq.currency,
-            due_date: newRfq.due_date,
-            version: newRfq.version,
-            total_amount: 0
-          }
-        ])
+        .insert([{ title: newRfq.title, customer_id: newRfq.customer_id, status: newRfq.status, currency: newRfq.currency, due_date: newRfq.due_date, version: newRfq.version, total_amount: 0 }])
         .select();
 
       if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "RFQ created successfully",
-      });
+      toast({ title: "Success", description: "RFQ created successfully" });
 
       if (data && data.length > 0) {
         navigate(`/rfq/${data[0].id}`);
       } else {
         fetchRfqs();
         setIsRfqDialogOpen(false);
-        resetNewRfqForm();
       }
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create RFQ",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleAddItem = async () => {
-    try {
-      if (!selectedRfq || !newItem.product_name) {
-        toast({
-          title: "Error",
-          description: "Product name is required",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Get current RFQ data
-      const { data: rfqData, error: rfqError } = await supabase
-        .from('rfqs')
-        .select('parts_details')
-        .eq('id', selectedRfq.id)
-        .single();
-      
-      if (rfqError) throw rfqError;
-
-      const now = new Date().toISOString();
-      
-      // Create new item with ID
-      const newItemWithId: RfqItem = {
-        id: crypto.randomUUID(),
-        rfq_id: selectedRfq.id,
-        product_name: newItem.product_name || '',
-        description: newItem.description || '',
-        quantity: newItem.quantity || 0,
-        unit_price: newItem.unit_price || 0,
-        total_price: newItem.total_price || 0,
-        created_at: now,
-        updated_at: now
-      };
-      
-      // Update parts_details array
-      const currentParts = ((rfqData as unknown as { parts_details: RfqItem[] })?.parts_details || []) as RfqItem[];
-      const updatedParts = [...currentParts, newItemWithId];
-      
-      // Update RFQ with new parts_details
-      const { error: updateError } = await supabase
-        .from('rfqs')
-        .update({ parts_details: updatedParts } as unknown as RfqRow)
-        .eq('id', selectedRfq.id);
-      
-      if (updateError) throw updateError;
-
-      // Update total
-      const newTotal = (currentParts.reduce((sum, item) => sum + item.total_price, 0) + newItemWithId.total_price) || 0;
-      await updateRfqTotal(selectedRfq.id, newTotal);
-
-      toast({
-        title: "Success",
-        description: "Item added successfully",
-      });
-
-      fetchRfqItems(selectedRfq.id);
-      setIsItemDialogOpen(false);
-      resetNewItemForm();
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to add item",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to create RFQ", variant: "destructive" });
     }
   };
 
   const handleUpdateRfqStatus = async (rfqId: string, newStatus: RfqStatus) => {
     try {
-      const { error } = await supabase
-        .from('rfqs')
-        .update({ status: newStatus })
-        .eq('id', rfqId);
-
+      const { error } = await supabase.from('rfqs').update({ status: newStatus }).eq('id', rfqId);
       if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: `RFQ ${newStatus === 'approved' ? 'approved and converted to order' : newStatus}`,
-      });
-
-      if (newStatus === 'approved') {
-        await createOrderFromRfq(rfqId);
-      }
-
+      toast({ title: "Success", description: `RFQ ${newStatus === 'approved' ? 'approved and converted to order' : newStatus}` });
+      if (newStatus === 'approved') await createOrderFromRfq(rfqId);
       fetchRfqs();
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update RFQ status",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to update RFQ status", variant: "destructive" });
     }
   };
 
   const createOrderFromRfq = async (rfqId: string) => {
     try {
-      const { data: rfqData, error: rfqError } = await supabase
-        .from('rfqs')
-        .select('*')
-        .eq('id', rfqId)
-        .single();
-
+      const { data: rfqData, error: rfqError } = await supabase.from('rfqs').select('*').eq('id', rfqId).single();
       if (rfqError) throw rfqError;
 
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
-        .insert([
-          {
-            customer_id: rfqData.customer_id,
-            rfq_id: rfqId,
-            status: 'new',
-            total_amount: rfqData.total_amount,
-            currency: rfqData.currency,
-            title: `Order - ${rfqData.title}`,
-            start_date: new Date().toISOString(),
-            delivery_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-          }
-        ])
+        .insert([{
+          customer_id: rfqData.customer_id,
+          rfq_id: rfqId,
+          status: 'new',
+          total_amount: rfqData.total_amount,
+          currency: rfqData.currency,
+          title: `Order - ${rfqData.title}`,
+          start_date: new Date().toISOString(),
+          delivery_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+        }])
         .select();
-
       if (orderError) throw orderError;
 
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('rfqs')
-        .select('parts_details')
-        .eq('id', rfqId)
-        .single();
-
-      if (itemsError) throw itemsError;
-
-      if (orderData && itemsData) {
-        const orderItems = itemsData.parts_details.map(item => ({
+      if (orderData && rfqData.parts_details) {
+        const orderItems = rfqData.parts_details.map((item: any) => ({
           order_id: orderData[0].id,
           product_name: item.product_name,
           description: item.description,
@@ -462,825 +339,509 @@ export default function RfqManagement() {
           unit_price: item.unit_price,
           total_price: item.total_price
         }));
-
-        const { error: orderItemsError } = await supabase
-          .from('order_items')
-          .insert(orderItems);
-
-        if (orderItemsError) throw orderItemsError;
-
-        // Note: This order creation doesn't assign a partner, so no notification needed
-        // If partner assignment is added later, notification should be implemented here
+        await supabase.from('order_items').insert(orderItems);
       }
-
-      toast({
-        title: "Success",
-        description: "Order created successfully",
-      });
-
-      setTimeout(() => {
-        navigate('/calendar');
-      }, 1500);
+      toast({ title: "Success", description: "Order created successfully" });
+      fetchOrders();
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create order",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to create order", variant: "destructive" });
     }
   };
 
-  const handleDeleteRfq = async () => {
+  const handleDeleteRfq = async (id: string) => {
     try {
-      if (!selectedRfq) return;
-
-      const { error } = await supabase
-        .from('rfqs')
-        .delete()
-        .eq('id', selectedRfq.id);
-
+      const { error } = await supabase.from('rfqs').delete().eq('id', id);
       if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "RFQ deleted successfully",
-      });
-
-      fetchRfqs();
-      setIsDeleteDialogOpen(false);
-      setSelectedRfq(null);
+      setRfqs(prev => prev.filter(r => r.id !== id));
+      toast({ title: "Success", description: "RFQ deleted" });
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to delete RFQ",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to delete RFQ", variant: "destructive" });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
   const handleCustomerAssign = async (customer: any) => {
     if (!selectedRfq) return;
-    
     try {
-      const { error } = await supabase
-        .from('rfqs')
-        .update({ customer_id: customer?.id || null })
-        .eq('id', selectedRfq.id);
-        
+      const { error } = await supabase.from('rfqs').update({ customer_id: customer?.id || null }).eq('id', selectedRfq.id);
       if (error) throw error;
-      
-      toast({
-        title: "Success",
-        description: customer ? `Customer ${customer.company_name} assigned successfully` : "Customer assignment removed",
-      });
-      
+      toast({ title: "Success", description: customer ? `Customer ${customer.company_name} assigned` : "Customer removed" });
       setIsCustomerAssignDialogOpen(false);
       setSelectedRfq(null);
       fetchRfqs();
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to assign customer",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to assign customer", variant: "destructive" });
     }
   };
 
   const handleOrderCustomerAssign = async (customer: any) => {
     if (!selectedOrder) return;
-    
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ customer_id: customer?.id || null })
-        .eq('id', selectedOrder.id);
-        
+      const { error } = await supabase.from('orders').update({ customer_id: customer?.id || null }).eq('id', selectedOrder.id);
       if (error) throw error;
-      
-      toast({
-        title: "Success",
-        description: customer ? `Customer ${customer.company_name} assigned successfully` : "Customer assignment removed",
-      });
-      
+      toast({ title: "Success", description: customer ? `Customer ${customer.company_name} assigned` : "Customer removed" });
       setIsOrderCustomerAssignDialogOpen(false);
       setSelectedOrder(null);
       fetchOrders();
     } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to assign customer",
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message || "Failed to assign customer", variant: "destructive" });
     }
-  };
-
-  const updateRfqTotal = async (rfqId: string, total: number) => {
-    try {
-      const { error } = await supabase
-        .from('rfqs')
-        .update({ total_amount: total })
-        .eq('id', rfqId);
-
-      if (error) throw error;
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to update RFQ total",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const resetNewRfqForm = () => {
-    setNewRfq({
-      title: "",
-      customer_id: "",
-      status: "draft",
-      currency: "USD",
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      version: 1
-    });
-  };
-
-  const resetNewItemForm = () => {
-    setNewItem({
-      product_name: "",
-      description: "",
-      quantity: 1,
-      unit_price: 0,
-      total_price: 0
-    });
-  };
-
-  const handleRfqClick = (rfq: RFQ) => {
-    setSelectedRfq(rfq);
-    if (expandedRfqId === rfq.id) {
-      setExpandedRfqId(null);
-      setRfqItems([]);
-    } else {
-      setExpandedRfqId(rfq.id);
-    }
-  };
-
-  const handleNewRfqClick = () => {
-    setSelectedRfq(null);
-    resetNewRfqForm();
-    setIsRfqDialogOpen(true);
-  };
-
-  const handleNewItemClick = () => {
-    resetNewItemForm();
-    setIsItemDialogOpen(true);
   };
 
   const handleRfqInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setNewRfq({
-      ...newRfq,
-      [name]: value
-    });
+    setNewRfq({ ...newRfq, [e.target.name]: e.target.value });
   };
 
-  const handleItemInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    const numValue = name === 'quantity' || name === 'unit_price' ? parseFloat(value) || 0 : value;
-    
-    setNewItem({
-      ...newItem,
-      [name]: numValue
-    });
+  // ── Helpers ────────────────────────────────────────────────
+  const getPartsQtySummary = (rfq: RFQ): string | null => {
+    if (!rfq.parts_details || rfq.parts_details.length === 0) return null;
+    const partsCount = rfq.parts_details.length;
+    const totalQty = rfq.parts_details.reduce((sum, item) => sum + (item.quantity || 0), 0);
+    return `${partsCount} / ${totalQty}`;
   };
 
-  const statusMap = {
-    draft: {
-      label: "Draft",
-      variant: "outline" as const,
-    },
-    sent: {
-      label: "Sent",
-      variant: "secondary" as const,
-    },
-    received: {
-      label: "Received",
-      variant: "default" as const,
-    },
-    approved: {
-      label: "Approved",
-      variant: "default" as const,
-    },
-    rejected: {
-      label: "Rejected",
-      variant: "destructive" as const,
-    },
+  const getProcess = (rfq: RFQ): string | null => {
+    if (!rfq.parts_details || rfq.parts_details.length === 0) return null;
+    return rfq.parts_details[0].product_name || null;
   };
 
-  const getStatusBadge = (status: RfqStatus) => {
-    const statusInfo = statusMap[status];
-    if (!statusInfo) {
-      return <Badge variant="outline">Unknown</Badge>;
+  // ── RFQ Card (matching customer-side pattern) ──────────────
+  const renderRfqCard = (rfq: RFQ) => {
+    const partsQty = getPartsQtySummary(rfq);
+    const process = getProcess(rfq);
+    const statusConfig = RFQ_STATUS_CONFIG[rfq.status];
+    const isDeleting = deleteConfirmId === rfq.id;
+
+    return (
+      <Card key={rfq.id} className="mb-3 transition-shadow hover:shadow-md">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            {/* Left: ID, customer, date, status */}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-3 flex-wrap">
+                <Link
+                  to={`/rfq/${rfq.id}`}
+                  className="text-base font-semibold text-primary hover:underline truncate"
+                >
+                  {rfq.rfq_number || rfq.title || `RFQ ${rfq.id.slice(0, 8)}`}
+                </Link>
+                <Badge className={`${statusConfig.className} border-0 text-xs`}>
+                  {statusConfig.label}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                <span className="font-medium text-foreground">{rfq.customer_name}</span>
+                <span className="hidden sm:inline">·</span>
+                <span>{format(new Date(rfq.created_at), 'MMM dd, yyyy')}</span>
+                {process && (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span>{process}</span>
+                  </>
+                )}
+                {rfq.due_date && (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span>Due: {format(new Date(rfq.due_date), 'MMM dd, yyyy')}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right: parts/qty, total, actions */}
+            <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
+              {partsQty && (
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Parts / Qty</p>
+                  <p className="text-sm font-medium">{partsQty}</p>
+                </div>
+              )}
+              <div className="text-right">
+                <p className="text-lg font-semibold">
+                  {formatCurrency(rfq.total_amount, rfq.currency)}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to={`/rfq/${rfq.id}`}>
+                    <Eye className="h-4 w-4 mr-1" />
+                    <span className="hidden sm:inline">View</span>
+                  </Link>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {rfq.status === 'draft' && (
+                      <DropdownMenuItem onClick={() => handleUpdateRfqStatus(rfq.id, 'sent')}>
+                        <Send className="mr-2 h-4 w-4" /> Mark as Sent
+                      </DropdownMenuItem>
+                    )}
+                    {rfq.status === 'sent' && (
+                      <DropdownMenuItem onClick={() => handleUpdateRfqStatus(rfq.id, 'received')}>
+                        <FileCheck className="mr-2 h-4 w-4" /> Mark as Received
+                      </DropdownMenuItem>
+                    )}
+                    {rfq.status === 'received' && (
+                      <>
+                        <DropdownMenuItem onClick={() => handleUpdateRfqStatus(rfq.id, 'approved')}>
+                          <FileCheck className="mr-2 h-4 w-4" /> Approve & Create Order
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleUpdateRfqStatus(rfq.id, 'rejected')}>
+                          <Trash2 className="mr-2 h-4 w-4" /> Reject
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {rfq.status !== 'approved' && (
+                      <DropdownMenuItem onClick={() => createOrderFromRfq(rfq.id)}>
+                        <Package className="mr-2 h-4 w-4" /> Convert to Order
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={() => { setSelectedRfq(rfq); setIsCustomerAssignDialogOpen(true); }}>
+                      <UserPlus className="mr-2 h-4 w-4" /> Assign Customer
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="text-destructive" onClick={() => setDeleteConfirmId(rfq.id)}>
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {isDeleting && (
+                  <div className="flex items-center gap-1 ml-1">
+                    <Button variant="destructive" size="sm" onClick={() => handleDeleteRfq(rfq.id)}>Confirm</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // ── Order Card (matching customer-side pattern) ────────────
+  const renderOrderCard = (order: any) => {
+    const orderId = generateOrderId(order);
+    const statusConfig = ORDER_STATUS_CONFIG[order.status] || { label: order.status, className: 'bg-gray-100 text-gray-700' };
+    const isDeleting = deleteConfirmId === order.id;
+
+    return (
+      <Card key={order.id} className="mb-3 transition-shadow hover:shadow-md">
+        <CardContent className="p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            {/* Left: order ID, title, customer, dates */}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center gap-3 flex-wrap">
+                <Link
+                  to={`/orders/${order.id}`}
+                  className="text-base font-semibold text-primary hover:underline truncate font-mono"
+                >
+                  {orderId}
+                </Link>
+                <Badge className={`${statusConfig.className} border-0 text-xs`}>
+                  {statusConfig.label}
+                </Badge>
+                {order.production_status && order.production_status !== order.status && (
+                  <Badge variant="outline" className="text-xs">
+                    {order.production_status.replace('_', ' ')}
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                <span className="font-medium text-foreground">{order.customer_name}</span>
+                <span className="hidden sm:inline">·</span>
+                <span>{order.title}</span>
+                {order.start_date && (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span>Start: {format(new Date(order.start_date), 'MMM dd, yyyy')}</span>
+                  </>
+                )}
+                {order.delivery_date && (
+                  <>
+                    <span className="hidden sm:inline">·</span>
+                    <span>Due: {format(new Date(order.delivery_date), 'MMM dd, yyyy')}</span>
+                  </>
+                )}
+              </div>
+              {/* Customer info row */}
+              {(order.customer_email || order.customer_phone || order.customer_vat) && (
+                <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                  {order.customer_email && <span>{order.customer_email}</span>}
+                  {order.customer_phone && <span>{order.customer_phone}</span>}
+                  {order.customer_vat && <span>VAT: {order.customer_vat}</span>}
+                </div>
+              )}
+            </div>
+
+            {/* Right: total, actions */}
+            <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
+              <div className="text-right">
+                <p className="text-lg font-semibold">
+                  {order.total_amount ? formatCurrency(order.total_amount, order.currency || 'EUR') : '—'}
+                </p>
+                {order.total_with_vat > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    incl. VAT: {formatCurrency(order.total_with_vat, 'EUR')}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" asChild>
+                  <Link to={`/orders/${order.id}`}>
+                    <Eye className="h-4 w-4 mr-1" />
+                    <span className="hidden sm:inline">View</span>
+                  </Link>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => navigate(`/orders/${order.id}`)}>
+                      <Eye className="mr-2 h-4 w-4" /> View Details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setSelectedOrder(order); setIsOrderCustomerAssignDialogOpen(true); }}>
+                      <UserPlus className="mr-2 h-4 w-4" /> Assign Customer
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  // ── Pagination (matching customer-side pattern) ────────────
+  const renderPagination = () => {
+    if (totalItems <= PAGE_SIZE_OPTIONS[0]) return null;
+
+    const pages: (number | 'ellipsis')[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (safePage > 3) pages.push('ellipsis');
+      for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pages.push(i);
+      if (safePage < totalPages - 2) pages.push('ellipsis');
+      pages.push(totalPages);
     }
-    return <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>;
+
+    return (
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Show</span>
+          <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className="border rounded px-2 py-1 text-sm bg-background">
+            {PAGE_SIZE_OPTIONS.map((size) => (<option key={size} value={size}>{size}</option>))}
+          </select>
+          <span>per page ({totalItems} total)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          {pages.map((page, idx) =>
+            page === 'ellipsis' ? (
+              <span key={`e-${idx}`} className="px-2 text-muted-foreground">...</span>
+            ) : (
+              <Button key={page} variant={page === safePage ? 'default' : 'outline'} size="sm" className="min-w-[36px]" onClick={() => setCurrentPage(page)}>
+                {page}
+              </Button>
+            )
+          )}
+          <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    );
   };
 
-  const formatCurrency = (amount: number, currency: string) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+  // ── Empty state ────────────────────────────────────────────
+  const renderEmptyState = (type: 'rfqs' | 'orders') => (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="rounded-full bg-muted p-6 mb-6">
+        {type === 'rfqs' ? <FileText className="h-12 w-12 text-muted-foreground" /> : <Package className="h-12 w-12 text-muted-foreground" />}
+      </div>
+      <h3 className="text-xl font-semibold mb-2">No {type === 'rfqs' ? 'RFQs' : 'orders'} found</h3>
+      <p className="text-muted-foreground mb-6 max-w-md">
+        {type === 'rfqs'
+          ? 'Create a new RFQ to get started with quoting.'
+          : 'Orders are created when RFQs are approved.'}
+      </p>
+      {type === 'rfqs' && (
+        <Button onClick={() => { setIsRfqDialogOpen(true); }}>
+          <Plus className="mr-2 h-4 w-4" /> New RFQ
+        </Button>
+      )}
+    </div>
+  );
+
+  // ── Loading state ──────────────────────────────────────────
+  const renderLoading = () => (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    </div>
+  );
+
+  // ── Tab content ────────────────────────────────────────────
+  const renderContent = () => {
+    if (loading) return renderLoading();
+
+    if (paginatedItems.length === 0) return renderEmptyState(mainTab);
+
+    return (
+      <>
+        {mainTab === 'rfqs'
+          ? paginatedItems.map((rfq: any) => renderRfqCard(rfq))
+          : paginatedItems.map((order: any) => renderOrderCard(order))
+        }
+        {renderPagination()}
+      </>
+    );
   };
 
-  const handleDownloadPdf = (rfq: RFQ) => {
-    toast({
-      title: "PDF Generation",
-      description: "PDF download functionality would be implemented here with a PDF generation library",
-    });
-  };
-
-  const handleViewDetails = (rfqId: string) => {
-    navigate(`/rfq/${rfqId}`);
-  };
-
-  const getRfqStatusActions = (rfq: RFQ) => {
-    const actions = [];
-
-    if (rfq.status === 'draft') {
-      actions.push(
-        <DropdownMenuItem key="send" onClick={() => handleUpdateRfqStatus(rfq.id, 'sent')}>
-          <Send className="mr-2 h-4 w-4" />
-          Mark as Sent
-        </DropdownMenuItem>
-      );
-    }
-
-    if (rfq.status === 'sent') {
-      actions.push(
-        <DropdownMenuItem key="receive" onClick={() => handleUpdateRfqStatus(rfq.id, 'received')}>
-          <FileCheck className="mr-2 h-4 w-4" />
-          Mark as Received
-        </DropdownMenuItem>
-      );
-    }
-
-    if (rfq.status === 'received') {
-      actions.push(
-        <DropdownMenuItem key="approve" onClick={() => handleUpdateRfqStatus(rfq.id, 'approved')}>
-          <FileCheck className="mr-2 h-4 w-4" />
-          Approve & Create Order
-        </DropdownMenuItem>,
-        <DropdownMenuItem key="reject" onClick={() => handleUpdateRfqStatus(rfq.id, 'rejected')}>
-          <Trash className="mr-2 h-4 w-4" />
-          Reject
-        </DropdownMenuItem>
-      );
-    }
-
-    if (rfq.status !== 'approved') {
-      actions.push(
-        <DropdownMenuItem key="convert" onClick={() => createOrderFromRfq(rfq.id)}>
-          <FileText className="mr-2 h-4 w-4" />
-          Convert to Order
-        </DropdownMenuItem>
-      );
-    }
-
-    return actions;
-  };
+  const rfqCount = rfqs.length;
+  const orderCount = orders.length;
 
   return (
     <PersistentDashboardLayout>
-      <div className="space-y-6">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">RFQ & Orders Management</h1>
+      <div className="container mx-auto max-w-5xl space-y-6">
+        {/* Page Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold tracking-tight">RFQ & Orders</h1>
+          <Button onClick={() => setIsRfqDialogOpen(true)}>
+            <FilePlus className="mr-2 h-4 w-4" /> New RFQ
+          </Button>
+        </div>
+
+        {/* Search and Filters */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by RFQ number, order ID, title, or customer..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            />
           </div>
-        <Button 
-          onClick={handleNewRfqClick}
-          className="flex items-center gap-1"
-        >
-          <FilePlus className="h-4 w-4" /> New RFQ
-        </Button>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground whitespace-nowrap">From</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring" />
+            <label className="text-sm text-muted-foreground whitespace-nowrap">To</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring" />
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as "rfqs" | "orders")}>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <TabsList>
+              <TabsTrigger value="rfqs">
+                RFQs
+                {rfqCount > 0 && (
+                  <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">{rfqCount}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="orders">
+                Orders
+                {orderCount > 0 && (
+                  <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">{orderCount}</span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Status filter for RFQs */}
+            {mainTab === 'rfqs' && (
+              <div className="flex gap-1 flex-wrap">
+                {(['all', 'draft', 'sent', 'received', 'approved', 'rejected'] as const).map(s => (
+                  <Button
+                    key={s}
+                    variant={statusFilter === s ? 'default' : 'outline'}
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setStatusFilter(s)}
+                  >
+                    {s === 'all' ? 'All' : RFQ_STATUS_CONFIG[s].label}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {/* Calendar link for orders */}
+            {mainTab === 'orders' && (
+              <Button variant="outline" size="sm" onClick={() => navigate('/calendar')}>
+                <Calendar className="h-4 w-4 mr-1" /> Calendar
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-6">
+            <TabsContent value="rfqs" className="mt-0">{renderContent()}</TabsContent>
+            <TabsContent value="orders" className="mt-0">{renderContent()}</TabsContent>
+          </div>
+        </Tabs>
       </div>
 
-      {/* Main Tabs for RFQs vs Orders */}
-      <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as "rfqs" | "orders")} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-6">
-          <TabsTrigger value="rfqs" className="flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            RFQs
-          </TabsTrigger>
-          <TabsTrigger value="orders" className="flex items-center gap-2">
-            <Briefcase className="h-4 w-4" />
-            Orders
-          </TabsTrigger>
-        </TabsList>
+      {/* ── Dialogs ────────────────────────────────────────── */}
 
-        <TabsContent value="rfqs" className="space-y-6">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by title or customer..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Tabs defaultValue="all" className="w-fit" onValueChange={(value) => setActiveTab(value as RfqStatus | "all")}>
-              <TabsList>
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="draft">Draft</TabsTrigger>
-                <TabsTrigger value="sent">Sent</TabsTrigger>
-                <TabsTrigger value="received">Received</TabsTrigger>
-                <TabsTrigger value="approved">Approved</TabsTrigger>
-                <TabsTrigger value="rejected">Rejected</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Request for Quotations</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead style={{ width: '30px' }}></TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Total Amount</TableHead>
-                <TableHead>Due Date</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center">Loading...</TableCell>
-                </TableRow>
-              ) : rfqs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center">No RFQs found</TableCell>
-                </TableRow>
-              ) : (
-                rfqs.map((rfq) => (
-                  <React.Fragment key={rfq.id}>
-                    <TableRow 
-                      className={selectedRfq?.id === rfq.id ? "bg-muted" : ""}
-                      onClick={() => handleRfqClick(rfq)}
-                    >
-                      <TableCell>
-                        <Button variant="ghost" size="icon" onClick={(e) => {
-                          e.stopPropagation();
-                          handleRfqClick(rfq);
-                        }}>
-                          {expandedRfqId === rfq.id ? 
-                            <ChevronUp className="h-4 w-4" /> : 
-                            <ChevronDown className="h-4 w-4" />
-                          }
-                        </Button>
-                      </TableCell>
-                      <TableCell className="font-medium">{rfq.title}</TableCell>
-                      <TableCell>{rfq.customer_name}</TableCell>
-                      <TableCell>{getStatusBadge(rfq.status)}</TableCell>
-                      <TableCell>{formatCurrency(rfq.total_amount, rfq.currency)}</TableCell>
-                      <TableCell>{new Date(rfq.due_date).toLocaleDateString()}</TableCell>
-                      <TableCell>v{rfq.version}</TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewDetails(rfq.id);
-                            }}>
-                              <FileText className="mr-2 h-4 w-4" />
-                              View Details
-                            </DropdownMenuItem>
-                            
-                            {getRfqStatusActions(rfq)}
-                            
-                            <DropdownMenuItem onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedRfq(rfq);
-                              setIsCustomerAssignDialogOpen(true);
-                            }}>
-                              <UserPlus className="mr-2 h-4 w-4" />
-                              Assign Customer
-                            </DropdownMenuItem>
-                            
-                            <DropdownMenuItem onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownloadPdf(rfq);
-                            }}>
-                              <Download className="mr-2 h-4 w-4" />
-                              Download PDF
-                            </DropdownMenuItem>
-                            
-                            <DropdownMenuItem 
-                              className="text-destructive focus:text-destructive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedRfq(rfq);
-                                setIsDeleteDialogOpen(true);
-                              }}
-                            >
-                              <Trash className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                    {expandedRfqId === rfq.id && (
-                      <TableRow>
-                        <TableCell colSpan={8} className="p-0 border-0">
-                          <div className="bg-muted/50 p-4">
-                            <div className="flex justify-between mb-4">
-                              <h3 className="font-medium">RFQ Items</h3>
-                              {rfq.status === 'draft' && (
-                                <Button 
-                                  size="sm" 
-                                  variant="outline" 
-                                  onClick={() => {
-                                    setSelectedRfq(rfq);
-                                    handleNewItemClick();
-                                  }}
-                                >
-                                  Add Item
-                                </Button>
-                              )}
-                            </div>
-                            
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Product</TableHead>
-                                  <TableHead>Description</TableHead>
-                                  <TableHead className="text-right">Quantity</TableHead>
-                                  <TableHead className="text-right">Unit Price</TableHead>
-                                  <TableHead className="text-right">Total Price</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {rfqItems.length === 0 ? (
-                                  <TableRow>
-                                    <TableCell colSpan={5} className="text-center">No items in this RFQ</TableCell>
-                                  </TableRow>
-                                ) : (
-                                  rfqItems.map((item) => (
-                                    <TableRow key={item.id}>
-                                      <TableCell>{item.product_name}</TableCell>
-                                      <TableCell>{item.description}</TableCell>
-                                      <TableCell className="text-right">{item.quantity}</TableCell>
-                                      <TableCell className="text-right">{formatCurrency(item.unit_price, rfq.currency)}</TableCell>
-                                      <TableCell className="text-right">{formatCurrency(item.total_price, rfq.currency)}</TableCell>
-                                    </TableRow>
-                                  ))
-                                )}
-                                <TableRow>
-                                  <TableCell colSpan={4} className="text-right font-medium">Total:</TableCell>
-                                  <TableCell className="text-right font-bold">{formatCurrency(rfq.total_amount, rfq.currency)}</TableCell>
-                                </TableRow>
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </React.Fragment>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-        </TabsContent>
-
-        <TabsContent value="orders" className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by order ID, customer or title..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">
-                {orders.length} {orders.length === 1 ? 'order' : 'orders'}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate('/calendar')}
-              >
-                <Calendar className="h-4 w-4 mr-1" />
-                Calendar
-              </Button>
-            </div>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Order ID</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Total Amount</TableHead>
-                    <TableHead>Start Date</TableHead>
-                    <TableHead>Delivery Date</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center">Loading...</TableCell>
-                    </TableRow>
-                  ) : orders.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8">
-                        <div className="flex flex-col items-center justify-center">
-                          <Package className="h-12 w-12 text-gray-300 mb-2" />
-                          <p className="text-muted-foreground">No orders found</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    orders
-                      .filter(order => {
-                        if (!searchQuery.trim()) return true;
-                        const q = searchQuery.toLowerCase();
-                        return generateOrderId(order).toLowerCase().includes(q) ||
-                               order.title?.toLowerCase().includes(q) ||
-                               order.customer_name?.toLowerCase().includes(q);
-                      })
-                      .map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell className="font-mono text-sm">{generateOrderId(order)}</TableCell>
-                        <TableCell className="font-medium">{order.title}</TableCell>
-                        <TableCell>{order.customer_name || 'Unassigned'}</TableCell>
-                        <TableCell>{getOrderStatusBadge(order.status)}</TableCell>
-                        <TableCell>{order.total_amount ? formatCurrency(order.total_amount, order.currency || 'EUR') : '-'}</TableCell>
-                        <TableCell>{order.start_date ? new Date(order.start_date).toLocaleDateString() : '-'}</TableCell>
-                        <TableCell>{order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : '-'}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate(`/orders/${order.id}`)}
-                            >
-                              View
-                            </Button>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigate(`/orders/${order.id}`);
-                                }}>
-                                  <Edit className="mr-2 h-4 w-4" />
-                                  Edit/View Details
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedOrder(order);
-                                  setIsOrderCustomerAssignDialogOpen(true);
-                                }}>
-                                  <UserPlus className="mr-2 h-4 w-4" />
-                                  Assign Customer
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
+      {/* New RFQ Dialog */}
       <Dialog open={isRfqDialogOpen} onOpenChange={setIsRfqDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Create New RFQ</DialogTitle>
-            <DialogDescription>
-              Enter the details for the new request for quotation.
-            </DialogDescription>
+            <DialogDescription>Enter the details for the new request for quotation.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <label htmlFor="title" className="text-sm font-medium">
-                RFQ Title *
-              </label>
-              <Input
-                id="title"
-                name="title"
-                value={newRfq.title}
-                onChange={handleRfqInputChange}
-                placeholder="e.g., Q1 2023 Parts Order"
-                required
-              />
+              <label htmlFor="title" className="text-sm font-medium">RFQ Title *</label>
+              <Input id="title" name="title" value={newRfq.title} onChange={handleRfqInputChange} placeholder="e.g., Q1 2025 Parts Order" required />
             </div>
-
             <div className="space-y-2">
-              <label htmlFor="customer_id" className="text-sm font-medium">
-                Customer *
-              </label>
-              <select
-                id="customer_id"
-                name="customer_id"
-                value={newRfq.customer_id}
-                onChange={handleRfqInputChange}
-                className="w-full p-2 border rounded-md"
-                required
-              >
+              <label htmlFor="customer_id" className="text-sm font-medium">Customer *</label>
+              <select id="customer_id" name="customer_id" value={newRfq.customer_id} onChange={handleRfqInputChange} className="w-full p-2 border rounded-md" required>
                 <option value="">Select a customer...</option>
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.company_name}
-                  </option>
-                ))}
+                {customers.map((c) => (<option key={c.id} value={c.id}>{c.company_name}</option>))}
               </select>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label htmlFor="currency" className="text-sm font-medium">
-                  Currency
-                </label>
-                <select
-                  id="currency"
-                  name="currency"
-                  value={newRfq.currency}
-                  onChange={handleRfqInputChange}
-                  className="w-full p-2 border rounded-md"
-                >
-                  <option value="USD">USD - US Dollar</option>
-                  <option value="EUR">EUR - Euro</option>
-                  <option value="GBP">GBP - British Pound</option>
-                  <option value="JPY">JPY - Japanese Yen</option>
-                  <option value="CNY">CNY - Chinese Yuan</option>
+                <label htmlFor="currency" className="text-sm font-medium">Currency</label>
+                <select id="currency" name="currency" value={newRfq.currency} onChange={handleRfqInputChange} className="w-full p-2 border rounded-md">
+                  <option value="EUR">EUR</option>
+                  <option value="USD">USD</option>
+                  <option value="GBP">GBP</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <label htmlFor="due_date" className="text-sm font-medium">
-                  Due Date
-                </label>
-                <Input
-                  id="due_date"
-                  name="due_date"
-                  type="date"
-                  value={newRfq.due_date}
-                  onChange={handleRfqInputChange}
-                />
+                <label htmlFor="due_date" className="text-sm font-medium">Due Date</label>
+                <Input id="due_date" name="due_date" type="date" value={newRfq.due_date} onChange={handleRfqInputChange} />
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRfqDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddRfq}>
-              Create RFQ
-            </Button>
+            <Button variant="outline" onClick={() => setIsRfqDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddRfq}>Create RFQ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isItemDialogOpen} onOpenChange={setIsItemDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
-          <DialogHeader>
-            <DialogTitle>Add RFQ Item</DialogTitle>
-            <DialogDescription>
-              Add a product or service item to the RFQ.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <label htmlFor="product_name" className="text-sm font-medium">
-                Product/Service Name *
-              </label>
-              <Input
-                id="product_name"
-                name="product_name"
-                value={newItem.product_name}
-                onChange={handleItemInputChange}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label htmlFor="description" className="text-sm font-medium">
-                Description
-              </label>
-              <Textarea
-                id="description"
-                name="description"
-                value={newItem.description}
-                onChange={handleItemInputChange}
-                rows={3}
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label htmlFor="quantity" className="text-sm font-medium">
-                  Quantity
-                </label>
-                <Input
-                  id="quantity"
-                  name="quantity"
-                  type="number"
-                  min="1"
-                  value={newItem.quantity}
-                  onChange={handleItemInputChange}
-                />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="unit_price" className="text-sm font-medium">
-                  Unit Price
-                </label>
-                <Input
-                  id="unit_price"
-                  name="unit_price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={newItem.unit_price}
-                  onChange={handleItemInputChange}
-                />
-              </div>
-              <div className="space-y-2">
-                <label htmlFor="total_price" className="text-sm font-medium">
-                  Total Price
-                </label>
-                <Input
-                  id="total_price"
-                  name="total_price"
-                  type="number"
-                  step="0.01"
-                  value={newItem.total_price}
-                  readOnly
-                  disabled
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsItemDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAddItem}>
-              Add Item
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this RFQ? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={loading}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteRfq} disabled={loading}>
-              {loading ? 
-                <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-4 w-4 mr-2 border-b-2 border-white"></div>
-                  Deleting...
-                </div> : 
-                "Delete"
-              }
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Customer Assignment Dialog for RFQs */}
+      {/* Customer Assignment Dialogs */}
       <CustomerSearchAssign
         currentCustomerId={selectedRfq?.customer_id}
         onCustomerSelect={handleCustomerAssign}
@@ -1289,8 +850,6 @@ export default function RfqManagement() {
         title="Assign Customer to RFQ"
         description="Search and assign a customer to this RFQ"
       />
-
-      {/* Customer Assignment Dialog for Orders */}
       <CustomerSearchAssign
         currentCustomerId={selectedOrder?.customer_id}
         onCustomerSelect={handleOrderCustomerAssign}
@@ -1299,7 +858,6 @@ export default function RfqManagement() {
         title="Assign Customer to Order"
         description="Search and assign a customer to this order"
       />
-      </div>
     </PersistentDashboardLayout>
   );
 }

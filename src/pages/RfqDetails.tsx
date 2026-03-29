@@ -1,14 +1,18 @@
-import React, { useState, useEffect, Suspense, useRef } from 'react';
+import React, { useState, useEffect, Suspense, useRef, lazy } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Download, FileText, Plus, Edit2, Trash2, CheckCircle, 
-  XCircle, Loader2, ChevronLeft, Send, Edit, 
-  Trash, FileDown, ShoppingBag, Upload, User 
+import {
+  Download, FileText, Plus, Edit2, Trash2, CheckCircle,
+  XCircle, Loader2, ChevronLeft, Send, Edit,
+  Trash, FileDown, ShoppingBag, Upload, User, Box, Eye
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import PartSpecsCard from '@/components/shared/PartSpecsCard';
+import { getSignedUrl } from '@/utils/awsS3Storage';
+
+const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -114,6 +118,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>('');
   const [productionPartners, setProductionPartners] = useState<any[]>([]);
   const [isLoadingPartners, setIsLoadingPartners] = useState(false);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+
+  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
 
   const [newItem, setNewItem] = useState<Partial<RfqItem>>({
     product_name: "",
@@ -274,6 +281,16 @@ const RfqDetails = (props: RfqDetailsProps) => {
       
       setGeneralFiles(general);
       setPartFiles(byPart);
+
+      // Generate signed URLs for 3D files
+      const allFiles = [...general, ...Object.values(byPart).flat()];
+      const threeDFiles = allFiles.filter(f => is3DFile(f.file_name));
+      const urlMap: Record<string, string> = {};
+      await Promise.all(threeDFiles.map(async (f) => {
+        const url = await getSignedUrl(f.file_path);
+        if (url) urlMap[f.id] = url;
+      }));
+      setSignedUrls(urlMap);
     } catch (error) {
       console.error('Error fetching quote files:', error);
     }
@@ -1222,6 +1239,31 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
+  const parseSpecsFromDescription = (description: string) => {
+    const specs: Record<string, string | boolean> = {};
+    if (!description) return specs;
+    const lines = description.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+      if (lower.startsWith('process:') || lower.startsWith('manufacturing process:')) specs.process = line.split(':').slice(1).join(':').trim();
+      else if (lower.startsWith('material:')) specs.material = line.split(':').slice(1).join(':').trim();
+      else if (lower.startsWith('surface roughness:') || lower.startsWith('roughness:')) specs.surfaceRoughness = line.split(':').slice(1).join(':').trim();
+      else if (lower.startsWith('surface treatment:') || lower.startsWith('treatment:') || lower.startsWith('finishing:')) specs.surfaceTreatment = line.split(':').slice(1).join(':').trim();
+      else if (lower.startsWith('tolerance:') || lower.startsWith('tolerances:')) specs.tolerance = line.split(':').slice(1).join(':').trim();
+      else if (lower.startsWith('thickness:')) specs.thickness = line.split(':').slice(1).join(':').trim().replace(/\s*mm\s*$/i, '');
+      else if (lower.startsWith('bending:')) specs.needsBending = line.split(':').slice(1).join(':').trim().toLowerCase() === 'yes';
+    }
+    return specs;
+  };
+
+  const handleView3DFile = (fileId: string, fileName: string) => {
+    const url = signedUrls[fileId];
+    if (url) {
+      setViewerFile({ url, type: 'model', name: fileName });
+      setViewerOpen(true);
+    }
+  };
+
   const refreshFiles = () => {
     console.log('Refreshing files...');
     setFilesRefreshTrigger(prev => prev + 1);
@@ -1503,104 +1545,116 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
               <div className="mt-6">
                 <h3 className="text-lg font-semibold mb-3">Items</h3>
-                <div ref={animationParent} className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Unit Price</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <Suspense fallback={
-                      <TableBody>
-                        <TableRow>
-                          <TableCell colSpan={6} className="h-24 text-center">
-                            <div className="flex justify-center">
-                              <Loader2 className="h-5 w-5 animate-spin" />
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    }>
-                      <TableBody>
-                        {rfqItems.map(item => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.product_name}</TableCell>
-                            <TableCell className="max-w-[400px] whitespace-pre-line break-words">{item.description}</TableCell>
-                            <TableCell className="text-right">{item.quantity}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(item.unit_price, rfq.currency)}</TableCell>
-                            <TableCell className="text-right font-semibold">{formatCurrency(item.total_price, rfq.currency)}</TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => showPartFiles(item.id)}
-                                  className="h-8 w-8"
-                                  title="View files"
-                                >
-                                  <FileText className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => {
-                                    setSelectedItem(item);
-                                    setIsEditItemDialogOpen(true);
-                                  }}
-                                  className="h-8 w-8"
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon"
-                                  onClick={() => {
-                                    setSelectedItem(item);
-                                    setIsDeleteItemDialogOpen(true);
-                                  }}
-                                  className="h-8 w-8 text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                <div ref={animationParent} className="space-y-4">
+                  {rfqItems.length === 0 ? (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                        <Box className="h-10 w-10 text-muted-foreground mb-3" />
+                        <p className="text-base font-medium mb-1">No items added yet</p>
+                        <p className="text-sm text-muted-foreground">Click "Add Item" below to add parts to this RFQ.</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    rfqItems.map((item, index) => {
+                      const specs = item.original_values
+                        ? (() => {
+                            const s: Record<string, string | boolean> = {};
+                            for (const [key, value] of Object.entries(item.original_values)) {
+                              const lower = key.toLowerCase();
+                              if (lower.includes('process')) s.process = String(value);
+                              else if (lower.includes('material')) s.material = String(value);
+                              else if (lower.includes('roughness')) s.surfaceRoughness = String(value);
+                              else if (lower.includes('treatment') || lower.includes('finishing')) s.surfaceTreatment = String(value);
+                              else if (lower.includes('tolerance')) s.tolerance = String(value);
+                              else if (lower === 'thickness') s.thickness = String(value);
+                              else if (lower === 'needsbending') s.needsBending = value === true || value === 'true';
+                            }
+                            return s;
+                          })()
+                        : parseSpecsFromDescription(item.description || '');
+                      const itemPartFiles = partFiles[item.id] || [];
+                      const threeDFile = itemPartFiles.find(f => is3DFile(f.file_name));
+                      const has3DFile = !!threeDFile;
+
+                      return (
+                        <div key={item.id} className="flex gap-3 items-start">
+                          {/* 3D Thumbnail */}
+                          <div className="hidden sm:block flex-shrink-0">
+                            {threeDFile && signedUrls[threeDFile.id] ? (
+                              <Suspense
+                                fallback={
+                                  <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
+                                  </div>
+                                }
+                              >
+                                <PartThumbnail3D fileUrl={signedUrls[threeDFile.id]} fileName={threeDFile.file_name} />
+                              </Suspense>
+                            ) : (
+                              <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                                <Box className="h-8 w-8 text-slate-300" />
+                                <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {rfqItems.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={6} className="h-24 text-center">
-                              No items added yet.
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        {rfq.shipping_cost && rfq.shipping_cost > 0 && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-right font-medium text-gray-600">
-                              Shipping Cost:
-                            </TableCell>
-                            <TableCell className="text-right font-medium text-gray-600">
-                              {formatCurrency(rfq.shipping_cost, rfq.currency)}
-                            </TableCell>
-                            <TableCell></TableCell>
-                          </TableRow>
-                        )}
-                        <TableRow>
-                          <TableCell colSpan={4} className="text-right font-bold">
-                            Total:
-                          </TableCell>
-                          <TableCell className="text-right font-bold">
-                            {formatCurrency(rfq.total_amount, rfq.currency)}
-                          </TableCell>
-                          <TableCell></TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Suspense>
-                  </Table>
+                            )}
+                          </div>
+
+                          {/* Part card */}
+                          <div className="flex-1 min-w-0">
+                            <PartSpecsCard
+                              index={index}
+                              currency={rfq.currency || 'EUR'}
+                              part={{
+                                product_name: item.product_name,
+                                description: item.description,
+                                quantity: item.quantity,
+                                unit_price: item.unit_price,
+                                total_price: item.total_price,
+                                material: specs.material as string | undefined,
+                                process: specs.process as string | undefined,
+                                tolerance: specs.tolerance as string | undefined,
+                                surfaceRoughness: specs.surfaceRoughness as string | undefined,
+                                surfaceTreatment: specs.surfaceTreatment as string | undefined,
+                                thickness: specs.thickness as string | undefined,
+                                needsBending: specs.needsBending as boolean | undefined,
+                                fileCount: itemPartFiles.length,
+                              }}
+                              onView3D={has3DFile ? () => handleView3DFile(threeDFile!.id, threeDFile!.file_name) : undefined}
+                              onEdit={() => {
+                                setSelectedItem(item);
+                                setIsEditItemDialogOpen(true);
+                              }}
+                              onDelete={() => {
+                                setSelectedItem(item);
+                                setIsDeleteItemDialogOpen(true);
+                              }}
+                              showPricing
+                              showActions
+                            />
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {/* Summary row */}
+                  {rfqItems.length > 0 && (
+                    <Card className="bg-gray-50">
+                      <CardContent className="py-3 px-5">
+                        <div className="flex flex-col gap-1 text-sm">
+                          {rfq.shipping_cost > 0 && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Shipping Cost:</span>
+                              <span className="font-medium">{formatCurrency(rfq.shipping_cost, rfq.currency)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-bold text-base">
+                            <span>Total:</span>
+                            <span>{formatCurrency(rfq.total_amount, rfq.currency)}</span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
                 
                 <div className="mt-4 flex justify-end">

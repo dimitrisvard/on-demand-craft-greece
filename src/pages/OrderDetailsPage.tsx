@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "@/integrations/supabase/client";
 import { Order, OrderItem, Partner } from "@/types/customer";
@@ -17,8 +17,12 @@ import {
   Edit3,
   Save,
   X,
-  FileOutput
+  FileOutput,
+  Box
 } from "lucide-react";
+import PartSpecsCard from '@/components/shared/PartSpecsCard';
+
+const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { 
@@ -87,6 +91,7 @@ export default function OrderDetailsPage() {
   const [viewerFileType, setViewerFileType] = useState<string | null>(null);
   const [viewerFileName, setViewerFileName] = useState<string | null>(null);
   const [rfq, setRfq] = useState<any>(null);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const { user } = useAuth();
 
   // Helper function to check if a file is a 3D model
@@ -319,12 +324,17 @@ export default function OrderDetailsPage() {
       
       // Store the organized files in state for PDF generation
       setPartFiles(byPart);
-      
-      // Debug: Log the final state
-      console.log('Final partFiles state set to:', byPart);
-      console.log('Parts details:', partsDetails);
-      console.log('Quote files:', files);
-      
+
+      // Generate signed URLs for 3D files
+      const allFiles = [...general, ...Object.values(byPart).flat()];
+      const threeDFiles = allFiles.filter(f => is3DFile(f.file_name));
+      const urlMap: Record<string, string> = {};
+      await Promise.all(threeDFiles.map(async (f) => {
+        const url = await getSignedUrl(f.file_path);
+        if (url) urlMap[f.id] = url;
+      }));
+      setSignedUrls(urlMap);
+
     } catch (error) {
       console.error('Error fetching quote files:', error);
     } finally {
@@ -1565,40 +1575,27 @@ export default function OrderDetailsPage() {
 
             <div>
               <h3 className="font-medium mb-4">Order Items</h3>
-              {console.log('Parts array:', parts)}
-              {console.log('Quote files:', quoteFiles)}
-              <div className="border rounded-lg divide-y">
+              <div className="space-y-4">
                 {orderItems.map((item, idx) => {
                   // Find files associated with this order item
                   let itemFiles: QuoteFile[] = [];
-                  
-                  // First try to match by part_id if we have parts data
+
                   if (parts[idx] && parts[idx].id) {
-                    // Match by part_id (most reliable)
                     itemFiles = quoteFiles.filter(file => file.part_id === parts[idx].id);
-                    console.log(`Part ${idx + 1} (${parts[idx].id}): Found ${itemFiles.length} files`, itemFiles.map(f => f.file_name));
                   } else {
-                    // Fallback: try to match by part name or index-based matching
                     itemFiles = quoteFiles.filter(file => {
-                      // Try to match by part name
-                      if (file.part_name === item.product_name) return true;
-                      
-                      // Try to match by checking if the file name contains part indicators
+                      if ((file as any).part_name === item.product_name) return true;
                       const productNameLower = item.product_name.toLowerCase();
                       const fileNameLower = file.file_name.toLowerCase();
-                      
-                      // Check if file name contains part number from product name
                       const partNumberMatch = productNameLower.match(/part\s*(\d+)/i);
                       if (partNumberMatch) {
                         const partNum = partNumberMatch[1];
                         return fileNameLower.includes(`-${partNum}.`) || fileNameLower.includes(`-${partNum}-`);
                       }
-                      
                       return false;
                     });
-                    console.log(`Part ${idx + 1} (fallback): Found ${itemFiles.length} files`, itemFiles.map(f => f.file_name));
                   }
-                  
+
                   // Parse specs from description
                   const descSpecs: Record<string, string> = {};
                   if (item.description) {
@@ -1610,85 +1607,80 @@ export default function OrderDetailsPage() {
                       else if (lower.startsWith('surface roughness:') || lower.startsWith('roughness:')) descSpecs.surfaceRoughness = line.split(':').slice(1).join(':').trim();
                       else if (lower.startsWith('surface treatment:') || lower.startsWith('treatment:') || lower.startsWith('finishing:')) descSpecs.surfaceTreatment = line.split(':').slice(1).join(':').trim();
                       else if (lower.startsWith('tolerance:')) descSpecs.tolerance = line.split(':').slice(1).join(':').trim();
+                      else if (lower.startsWith('thickness:')) descSpecs.thickness = line.split(':').slice(1).join(':').trim().replace(/\s*mm\s*$/i, '');
                     }
                   }
-                  const hasSpecs = Object.keys(descSpecs).length > 0;
+
+                  const threeDFile = itemFiles.find(f => is3DFile(f.file_name));
+                  const has3DFile = !!threeDFile;
+                  const isPartner = user?.role === 'partner_seller';
 
                   return (
-                  <div key={item.id} className="p-4">
-                    <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                          <h4 className="font-medium">{item.product_name}</h4>
-                          {descSpecs.process && (
-                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">{descSpecs.process}</span>
-                          )}
-                          {item.quantity > 1 && (
-                            <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">Qty: {item.quantity}</span>
-                          )}
-                        </div>
-                        {/* Structured specs display */}
-                        {hasSpecs && (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs mt-1 mb-2">
-                            {descSpecs.material && (
-                              <span><span className="text-muted-foreground">Material:</span> {descSpecs.material}</span>
-                            )}
-                            {descSpecs.tolerance && (
-                              <span><span className="text-muted-foreground">Tolerance:</span> {descSpecs.tolerance}</span>
-                            )}
-                            {descSpecs.surfaceRoughness && (
-                              <span><span className="text-muted-foreground">Roughness:</span> {descSpecs.surfaceRoughness}</span>
-                            )}
-                            {descSpecs.surfaceTreatment && (
-                              <span><span className="text-muted-foreground">Treatment:</span> {descSpecs.surfaceTreatment}</span>
-                            )}
+                    <div key={item.id} className="flex gap-3 items-start">
+                      {/* 3D Thumbnail */}
+                      <div className="hidden sm:block flex-shrink-0">
+                        {threeDFile && signedUrls[threeDFile.id] ? (
+                          <Suspense
+                            fallback={
+                              <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                                <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
+                              </div>
+                            }
+                          >
+                            <PartThumbnail3D fileUrl={signedUrls[threeDFile.id]} fileName={threeDFile.file_name} />
+                          </Suspense>
+                        ) : (
+                          <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                            <Box className="h-8 w-8 text-slate-300" />
+                            <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
                           </div>
                         )}
-                        {/* Fallback description if no specs */}
-                        {!hasSpecs && item.description && (
-                          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                            {item.description}
-                          </p>
-                        )}
-                          {/* Add files information */}
-                          {itemFiles.length > 0 && (
-                            <div className="mt-2">
-                              <p className="text-xs font-medium text-gray-700">Files:</p>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {itemFiles.map((file) => (
-                                  <div key={file.id} className="flex items-center gap-1">
-                                    <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                                      {file.file_name}
-                                    </span>
-                                    {is3DFile(file.file_name) && (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-6 text-xs px-2"
-                                        disabled={flatPatternLoading === file.id}
-                                        onClick={() => handleExtractFlatPattern(file)}
-                                        title="Extract flat pattern and generate PDF technical drawing"
-                                      >
-                                        <FileOutput className="h-3 w-3 mr-1" />
-                                        {flatPatternLoading === file.id ? 'Processing...' : 'Flat Pattern PDF'}
-                                      </Button>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                        )}
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="font-medium">
-                          {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {item.quantity} × {user?.role === 'partner_seller' ? '' : formatCurrency(item.unit_price, order.currency)}
-                        </p>
+
+                      {/* Part card */}
+                      <div className="flex-1 min-w-0">
+                        <PartSpecsCard
+                          index={idx}
+                          currency={order.currency || 'EUR'}
+                          part={{
+                            product_name: item.product_name,
+                            description: item.description,
+                            quantity: item.quantity,
+                            unit_price: isPartner ? undefined : item.unit_price,
+                            total_price: isPartner ? undefined : item.total_price,
+                            material: descSpecs.material,
+                            process: descSpecs.process,
+                            tolerance: descSpecs.tolerance,
+                            surfaceRoughness: descSpecs.surfaceRoughness,
+                            surfaceTreatment: descSpecs.surfaceTreatment,
+                            thickness: descSpecs.thickness,
+                            fileCount: itemFiles.length,
+                          }}
+                          onView3D={has3DFile ? () => handleOpen3DViewer(threeDFile!) : undefined}
+                          showPricing={!isPartner}
+                          showActions={true}
+                        />
+                        {/* Flat Pattern buttons for 3D files */}
+                        {itemFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {itemFiles.filter(f => is3DFile(f.file_name)).map(file => (
+                              <Button
+                                key={file.id}
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 text-xs"
+                                disabled={flatPatternLoading === file.id}
+                                onClick={() => handleExtractFlatPattern(file)}
+                                title="Extract flat pattern and generate PDF technical drawing"
+                              >
+                                <FileOutput className="h-3.5 w-3.5" />
+                                {flatPatternLoading === file.id ? 'Processing...' : `Flat Pattern: ${file.file_name}`}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
                   );
                 })}
               </div>
