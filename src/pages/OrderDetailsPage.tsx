@@ -90,7 +90,7 @@ export default function OrderDetailsPage() {
 
   // Helper function to check if a file is a 3D model
   const is3DFile = (fileName: string): boolean => {
-    const threeDExtensions = ['.stl', '.obj', '.fbx', '.dae', '.3ds', '.blend', '.max', '.ma', '.mb', '.c4d'];
+    const threeDExtensions = ['.stl', '.obj', '.fbx', '.dae', '.3ds', '.blend', '.max', '.ma', '.mb', '.c4d', '.step', '.stp', '.dxf', '.glb', '.gltf'];
     const extension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
     return threeDExtensions.includes(extension);
   };

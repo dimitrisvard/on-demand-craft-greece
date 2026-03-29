@@ -157,7 +157,7 @@ export default function QuoteDetailPage() {
 
   const getFilesForPart = (partId: string) => files.filter((f) => f.part_id === partId);
 
-  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
+  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
 
   const handleDuplicatePart = async (index: number) => {
     if (!rfq) return;

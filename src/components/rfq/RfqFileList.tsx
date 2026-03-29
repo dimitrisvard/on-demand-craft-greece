@@ -41,7 +41,7 @@ const RfqFileList: React.FC<RfqFileListProps> = ({
   // Helper: Check if file is a 3D model
   const is3DFile = (name: string) => {
     const ext = name.toLowerCase();
-    return ext.endsWith('.stl') || ext.endsWith('.obj') || ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.step') || ext.endsWith('.stp');
+    return ext.endsWith('.stl') || ext.endsWith('.obj') || ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.step') || ext.endsWith('.stp') || ext.endsWith('.dxf');
   };
 
   // Helper: Open 3D viewer modal for a file

@@ -60,6 +60,7 @@ const isOBJ = (name: string) => name.toLowerCase().endsWith('.obj');
 const isGLB = (name: string) => name.toLowerCase().endsWith('.glb');
 const isGLTF = (name: string) => name.toLowerCase().endsWith('.gltf');
 const isSTEP = (name: string) => name.toLowerCase().endsWith('.step') || name.toLowerCase().endsWith('.stp');
+const isDXF = (name: string) => name.toLowerCase().endsWith('.dxf');
 
 // ── Materials ──────────────────────────────────────────────────────────────────
 
@@ -525,15 +526,17 @@ function ProjectionSwitcher({ projection }: { projection: ProjectionMode }) {
   return null;
 }
 
-function ViewerScene({ children, state, onStateChange, onResetView }: {
+function ViewerScene({ children, state, onStateChange, onResetView, initialView }: {
   children: React.ReactNode;
   state: ViewerState;
   onStateChange: (s: Partial<ViewerState>) => void;
   onResetView: () => void;
+  initialView?: string;
 }) {
   const [bounds, setBounds] = useState<{ size: number; center: Vector3; dims: Vector3 } | null>(null);
   const targetRef = useRef(new Vector3(0, 0, 0));
-  const [viewPreset, setViewPreset] = useState<string | null>(null);
+  const [viewPreset, setViewPreset] = useState<string | null>(initialView || null);
+  const initialViewApplied = useRef(false);
 
   const clippingPlanes = useMemo(() => {
     if (!state.clipping || !bounds) return undefined;
@@ -548,6 +551,11 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
       volume: info.volume,
       surfaceArea: info.surfaceArea,
     });
+    // Apply initial view preset (e.g. 'top' for DXF) once bounds are known
+    if (initialView && !initialViewApplied.current) {
+      initialViewApplied.current = true;
+      setViewPreset(initialView);
+    }
   };
 
   const enhancedChildren = React.Children.map(children, (child) => {
@@ -770,12 +778,13 @@ function useStepGeometries(url: string) {
 
 // ── STEP viewer (GLB-first with STEP fallback) ────────────────────────────────
 
-function StepViewer({ url, glbUrl, state, onStateChange, onResetView }: {
+function StepViewer({ url, glbUrl, state, onStateChange, onResetView, initialView }: {
   url: string;
   glbUrl?: string | null;
   state: ViewerState;
   onStateChange: (s: Partial<ViewerState>) => void;
   onResetView: () => void;
+  initialView?: string;
 }) {
   // If pre-converted GLB exists, render it directly (Phase 2 — fast + high quality)
   if (glbUrl) {
@@ -787,23 +796,24 @@ function StepViewer({ url, glbUrl, state, onStateChange, onResetView }: {
   }
 
   // Otherwise, client-side STEP parsing with Phase 1 quality fixes
-  return <StepViewerClient url={url} state={state} onStateChange={onStateChange} onResetView={onResetView} />;
+  return <StepViewerClient url={url} state={state} onStateChange={onStateChange} onResetView={onResetView} initialView={initialView} />;
 }
 
-function StepViewerClient({ url, state, onStateChange, onResetView }: {
+function StepViewerClient({ url, state, onStateChange, onResetView, initialView }: {
   url: string;
   state: ViewerState;
   onStateChange: (s: Partial<ViewerState>) => void;
   onResetView: () => void;
+  initialView?: string;
 }) {
   const { geometries, loading, error } = useStepGeometries(url);
 
-  if (loading) return <StatusOverlay type="loading" message="Loading STEP file..." detail="Parsing geometry" />;
-  if (error) return <StatusOverlay type="error" message="Error loading 3D model" detail={error} />;
-  if (!geometries.length) return <StatusOverlay type="empty" message="No geometry found in STEP file." />;
+  if (loading) return <StatusOverlay type="loading" message="Loading file..." detail="Parsing geometry" />;
+  if (error) return <StatusOverlay type="error" message="Error loading file" detail={error} />;
+  if (!geometries.length) return <StatusOverlay type="empty" message="No geometry found in file." />;
 
   return (
-    <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView}>
+    <ViewerScene state={state} onStateChange={onStateChange} onResetView={onResetView} initialView={initialView}>
       <StepMeshes geometries={geometries} wireframe={state.wireframe} />
     </ViewerScene>
   );
@@ -868,12 +878,15 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
         <GLTFModel url={fileUrl} wireframe={state.wireframe} />
       </ViewerScene>
     );
+  } else if (isDXF(fileName)) {
+    // DXF files are 2D drawings — attempt loading via STEP parser, default to top-down view
+    content = <StepViewer key={viewKey} url={fileUrl} glbUrl={null} state={state} onStateChange={handleStateChange} onResetView={handleResetView} initialView="top" />;
   } else {
     content = (
       <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 15, color: '#374151' }}>Unsupported 3D file type.</div>
-          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Supported: STL, OBJ, GLB, GLTF, STEP</div>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 6 }}>Supported: STL, OBJ, GLB, GLTF, STEP, DXF</div>
         </div>
       </div>
     );

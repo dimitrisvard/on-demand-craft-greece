@@ -65,7 +65,7 @@ const productionStatusColorMap: Record<string, string> = {
 const formatStatusLabel = (status: string) =>
   status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
+const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
 
 export default function PartnerOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
