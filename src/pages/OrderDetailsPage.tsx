@@ -1507,20 +1507,61 @@ export default function OrderDetailsPage() {
                     console.log(`Part ${idx + 1} (fallback): Found ${itemFiles.length} files`, itemFiles.map(f => f.file_name));
                   }
                   
+                  // Parse specs from description
+                  const descSpecs: Record<string, string> = {};
+                  if (item.description) {
+                    const lines = item.description.split('\n').map((l: string) => l.trim()).filter(Boolean);
+                    for (const line of lines) {
+                      const lower = line.toLowerCase();
+                      if (lower.startsWith('process:') || lower.startsWith('manufacturing process:')) descSpecs.process = line.split(':').slice(1).join(':').trim();
+                      else if (lower.startsWith('material:')) descSpecs.material = line.split(':').slice(1).join(':').trim();
+                      else if (lower.startsWith('surface roughness:') || lower.startsWith('roughness:')) descSpecs.surfaceRoughness = line.split(':').slice(1).join(':').trim();
+                      else if (lower.startsWith('surface treatment:') || lower.startsWith('treatment:') || lower.startsWith('finishing:')) descSpecs.surfaceTreatment = line.split(':').slice(1).join(':').trim();
+                      else if (lower.startsWith('tolerance:')) descSpecs.tolerance = line.split(':').slice(1).join(':').trim();
+                    }
+                  }
+                  const hasSpecs = Object.keys(descSpecs).length > 0;
+
                   return (
                   <div key={item.id} className="p-4">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h4 className="font-medium">{item.product_name}</h4>
-                        {item.description && (
-                          <p className="text-sm text-muted-foreground mt-1">
+                    <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <h4 className="font-medium">{item.product_name}</h4>
+                          {descSpecs.process && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">{descSpecs.process}</span>
+                          )}
+                          {item.quantity > 1 && (
+                            <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">Qty: {item.quantity}</span>
+                          )}
+                        </div>
+                        {/* Structured specs display */}
+                        {hasSpecs && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs mt-1 mb-2">
+                            {descSpecs.material && (
+                              <span><span className="text-muted-foreground">Material:</span> {descSpecs.material}</span>
+                            )}
+                            {descSpecs.tolerance && (
+                              <span><span className="text-muted-foreground">Tolerance:</span> {descSpecs.tolerance}</span>
+                            )}
+                            {descSpecs.surfaceRoughness && (
+                              <span><span className="text-muted-foreground">Roughness:</span> {descSpecs.surfaceRoughness}</span>
+                            )}
+                            {descSpecs.surfaceTreatment && (
+                              <span><span className="text-muted-foreground">Treatment:</span> {descSpecs.surfaceTreatment}</span>
+                            )}
+                          </div>
+                        )}
+                        {/* Fallback description if no specs */}
+                        {!hasSpecs && item.description && (
+                          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                             {item.description}
                           </p>
                         )}
                           {/* Add files information */}
                           {itemFiles.length > 0 && (
                             <div className="mt-2">
-                              <p className="text-sm font-medium text-gray-700">Files:</p>
+                              <p className="text-xs font-medium text-gray-700">Files:</p>
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {itemFiles.map((file) => (
                                   <span key={file.id} className="text-xs bg-gray-100 px-2 py-1 rounded">
@@ -1531,7 +1572,7 @@ export default function OrderDetailsPage() {
                             </div>
                         )}
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex-shrink-0">
                         <p className="font-medium">
                           {user?.role === 'partner_seller' ? '' : formatCurrency(item.total_price, order.currency)}
                         </p>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Upload, Copy, Trash2, Edit, FileText, Package } from 'lucide-react';
+import { ArrowLeft, Upload, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import PartSpecsCard from '@/components/shared/PartSpecsCard';
 import type { RFQ, RfqItem } from '@/types/customer';
+
+const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
 
 type RfqStatus = RFQ['status'];
 
@@ -86,6 +89,8 @@ export default function QuoteDetailPage() {
   const [files, setFiles] = useState<RfqFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [discountCode, setDiscountCode] = useState('');
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFile, setViewerFile] = useState<{ url: string; type: string; name: string } | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -150,6 +155,18 @@ export default function QuoteDetailPage() {
 
   const getFilesForPart = (partId: string) => files.filter((f) => f.part_id === partId);
 
+  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
+
+  const handleView3D = (partFiles: RfqFile[]) => {
+    const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+    if (threeDFile) {
+      setViewerFile({ url: threeDFile.file_path, type: threeDFile.file_type, name: threeDFile.file_name });
+      setViewerOpen(true);
+    } else {
+      toast({ title: 'No 3D file', description: 'No viewable 3D file attached to this part.', variant: 'default' });
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* Header */}
@@ -163,7 +180,7 @@ export default function QuoteDetailPage() {
         </Link>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
             Quote {rfq.rfq_number || rfq.title || rfq.id.slice(0, 8)}
           </h1>
           <Badge variant={statusConfig.variant} className={statusConfig.className}>
@@ -181,8 +198,8 @@ export default function QuoteDetailPage() {
 
       {/* File Upload Placeholder */}
       <Card className="mb-6 border-dashed border-2">
-        <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-          <Upload className="h-10 w-10 text-muted-foreground mb-3" />
+        <CardContent className="flex flex-col items-center justify-center py-8 sm:py-10 text-center">
+          <Upload className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground mb-3" />
           <p className="text-base font-medium mb-1">Add new parts to quote</p>
           <p className="text-sm text-muted-foreground">
             Drag &amp; Drop your designs or{' '}
@@ -211,110 +228,33 @@ export default function QuoteDetailPage() {
                 ? parseSpecsFromOriginalValues(part.original_values)
                 : parseSpecsFromDescription(part.description || '');
               const partFiles = getFilesForPart(part.id);
-              const hasSpecs = specs.process || specs.material || specs.surfaceRoughness || specs.surfaceTreatment || specs.tolerance;
+              const has3DFile = partFiles.some((f) => is3DFile(f.file_name));
 
               return (
-                <Card key={part.id || index} className="transition-shadow hover:shadow-md">
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold truncate">
-                          {part.product_name || `Part ${index + 1}`}
-                        </h3>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-lg font-semibold">
-                          {formatCurrency(part.total_price || 0, currency)}
-                        </p>
-                        {part.quantity > 1 && (
-                          <p className="text-xs text-muted-foreground">
-                            {formatCurrency(part.unit_price || 0, currency)} x {part.quantity}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Specs Grid */}
-                    {hasSpecs && (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2 mb-3 text-sm">
-                        {specs.process && (
-                          <div>
-                            <span className="text-muted-foreground">Process:</span>{' '}
-                            <span className="font-medium">{specs.process}</span>
-                          </div>
-                        )}
-                        {specs.material && (
-                          <div>
-                            <span className="text-muted-foreground">Material:</span>{' '}
-                            <span className="font-medium">{specs.material}</span>
-                          </div>
-                        )}
-                        {specs.surfaceRoughness && (
-                          <div>
-                            <span className="text-muted-foreground">Surface Roughness:</span>{' '}
-                            <span className="font-medium">{specs.surfaceRoughness}</span>
-                          </div>
-                        )}
-                        {specs.surfaceTreatment && (
-                          <div>
-                            <span className="text-muted-foreground">Surface Treatment:</span>{' '}
-                            <span className="font-medium">{specs.surfaceTreatment}</span>
-                          </div>
-                        )}
-                        {specs.tolerance && (
-                          <div>
-                            <span className="text-muted-foreground">Tolerance:</span>{' '}
-                            <span className="font-medium">{specs.tolerance}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Description fallback if no structured specs */}
-                    {!hasSpecs && part.description && (
-                      <p className="text-sm text-muted-foreground mb-3 whitespace-pre-line line-clamp-3">
-                        {part.description}
-                      </p>
-                    )}
-
-                    {/* Quantity badge */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <Badge variant="outline" className="text-xs">
-                        Qty: {part.quantity}
-                      </Badge>
-                    </div>
-
-                    {/* File badges */}
-                    {partFiles.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        {partFiles.map((file) => (
-                          <Badge key={file.id} variant="secondary" className="text-xs gap-1">
-                            <FileText className="h-3 w-3" />
-                            {file.file_name}
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-
-                    <Separator className="my-3" />
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <Link to="/quote">
-                          <Edit className="mr-1 h-3.5 w-3.5" />
-                          Edit Specifications
-                        </Link>
-                      </Button>
-                      <Button variant="ghost" size="sm" title="Duplicate part">
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button variant="ghost" size="sm" title="Delete part">
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <PartSpecsCard
+                  key={part.id || index}
+                  index={index}
+                  currency={currency}
+                  part={{
+                    product_name: part.product_name,
+                    description: part.description,
+                    quantity: part.quantity,
+                    unit_price: part.unit_price,
+                    total_price: part.total_price,
+                    material: specs.material,
+                    process: specs.process,
+                    tolerance: specs.tolerance,
+                    surfaceRoughness: specs.surfaceRoughness,
+                    surfaceTreatment: specs.surfaceTreatment,
+                    fileCount: partFiles.length,
+                  }}
+                  onView3D={has3DFile ? () => handleView3D(partFiles) : undefined}
+                  onEdit={() => {}}
+                  onDuplicate={() => {}}
+                  onDelete={() => {}}
+                  showPricing
+                  showActions
+                />
               );
             })
           )}
@@ -322,7 +262,7 @@ export default function QuoteDetailPage() {
 
         {/* Right Column - Order Summary (sticky) */}
         <div className="lg:col-span-1">
-          <div className="sticky top-6">
+          <div className="sticky top-[140px]">
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Order Summary</CardTitle>
@@ -384,9 +324,14 @@ export default function QuoteDetailPage() {
                 <Button
                   className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
                   size="lg"
+                  asChild={rfq.status !== 'approved'}
                   disabled={rfq.status === 'approved'}
                 >
-                  Proceed to Checkout
+                  {rfq.status !== 'approved' ? (
+                    <Link to={`/customer/checkout/${rfq.id}`}>Proceed to Checkout</Link>
+                  ) : (
+                    'Already Approved'
+                  )}
                 </Button>
 
                 {rfq.status === 'approved' && (
@@ -399,6 +344,17 @@ export default function QuoteDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 3D Viewer Modal */}
+      <Suspense fallback={null}>
+        <ThreeDViewerModal
+          open={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+          fileUrl={viewerFile?.url || null}
+          fileType={viewerFile?.type || null}
+          fileName={viewerFile?.name || null}
+        />
+      </Suspense>
     </div>
   );
 }

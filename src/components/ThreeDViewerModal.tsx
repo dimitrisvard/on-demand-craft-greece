@@ -49,6 +49,8 @@ interface ViewerState {
   projection: ProjectionMode;
   showDimensions: boolean;
   dimensions: { x: number; y: number; z: number } | null;
+  volume: number | null; // mm³
+  surfaceArea: number | null; // mm²
 }
 
 // ── File type helpers ──────────────────────────────────────────────────────────
@@ -174,7 +176,7 @@ function FreeControls({ targetRef }: { targetRef: React.MutableRefObject<Vector3
 
 function AutoFrame({ children, onReady }: {
   children: React.ReactNode;
-  onReady?: (info: { size: number; center: Vector3; dims: Vector3 }) => void;
+  onReady?: (info: { size: number; center: Vector3; dims: Vector3; volume: number; surfaceArea: number }) => void;
 }) {
   const groupRef = useRef<Group>(null);
   const { camera } = useThree();
@@ -198,7 +200,37 @@ function AutoFrame({ children, onReady }: {
     camera.lookAt(0, size.y * 0.35, 0);
     camera.updateProjectionMatrix();
 
-    onReady?.({ size: maxDim, center: new Vector3(0, size.y * 0.35, 0), dims: size });
+    // Calculate volume and surface area from all meshes in the scene
+    let totalVolume = 0;
+    let totalSurfaceArea = 0;
+    groupRef.current.traverse((child: any) => {
+      if (child.isMesh && child.geometry) {
+        const geo = child.geometry;
+        const pos = geo.getAttribute('position');
+        if (!pos) return;
+        const idx = geo.getIndex();
+        const v0 = new Vector3(), v1 = new Vector3(), v2 = new Vector3();
+        const e1 = new Vector3(), e2 = new Vector3(), cr = new Vector3();
+        const count = idx ? idx.count : pos.count;
+        for (let i = 0; i < count; i += 3) {
+          const a = idx ? idx.getX(i) : i;
+          const b = idx ? idx.getX(i + 1) : i + 1;
+          const c = idx ? idx.getX(i + 2) : i + 2;
+          v0.fromBufferAttribute(pos, a);
+          v1.fromBufferAttribute(pos, b);
+          v2.fromBufferAttribute(pos, c);
+          // Signed volume of triangle
+          totalVolume += (v0.x * (v1.y * v2.z - v1.z * v2.y) + v0.y * (v1.z * v2.x - v1.x * v2.z) + v0.z * (v1.x * v2.y - v1.y * v2.x)) / 6.0;
+          // Surface area
+          e1.subVectors(v1, v0);
+          e2.subVectors(v2, v0);
+          cr.crossVectors(e1, e2);
+          totalSurfaceArea += cr.length() * 0.5;
+        }
+      }
+    });
+
+    onReady?.({ size: maxDim, center: new Vector3(0, size.y * 0.35, 0), dims: size, volume: Math.abs(totalVolume), surfaceArea: totalSurfaceArea });
   });
 
   return <group ref={groupRef}>{children}</group>;
@@ -508,10 +540,14 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
     return [new Plane(new Vector3(0, -1, 0), bounds.dims.y * 0.5)];
   }, [state.clipping, bounds]);
 
-  const handleReady = (info: { size: number; center: Vector3; dims: Vector3 }) => {
+  const handleReady = (info: { size: number; center: Vector3; dims: Vector3; volume: number; surfaceArea: number }) => {
     setBounds(info);
     targetRef.current.copy(info.center);
-    onStateChange({ dimensions: { x: info.dims.x, y: info.dims.y, z: info.dims.z } });
+    onStateChange({
+      dimensions: { x: info.dims.x, y: info.dims.y, z: info.dims.z },
+      volume: info.volume,
+      surfaceArea: info.surfaceArea,
+    });
   };
 
   const enhancedChildren = React.Children.map(children, (child) => {
@@ -547,6 +583,22 @@ function ViewerScene({ children, state, onStateChange, onResetView }: {
           <span style={{ marginLeft: 8 }}>
             {(state.dimensions.x / 25.4).toFixed(3)} x {(state.dimensions.y / 25.4).toFixed(3)} x {(state.dimensions.z / 25.4).toFixed(3)} in
           </span>
+          {state.volume != null && state.volume > 0 && (
+            <>
+              <span style={{ color: '#6b7280', marginLeft: 8 }}>|</span>
+              <span style={{ marginLeft: 8 }}>
+                Vol: {state.volume >= 1000 ? `${(state.volume / 1000).toFixed(2)} cm³` : `${state.volume.toFixed(1)} mm³`}
+              </span>
+            </>
+          )}
+          {state.surfaceArea != null && state.surfaceArea > 0 && (
+            <>
+              <span style={{ color: '#6b7280', marginLeft: 8 }}>|</span>
+              <span style={{ marginLeft: 8 }}>
+                SA: {state.surfaceArea >= 100 ? `${(state.surfaceArea / 100).toFixed(2)} cm²` : `${state.surfaceArea.toFixed(1)} mm²`}
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -761,14 +813,14 @@ function StepViewerClient({ url, state, onStateChange, onResetView }: {
 
 const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fileUrl, fileType, fileName, glbUrl }) => {
   const [viewerError, setViewerError] = useState<string | null>(null);
-  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null });
+  const [state, setState] = useState<ViewerState>({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null, volume: null, surfaceArea: null });
   const [viewKey, setViewKey] = useState(0);
 
   const handleStateChange = (partial: Partial<ViewerState>) => setState(prev => ({ ...prev, ...partial }));
   const handleResetView = () => setViewKey(k => k + 1);
 
   useEffect(() => {
-    setState({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null });
+    setState({ wireframe: false, clipping: false, renderMode: 'solid', projection: 'perspective', showDimensions: true, dimensions: null, volume: null, surfaceArea: null });
     setViewKey(0);
     setViewerError(null);
   }, [fileUrl]);
