@@ -118,7 +118,11 @@ const initialValues: FormValues = {
   captchaToken: '',
 };
 
-const MultiStepQuoteForm: React.FC = () => {
+interface MultiStepQuoteFormProps {
+  isOrder?: boolean;
+}
+
+const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -200,40 +204,41 @@ const MultiStepQuoteForm: React.FC = () => {
         await schema.validate(values, { abortEarly: false });
       }
 
-      // Generate RFQ number
+      // Generate RFQ/ORD number
+      const rfqPrefix = isOrder ? 'ORD' : 'RFQ';
       const today = new Date();
       const formattedDate = today.toLocaleDateString('en-GB', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric'
       }).split('/').join('');
-      
+
       // Check existing RFQ numbers for today to get the next sequence number
       const { data: existingRfqs, error: rfqsError } = await supabase
         .from('rfqs')
         .select('rfq_number')
-        .like('rfq_number', `RFQ-${formattedDate}-%`)
+        .like('rfq_number', `${rfqPrefix}-${formattedDate}-%`)
         .order('rfq_number', { ascending: false });
-        
+
       if (rfqsError) {
         console.error('Error getting existing RFQs:', rfqsError);
         throw rfqsError;
       }
-      
+
       let sequenceNumber = 1;
       if (existingRfqs && existingRfqs.length > 0) {
         // Extract the highest sequence number and increment by 1
         const latestRfq = existingRfqs[0];
         if (latestRfq && 'rfq_number' in latestRfq) {
           const rfqNumber = latestRfq.rfq_number as string;
-          const match = rfqNumber.match(/RFQ-\d{8}-(\d+)/);
+          const match = rfqNumber.match(new RegExp(`${rfqPrefix}-\\d{8}-(\\d+)`));
           if (match && match[1]) {
             sequenceNumber = parseInt(match[1], 10) + 1;
           }
         }
       }
-      
-      const rfqNumber = `RFQ-${formattedDate}-${sequenceNumber}`;
+
+      const rfqNumber = `${rfqPrefix}-${formattedDate}-${sequenceNumber}`;
       console.log('Generated RFQ number:', rfqNumber);
 
       // Note: Customer creation removed - RFQs will be created without customer assignment
@@ -328,7 +333,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             contact_phone: values.contact?.phone,
             mobile: values.contact?.mobile,
             customer_id: null, // No customer assigned initially
-            status: 'draft',
+            status: isOrder ? 'approved' : 'draft',
             currency: 'EUR',
             due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
             version: 1,
@@ -430,6 +435,30 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         }
       }
 
+      // If this is a direct order, also create a record in the orders table
+      if (isOrder) {
+        const { error: orderError } = await supabase
+          .from('orders')
+          .insert([
+            {
+              customer_id: null,
+              rfq_id: rfqData.id,
+              status: 'new',
+              total_amount: 0,
+              currency: 'EUR',
+              title: `${rfqNumber} - ${values.companyName}`,
+              start_date: new Date().toISOString(),
+              delivery_date: values.delivery.maxDeliveryDate || null,
+            }
+          ]);
+
+        if (orderError) {
+          console.error('Error creating order:', orderError);
+          throw orderError;
+        }
+        console.log('Order record created for RFQ:', rfqData.id);
+      }
+
       // Send confirmation and notification emails
       try {
         console.log('Sending RFQ confirmation and notification emails...');
@@ -479,9 +508,14 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         description: "Your quote request has been submitted successfully. We will contact you shortly.",
       });
 
-      // Redirect to success page
-      console.log('Redirecting to success page...');
-      navigate(getLocalizedPath('/quote/success'));
+      // Redirect after successful submission
+      if (isOrder) {
+        console.log('Redirecting to orders tab...');
+        navigate(getLocalizedPath('/customer/projects?tab=orders'));
+      } else {
+        console.log('Redirecting to customer projects...');
+        navigate(getLocalizedPath('/customer/projects'));
+      }
 
     } catch (error) {
       console.error('Submission error:', error);

@@ -13,6 +13,7 @@ import PartSpecsCard from '@/components/shared/PartSpecsCard';
 import type { RFQ, RfqItem } from '@/types/customer';
 
 const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
+const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
 
 type RfqStatus = RFQ['status'];
 
@@ -251,31 +252,57 @@ export default function QuoteDetailPage() {
               const partFiles = getFilesForPart(part.id);
               const has3DFile = partFiles.some((f) => is3DFile(f.file_name));
 
+              const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+
               return (
-                <PartSpecsCard
-                  key={part.id || index}
-                  index={index}
-                  currency={currency}
-                  part={{
-                    product_name: part.product_name,
-                    description: part.description,
-                    quantity: part.quantity,
-                    unit_price: part.unit_price,
-                    total_price: part.total_price,
-                    material: specs.material,
-                    process: specs.process,
-                    tolerance: specs.tolerance,
-                    surfaceRoughness: specs.surfaceRoughness,
-                    surfaceTreatment: specs.surfaceTreatment,
-                    fileCount: partFiles.length,
-                  }}
-                  onView3D={has3DFile ? () => handleView3D(partFiles) : undefined}
-                  onEdit={() => navigate(`/customer/quotes/${rfq.id}/parts/${index}`)}
-                  onDuplicate={() => handleDuplicatePart(index)}
-                  onDelete={() => handleDeletePart(index)}
-                  showPricing
-                  showActions
-                />
+                <div key={part.id || index} className="flex gap-3 items-start">
+                  {/* 3D Thumbnail */}
+                  <div className="hidden sm:block flex-shrink-0">
+                    {threeDFile ? (
+                      <Suspense
+                        fallback={
+                          <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                            <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
+                          </div>
+                        }
+                      >
+                        <PartThumbnail3D fileUrl={threeDFile.file_path} fileName={threeDFile.file_name} />
+                      </Suspense>
+                    ) : (
+                      <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                        <Box className="h-8 w-8 text-slate-300" />
+                        <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Part card */}
+                  <div className="flex-1 min-w-0">
+                    <PartSpecsCard
+                      index={index}
+                      currency={currency}
+                      part={{
+                        product_name: part.product_name,
+                        description: part.description,
+                        quantity: part.quantity,
+                        unit_price: part.unit_price,
+                        total_price: part.total_price,
+                        material: specs.material,
+                        process: specs.process,
+                        tolerance: specs.tolerance,
+                        surfaceRoughness: specs.surfaceRoughness,
+                        surfaceTreatment: specs.surfaceTreatment,
+                        fileCount: partFiles.length,
+                      }}
+                      onView3D={has3DFile ? () => handleView3D(partFiles) : undefined}
+                      onEdit={() => navigate(`/customer/quotes/${rfq.id}/parts/${index}`)}
+                      onDuplicate={() => handleDuplicatePart(index)}
+                      onDelete={() => handleDeletePart(index)}
+                      showPricing
+                      showActions
+                    />
+                  </div>
+                </div>
               );
             })
           )}
