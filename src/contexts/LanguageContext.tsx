@@ -26,6 +26,11 @@ export const DEFAULT_LANGUAGE = 'en';
 // Routes that should NOT have language prefixes
 const NON_LANGUAGE_ROUTES = [
   '/dashboard',
+  '/customer',
+  '/partner',
+  '/login',
+  '/register',
+  '/reset-password',
   '/customers',
   '/partners',
   '/calendar',
