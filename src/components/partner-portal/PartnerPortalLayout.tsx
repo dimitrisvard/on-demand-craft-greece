@@ -10,7 +10,7 @@ interface PartnerPortalLayoutProps {
 
 const portalNavItems = [
   { to: '/partner/jobs', label: 'Job Board', icon: Briefcase },
-  { to: '/orders', label: 'My Orders', icon: Package },
+  { to: '/partner/orders', label: 'My Orders', icon: Package },
   { to: '/partner/finance', label: 'Finance', icon: Wallet },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
 ];

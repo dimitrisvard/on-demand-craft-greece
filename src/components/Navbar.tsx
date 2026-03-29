@@ -56,7 +56,15 @@ const Navbar = () => {
 
         <div className="hidden xl:flex items-center space-x-1 text-sm font-medium">
           <NavLink to={getLocalizedPath('/')} label={t('home_title', 'Home')} isActive={isRouteActive('/')} />
-          <NavLink to="/dashboard" label="Dashboard" isActive={isRouteActive('/dashboard')} />
+          {user && isAdmin() && (
+            <NavLink to="/dashboard" label="Dashboard" isActive={isRouteActive('/dashboard')} />
+          )}
+          {user && isCustomer() && (
+            <NavLink to="/customer/dashboard" label="My Dashboard" isActive={isRouteActive('/customer')} />
+          )}
+          {user && isPartner() && (
+            <NavLink to="/partner/jobs" label="Partner Portal" isActive={isRouteActive('/partner')} />
+          )}
           
           {/* Mega Menu for Services */}
           <NavigationMenu>
@@ -148,7 +156,7 @@ const Navbar = () => {
                             </Link>
                           </li>
                           <li>
-                            <Link to="/orders" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
+                            <Link to="/partner/orders" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
                               <span className="flex items-center gap-2"><FolderOpen className="h-4 w-4" /> My Orders</span>
                             </Link>
                           </li>
@@ -197,7 +205,15 @@ const Navbar = () => {
       <div className={`xl:hidden fixed top-[73px] left-0 right-0 bg-white shadow-lg transition-all duration-300 z-[60] ${isOpen ? 'max-h-[calc(100vh-73px)] opacity-100 overflow-y-auto' : 'max-h-0 opacity-0 overflow-hidden'}`}>
         <div className="container-custom py-4 flex flex-col space-y-4">
           <MobileNavLink to={getLocalizedPath('/')} label={t('home_title', 'Home')} />
-          <MobileNavLink to="/dashboard" label="Dashboard" />
+          {user && isAdmin() && (
+            <MobileNavLink to="/dashboard" label="Dashboard" />
+          )}
+          {user && isCustomer() && (
+            <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
+          )}
+          {user && isPartner() && (
+            <MobileNavLink to="/partner/jobs" label="Partner Portal" />
+          )}
           <div className="pl-4 border-l-2 border-gray-100 ml-2 space-y-2">
              <div className="font-medium text-brand-dark py-2">{t('navbar_services', 'Services')}</div>
              <MobileNavLink to={getLocalizedPath('/services/cnc-machining')} label="5-Axis Milling" />
@@ -227,7 +243,7 @@ const Navbar = () => {
                 {isPartner() && (
                   <>
                     <MobileNavLink to="/partner/jobs" label="Job Board" />
-                    <MobileNavLink to="/orders" label="My Orders" />
+                    <MobileNavLink to="/partner/orders" label="My Orders" />
                     <MobileNavLink to="/partner/finance" label="Finance" />
                   </>
                 )}

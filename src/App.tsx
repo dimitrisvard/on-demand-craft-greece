@@ -74,6 +74,7 @@ const CheckoutPage = lazy(() => import('./pages/customer/CheckoutPage'));
 const PartnerJobBoard = lazy(() => import('./pages/partner/PartnerJobBoard'));
 const PartnerFinancePage = lazy(() => import('./pages/partner/PartnerFinancePage'));
 const PartnerOrderDetailPage = lazy(() => import('./pages/partner/PartnerOrderDetailPage'));
+const PartnerOrdersPage = lazy(() => import('./pages/partner/PartnerOrdersPage'));
 
 // Loading component
 const PageLoader = () => (
@@ -197,6 +198,7 @@ function AppContent() {
 
                 {/* Partner Portal routes */}
                 <Route path="/partner/jobs" element={<PartnerPortalLayout><PartnerJobBoard /></PartnerPortalLayout>} />
+                <Route path="/partner/orders" element={<PartnerPortalLayout><PartnerOrdersPage /></PartnerPortalLayout>} />
                 <Route path="/partner/orders/:id" element={<PartnerPortalLayout><PartnerOrderDetailPage /></PartnerPortalLayout>} />
                 <Route path="/partner/finance" element={<PartnerPortalLayout><PartnerFinancePage /></PartnerPortalLayout>} />
 
