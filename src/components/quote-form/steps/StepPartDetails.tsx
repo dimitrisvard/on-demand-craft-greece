@@ -1,6 +1,6 @@
-import React, { useState, lazy, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { FormikProps, FieldArray } from 'formik';
-import { Plus, Trash2, FileText, X, MoreHorizontal, Check, RotateCcw } from 'lucide-react';
+import { Plus, Trash2, FileText, X, Box as BoxIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -24,8 +24,201 @@ import {
 import { Upload as UploadIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from 'react-i18next';
+import { Canvas, useLoader, useThree } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
+// @ts-expect-error: no types for STLLoader
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+// @ts-expect-error: no types for BufferGeometryUtils
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils';
+import {
+  BufferGeometry,
+  Float32BufferAttribute,
+  MeshPhongMaterial,
+  Color,
+  DoubleSide,
+  Vector3,
+  Box3,
+} from 'three';
 
-const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
+// ── Darker material for embedded viewer ──
+const darkCadMaterial = new MeshPhongMaterial({
+  color: new Color('#607d8b'),
+  specular: new Color('#222222'),
+  shininess: 50,
+  side: DoubleSide,
+});
+
+function smoothGeo(geom: BufferGeometry): BufferGeometry {
+  try { const m = mergeVertices(geom); m.computeVertexNormals(); return m; }
+  catch { geom.computeVertexNormals(); return geom; }
+}
+
+// OCCT loader
+let occtP: Promise<any> | null = null;
+function loadOcct(): Promise<any> {
+  if (!occtP) {
+    occtP = new Promise((resolve, reject) => {
+      if ((window as any).occtimportjs) { resolve((window as any).occtimportjs()); return; }
+      const existing = document.querySelector('script[src="/occt-import-js.js"]');
+      if (existing) {
+        const c = setInterval(() => { if ((window as any).occtimportjs) { clearInterval(c); resolve((window as any).occtimportjs()); } }, 100);
+        setTimeout(() => { clearInterval(c); reject(new Error('timeout')); }, 15000);
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = '/occt-import-js.js';
+      s.onload = () => {
+        const c = setInterval(() => { if ((window as any).occtimportjs) { clearInterval(c); resolve((window as any).occtimportjs()); } }, 100);
+        setTimeout(() => { clearInterval(c); reject(new Error('timeout')); }, 15000);
+      };
+      s.onerror = () => reject(new Error('Failed to load occt'));
+      document.head.appendChild(s);
+    });
+  }
+  return occtP;
+}
+
+// Inline STL viewer for embedded canvas
+function EmbeddedSTL({ url, onDims }: { url: string; onDims: (d: { x: number; y: number; z: number }) => void }) {
+  const geometry = useLoader(STLLoader, url) as BufferGeometry;
+  const { camera } = useThree();
+  const dims = useMemo(() => {
+    geometry.computeBoundingBox(); geometry.center();
+    const s = new Vector3(); geometry.boundingBox!.getSize(s);
+    return { x: s.x, y: s.y, z: s.z };
+  }, [geometry]);
+  useEffect(() => {
+    onDims(dims);
+    const max = Math.max(dims.x, dims.y, dims.z);
+    const d = max * 1.8;
+    camera.position.set(d, d * 0.7, d);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [dims, camera, onDims]);
+  return <mesh geometry={geometry} material={darkCadMaterial} />;
+}
+
+// Inline STEP viewer for embedded canvas
+function EmbeddedSTEP({ url, onDims }: { url: string; onDims: (d: { x: number; y: number; z: number }) => void }) {
+  const [geoms, setGeoms] = useState<BufferGeometry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const { camera } = useThree();
+  const groupRef = useRef<any>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const occt = await loadOcct();
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('fetch fail');
+        const buf = await resp.arrayBuffer();
+        const res = occt.ReadStepFile(new Uint8Array(buf), { linearDeflection: 0.001, linearDeflectionType: 'bounding_box_ratio' });
+        if (!res.success) throw new Error('parse fail');
+        if (cancelled) return;
+        setGeoms((res.meshes || []).map((m: any) => {
+          const g = new BufferGeometry();
+          g.setAttribute('position', new Float32BufferAttribute(m.attributes.position.array, 3));
+          if (m.index) g.setIndex(Array.from(m.index.array));
+          return smoothGeo(g);
+        }));
+      } catch { if (!cancelled) setError(true); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [url]);
+  useEffect(() => {
+    if (geoms.length === 0 || !groupRef.current) return;
+    const box = new Box3();
+    geoms.forEach(g => { g.computeBoundingBox(); if (g.boundingBox) box.union(g.boundingBox); });
+    const center = new Vector3(), size = new Vector3();
+    box.getCenter(center); box.getSize(size);
+    onDims({ x: size.x, y: size.y, z: size.z });
+    const max = Math.max(size.x, size.y, size.z);
+    const d = max * 1.8;
+    camera.position.set(d, d * 0.7, d);
+    camera.lookAt(center.x, center.y, center.z);
+    camera.updateProjectionMatrix();
+  }, [geoms, camera, onDims]);
+  if (loading || error || geoms.length === 0) return null;
+  return (
+    <group ref={groupRef}>
+      {geoms.map((g, i) => <mesh key={i} geometry={g} material={darkCadMaterial} />)}
+    </group>
+  );
+}
+
+// Embedded 3D preview panel
+function Embedded3DPreview({ file }: { file: File | null }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  const isSTL = (n: string) => /\.stl$/i.test(n);
+  const isSTEP = (n: string) => /\.(step|stp)$/i.test(n);
+  const isDXF = (n: string) => /\.dxf$/i.test(n);
+
+  useEffect(() => {
+    if (file && !isDXF(file.name)) {
+      const url = URL.createObjectURL(file);
+      setBlobUrl(url);
+      setDims(null);
+      setLoadError(false);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setBlobUrl(null);
+      setDims(null);
+    }
+  }, [file]);
+
+  if (!file) {
+    return (
+      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center">
+        <BoxIcon className="h-10 w-10 text-slate-300 mb-2" />
+        <p className="text-sm text-slate-400 font-medium">3D Preview</p>
+        <p className="text-xs text-slate-400">Upload a file to preview</p>
+      </div>
+    );
+  }
+
+  if (isDXF(file.name)) {
+    return (
+      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-300 flex flex-col items-center justify-center">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+        <span className="text-sm text-slate-500 mt-2 font-medium">2D Drawing (DXF)</span>
+      </div>
+    );
+  }
+
+  if (!blobUrl) return null;
+
+  return (
+    <div className="flex flex-col">
+      <div className="rounded-lg overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 border border-teal-300" style={{ height: 200 }}>
+        <Canvas camera={{ position: [5, 5, 5], fov: 40 }} gl={{ antialias: true, alpha: true }}>
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[5, 10, 7]} intensity={1.2} />
+          <directionalLight position={[-5, -3, -5]} intensity={0.4} />
+          <Suspense fallback={null}>
+            {isSTL(file.name) && <EmbeddedSTL url={blobUrl} onDims={setDims} />}
+            {isSTEP(file.name) && <EmbeddedSTEP url={blobUrl} onDims={setDims} />}
+          </Suspense>
+          <OrbitControls enableZoom enablePan={false} autoRotate={false} />
+        </Canvas>
+      </div>
+      {dims && (
+        <p className="text-xs text-center text-muted-foreground mt-1.5">
+          {dims.x.toFixed(1)} &times; {dims.y.toFixed(1)} &times; {dims.z.toFixed(1)} mm
+        </p>
+      )}
+    </div>
+  );
+}
 
 const thicknessOptions = [
   { value: '0.5', label: '0.5 mm' },
@@ -54,8 +247,6 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
   const { t } = useTranslation();
   const [materialSubtypes, setMaterialSubtypes] = useState<any[]>([]);
   const [expandedAccordions, setExpandedAccordions] = useState<string[]>(['part-0']);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerFile, setViewerFile] = useState<{ url: string; name: string } | null>(null);
 
   const handleMaterialChange = (partIndex: number, value: string) => {
     const selectedMaterial = materialOptions.find((m) => m.value === value);
@@ -456,78 +647,64 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                           />
                         </div>
 
+                        {/* Upload + 3D Preview side by side */}
                         <div className="mb-6">
                           <Label className="block mb-2">
                             {t('quote_form_upload_files')} <span className="text-red-500">*</span>
                           </Label>
-                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
-                            <UploadIcon className="mx-auto h-12 w-12 text-gray-400" />
-                            <div className="mt-4">
-                              <p className="text-sm text-gray-600">{t('quote_form_drag_drop_files')}</p>
-                              <p className="text-xs text-gray-500 mt-1">{t('quote_form_accepted_file_types')}</p>
-                              <p className="text-xs text-gray-500">{t('quote_form_file_size_limit')}</p>
-                            </div>
-                            <input
-                              type="file"
-                              multiple
-                              accept={acceptedFileTypes}
-                              onChange={(e) => handleFileChange(e, index)}
-                              className="hidden"
-                              id={`file-upload-${index}`}
-                            />
-                            <label
-                              htmlFor={`file-upload-${index}`}
-                              className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 cursor-pointer"
-                            >
-                              {t('quote_form_upload_files')}
-                            </label>
-                          </div>
-                          
-                          {part.files && part.files.length > 0 && (
-                            <div className="mt-4">
-                              <h4 className="text-sm font-medium mb-2">{t('quote_form_files_uploaded')}:</h4>
-                              <div className="space-y-2">
-                                {part.files.map((file: any, fileIndex: number) => {
-                                  const canPreview3D = is3DFile(file.name);
-                                  return (
-                                    <div key={fileIndex} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                                      <div className="flex items-center">
-                                        <FileText className="h-4 w-4 text-gray-500 mr-2" />
-                                        <span className="text-sm">{file.name}</span>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        {canPreview3D && (
-                                          <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => {
-                                              const url = URL.createObjectURL(file);
-                                              setViewerFile({ url, name: file.name });
-                                              setViewerOpen(true);
-                                            }}
-                                            className="h-7 px-2 text-teal-600 hover:text-teal-700"
-                                          >
-                                            <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                                            <span className="text-xs">3D View</span>
-                                          </Button>
-                                        )}
-                                        <Button
-                                          type="button"
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => removeFile(index, fileIndex)}
-                                          className="h-6 w-6 p-0"
-                                        >
-                                          <X className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Left: Upload area */}
+                            <div>
+                              <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
+                                <UploadIcon className="mx-auto h-8 w-8 text-gray-400" />
+                                <p className="text-sm text-gray-600 mt-2">{t('quote_form_drag_drop_files')}</p>
+                                <p className="text-[11px] text-gray-400 mt-1">{t('quote_form_accepted_file_types')}</p>
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept={acceptedFileTypes}
+                                  onChange={(e) => handleFileChange(e, index)}
+                                  className="hidden"
+                                  id={`file-upload-${index}`}
+                                />
+                                <label
+                                  htmlFor={`file-upload-${index}`}
+                                  className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 cursor-pointer"
+                                >
+                                  {t('quote_form_upload_files')}
+                                </label>
                               </div>
+                              {/* File list */}
+                              {part.files && part.files.length > 0 && (
+                                <div className="mt-3 space-y-1.5">
+                                  {part.files.map((file: any, fileIndex: number) => (
+                                    <div key={fileIndex} className="flex items-center justify-between p-1.5 bg-gray-50 rounded text-sm">
+                                      <div className="flex items-center min-w-0">
+                                        <FileText className="h-3.5 w-3.5 text-gray-400 mr-1.5 flex-shrink-0" />
+                                        <span className="truncate text-xs">{file.name}</span>
+                                      </div>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => removeFile(index, fileIndex)}
+                                        className="h-5 w-5 p-0 flex-shrink-0"
+                                      >
+                                        <X className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
-                          )}
+
+                            {/* Right: Embedded 3D Preview */}
+                            <div>
+                              <Embedded3DPreview
+                                file={part.files?.find((f: File) => is3DFile(f.name)) || null}
+                              />
+                            </div>
+                          </div>
                         </div>
                       </AccordionContent>
                     </AccordionItem>
@@ -592,20 +769,6 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
         </div>
       </div>
 
-      {/* 3D Viewer Modal for file preview */}
-      <Suspense fallback={null}>
-        <ThreeDViewerModal
-          open={viewerOpen}
-          onClose={() => {
-            setViewerOpen(false);
-            if (viewerFile?.url) URL.revokeObjectURL(viewerFile.url);
-            setViewerFile(null);
-          }}
-          fileUrl={viewerFile?.url || null}
-          fileType={null}
-          fileName={viewerFile?.name || null}
-        />
-      </Suspense>
     </div>
   );
 };

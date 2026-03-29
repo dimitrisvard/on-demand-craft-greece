@@ -9,6 +9,7 @@ import { ArrowLeft, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box, C
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import PartSpecsCard from '@/components/shared/PartSpecsCard';
+import { getSignedUrl } from '@/utils/awsS3Storage';
 import type { RFQ, RfqItem } from '@/types/customer';
 
 const ThreeDViewerModal = lazy(() => import('@/components/ThreeDViewerModal'));
@@ -100,6 +101,9 @@ export default function QuoteDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<{ url: string; type: string; name: string } | null>(null);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+
+  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
 
   useEffect(() => {
     if (id) {
@@ -118,6 +122,15 @@ export default function QuoteDetailPage() {
       if (rfqRes.error) throw rfqRes.error;
       setRfq(rfqRes.data as unknown as RFQ);
       setFiles((filesRes.data as unknown as RfqFile[]) || []);
+
+      // Generate signed URLs for 3D files
+      const urlMap: Record<string, string> = {};
+      const threeDFiles = (filesRes.data || []).filter((f: any) => is3DFile(f.file_name));
+      await Promise.all(threeDFiles.map(async (f: any) => {
+        const url = await getSignedUrl(f.file_path);
+        if (url) urlMap[f.id] = url;
+      }));
+      setSignedUrls(urlMap);
     } catch (err: any) {
       toast({ title: 'Error loading quote', description: err.message, variant: 'destructive' });
     } finally {
@@ -165,8 +178,6 @@ export default function QuoteDetailPage() {
 
   const getFilesForPart = (partId: string) => files.filter((f) => f.part_id === partId);
 
-  const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
-
   const handleDuplicatePart = async (index: number) => {
     if (!rfq) return;
     try {
@@ -204,7 +215,8 @@ export default function QuoteDetailPage() {
   const handleView3D = (partFiles: RfqFile[]) => {
     const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
     if (threeDFile) {
-      setViewerFile({ url: threeDFile.file_path, type: threeDFile.file_type, name: threeDFile.file_name });
+      const signedUrl = signedUrls[threeDFile.id];
+      setViewerFile({ url: signedUrl || threeDFile.file_path, type: threeDFile.file_type, name: threeDFile.file_name });
       setViewerOpen(true);
     } else {
       toast({ title: 'No 3D file', description: 'No viewable 3D file attached to this part.', variant: 'default' });
@@ -274,7 +286,7 @@ export default function QuoteDetailPage() {
                           </div>
                         }
                       >
-                        <PartThumbnail3D fileUrl={threeDFile.file_path} fileName={threeDFile.file_name} />
+                        <PartThumbnail3D fileUrl={signedUrls[threeDFile.id] || threeDFile.file_path} fileName={threeDFile.file_name} />
                       </Suspense>
                     ) : (
                       <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
