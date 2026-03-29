@@ -15,7 +15,7 @@ const CustomerQuotePage = () => {
           ? t('customer_order_page_title', 'Place an Order')
           : t('customer_quote_page_title', 'Request a Quote')}
       </h1>
-      <MultiStepQuoteForm isOrder={isOrder} />
+      <MultiStepQuoteForm isOrder={isOrder} skipCompanyStep />
       <Toaster />
     </div>
   );

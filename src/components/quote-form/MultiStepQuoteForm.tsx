@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Formik, Form } from 'formik';
 import * as Yup from 'yup';
 import { Button } from '@/components/ui/button';
@@ -120,15 +120,81 @@ const initialValues: FormValues = {
 
 interface MultiStepQuoteFormProps {
   isOrder?: boolean;
+  skipCompanyStep?: boolean;
 }
 
-const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false }) => {
-  const [currentStep, setCurrentStep] = useState(0);
+const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false, skipCompanyStep = false }) => {
+  const [currentStep, setCurrentStep] = useState(skipCompanyStep ? 1 : 0);
+  const [prefillValues, setPrefillValues] = useState<Partial<typeof initialValues> | null>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
+
+  // Pre-fill company info from customer profile when skipping company step
+  useEffect(() => {
+    if (!skipCompanyStep || !user) return;
+    const loadProfile = async () => {
+      try {
+        const { data } = await supabase
+          .from('customer_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
+        if (data) {
+          setPrefillValues({
+            companyName: data.company_name || user.email || 'Customer',
+            vatId: data.vat_id || 'N/A',
+            address: {
+              street: data.address || 'N/A',
+              city: data.city || 'N/A',
+              zipCode: data.zip_code || '00000',
+              country: data.country || 'GR',
+            },
+            contact: {
+              firstName: data.first_name || user.user_metadata?.first_name || 'Customer',
+              lastName: data.last_name || user.user_metadata?.last_name || '',
+              position: '',
+              email: user.email || '',
+              phone: data.phone || 'N/A',
+              mobile: '',
+            },
+          });
+        } else {
+          // No profile, fill with defaults so validation passes
+          setPrefillValues({
+            companyName: user.email || 'Customer',
+            vatId: 'N/A',
+            address: { street: 'N/A', city: 'N/A', zipCode: '00000', country: 'GR' },
+            contact: {
+              firstName: user.user_metadata?.first_name || 'Customer',
+              lastName: user.user_metadata?.last_name || '',
+              position: '',
+              email: user.email || '',
+              phone: 'N/A',
+              mobile: '',
+            },
+          });
+        }
+      } catch {
+        setPrefillValues({
+          companyName: user.email || 'Customer',
+          vatId: 'N/A',
+          address: { street: 'N/A', city: 'N/A', zipCode: '00000', country: 'GR' },
+          contact: {
+            firstName: user.user_metadata?.first_name || 'Customer',
+            lastName: user.user_metadata?.last_name || '',
+            position: '',
+            email: user.email || '',
+            phone: 'N/A',
+            mobile: '',
+          },
+        });
+      }
+    };
+    loadProfile();
+  }, [skipCompanyStep, user]);
 
   const steps = [
     { title: t('quote_form_step_company_contact'), component: StepCompanyInfo },
@@ -190,7 +256,8 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
   };
 
   const handleBack = () => {
-    setCurrentStep((prev) => Math.max(prev - 1, 0));
+    const minStep = skipCompanyStep ? 1 : 0;
+    setCurrentStep((prev) => Math.max(prev - 1, minStep));
   };
 
   const handleSubmit = async (values: FormValues, { setSubmitting, setErrors, setTouched }: any) => {
@@ -332,7 +399,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             contact_email: values.contact?.email,
             contact_phone: values.contact?.phone,
             mobile: values.contact?.mobile,
-            customer_id: null, // No customer assigned initially
+            customer_id: user?.id || null,
             status: isOrder ? 'approved' : 'draft',
             currency: 'EUR',
             due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -599,7 +666,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
       </div>
 
       <Formik
-        initialValues={initialValues}
+        initialValues={prefillValues ? { ...initialValues, ...prefillValues } : initialValues}
         validationSchema={validationSchemas[currentStep]}
         onSubmit={handleSubmit}
         validateOnBlur={true}
@@ -627,7 +694,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
               })}
 
               <div className="flex justify-between pt-6">
-                {currentStep > 0 && (
+                {currentStep > (skipCompanyStep ? 1 : 0) && (
                   <Button
                     type="button"
                     variant="outline"

@@ -34,10 +34,10 @@ const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLa
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Secondary navigation bar - fixed below the main Navbar */}
-      <nav className="fixed top-[73px] left-0 right-0 z-40 bg-white border-b border-gray-200">
+      {/* Secondary navigation bar - fixed directly below the main Navbar with no gap */}
+      <nav className="fixed top-[73px] left-0 right-0 z-40 bg-white border-b border-gray-200 shadow-sm">
         <div className="container-custom">
-          <div className="flex items-center justify-between h-14">
+          <div className="flex items-center justify-between h-12">
             {/* Navigation links */}
             <div className="flex items-center space-x-1">
               {portalNavItems.map((item) => {
@@ -65,7 +65,7 @@ const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLa
       </nav>
 
       {/* Content area */}
-      <main className="container-custom py-6 pt-20">
+      <main className="container-custom py-6 pt-[134px]">
         {/* Breadcrumbs */}
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav aria-label="Breadcrumb" className="mb-4">

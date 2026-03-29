@@ -88,7 +88,7 @@ const CustomerDashboard = () => {
   return (
     <div className="space-y-6 p-4 md:p-6 max-w-7xl mx-auto">
       {/* Welcome Banner */}
-      <div className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-800 p-6 text-white shadow-md">
+      <div className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-800 p-6 text-white shadow-md mt-2">
         <h1 className="text-2xl font-bold">
           Hi {firstName}, welcome to your Microns Hub account
         </h1>
