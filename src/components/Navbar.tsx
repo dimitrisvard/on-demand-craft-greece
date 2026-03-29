@@ -59,7 +59,7 @@ const Navbar = () => {
           {user && isAdmin() && (
             <NavLink to="/dashboard" label="Dashboard" isActive={isRouteActive('/dashboard')} />
           )}
-          {user && isCustomer() && (
+          {user && isCustomer() && !isAdmin() && (
             <NavLink to="/customer/dashboard" label="My Dashboard" isActive={isRouteActive('/customer')} />
           )}
           {user && isPartner() && (
@@ -124,8 +124,8 @@ const Navbar = () => {
                   </NavigationMenuTrigger>
                   <NavigationMenuContent>
                     <ul className="w-[220px] p-2 bg-white">
-                      {/* Customer links - shown to customers and admins */}
-                      {(isCustomer() || isAdmin()) && (
+                      {/* Customer links - shown to customers only (not admins) */}
+                      {isCustomer() && !isAdmin() && (
                         <>
                           <li>
                             <Link to="/customer/dashboard" className="block px-3 py-2 text-sm rounded-md hover:bg-slate-100 text-brand-dark">
@@ -205,7 +205,7 @@ const Navbar = () => {
           {user && isAdmin() && (
             <MobileNavLink to="/dashboard" label="Dashboard" />
           )}
-          {user && isCustomer() && (
+          {user && isCustomer() && !isAdmin() && (
             <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
           )}
           {user && isPartner() && (
@@ -229,7 +229,7 @@ const Navbar = () => {
             <>
               <div className="border-t pt-2 mt-2">
                 <div className="font-medium text-brand-dark py-2">My Account</div>
-                {(isCustomer() || isAdmin()) && (
+                {isCustomer() && !isAdmin() && (
                   <>
                     <MobileNavLink to="/customer/dashboard" label="My Dashboard" />
                     <MobileNavLink to="/customer/projects" label="My Projects" />

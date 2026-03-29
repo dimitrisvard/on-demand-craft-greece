@@ -65,7 +65,7 @@ const CustomerPortalLayout = ({ children, breadcrumbs, title }: CustomerPortalLa
       </nav>
 
       {/* Content area */}
-      <main className="container-custom py-6 pt-[57px]">
+      <main className="container-custom py-6 pt-20">
         {/* Breadcrumbs */}
         {breadcrumbs && breadcrumbs.length > 0 && (
           <nav aria-label="Breadcrumb" className="mb-4">

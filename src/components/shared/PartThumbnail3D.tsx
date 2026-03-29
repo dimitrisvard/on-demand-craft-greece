@@ -293,7 +293,23 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
     return <PlaceholderIcon fileName={fileName} />;
   }
 
-  const topDown = isDXF(fileName);
+  // DXF files are 2D drawings — show a drawing placeholder
+  if (isDXF(fileName)) {
+    return (
+      <div className={`flex flex-col items-center ${className ?? ''}`}>
+        <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span className="text-[10px] text-slate-500 mt-1.5 font-medium">2D Drawing</span>
+          <span className="text-[9px] text-slate-400 truncate max-w-[130px] px-2">{fileName}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ThumbnailErrorBoundary fileName={fileName}>
@@ -302,13 +318,13 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
           <Suspense fallback={<LoadingSpinner />}>
             <ThumbnailCanvas onDimensions={dimensions}>
               {isSTL(fileName) && (
-                <STLModel url={fileUrl} onDimensions={setDimensions} topDown={topDown} />
+                <STLModel url={fileUrl} onDimensions={setDimensions} />
               )}
               {isSTEP(fileName) && (
                 <StepModel url={fileUrl} onDimensions={setDimensions} />
               )}
-              {(isOBJ(fileName) || isDXF(fileName)) && (
-                <STLModel url={fileUrl} onDimensions={setDimensions} topDown={topDown} />
+              {isOBJ(fileName) && (
+                <STLModel url={fileUrl} onDimensions={setDimensions} />
               )}
             </ThumbnailCanvas>
           </Suspense>

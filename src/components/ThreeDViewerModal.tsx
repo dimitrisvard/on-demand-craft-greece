@@ -879,8 +879,20 @@ const ThreeDViewerModal: React.FC<ThreeDViewerModalProps> = ({ open, onClose, fi
       </ViewerScene>
     );
   } else if (isDXF(fileName)) {
-    // DXF files are 2D drawings — attempt loading via STEP parser, default to top-down view
-    content = <StepViewer key={viewKey} url={fileUrl} glbUrl={null} state={state} onStateChange={handleStateChange} onResetView={handleResetView} initialView="top" />;
+    // DXF files are 2D drawings — show a top-down flat view message
+    content = (
+      <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>
+        <div style={{ textAlign: 'center' }}>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 12px' }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <div style={{ fontSize: 15, color: '#374151', fontWeight: 500 }}>DXF Drawing File</div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>{fileName}</div>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8, maxWidth: 280, margin: '8px auto 0' }}>
+            DXF files are 2D drawings and cannot be rendered in the 3D viewer.
+            Upload a STEP or STL file to view the 3D model.
+          </div>
+        </div>
+      </div>
+    );
   } else {
     content = (
       <div style={{ height: 560, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef1f5', borderRadius: 8 }}>

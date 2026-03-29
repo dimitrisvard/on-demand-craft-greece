@@ -4,9 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box } from 'lucide-react';
+import { ArrowLeft, Copy, Trash2, Edit, FileText, Package, Weight, Ruler, Box, Check, X } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import PartSpecsCard from '@/components/shared/PartSpecsCard';
@@ -90,7 +89,7 @@ export default function QuoteDetailPage() {
   const [rfq, setRfq] = useState<RFQ | null>(null);
   const [files, setFiles] = useState<RfqFile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [discountCode, setDiscountCode] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<{ url: string; type: string; name: string } | null>(null);
 
@@ -152,7 +151,8 @@ export default function QuoteDetailPage() {
 
   const subtotal = parts.reduce((sum, part) => sum + (part.total_price || 0), 0);
   const shippingCost = rfq.shipping_cost;
-  const total = subtotal + (shippingCost || 0);
+  const vatAmount = (subtotal + (shippingCost || 0)) * 0.24;
+  const total = subtotal + (shippingCost || 0) + vatAmount;
   const totalPieces = parts.reduce((sum, part) => sum + (part.quantity || 0), 0);
 
   const getFilesForPart = (partId: string) => files.filter((f) => f.part_id === partId);
@@ -310,7 +310,7 @@ export default function QuoteDetailPage() {
 
         {/* Right Column - Order Summary (sticky) */}
         <div className="lg:col-span-1">
-          <div className="sticky top-[140px]">
+          <div className="sticky top-[140px] max-h-[calc(100vh-160px)] overflow-y-auto">
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Order Summary</CardTitle>
@@ -344,48 +344,93 @@ export default function QuoteDetailPage() {
 
                 <Separator />
 
-                {/* Discount code */}
-                <div>
-                  <label className="text-sm text-muted-foreground mb-1.5 block">Discount code</label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={discountCode}
-                      onChange={(e) => setDiscountCode(e.target.value)}
-                      placeholder="Enter code"
-                      className="text-sm"
-                    />
-                    <Button variant="outline" size="sm" className="flex-shrink-0">
-                      Apply
-                    </Button>
-                  </div>
+                {/* VAT */}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">VAT (24%)</span>
+                  <span className="font-medium">{formatCurrency(vatAmount, currency)}</span>
                 </div>
 
                 <Separator />
 
                 {/* Total */}
                 <div className="flex justify-between items-baseline">
-                  <span className="text-sm text-muted-foreground">Total (excl. VAT)</span>
+                  <span className="text-sm text-muted-foreground">Total (Inc. VAT)</span>
                   <span className="text-2xl font-bold">{formatCurrency(total, currency)}</span>
                 </div>
 
-                {/* CTA */}
-                <Button
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
-                  size="lg"
-                  asChild={rfq.status !== 'approved'}
-                  disabled={rfq.status === 'approved'}
-                >
-                  {rfq.status !== 'approved' ? (
-                    <Link to={`/customer/checkout/${rfq.id}`}>Proceed to Checkout</Link>
-                  ) : (
-                    'Already Approved'
-                  )}
-                </Button>
-
-                {rfq.status === 'approved' && (
-                  <p className="text-xs text-center text-muted-foreground">
-                    This quote has already been approved.
+                {/* Action buttons */}
+                {(rfq.status === 'approved' || rfq.status === 'rejected') ? (
+                  <p className="text-sm text-center text-muted-foreground py-2">
+                    This quote has been {rfq.status === 'approved' ? 'accepted' : 'declined'}.
                   </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      size="lg"
+                      disabled={actionLoading}
+                      onClick={async () => {
+                        try {
+                          setActionLoading(true);
+                          const { error: statusError } = await supabase
+                            .from('rfqs')
+                            .update({ status: 'approved' })
+                            .eq('id', rfq.id);
+                          if (statusError) throw statusError;
+
+                          const { error: orderError } = await supabase
+                            .from('orders')
+                            .insert({
+                              customer_id: rfq.customer_id,
+                              rfq_id: rfq.id,
+                              status: 'pending',
+                              total_amount: total,
+                              currency: currency,
+                              title: rfq.title || rfq.rfq_number || `Order from ${rfq.id.slice(0, 8)}`,
+                              start_date: new Date().toISOString(),
+                              delivery_date: rfq.delivery_date || null,
+                            });
+                          if (orderError) throw orderError;
+
+                          toast({ title: 'Quote accepted', description: 'Your order has been created successfully.' });
+                          navigate('/customer/projects?tab=orders');
+                        } catch (err: any) {
+                          toast({ title: 'Failed to accept quote', description: err.message, variant: 'destructive' });
+                        } finally {
+                          setActionLoading(false);
+                        }
+                      }}
+                    >
+                      <Check className="mr-2 h-4 w-4" />
+                      Accept Quote
+                    </Button>
+                    <Button
+                      className="w-full border-red-500 text-red-600 hover:bg-red-50"
+                      variant="outline"
+                      size="lg"
+                      disabled={actionLoading}
+                      onClick={async () => {
+                        try {
+                          setActionLoading(true);
+                          const { error } = await supabase
+                            .from('rfqs')
+                            .update({ status: 'rejected' })
+                            .eq('id', rfq.id);
+                          if (error) throw error;
+
+                          toast({ title: 'Quote declined', description: 'The quote has been declined.' });
+                          navigate('/customer/projects');
+                        } catch (err: any) {
+                          toast({ title: 'Failed to decline quote', description: err.message, variant: 'destructive' });
+                        } finally {
+                          setActionLoading(false);
+                        }
+                      }}
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Decline Quote
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>

@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Info } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Save, Loader2 } from 'lucide-react';
 import {
   materialOptions,
   surfaceRoughnessOptions,
@@ -27,13 +27,6 @@ const manufacturingProcessOptions = [
   { value: 'sheet-metal', label: 'Sheet Metal' },
   { value: '3d-printing', label: '3D Printing' },
   { value: 'injection-molding', label: 'Injection Molding' },
-];
-
-const inspectionOptions = [
-  { value: 'none', label: 'None', price: null },
-  { value: 'cmm', label: 'CMM', price: 125.0 },
-  { value: 'fair', label: 'FAIR', price: 150.0 },
-  { value: 'measurement-report', label: 'Measurement Report', price: 75.0 },
 ];
 
 const partMarkingOptions = [
@@ -57,9 +50,9 @@ export default function PartConfigurationPage() {
   const [tolerance, setTolerance] = useState('');
   const [surfaceRoughness, setSurfaceRoughness] = useState('');
   const [partMarking, setPartMarking] = useState<string[]>([]);
-  const [inspection, setInspection] = useState('none');
   const [notes, setNotes] = useState('');
   const [deliverySpeed, setDeliverySpeed] = useState('standard');
+  const [saving, setSaving] = useState(false);
 
   const idx = parseInt(partIndex || '0', 10);
 
@@ -104,6 +97,50 @@ export default function PartConfigurationPage() {
     setPartMarking((prev) =>
       prev.includes(markingId) ? prev.filter((id) => id !== markingId) : [...prev, markingId]
     );
+  };
+
+  const handleSave = async () => {
+    if (!rfq) return;
+    try {
+      setSaving(true);
+      const updatedParts = [...(rfq.parts_details || [])];
+      updatedParts[idx] = {
+        ...updatedParts[idx],
+        quantity,
+        description: [
+          process && `Manufacturing Process: ${process}`,
+          materialCategory && `Material: ${materialCategory}${materialSubtype ? ` / ${materialSubtype}` : ''}`,
+          surfaceTreatment && surfaceTreatment !== 'none' && `Surface Treatment: ${surfaceTreatment}`,
+          tolerance && `Tolerance: ${tolerance}`,
+          surfaceRoughness && `Surface Roughness: ${surfaceRoughness}`,
+          partMarking.length > 0 && `Part Marking: ${partMarking.join(', ')}`,
+          notes && `Notes: ${notes}`,
+        ].filter(Boolean).join('\n'),
+        original_values: {
+          process,
+          material: materialCategory,
+          materialSubtype,
+          surfaceTreatment,
+          tolerance,
+          surfaceRoughness,
+          partMarking: partMarking.join(', '),
+          notes,
+          deliverySpeed,
+        },
+      };
+
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ parts_details: updatedParts as any })
+        .eq('id', rfq.id);
+
+      if (error) throw error;
+      toast({ title: 'Part saved', description: 'Your changes have been saved successfully.' });
+    } catch (err: any) {
+      toast({ title: 'Failed to save', description: err.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -187,7 +224,6 @@ export default function PartConfigurationPage() {
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
-              <button className="text-sm text-primary hover:underline">Bulk pricing</button>
             </CardContent>
           </Card>
 
@@ -212,10 +248,6 @@ export default function PartConfigurationPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <button className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-                <Info className="h-3.5 w-3.5" />
-                Technology selection guide
-              </button>
             </CardContent>
           </Card>
 
@@ -265,10 +297,6 @@ export default function PartConfigurationPage() {
                 </div>
               )}
 
-              <button className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-                <Info className="h-3.5 w-3.5" />
-                Learn more about this material
-              </button>
             </CardContent>
           </Card>
 
@@ -364,32 +392,6 @@ export default function PartConfigurationPage() {
             </CardContent>
           </Card>
 
-          {/* Inspection Section */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Inspection</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <RadioGroup value={inspection} onValueChange={setInspection} className="space-y-3">
-                {inspectionOptions.map((opt) => (
-                  <div key={opt.value} className="flex items-center space-x-2">
-                    <RadioGroupItem value={opt.value} id={`inspection-${opt.value}`} />
-                    <Label
-                      htmlFor={`inspection-${opt.value}`}
-                      className="text-sm font-normal cursor-pointer flex-1"
-                    >
-                      {opt.label}
-                    </Label>
-                    {opt.price !== null && (
-                      <span className="text-sm text-muted-foreground">
-                        {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(opt.price)}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </RadioGroup>
-            </CardContent>
-          </Card>
 
           {/* Additional Requirements Section */}
           <Card>
@@ -495,7 +497,19 @@ export default function PartConfigurationPage() {
               </CardContent>
             </Card>
 
-            {/* Navigation */}
+            {/* Save & Navigation */}
+            <Button
+              className="w-full"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
             <Button asChild variant="outline" className="w-full">
               <Link to={`/customer/quotes/${quoteId}`}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
