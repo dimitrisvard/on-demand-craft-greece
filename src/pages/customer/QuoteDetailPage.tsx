@@ -281,7 +281,7 @@ export default function QuoteDetailPage() {
                     {threeDFile ? (
                       <Suspense
                         fallback={
-                          <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                          <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
                             <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
                           </div>
                         }
@@ -289,7 +289,7 @@ export default function QuoteDetailPage() {
                         <PartThumbnail3D fileUrl={signedUrls[threeDFile.id] || threeDFile.file_path} fileName={threeDFile.file_name} />
                       </Suspense>
                     ) : (
-                      <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                      <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
                         <Box className="h-8 w-8 text-slate-300" />
                         <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
                       </div>

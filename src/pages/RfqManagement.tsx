@@ -181,17 +181,23 @@ export default function RfqManagement() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*, customers(company_name, email, phone, vat_tax_id)')
+        .select('*, customers(company_name, email, phone, vat_tax_id), rfqs(customer_id, customers(company_name, email, phone, vat_tax_id))')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      const transformed = (data || []).map(item => ({
-        ...item,
-        customer_name: item.customers?.company_name || 'Unassigned',
-        customer_email: item.customers?.email,
-        customer_phone: item.customers?.phone,
-        customer_vat: item.customers?.vat_tax_id,
-      }));
+      const transformed = (data || []).map((item: any) => {
+        // Use order's customer, fall back to RFQ's customer
+        const directCustomer = item.customers;
+        const rfqCustomer = item.rfqs?.customers;
+        const cust = directCustomer || rfqCustomer;
+        return {
+          ...item,
+          customer_name: cust?.company_name || 'Unassigned',
+          customer_email: cust?.email,
+          customer_phone: cust?.phone,
+          customer_vat: cust?.vat_tax_id,
+        };
+      });
       setOrders(transformed);
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to load orders", variant: "destructive" });

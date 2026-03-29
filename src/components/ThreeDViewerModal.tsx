@@ -193,12 +193,11 @@ function AutoFrame({ children, onReady }: {
     const center = box.getCenter(new Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
 
-    groupRef.current.position.set(-center.x, -box.min.y, -center.z);
+    groupRef.current.position.set(-center.x, -center.y, -center.z);
 
     const dist = maxDim * 1.8;
-    const camY = size.y * 0.5 + dist * 0.4;
-    camera.position.set(dist * 0.65, camY, dist * 0.65);
-    camera.lookAt(0, size.y * 0.35, 0);
+    camera.position.set(dist * 0.65, dist * 0.5, dist * 0.65);
+    camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
     // Calculate volume and surface area from all meshes in the scene

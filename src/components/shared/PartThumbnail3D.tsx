@@ -137,6 +137,7 @@ function StepModel({
   onDimensions: (dims: { x: number; y: number; z: number }) => void;
 }) {
   const [geometries, setGeometries] = useState<BufferGeometry[]>([]);
+  const [centerOffset, setCenterOffset] = useState<Vector3 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const { camera } = useThree();
@@ -189,12 +190,15 @@ function StepModel({
     box.getCenter(center);
     box.getSize(size);
 
+    // Center the group so the model is at origin
+    setCenterOffset(center.clone());
+
     onDimensions({ x: size.x, y: size.y, z: size.z });
 
     const maxDim = Math.max(size.x, size.y, size.z);
     const dist = maxDim * 1.8;
     camera.position.set(dist, dist * 0.7, dist);
-    camera.lookAt(center.x, center.y, center.z);
+    camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
   }, [geometries, camera, onDimensions]);
 
@@ -202,7 +206,7 @@ function StepModel({
   if (error || geometries.length === 0) return null;
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} position={centerOffset ? [-centerOffset.x, -centerOffset.y, -centerOffset.z] : [0, 0, 0]}>
       {geometries.map((geom, i) => (
         <mesh key={i} geometry={geom} material={cadMaterial} />
       ))}
@@ -224,9 +228,9 @@ function LoadingSpinner() {
 
 function PlaceholderIcon({ fileName }: { fileName: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200">
+    <div className="flex flex-col items-center justify-center h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200">
       <BoxIcon className="h-8 w-8 text-slate-400 mb-1" />
-      <span className="text-[10px] text-slate-500 text-center px-2 truncate max-w-[130px]">
+      <span className="text-[11px] text-slate-500 text-center px-2 truncate max-w-[180px]">
         {fileName}
       </span>
     </div>
@@ -265,8 +269,8 @@ function ThumbnailCanvas({
 }) {
   return (
     <Canvas
-      camera={{ position: [5, 5, 5], fov: 40 }}
-      style={{ width: 150, height: 150 }}
+      camera={{ position: [5, 5, 5], fov: 45 }}
+      style={{ width: 200, height: 200 }}
       gl={{ antialias: true, alpha: true }}
     >
       <ambientLight intensity={0.5} />
@@ -297,7 +301,7 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
   if (isDXF(fileName)) {
     return (
       <div className={`flex flex-col items-center ${className ?? ''}`}>
-        <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+        <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
@@ -314,7 +318,7 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
   return (
     <ThumbnailErrorBoundary fileName={fileName}>
       <div className={`flex flex-col items-center ${className ?? ''}`}>
-        <div className="h-[150px] w-[150px] rounded-lg overflow-hidden bg-slate-50 border border-slate-200">
+        <div className="h-[200px] w-[200px] rounded-lg overflow-hidden bg-slate-50 border border-slate-200">
           <Suspense fallback={<LoadingSpinner />}>
             <ThumbnailCanvas onDimensions={dimensions}>
               {isSTL(fileName) && (
@@ -330,7 +334,7 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
           </Suspense>
         </div>
         {dimensions && (
-          <p className="text-[10px] text-muted-foreground mt-1 text-center leading-tight">
+          <p className="text-xs font-medium text-muted-foreground mt-1.5 text-center leading-tight">
             {dimensions.x.toFixed(1)} x {dimensions.y.toFixed(1)} x {dimensions.z.toFixed(1)} mm
           </p>
         )}

@@ -6,7 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Download, FileText, Plus, Edit2, Trash2, CheckCircle,
   XCircle, Loader2, ChevronLeft, Send, Edit,
-  Trash, FileDown, ShoppingBag, Upload, User, Box, Eye
+  Trash, FileDown, ShoppingBag, Upload, User, Box, Eye, FileOutput
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import PartSpecsCard from '@/components/shared/PartSpecsCard';
@@ -1239,6 +1239,38 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
+  // Flat pattern extraction
+  const [flatPatternLoading, setFlatPatternLoading] = useState<string | null>(null);
+  const handleExtractFlatPattern = async (file: QuoteFile) => {
+    try {
+      setFlatPatternLoading(file.id);
+      const url = await getSignedUrl(file.file_path);
+      if (!url) {
+        toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke('extract-flat-pattern', {
+        body: { file_url: url, file_name: file.file_name, rfq_id: rfq?.id }
+      });
+      if (error) throw error;
+      if (data?.pdf_url) {
+        const link = document.createElement('a');
+        link.href = data.pdf_url;
+        link.download = `${file.file_name.replace(/\.[^.]+$/, '')}_flat_pattern.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast({ title: 'Flat Pattern Generated', description: 'PDF technical drawing downloaded.' });
+      } else {
+        toast({ title: 'Processing', description: data?.message || 'Flat pattern extraction queued.' });
+      }
+    } catch (error: any) {
+      toast({ title: 'Flat Pattern Error', description: error.message || 'Failed to extract flat pattern.', variant: 'destructive' });
+    } finally {
+      setFlatPatternLoading(null);
+    }
+  };
+
   const parseSpecsFromDescription = (description: string) => {
     const specs: Record<string, string | boolean> = {};
     if (!description) return specs;
@@ -1558,18 +1590,16 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     rfqItems.map((item, index) => {
                       const specs = item.original_values
                         ? (() => {
-                            const s: Record<string, string | boolean> = {};
-                            for (const [key, value] of Object.entries(item.original_values)) {
-                              const lower = key.toLowerCase();
-                              if (lower.includes('process')) s.process = String(value);
-                              else if (lower.includes('material')) s.material = String(value);
-                              else if (lower.includes('roughness')) s.surfaceRoughness = String(value);
-                              else if (lower.includes('treatment') || lower.includes('finishing')) s.surfaceTreatment = String(value);
-                              else if (lower.includes('tolerance')) s.tolerance = String(value);
-                              else if (lower === 'thickness') s.thickness = String(value);
-                              else if (lower === 'needsbending') s.needsBending = value === true || value === 'true';
-                            }
-                            return s;
+                            const ov = item.original_values as Record<string, any>;
+                            return {
+                              process: ov.processLabel || ov.process || '',
+                              material: ov.materialSubtypeLabel || ov.materialLabel || ov.material || '',
+                              surfaceRoughness: ov.surfaceRoughnessLabel || ov.surfaceRoughness || '',
+                              surfaceTreatment: ov.surfaceTreatmentLabel || ov.surfaceTreatment || '',
+                              tolerance: ov.toleranceLabel || ov.tolerance || '',
+                              thickness: ov.thickness || '',
+                              needsBending: ov.needsBending === true || ov.needsBending === 'true',
+                            } as Record<string, string | boolean>;
                           })()
                         : parseSpecsFromDescription(item.description || '');
                       const itemPartFiles = partFiles[item.id] || [];
@@ -1583,7 +1613,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
                             {threeDFile && signedUrls[threeDFile.id] ? (
                               <Suspense
                                 fallback={
-                                  <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                                  <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
                                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
                                   </div>
                                 }
@@ -1591,7 +1621,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
                                 <PartThumbnail3D fileUrl={signedUrls[threeDFile.id]} fileName={threeDFile.file_name} />
                               </Suspense>
                             ) : (
-                              <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                              <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
                                 <Box className="h-8 w-8 text-slate-300" />
                                 <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
                               </div>
@@ -1630,6 +1660,25 @@ const RfqDetails = (props: RfqDetailsProps) => {
                               showPricing
                               showActions
                             />
+                            {/* Flat Pattern buttons for 3D files */}
+                            {itemPartFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {itemPartFiles.filter(f => is3DFile(f.file_name)).map(file => (
+                                  <Button
+                                    key={file.id}
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1.5 text-xs"
+                                    disabled={flatPatternLoading === file.id}
+                                    onClick={() => handleExtractFlatPattern(file)}
+                                    title="Extract flat pattern and generate PDF technical drawing"
+                                  >
+                                    <FileOutput className="h-3.5 w-3.5" />
+                                    {flatPatternLoading === file.id ? 'Processing...' : `Flat Pattern: ${file.file_name}`}
+                                  </Button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -2182,9 +2231,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
         <ThreeDViewerModal
           open={viewerOpen}
           onClose={() => setViewerOpen(false)}
-          fileUrl={`https://cfjrtmtaitwzggzpkhxi.supabase.co/storage/v1/object/public/rfq-files/${viewerFile.file_path}`}
-          fileType={viewerFile.file_type}
-          fileName={viewerFile.file_name}
+          fileUrl={viewerFile.url}
+          fileType={viewerFile.type}
+          fileName={viewerFile.name}
         />
       )}
     </ErrorBoundary>

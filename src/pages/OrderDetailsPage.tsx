@@ -34,7 +34,7 @@ import {
   DialogDescription
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { CustomerDetailsPanel } from "@/components/customers/CustomerDetailsPanel";
+// CustomerDetailsPanel replaced with inline card display
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { downloadAndSaveFile } from "@/utils/fileStorage";
@@ -115,32 +115,43 @@ export default function OrderDetailsPage() {
         .eq('id', id)
         .single();
       if (orderError) throw orderError;
-      setOrder({
-        ...orderData as Order,
-        customer_name: orderData.customers?.company_name
-      });
-      setCustomer(orderData.customers);
+      let orderCustomer = orderData.customers;
+
+      // Fetch order items
       const { data: itemsData, error: itemsError } = await supabase
         .from('order_items')
         .select('*')
         .eq('order_id', id);
       if (itemsError) throw itemsError;
       setOrderItems(itemsData as OrderItem[]);
+
       if (orderData.rfq_id) {
         // Fetch RFQ and its parts_details
         const { data: rfqData, error: rfqError } = await supabase
           .from('rfqs')
-          .select('*')
+          .select('*, customers(*)')
           .eq('id', orderData.rfq_id)
           .single();
         if (rfqError) throw rfqError;
         setRfq(rfqData);
+
+        // Fall back to RFQ's customer if order doesn't have one
+        if (!orderCustomer && (rfqData as any).customers) {
+          orderCustomer = (rfqData as any).customers;
+        }
+
         // Defensive: parts_details may be undefined or not an array
         const partsDetails = (rfqData as any).parts_details;
         setParts(Array.isArray(partsDetails) ? partsDetails : []);
         // Fetch files from rfq_files and organize them by parts
         await fetchQuoteFiles(orderData.rfq_id, partsDetails);
       }
+
+      setOrder({
+        ...orderData as Order,
+        customer_name: orderCustomer?.company_name
+      });
+      setCustomer(orderCustomer);
       if (orderData.partner_id) {
         setSelectedPartnerId(orderData.partner_id);
       }
@@ -1291,8 +1302,8 @@ export default function OrderDetailsPage() {
       <div className="flex justify-between items-center">
         <BackToDashboardButton />
         <div className="flex space-x-2">
-          <Button variant="outline" onClick={() => navigate('/orders')}>
-            Back to Orders
+          <Button variant="outline" onClick={() => navigate('/rfq-management')}>
+            Back to RFQ & Orders
           </Button>
           <Button 
             variant="outline" 
@@ -1353,8 +1364,8 @@ export default function OrderDetailsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        <Card className="md:col-span-7">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <Card className="xl:col-span-2">
           <CardHeader>
             <div className="flex justify-between items-start">
               <div>
@@ -1596,9 +1607,20 @@ export default function OrderDetailsPage() {
                     });
                   }
 
-                  // Parse specs from description
-                  const descSpecs: Record<string, string> = {};
-                  if (item.description) {
+                  // Parse specs - prefer original_values from RFQ parts if available
+                  let descSpecs: Record<string, string> = {};
+                  const rfqPart = parts[idx] as any;
+                  if (rfqPart?.original_values) {
+                    const ov = rfqPart.original_values;
+                    descSpecs = {
+                      process: ov.processLabel || ov.process || '',
+                      material: ov.materialSubtypeLabel || ov.materialLabel || ov.material || '',
+                      surfaceRoughness: ov.surfaceRoughnessLabel || ov.surfaceRoughness || '',
+                      surfaceTreatment: ov.surfaceTreatmentLabel || ov.surfaceTreatment || '',
+                      tolerance: ov.toleranceLabel || ov.tolerance || '',
+                      thickness: ov.thickness || '',
+                    };
+                  } else if (item.description) {
                     const lines = item.description.split('\n').map((l: string) => l.trim()).filter(Boolean);
                     for (const line of lines) {
                       const lower = line.toLowerCase();
@@ -1622,7 +1644,7 @@ export default function OrderDetailsPage() {
                         {threeDFile && signedUrls[threeDFile.id] ? (
                           <Suspense
                             fallback={
-                              <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
+                              <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center">
                                 <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
                               </div>
                             }
@@ -1630,7 +1652,7 @@ export default function OrderDetailsPage() {
                             <PartThumbnail3D fileUrl={signedUrls[threeDFile.id]} fileName={threeDFile.file_name} />
                           </Suspense>
                         ) : (
-                          <div className="h-[150px] w-[150px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
+                          <div className="h-[200px] w-[200px] rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
                             <Box className="h-8 w-8 text-slate-300" />
                             <span className="text-[10px] text-slate-400 mt-1">No 3D file</span>
                           </div>
@@ -1689,7 +1711,7 @@ export default function OrderDetailsPage() {
         </Card>
 
         {/* Right Sidebar */}
-        <div className="md:col-span-5 space-y-6">
+        <div className="space-y-6">
           {/* Production Costs Box */}
           {(user?.role === 'admin' || user?.role === 'partner_seller') && (
             <ProductionCostsBox 
@@ -1698,10 +1720,56 @@ export default function OrderDetailsPage() {
             />
           )}
           
-          {/* Customer Details */}
-        {customer && user?.role !== 'partner_seller' && (
-            <CustomerDetailsPanel customer={customer} />
-        )}
+          {/* Customer Information */}
+          {user?.role !== 'partner_seller' && (
+            <Card className="h-fit">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg font-semibold">Customer Information</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {customer ? (
+                  <>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Company</h3>
+                      <p className="font-semibold text-gray-900">{customer.company_name}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">VAT/Tax ID</h3>
+                      <p className="text-gray-900">{customer.vat_tax_id || 'Not provided'}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Contact Person</h3>
+                      <p className="text-gray-900">{customer.first_name || 'Not provided'} {customer.last_name || ''}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Email</h3>
+                      <p className="text-gray-900">{customer.email || 'Not provided'}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Phone</h3>
+                      <p className="text-gray-900">{customer.phone || 'Not provided'}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Address</h3>
+                      <p className="text-gray-900 whitespace-pre-line">{customer.street_address || customer.address || 'Not provided'}</p>
+                    </div>
+                    <div className="border-b border-gray-100 pb-3">
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">City</h3>
+                      <p className="text-gray-900">{customer.city || 'Not provided'}</p>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-gray-600 mb-1">Country</h3>
+                      <p className="text-gray-900">{customer.country || 'Not provided'}</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No customer assigned</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
