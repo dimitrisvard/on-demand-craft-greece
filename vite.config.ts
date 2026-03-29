@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { componentTagger } from "lovable-tagger";
 
 // All supported languages and their URL slugs
 // (from src/locales/{lang}/translation.json url_slug_* keys)
@@ -108,6 +109,7 @@ export default defineConfig(async ({ mode }) => {
 		},
 		plugins: [
 			react(),
+			mode === 'development' && componentTagger(),
 			// Prerender plugin: generates static HTML for all 210 routes at build time
 			// so crawlers (Googlebot, Bing, social preview fetchers) see full page content
 			// without needing to execute JavaScript.
