@@ -217,10 +217,10 @@ function AppContent() {
                 <Route path="/rfq-management" element={<RfqManagement />} />
                 <Route path="/orders/:id" element={<OrderDetailsPage />} />
                 
-                <Route path="/orders" element={<OrdersPage />} />
-                <Route path="/dashboard/orders" element={<OrdersPage />} />
+                <Route path="/orders" element={<RfqManagement />} />
+                <Route path="/dashboard/orders" element={<RfqManagement />} />
                 <Route path="/dashboard/customers" element={<CustomersPage />} />
-                <Route path="/dashboard/quotes" element={<QuotesPage />} />
+                <Route path="/dashboard/quotes" element={<RfqManagement />} />
                 <Route path="/dashboard/analytics" element={<AnalyticsPage />} />
                 <Route path="/dashboard/blog" element={<BlogList />} />
                 <Route path="/dashboard/blog/new" element={<BlogEditor />} />

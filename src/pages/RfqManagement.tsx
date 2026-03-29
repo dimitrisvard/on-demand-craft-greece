@@ -4,7 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RFQ, RfqItem } from "@/types/customer";
 import { Database } from '@/integrations/supabase/types';
-import { Briefcase, FileText } from "lucide-react";
+import { Briefcase, FileText, Calendar, Package } from "lucide-react";
 import { 
   Table, 
   TableBody, 
@@ -214,11 +214,17 @@ export default function RfqManagement() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*')
+        .select('*, customers(company_name, vat_tax_id)')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setOrders(data || []);
+
+      const transformedOrders = (data || []).map(item => ({
+        ...item,
+        customer_name: item.customers?.company_name || 'Unassigned',
+        customer_vat: item.customers?.vat_tax_id,
+      }));
+      setOrders(transformedOrders);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -227,6 +233,44 @@ export default function RfqManagement() {
       });
     }
   }
+
+  const generateOrderId = (order: any) => {
+    const orderDate = new Date(order.created_at);
+    const day = String(orderDate.getDate()).padStart(2, '0');
+    const month = String(orderDate.getMonth() + 1).padStart(2, '0');
+    const year = orderDate.getFullYear();
+    const dateStr = `${day}${month}${year}`;
+
+    // Find all orders on the same date and determine sequence number
+    const sameDateOrders = orders
+      .filter(o => {
+        const d = new Date(o.created_at);
+        return d.getDate() === orderDate.getDate() &&
+               d.getMonth() === orderDate.getMonth() &&
+               d.getFullYear() === orderDate.getFullYear();
+      })
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    const seqIndex = sameDateOrders.findIndex(o => o.id === order.id);
+    const seqNum = seqIndex >= 0 ? seqIndex + 1 : 1;
+
+    return `PO-${dateStr}-${seqNum}`;
+  };
+
+  const getOrderStatusBadge = (status: string) => {
+    switch (status) {
+      case 'new':
+        return <Badge>New</Badge>;
+      case 'in_progress':
+        return <Badge variant="default">In Progress</Badge>;
+      case 'completed':
+        return <Badge variant="secondary">Completed</Badge>;
+      case 'cancelled':
+        return <Badge variant="destructive">Cancelled</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
 
   const handleAddRfq = async () => {
     try {
@@ -917,61 +961,111 @@ export default function RfqManagement() {
         </TabsContent>
 
         <TabsContent value="orders" className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by order ID, customer or title..."
+                className="pl-10"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                {orders.length} {orders.length === 1 ? 'order' : 'orders'}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate('/calendar')}
+              >
+                <Calendar className="h-4 w-4 mr-1" />
+                Calendar
+              </Button>
+            </div>
+          </div>
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Orders</CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Order ID</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Total Amount</TableHead>
-                    <TableHead>Created Date</TableHead>
+                    <TableHead>Start Date</TableHead>
+                    <TableHead>Delivery Date</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center">Loading...</TableCell>
+                      <TableCell colSpan={8} className="text-center">Loading...</TableCell>
                     </TableRow>
                   ) : orders.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center">No orders found</TableCell>
+                      <TableCell colSpan={8} className="text-center py-8">
+                        <div className="flex flex-col items-center justify-center">
+                          <Package className="h-12 w-12 text-gray-300 mb-2" />
+                          <p className="text-muted-foreground">No orders found</p>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ) : (
-                    orders.map((order) => (
+                    orders
+                      .filter(order => {
+                        if (!searchQuery.trim()) return true;
+                        const q = searchQuery.toLowerCase();
+                        return generateOrderId(order).toLowerCase().includes(q) ||
+                               order.title?.toLowerCase().includes(q) ||
+                               order.customer_name?.toLowerCase().includes(q);
+                      })
+                      .map((order) => (
                       <TableRow key={order.id}>
+                        <TableCell className="font-mono text-sm">{generateOrderId(order)}</TableCell>
                         <TableCell className="font-medium">{order.title}</TableCell>
-                        <TableCell>{order.customer_id ? customers.find(c => c.id === order.customer_id)?.company_name || 'Unknown Customer' : 'Unassigned'}</TableCell>
-                        <TableCell>
-                          <Badge variant={order.status === 'completed' ? 'default' : order.status === 'in_progress' ? 'secondary' : 'outline'}>
-                            {order.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{order.total_amount ? `${order.total_amount} ${order.currency || 'USD'}` : '-'}</TableCell>
-                        <TableCell>{order.created_at ? new Date(order.created_at).toLocaleDateString() : '-'}</TableCell>
+                        <TableCell>{order.customer_name || 'Unassigned'}</TableCell>
+                        <TableCell>{getOrderStatusBadge(order.status)}</TableCell>
+                        <TableCell>{order.total_amount ? formatCurrency(order.total_amount, order.currency || 'EUR') : '-'}</TableCell>
+                        <TableCell>{order.start_date ? new Date(order.start_date).toLocaleDateString() : '-'}</TableCell>
+                        <TableCell>{order.delivery_date ? new Date(order.delivery_date).toLocaleDateString() : '-'}</TableCell>
                         <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedOrder(order);
-                                setIsOrderCustomerAssignDialogOpen(true);
-                              }}>
-                                <UserPlus className="mr-2 h-4 w-4" />
-                                Assign Customer
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigate(`/orders/${order.id}`)}
+                            >
+                              View
+                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/orders/${order.id}`);
+                                }}>
+                                  <Edit className="mr-2 h-4 w-4" />
+                                  Edit/View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOrder(order);
+                                  setIsOrderCustomerAssignDialogOpen(true);
+                                }}>
+                                  <UserPlus className="mr-2 h-4 w-4" />
+                                  Assign Customer
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))

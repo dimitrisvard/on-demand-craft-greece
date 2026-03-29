@@ -26,16 +26,10 @@ const menuItems = [
     description: "Manage customer section"
   },
   {
-    title: "Quotes & RFQs",
+    title: "RFQ & Orders",
     icon: FileText,
-    path: "/dashboard/quotes",
-    description: "Track quotes and RFQs"
-  },
-  {
-    title: "Orders",
-    icon: PackageCheck,
-    path: "/dashboard/orders",
-    description: "Manage production orders"
+    path: "/rfq-management",
+    description: "Manage RFQs and orders"
   },
   {
     title: "Production Partners",

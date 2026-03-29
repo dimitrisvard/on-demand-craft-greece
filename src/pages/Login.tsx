@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Eye, EyeOff, Lock, Mail, User, Building, Phone, Globe } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, User, Building, Phone, Globe, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -15,6 +16,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const { toast } = useToast();
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -28,17 +30,15 @@ const Login = () => {
   const [regCompanyName, setRegCompanyName] = useState("");
   const [regPhone, setRegPhone] = useState("");
   const [regCountry, setRegCountry] = useState("");
+  const [regVatNumber, setRegVatNumber] = useState("");
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError(null);
     if (!email || !password) {
-      toast({
-        title: "Error",
-        description: "Please enter email and password",
-        variant: "destructive",
-      });
+      setLoginError("Please enter email and password.");
       return;
     }
 
@@ -48,17 +48,13 @@ const Login = () => {
       // Navigation is handled by AuthContext based on user role
     } catch (error: any) {
       console.error('Login error:', error);
-      let description = error?.message || "Please check your credentials and try again";
+      let description = error?.message || "Please check your credentials and try again.";
       if (description.includes('Invalid login credentials')) {
         description = "Invalid email or password. Please check your credentials and try again.";
       } else if (description.includes('Email not confirmed')) {
         description = "Your email is not verified yet. Please check your inbox for the verification link.";
       }
-      toast({
-        title: "Login Failed",
-        description,
-        variant: "destructive",
-      });
+      setLoginError(description);
     } finally {
       setLoading(false);
     }
@@ -110,6 +106,7 @@ const Login = () => {
             company_name: regCompanyName,
             phone: regPhone,
             country: regCountry,
+            vat_number: regVatNumber,
           },
         },
       });
@@ -125,9 +122,31 @@ const Login = () => {
             company_name: regCompanyName,
             phone: regPhone,
             country: regCountry,
+            vat_number: regVatNumber,
           });
         } catch (profileError) {
           console.warn('Could not save customer profile:', profileError);
+        }
+
+        // Also create entry in customers table so account appears in admin customers list
+        try {
+          const contactName = `${regFirstName} ${regLastName}`.trim();
+          await supabase.from('customers').upsert({
+            email: regEmail,
+            company_name: regCompanyName || contactName,
+            first_name: regFirstName,
+            last_name: regLastName,
+            contact_name: contactName,
+            phone: regPhone || null,
+            country: regCountry || null,
+            vat_tax_id: regVatNumber || '',
+            status: 'active',
+            street_address: '',
+            city: '',
+            zip_code: '',
+          }, { onConflict: 'email' });
+        } catch (customerError) {
+          console.warn('Could not save to customers table:', customerError);
         }
 
         toast({
@@ -140,7 +159,27 @@ const Login = () => {
           navigate('/customer/dashboard');
         }, 500);
       } else if (data.user && !data.session) {
-        // Email verification required - show persistent message
+        // Email verification required - still create customer record
+        try {
+          const contactName = `${regFirstName} ${regLastName}`.trim();
+          await supabase.from('customers').upsert({
+            email: regEmail,
+            company_name: regCompanyName || contactName,
+            first_name: regFirstName,
+            last_name: regLastName,
+            contact_name: contactName,
+            phone: regPhone || null,
+            country: regCountry || null,
+            vat_tax_id: regVatNumber || '',
+            status: 'active',
+            street_address: '',
+            city: '',
+            zip_code: '',
+          }, { onConflict: 'email' });
+        } catch (customerError) {
+          console.warn('Could not save to customers table:', customerError);
+        }
+
         setRegistrationSuccess(true);
         toast({
           title: "Account created!",
@@ -207,6 +246,11 @@ const Login = () => {
             <TabsContent value="login">
               <form onSubmit={handleLogin}>
                 <CardContent className="space-y-4">
+                  {loginError && (
+                    <Alert variant="destructive">
+                      <AlertDescription>{loginError}</AlertDescription>
+                    </Alert>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="login-email">Email</Label>
                     <div className="relative">
@@ -337,6 +381,21 @@ const Login = () => {
                         className="pl-9"
                         value={regCompanyName}
                         onChange={(e) => setRegCompanyName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* VAT Number */}
+                  <div className="space-y-1">
+                    <Label htmlFor="reg-vat">VAT Number</Label>
+                    <div className="relative">
+                      <Hash className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="reg-vat"
+                        placeholder="e.g., EL123456789"
+                        className="pl-9"
+                        value={regVatNumber}
+                        onChange={(e) => setRegVatNumber(e.target.value)}
                       />
                     </div>
                   </div>

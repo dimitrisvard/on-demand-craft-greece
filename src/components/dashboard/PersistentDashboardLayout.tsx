@@ -69,8 +69,9 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/customers') return 'customers';
     if (path === '/partners') return 'partners';
     if (path === '/products') return 'products';
-    if (path === '/rfq-management') return 'quotes';
-    if (path === '/orders') return 'orders';
+    if (path === '/rfq-management') return 'rfq-orders';
+    if (path === '/orders') return 'rfq-orders';
+    if (path.startsWith('/orders/')) return 'rfq-orders';
     if (path === '/calendar') return 'calendar';
     if (path === '/dashboard/notifications') return 'notifications';
     if (path === '/dashboard/settings') return 'settings';
@@ -173,18 +174,11 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<ShoppingBag className="h-4 w-4" />}
                       label="Products & Inventory"
                     />
-                    <NavButton 
-                      active={activeModule === "quotes"}
+                    <NavButton
+                      active={activeModule === "rfq-orders"}
                       onClick={() => handleNavigation("/rfq-management")}
                       icon={<FileText className="h-4 w-4" />}
-                      label="RFQ & Quotes"
-                    />
-                     {/* Orders Moved Here */}
-                    <NavButton 
-                      active={activeModule === "orders"}
-                      onClick={() => handleNavigation("/orders")}
-                      icon={<Package className="h-4 w-4" />}
-                      label="Orders"
+                      label="RFQ & Orders"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -225,11 +219,11 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       The logic above hides "Management" for partners.
                   */}
                   {isProductionPartner && (
-                     <NavButton 
-                      active={activeModule === "orders"}
-                      onClick={() => handleNavigation("/orders")}
+                     <NavButton
+                      active={activeModule === "rfq-orders"}
+                      onClick={() => handleNavigation("/rfq-management")}
                       icon={<Package className="h-4 w-4" />}
-                      label="Orders"
+                      label="RFQ & Orders"
                     />
                   )}
                 <NavButton 
@@ -395,18 +389,11 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<ShoppingBag className="h-4 w-4" />}
                       label="Products & Inventory"
                     />
-                    <NavButton 
-                      active={activeModule === "quotes"}
+                    <NavButton
+                      active={activeModule === "rfq-orders"}
                       onClick={() => handleNavigation("/rfq-management")}
                       icon={<FileText className="h-4 w-4" />}
-                      label="RFQ & Quotes"
-                    />
-                     {/* Orders Moved Here */}
-                    <NavButton 
-                      active={activeModule === "orders"}
-                      onClick={() => handleNavigation("/orders")}
-                      icon={<Package className="h-4 w-4" />}
-                      label="Orders"
+                      label="RFQ & Orders"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -442,11 +429,11 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                 </AccordionTrigger>
                 <AccordionContent className="pb-0 pt-1 space-y-1">
                   {isProductionPartner && (
-                     <NavButton 
-                      active={activeModule === "orders"}
-                      onClick={() => handleNavigation("/orders")}
+                     <NavButton
+                      active={activeModule === "rfq-orders"}
+                      onClick={() => handleNavigation("/rfq-management")}
                       icon={<Package className="h-4 w-4" />}
-                      label="Orders"
+                      label="RFQ & Orders"
                     />
                   )}
                 <NavButton 

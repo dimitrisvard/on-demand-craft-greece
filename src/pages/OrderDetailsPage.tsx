@@ -7,16 +7,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { 
-  Calendar, 
-  Package, 
-  Download, 
-  Trash2, 
+import {
+  Calendar,
+  Package,
+  Download,
+  Trash2,
   Factory,
   FileText,
   Edit3,
   Save,
-  X
+  X,
+  FileOutput
 } from "lucide-react";
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -425,15 +426,40 @@ export default function OrderDetailsPage() {
     }
   };
 
+  const [orderSequenceNum, setOrderSequenceNum] = useState<number>(1);
+
+  // Fetch the sequential number for this order on its creation date
+  useEffect(() => {
+    if (!order) return;
+    const fetchSequenceNumber = async () => {
+      const orderDate = new Date(order.created_at);
+      const startOfDay = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate()).toISOString();
+      const endOfDay = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate() + 1).toISOString();
+
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, created_at')
+        .gte('created_at', startOfDay)
+        .lt('created_at', endOfDay)
+        .order('created_at', { ascending: true });
+
+      if (!error && data) {
+        const idx = data.findIndex(o => o.id === order.id);
+        setOrderSequenceNum(idx >= 0 ? idx + 1 : 1);
+      }
+    };
+    fetchSequenceNumber();
+  }, [order]);
+
   const generateOrderId = () => {
     if (!order) return 'PO-DDMMYYYY-1';
-    
+
     const orderDate = new Date(order.created_at);
     const day = String(orderDate.getDate()).padStart(2, '0');
     const month = String(orderDate.getMonth() + 1).padStart(2, '0');
     const year = orderDate.getFullYear();
-    
-    return `PO-${day}${month}${year}-1`;
+
+    return `PO-${day}${month}${year}-${orderSequenceNum}`;
   };
   
   // Helper: Generate 3D model screenshot
@@ -1160,6 +1186,60 @@ export default function OrderDetailsPage() {
     document.body.removeChild(link);
   };
 
+  // Extract flat pattern from 3D file and generate PDF technical drawing
+  const [flatPatternLoading, setFlatPatternLoading] = useState<string | null>(null);
+  const handleExtractFlatPattern = async (file: QuoteFile) => {
+    try {
+      setFlatPatternLoading(file.id);
+      const signedUrl = await getSignedUrl(file.file_path);
+      if (!signedUrl) {
+        toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
+        return;
+      }
+
+      // Call the flat pattern extraction pipeline edge function
+      const { data, error } = await supabase.functions.invoke('extract-flat-pattern', {
+        body: {
+          file_url: signedUrl,
+          file_name: file.file_name,
+          order_id: order?.id,
+          rfq_id: order?.rfq_id,
+        }
+      });
+
+      if (error) throw error;
+
+      if (data?.pdf_url) {
+        // Download the generated PDF
+        const link = document.createElement('a');
+        link.href = data.pdf_url;
+        link.download = `${file.file_name.replace(/\.[^.]+$/, '')}_flat_pattern.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        toast({
+          title: 'Flat Pattern Generated',
+          description: 'PDF technical drawing downloaded successfully',
+        });
+      } else {
+        toast({
+          title: 'Processing',
+          description: data?.message || 'Flat pattern extraction has been queued. You will be notified when ready.',
+        });
+      }
+    } catch (error: any) {
+      console.error('Flat pattern extraction error:', error);
+      toast({
+        title: 'Flat Pattern Extraction',
+        description: error.message || 'Failed to extract flat pattern. Please check the pipeline configuration.',
+        variant: 'destructive',
+      });
+    } finally {
+      setFlatPatternLoading(null);
+    }
+  };
+
   // Helper: Open 3D viewer modal for a file
   const handleOpen3DViewer = async (file: QuoteFile) => {
     const url = await getSignedUrl(file.file_path);
@@ -1576,9 +1656,24 @@ export default function OrderDetailsPage() {
                               <p className="text-xs font-medium text-gray-700">Files:</p>
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {itemFiles.map((file) => (
-                                  <span key={file.id} className="text-xs bg-gray-100 px-2 py-1 rounded">
-                                    {file.file_name}
-                                  </span>
+                                  <div key={file.id} className="flex items-center gap-1">
+                                    <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                      {file.file_name}
+                                    </span>
+                                    {is3DFile(file.file_name) && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-6 text-xs px-2"
+                                        disabled={flatPatternLoading === file.id}
+                                        onClick={() => handleExtractFlatPattern(file)}
+                                        title="Extract flat pattern and generate PDF technical drawing"
+                                      >
+                                        <FileOutput className="h-3 w-3 mr-1" />
+                                        {flatPatternLoading === file.id ? 'Processing...' : 'Flat Pattern PDF'}
+                                      </Button>
+                                    )}
+                                  </div>
                                 ))}
                               </div>
                             </div>

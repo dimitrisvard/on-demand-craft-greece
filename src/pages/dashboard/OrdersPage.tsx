@@ -197,11 +197,22 @@ export default function OrdersPage() {
     const day = String(orderDate.getDate()).padStart(2, '0');
     const month = String(orderDate.getMonth() + 1).padStart(2, '0');
     const year = orderDate.getFullYear();
-    
-    // Extract a short unique identifier from the order ID
-    const shortId = order.id.substring(0, 4);
-    
-    return `PO-${day}${month}${year}-${shortId}`;
+    const dateStr = `${day}${month}${year}`;
+
+    // Find all orders on the same date and determine sequence number
+    const sameDateOrders = orders
+      .filter(o => {
+        const d = new Date(o.created_at);
+        return d.getDate() === orderDate.getDate() &&
+               d.getMonth() === orderDate.getMonth() &&
+               d.getFullYear() === orderDate.getFullYear();
+      })
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+    const seqIndex = sameDateOrders.findIndex(o => o.id === order.id);
+    const seqNum = seqIndex >= 0 ? seqIndex + 1 : 1;
+
+    return `PO-${dateStr}-${seqNum}`;
   };
 
   const handleAddClick = () => {
