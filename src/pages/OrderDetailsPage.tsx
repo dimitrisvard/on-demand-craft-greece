@@ -563,6 +563,8 @@ export default function OrderDetailsPage() {
       return;
     }
 
+    try {
+
     // Check if user is a partner
     const isPartner = user?.role === 'partner_seller';
 
@@ -841,6 +843,14 @@ export default function OrderDetailsPage() {
       title: 'Success',
       description: 'PDF downloaded successfully',
     });
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to generate PDF. Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {

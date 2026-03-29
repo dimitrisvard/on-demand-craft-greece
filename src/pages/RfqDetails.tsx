@@ -944,6 +944,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const generateRFQPDF = async (): Promise<string> => {
     if (!rfq || !customer) return '';
 
+    try {
     // Prepare the data structure as per requirements
     const data = {
       seller: {
@@ -986,9 +987,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
           product_name: item.product_name, // e.g. Part 1 RFQ-08052025-1-1
           files: filesForPartArr,
           description: item.description || '',
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total_price: item.total_price,
+          quantity: item.quantity || 0,
+          unit_price: item.unit_price || 0,
+          total_price: item.total_price || 0,
           notes: item.notes || '',
         };
       }),
@@ -996,7 +997,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
       net_price: rfq.net_price || 0,
       vat_rate: 0,
       vat_amount: 0,
-      total_price: rfq.total_amount,
+      total_price: rfq.total_amount || 0,
       conditions: {
         delivery_time: '21 working days',
         shipping_terms: 'CIP',
@@ -1160,11 +1161,15 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
     // Get PDF as base64
     const pdfBase64 = pdf.output('datauristring').split(',')[1];
-    
+
     // Clean up
     document.body.removeChild(container);
-    
+
     return pdfBase64;
+    } catch (error) {
+      console.error('Error in generateRFQPDF:', error);
+      throw error;
+    }
   };
 
   const handleDownloadPdf = async () => {
