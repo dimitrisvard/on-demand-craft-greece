@@ -279,8 +279,6 @@ const thicknessOptions = [
   { value: '25', label: '25.0 mm' },
 ];
 
-const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
-
 const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
   const { values, errors, touched, handleChange, setFieldValue } = formikProps;
   const { toast } = useToast();
