@@ -96,6 +96,8 @@ export type Order = {
   total_production_costs?: number;
   vat_amount?: number;
   total_with_vat?: number;
+  po_number?: string;  // Stored PO identifier (PO-DDMMYYYY-N)
+  from_rfq_number?: string;  // Source RFQ number this order came from
 };
 
 export type OrderItem = {

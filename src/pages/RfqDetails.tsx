@@ -446,7 +446,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
   };
 
   const handleCreateOrder = async () => {
-    if (!rfq || !customer) return;
+    if (!rfq) return;
     
     setIsCreatingOrder(true);
     
@@ -455,12 +455,31 @@ const RfqDetails = (props: RfqDetailsProps) => {
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 2);
       
+      // Generate PO number: PO-DDMMYYYY-N
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      const dateStr = `${day}${month}${year}`;
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+      const { data: todayOrders } = await supabase
+        .from('orders')
+        .select('id')
+        .gte('created_at', startOfDay)
+        .lt('created_at', endOfDay);
+      const seq = (todayOrders?.length || 0) + 1;
+      const poNumber = `PO-${dateStr}-${seq}`;
+      const rfqNumberVal = rfqNumber || (rfq as any).rfq_number || '';
+
       // Create the order
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
         .insert([
           {
-            title: newOrderTitle,
+            title: poNumber,
+            po_number: poNumber,
+            from_rfq_number: rfqNumberVal,
             customer_id: rfq.customer_id,
             rfq_id: rfq.id,
             partner_id: selectedPartnerId && selectedPartnerId !== 'none' ? selectedPartnerId : null,
@@ -2160,13 +2179,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
             
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <label htmlFor="order_title">Order Title</label>
-                <Input
-                  id="order_title"
-                  value={newOrderTitle}
-                  onChange={(e) => setNewOrderTitle(e.target.value)}
-                  placeholder="Enter order title"
-                />
+                <label className="text-sm text-muted-foreground">Order ID will be auto-generated (PO-DDMMYYYY-N)</label>
               </div>
               
               <div className="grid gap-2">

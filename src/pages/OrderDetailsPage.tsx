@@ -1336,6 +1336,30 @@ export default function OrderDetailsPage() {
               </Button>
             </div>
           )}
+          {/* Indoors: Mark as Finished button for admin when partner is Indoors */}
+          {user?.role !== 'partner_seller' && order?.partner_id && partners.find(p => p.id === order.partner_id)?.company_name === 'Indoors' && order.status !== 'completed' && (
+            <Button
+              variant="default"
+              className="bg-green-600 hover:bg-green-700"
+              onClick={async () => {
+                if (!id) return;
+                try {
+                  const { error } = await supabase
+                    .from('orders')
+                    .update({ status: 'completed', production_status: 'completed' })
+                    .eq('id', id);
+                  if (error) throw error;
+                  setOrder(prev => prev ? { ...prev, status: 'completed' as any, production_status: 'completed' } : null);
+                  toast({ title: 'Success', description: 'Order marked as finished' });
+                } catch (error: any) {
+                  toast({ title: 'Error', description: error.message || 'Failed to update', variant: 'destructive' });
+                }
+              }}
+            >
+              <Package className="h-4 w-4 mr-2" />
+              Mark as Finished
+            </Button>
+          )}
           {user?.role !== 'partner_seller' && (
             <>
           {!isEditMode ? (
@@ -1417,11 +1441,16 @@ export default function OrderDetailsPage() {
                   </div>
                 ) : (
                   <>
-                    <CardTitle>{order.title}</CardTitle>
-                    <div className="flex items-center space-x-2 mt-1">
+                    <CardTitle>{order.po_number || order.title}</CardTitle>
+                    <div className="flex items-center space-x-2 mt-1 flex-wrap gap-y-1">
                       <p className="text-sm text-muted-foreground">
-                        Order ID: <span className="font-mono">{generateOrderId()}</span>
+                        Order ID: <span className="font-mono">{order.po_number || generateOrderId()}</span>
                       </p>
+                      {(order as any).from_rfq_number && (
+                        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                          From RFQ: {(order as any).from_rfq_number}
+                        </Badge>
+                      )}
                       <p className="text-sm text-muted-foreground">
                         | Order for {user?.role === 'partner_seller' ? '' : order?.customer_name}
                       </p>
@@ -1676,6 +1705,10 @@ export default function OrderDetailsPage() {
                             surfaceRoughness: descSpecs.surfaceRoughness,
                             surfaceTreatment: descSpecs.surfaceTreatment,
                             thickness: descSpecs.thickness,
+                            needsBending: rfqPart?.original_values?.needsBending === true || rfqPart?.original_values?.needsBending === 'true' || rfqPart?.needsBending,
+                            dimensions: rfqPart?.dimensions,
+                            volume: rfqPart?.volume,
+                            surfaceArea: rfqPart?.surfaceArea,
                             fileCount: itemFiles.length,
                           }}
                           onView3D={has3DFile ? () => handleOpen3DViewer(threeDFile!) : undefined}

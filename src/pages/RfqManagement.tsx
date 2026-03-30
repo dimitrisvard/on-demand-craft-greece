@@ -18,9 +18,14 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Plus,
   Download,
   Copy,
+  Layers,
+  Weight,
+  Box,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,6 +70,7 @@ const RFQ_STATUS_CONFIG: Record<RfqStatus, { label: string; className: string }>
 
 const ORDER_STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   new: { label: 'New', className: 'bg-blue-100 text-blue-700 hover:bg-blue-100' },
+  pending: { label: 'Pending', className: 'bg-amber-100 text-amber-700 hover:bg-amber-100' },
   in_progress: { label: 'In Progress', className: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100' },
   completed: { label: 'Completed', className: 'bg-green-100 text-green-700 hover:bg-green-100' },
   cancelled: { label: 'Cancelled', className: 'bg-red-100 text-red-700 hover:bg-red-100' },
@@ -97,6 +103,26 @@ export default function RfqManagement() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [partIndexes, setPartIndexes] = useState<Record<string, number>>({});
+
+  const toggleExpand = (id: string) => {
+    setExpandedCards(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const navigatePart = (id: string, direction: 'prev' | 'next', totalParts: number) => {
+    setPartIndexes(prev => {
+      const current = prev[id] || 0;
+      const next = direction === 'next'
+        ? (current + 1) % totalParts
+        : (current - 1 + totalParts) % totalParts;
+      return { ...prev, [id]: next };
+    });
+  };
 
   const [newRfq, setNewRfq] = useState<Partial<RFQ>>({
     title: "",
@@ -181,7 +207,7 @@ export default function RfqManagement() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*, customers(company_name, email, phone, vat_tax_id), rfqs(customer_id, customers(company_name, email, phone, vat_tax_id))')
+        .select('*, customers(company_name, email, phone, vat_tax_id), rfqs(customer_id, rfq_number, parts_details, customers(company_name, email, phone, vat_tax_id))')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -196,6 +222,8 @@ export default function RfqManagement() {
           customer_email: cust?.email,
           customer_phone: cust?.phone,
           customer_vat: cust?.vat_tax_id,
+          parts_details: item.rfqs?.parts_details || [],
+          from_rfq_number: item.from_rfq_number || item.rfqs?.rfq_number || '',
         };
       });
       setOrders(transformed);
@@ -316,10 +344,33 @@ export default function RfqManagement() {
     }
   };
 
+  const generatePoNumber = async (): Promise<string> => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const dateStr = `${day}${month}${year}`;
+
+    // Count existing orders for today
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+    const { data: todayOrders } = await supabase
+      .from('orders')
+      .select('id')
+      .gte('created_at', startOfDay)
+      .lt('created_at', endOfDay);
+
+    const seq = (todayOrders?.length || 0) + 1;
+    return `PO-${dateStr}-${seq}`;
+  };
+
   const createOrderFromRfq = async (rfqId: string) => {
     try {
-      const { data: rfqData, error: rfqError } = await supabase.from('rfqs').select('*').eq('id', rfqId).single();
+      const { data: rfqData, error: rfqError } = await supabase.from('rfqs').select('*, customers(company_name)').eq('id', rfqId).single();
       if (rfqError) throw rfqError;
+
+      const poNumber = await generatePoNumber();
+      const rfqNumber = (rfqData as any).rfq_number || '';
 
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
@@ -329,7 +380,9 @@ export default function RfqManagement() {
           status: 'new',
           total_amount: rfqData.total_amount,
           currency: rfqData.currency,
-          title: `Order - ${rfqData.title}`,
+          title: poNumber,
+          po_number: poNumber,
+          from_rfq_number: rfqNumber,
           start_date: new Date().toISOString(),
           delivery_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
         }])
@@ -339,15 +392,15 @@ export default function RfqManagement() {
       if (orderData && rfqData.parts_details) {
         const orderItems = rfqData.parts_details.map((item: any) => ({
           order_id: orderData[0].id,
-          product_name: item.product_name,
-          description: item.description,
+          product_name: item.product_name || item.name,
+          description: item.description || '',
           quantity: item.quantity,
           unit_price: item.unit_price,
           total_price: item.total_price
         }));
         await supabase.from('order_items').insert(orderItems);
       }
-      toast({ title: "Success", description: "Order created successfully" });
+      toast({ title: "Success", description: `Order ${poNumber} created successfully` });
       fetchOrders();
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to create order", variant: "destructive" });
@@ -415,9 +468,21 @@ export default function RfqManagement() {
   // ── RFQ Card (matching customer-side pattern) ──────────────
   const renderRfqCard = (rfq: RFQ) => {
     const partsQty = getPartsQtySummary(rfq);
-    const process = getProcess(rfq);
     const statusConfig = RFQ_STATUS_CONFIG[rfq.status];
     const isDeleting = deleteConfirmId === rfq.id;
+
+    // Collect tags from parts
+    const processes = new Set<string>();
+    let hasBending = false;
+    let hasLaserMarking = false;
+    (rfq.parts_details || []).forEach((part: any) => {
+      const ov = part.original_values || {};
+      const process = ov.processLabel || ov.process || part.process || '';
+      if (process) processes.add(process);
+      if (ov.needsBending === true || ov.needsBending === 'true' || part.needsBending) hasBending = true;
+      const treatment = (ov.surfaceTreatmentLabel || ov.surfaceTreatment || part.surfaceTreatment || '').toLowerCase();
+      if (treatment.includes('laser') || treatment.includes('marking') || treatment.includes('engrav')) hasLaserMarking = true;
+    });
 
     return (
       <Card key={rfq.id} className="mb-3 transition-shadow hover:shadow-md">
@@ -436,16 +501,24 @@ export default function RfqManagement() {
                   {statusConfig.label}
                 </Badge>
               </div>
+              {/* Tags row */}
+              {(processes.size > 0 || hasBending || hasLaserMarking) && (
+                <div className="flex flex-wrap gap-1">
+                  {Array.from(processes).map(p => (
+                    <Badge key={p} variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50">{p}</Badge>
+                  ))}
+                  {hasBending && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-orange-50 text-orange-700 border-orange-200">Bending</Badge>
+                  )}
+                  {hasLaserMarking && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200">Laser Marking</Badge>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
                 <span className="font-medium text-foreground">{rfq.customer_name}</span>
                 <span className="hidden sm:inline">·</span>
                 <span>{format(new Date(rfq.created_at), 'MMM dd, yyyy')}</span>
-                {process && (
-                  <>
-                    <span className="hidden sm:inline">·</span>
-                    <span>{process}</span>
-                  </>
-                )}
                 {rfq.due_date && (
                   <>
                     <span className="hidden sm:inline">·</span>
@@ -470,6 +543,12 @@ export default function RfqManagement() {
               </div>
 
               <div className="flex items-center gap-1">
+                {/* Expand/collapse button */}
+                {rfq.parts_details && rfq.parts_details.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => toggleExpand(rfq.id)} title="Show parts overview">
+                    {expandedCards.has(rfq.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" asChild>
                   <Link to={`/rfq/${rfq.id}`}>
                     <Eye className="h-4 w-4 mr-1" />
@@ -527,6 +606,45 @@ export default function RfqManagement() {
               </div>
             </div>
           </div>
+
+          {/* Expandable parts overview */}
+          {expandedCards.has(rfq.id) && rfq.parts_details && rfq.parts_details.length > 0 && (() => {
+            const pd = rfq.parts_details;
+            const currentIdx = partIndexes[rfq.id] || 0;
+            const part = pd[currentIdx] as any;
+            const ov = part?.original_values || {};
+            const material = ov.materialSubtypeLabel || ov.materialLabel || ov.material || part?.material || '';
+            const process = ov.processLabel || ov.process || part?.process || '';
+            const thickness = ov.thickness || part?.thickness || '';
+            return (
+              <div className="border-t mt-3 pt-3">
+                <div className="flex items-center gap-3">
+                  {/* Navigation arrows */}
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(rfq.id, 'prev', pd.length)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  {/* Part info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Box className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{part?.product_name || part?.name || `Part ${currentIdx + 1}`}</span>
+                      <span className="text-xs text-muted-foreground">({currentIdx + 1}/{pd.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1">
+                      {material && <span><Layers className="h-3 w-3 inline mr-0.5" />{material}</span>}
+                      {process && <span>{process}</span>}
+                      {thickness && <span>t: {thickness}mm</span>}
+                      {part?.quantity > 1 && <span>Qty: {part.quantity}</span>}
+                      {part?.dimensions && <span>{part.dimensions.x?.toFixed(1)}x{part.dimensions.y?.toFixed(1)}x{part.dimensions.z?.toFixed(1)}mm</span>}
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(rfq.id, 'next', pd.length)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     );
@@ -534,9 +652,29 @@ export default function RfqManagement() {
 
   // ── Order Card (matching customer-side pattern) ────────────
   const renderOrderCard = (order: any) => {
-    const orderId = generateOrderId(order);
+    const orderId = order.po_number || generateOrderId(order);
     const statusConfig = ORDER_STATUS_CONFIG[order.status] || { label: order.status, className: 'bg-gray-100 text-gray-700' };
     const isDeleting = deleteConfirmId === order.id;
+
+    // Get first part's thumbnail info
+    const partsDetails = order.parts_details || [];
+    const partsSummary = partsDetails.length > 0
+      ? `${partsDetails.length} part${partsDetails.length > 1 ? 's' : ''}`
+      : null;
+
+    // Collect tags from parts
+    const tags: { label: string; className: string }[] = [];
+    const processes = new Set<string>();
+    let hasBending = false;
+    let hasLaserMarking = false;
+    partsDetails.forEach((part: any) => {
+      const ov = part.original_values || {};
+      const process = ov.processLabel || ov.process || part.process || '';
+      if (process) processes.add(process);
+      if (ov.needsBending === true || ov.needsBending === 'true' || part.needsBending) hasBending = true;
+      const treatment = (ov.surfaceTreatmentLabel || ov.surfaceTreatment || part.surfaceTreatment || '').toLowerCase();
+      if (treatment.includes('laser') || treatment.includes('marking') || treatment.includes('engrav')) hasLaserMarking = true;
+    });
 
     return (
       <Card key={order.id} className="mb-3 transition-shadow hover:shadow-md">
@@ -559,11 +697,30 @@ export default function RfqManagement() {
                     {order.production_status.replace('_', ' ')}
                   </Badge>
                 )}
+                {order.from_rfq_number && (
+                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                    From RFQ: {order.from_rfq_number}
+                  </Badge>
+                )}
               </div>
+              {/* Tags row */}
+              {(processes.size > 0 || hasBending || hasLaserMarking) && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {Array.from(processes).map(p => (
+                    <Badge key={p} variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50">{p}</Badge>
+                  ))}
+                  {hasBending && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-orange-50 text-orange-700 border-orange-200">Bending</Badge>
+                  )}
+                  {hasLaserMarking && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200">Laser Marking</Badge>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
                 <span className="font-medium text-foreground">{order.customer_name}</span>
                 <span className="hidden sm:inline">·</span>
-                <span>{order.title}</span>
+                <span>{format(new Date(order.created_at), 'MMM dd, yyyy')}</span>
                 {order.start_date && (
                   <>
                     <span className="hidden sm:inline">·</span>
@@ -589,6 +746,12 @@ export default function RfqManagement() {
 
             {/* Right: total, actions */}
             <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
+              {partsSummary && (
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Parts</p>
+                  <p className="text-sm font-medium">{partsSummary}</p>
+                </div>
+              )}
               <div className="text-right">
                 <p className="text-lg font-semibold">
                   {order.total_amount ? formatCurrency(order.total_amount, order.currency || 'EUR') : '—'}
@@ -601,6 +764,12 @@ export default function RfqManagement() {
               </div>
 
               <div className="flex items-center gap-1">
+                {/* Expand/collapse button */}
+                {partsDetails.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={() => toggleExpand(order.id)} title="Show parts overview">
+                    {expandedCards.has(order.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                )}
                 <Button variant="ghost" size="sm" asChild>
                   <Link to={`/orders/${order.id}`}>
                     <Eye className="h-4 w-4 mr-1" />
@@ -626,6 +795,43 @@ export default function RfqManagement() {
               </div>
             </div>
           </div>
+
+          {/* Expandable parts overview */}
+          {expandedCards.has(order.id) && partsDetails.length > 0 && (() => {
+            const pd = partsDetails;
+            const currentIdx = partIndexes[order.id] || 0;
+            const part = pd[currentIdx] as any;
+            const ov = part?.original_values || {};
+            const material = ov.materialSubtypeLabel || ov.materialLabel || ov.material || part?.material || '';
+            const process = ov.processLabel || ov.process || part?.process || '';
+            const thickness = ov.thickness || part?.thickness || '';
+            return (
+              <div className="border-t mt-3 pt-3">
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(order.id, 'prev', pd.length)}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Box className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                      <span className="text-sm font-medium truncate">{part?.product_name || part?.name || `Part ${currentIdx + 1}`}</span>
+                      <span className="text-xs text-muted-foreground">({currentIdx + 1}/{pd.length})</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1">
+                      {material && <span><Layers className="h-3 w-3 inline mr-0.5" />{material}</span>}
+                      {process && <span>{process}</span>}
+                      {thickness && <span>t: {thickness}mm</span>}
+                      {part?.quantity > 1 && <span>Qty: {part.quantity}</span>}
+                      {part?.dimensions && <span>{part.dimensions.x?.toFixed(1)}x{part.dimensions.y?.toFixed(1)}x{part.dimensions.z?.toFixed(1)}mm</span>}
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(order.id, 'next', pd.length)}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
     );

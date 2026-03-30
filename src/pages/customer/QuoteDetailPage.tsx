@@ -400,19 +400,53 @@ export default function QuoteDetailPage() {
                             .eq('id', rfq.id);
                           if (statusError) throw statusError;
 
-                          const { error: orderError } = await supabase
+                          // Generate PO number: PO-DDMMYYYY-N
+                          const now = new Date();
+                          const day = String(now.getDate()).padStart(2, '0');
+                          const month = String(now.getMonth() + 1).padStart(2, '0');
+                          const year = now.getFullYear();
+                          const dateStr = `${day}${month}${year}`;
+                          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+                          const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+                          const { data: todayOrders } = await supabase
+                            .from('orders')
+                            .select('id')
+                            .gte('created_at', startOfDay)
+                            .lt('created_at', endOfDay);
+                          const seq = (todayOrders?.length || 0) + 1;
+                          const poNumber = `PO-${dateStr}-${seq}`;
+
+                          const rfqNumber = rfq.rfq_number || '';
+
+                          const { data: orderData, error: orderError } = await supabase
                             .from('orders')
                             .insert({
                               customer_id: rfq.customer_id,
                               rfq_id: rfq.id,
-                              status: 'pending',
+                              status: 'new',
                               total_amount: total,
                               currency: currency,
-                              title: rfq.title || rfq.rfq_number || `Order from ${rfq.id.slice(0, 8)}`,
+                              title: poNumber,
+                              po_number: poNumber,
+                              from_rfq_number: rfqNumber,
                               start_date: new Date().toISOString(),
-                              delivery_date: rfq.delivery_date || null,
-                            });
+                              delivery_date: (rfq as any).delivery_date || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+                            })
+                            .select();
                           if (orderError) throw orderError;
+
+                          // Create order items from parts
+                          if (orderData && parts.length > 0) {
+                            const orderItems = parts.map((part) => ({
+                              order_id: orderData[0].id,
+                              product_name: part.product_name || '',
+                              description: part.description || '',
+                              quantity: part.quantity || 0,
+                              unit_price: part.unit_price || 0,
+                              total_price: part.total_price || 0,
+                            }));
+                            await supabase.from('order_items').insert(orderItems);
+                          }
 
                           toast({ title: 'Quote accepted', description: 'Your order has been created successfully.' });
                           navigate('/customer/projects?tab=orders');
