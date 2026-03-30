@@ -18,11 +18,17 @@ import { Box as BoxIcon } from 'lucide-react';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
+export interface PartThumbnail3DMetrics {
+  dimensions: { x: number; y: number; z: number };
+  volume: number; // mm³
+}
+
 interface PartThumbnail3DProps {
   fileUrl: string;
   fileName: string;
   className?: string;
   size?: number; // px, defaults to 200
+  onMetrics?: (metrics: PartThumbnail3DMetrics) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -32,6 +38,31 @@ const isSTEP = (name: string) => /\.(step|stp)$/i.test(name);
 const isDXF = (name: string) => /\.dxf$/i.test(name);
 const isOBJ = (name: string) => /\.obj$/i.test(name);
 const isSupported = (name: string) => isSTL(name) || isSTEP(name) || isDXF(name) || isOBJ(name);
+
+/** Signed-volume method — same algorithm as volumeCalculation.ts but inline to avoid import issues */
+function computeVolume(geom: BufferGeometry): number {
+  const pos = geom.getAttribute('position');
+  if (!pos) return 0;
+  const idx = geom.getIndex();
+  let vol = 0;
+  const a = new Vector3(), b = new Vector3(), c = new Vector3();
+  if (idx) {
+    for (let i = 0; i < idx.count; i += 3) {
+      a.fromBufferAttribute(pos, idx.getX(i));
+      b.fromBufferAttribute(pos, idx.getX(i + 1));
+      c.fromBufferAttribute(pos, idx.getX(i + 2));
+      vol += a.dot(new Vector3().crossVectors(b, c)) / 6;
+    }
+  } else {
+    for (let i = 0; i < pos.count; i += 3) {
+      a.fromBufferAttribute(pos, i);
+      b.fromBufferAttribute(pos, i + 1);
+      c.fromBufferAttribute(pos, i + 2);
+      vol += a.dot(new Vector3().crossVectors(b, c)) / 6;
+    }
+  }
+  return Math.abs(vol);
+}
 
 const cadMaterial = new MeshPhongMaterial({
   color: new Color('#546e7a'),
@@ -92,14 +123,17 @@ function loadOcct(): Promise<any> {
 function STLModel({
   url,
   onDimensions,
+  onMetrics,
   topDown,
 }: {
   url: string;
   onDimensions: (dims: { x: number; y: number; z: number }) => void;
+  onMetrics?: (m: PartThumbnail3DMetrics) => void;
   topDown?: boolean;
 }) {
   const geometry = useLoader(STLLoader, url) as BufferGeometry;
   const { camera } = useThree();
+  const metricsReported = useRef(false);
 
   const dims = useMemo(() => {
     geometry.computeBoundingBox();
@@ -112,13 +146,16 @@ function STLModel({
 
   useEffect(() => {
     onDimensions(dims);
+    if (onMetrics && !metricsReported.current) {
+      metricsReported.current = true;
+      const vol = computeVolume(geometry);
+      onMetrics({ dimensions: dims, volume: vol });
+    }
     const maxDim = Math.max(dims.x, dims.y, dims.z);
     const dist = maxDim * 1.8;
     if (topDown) {
-      // Top-down view for DXF-like flat parts
       camera.position.set(0, dist, 0);
     } else {
-      // Isometric view
       camera.position.set(dist, dist * 0.7, dist);
     }
     camera.lookAt(0, 0, 0);
@@ -133,9 +170,11 @@ function STLModel({
 function StepModel({
   url,
   onDimensions,
+  onMetrics,
 }: {
   url: string;
   onDimensions: (dims: { x: number; y: number; z: number }) => void;
+  onMetrics?: (m: PartThumbnail3DMetrics) => void;
 }) {
   const [geometries, setGeometries] = useState<BufferGeometry[]>([]);
   const [centerOffset, setCenterOffset] = useState<Vector3 | null>(null);
@@ -194,7 +233,14 @@ function StepModel({
     // Center the group so the model is at origin
     setCenterOffset(center.clone());
 
-    onDimensions({ x: size.x, y: size.y, z: size.z });
+    const dims = { x: size.x, y: size.y, z: size.z };
+    onDimensions(dims);
+
+    if (onMetrics) {
+      let totalVol = 0;
+      geometries.forEach((g) => { totalVol += computeVolume(g); });
+      onMetrics({ dimensions: dims, volume: totalVol });
+    }
 
     const maxDim = Math.max(size.x, size.y, size.z);
     const dist = maxDim * 1.8;
@@ -292,7 +338,7 @@ function ThumbnailCanvas({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function PartThumbnail3D({ fileUrl, fileName, className, size = 200 }: PartThumbnail3DProps) {
+export default function PartThumbnail3D({ fileUrl, fileName, className, size = 200, onMetrics }: PartThumbnail3DProps) {
   const [dimensions, setDimensions] = useState<{ x: number; y: number; z: number } | null>(null);
 
   // Unsupported files get a static placeholder
@@ -325,13 +371,13 @@ export default function PartThumbnail3D({ fileUrl, fileName, className, size = 2
           <Suspense fallback={<LoadingSpinner />}>
             <ThumbnailCanvas onDimensions={dimensions} size={size}>
               {isSTL(fileName) && (
-                <STLModel url={fileUrl} onDimensions={setDimensions} />
+                <STLModel url={fileUrl} onDimensions={setDimensions} onMetrics={onMetrics} />
               )}
               {isSTEP(fileName) && (
-                <StepModel url={fileUrl} onDimensions={setDimensions} />
+                <StepModel url={fileUrl} onDimensions={setDimensions} onMetrics={onMetrics} />
               )}
               {isOBJ(fileName) && (
-                <STLModel url={fileUrl} onDimensions={setDimensions} />
+                <STLModel url={fileUrl} onDimensions={setDimensions} onMetrics={onMetrics} />
               )}
             </ThumbnailCanvas>
           </Suspense>

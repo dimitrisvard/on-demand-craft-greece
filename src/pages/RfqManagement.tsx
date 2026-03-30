@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 
 const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
+import type { PartThumbnail3DMetrics } from '@/components/shared/PartThumbnail3D';
 const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,8 @@ export default function RfqManagement() {
   const [partIndexes, setPartIndexes] = useState<Record<string, number>>({});
   // Thumbnail state: rfqId -> { fileUrl, fileName } for the first 3D file per RFQ
   const [rfqThumbnails, setRfqThumbnails] = useState<Record<string, { url: string; name: string }>>({});
+  // Volume state: rfqId -> volume in mm³ (computed when thumbnail 3D model loads)
+  const [rfqVolumes, setRfqVolumes] = useState<Record<string, number>>({});
 
   const toggleExpand = (id: string) => {
     setExpandedCards(prev => {
@@ -535,10 +538,46 @@ export default function RfqManagement() {
       if (treatment.includes('laser') || treatment.includes('marking') || treatment.includes('engrav')) hasLaserMarking = true;
     });
 
+    const rfqThumb = rfqThumbnails[rfq.id];
+    // Get material from first part for weight calculation
+    const firstPart = (rfq.parts_details || [])[0] as any;
+    const firstOv = firstPart?.original_values || {};
+    const rfqMaterial = firstOv.materialSubtypeLabel || firstOv.materialLabel || firstOv.material || firstPart?.material || '';
+    const rfqVolume = rfqVolumes[rfq.id];
+    const rfqWeight = rfqVolume && rfqMaterial ? calculateWeight(rfqVolume, rfqMaterial) : null;
+
     return (
       <Card key={rfq.id} className="mb-3 transition-shadow hover:shadow-md">
         <CardContent className="p-4 sm:p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            {/* Thumbnail — always visible */}
+            <div className="flex-shrink-0 hidden sm:block">
+              {rfqThumb ? (
+                <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                  <PartThumbnail3D
+                    fileUrl={rfqThumb.url}
+                    fileName={rfqThumb.name}
+                    size={72}
+                    onMetrics={(m) => {
+                      setRfqVolumes(prev => {
+                        if (prev[rfq.id]) return prev;
+                        return { ...prev, [rfq.id]: m.volume };
+                      });
+                    }}
+                  />
+                  {rfqWeight != null && rfqWeight > 0 && (
+                    <p className="text-[10px] text-muted-foreground text-center mt-0.5 flex items-center justify-center gap-0.5">
+                      <Weight className="h-3 w-3" />{formatWeight(rfqWeight)}
+                    </p>
+                  )}
+                </Suspense>
+              ) : (
+                <div className="h-[72px] w-[72px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                  <Box className="h-5 w-5 text-slate-300" />
+                </div>
+              )}
+            </div>
+
             {/* Left: ID, customer, date, status */}
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex items-center gap-3 flex-wrap">
@@ -671,9 +710,8 @@ export default function RfqManagement() {
             const tolerance = ov.toleranceLabel || ov.tolerance || '';
             const surfaceRoughness = ov.surfaceRoughnessLabel || ov.surfaceRoughness || '';
             const needsBending = ov.needsBending === true || ov.needsBending === 'true';
-            const volume = part?.volume || ov.volume;
+            const volume = part?.volume || ov.volume || rfqVolumes[rfq.id];
             const estWeight = volume && material ? calculateWeight(volume, material) : null;
-            const thumb = rfqThumbnails[rfq.id];
             return (
               <div className="border-t mt-3 pt-3">
                 <div className="flex items-center gap-3">
@@ -681,18 +719,6 @@ export default function RfqManagement() {
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(rfq.id, 'prev', pd.length)}>
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  {/* Thumbnail */}
-                  <div className="flex-shrink-0 hidden sm:block">
-                    {thumb ? (
-                      <Suspense fallback={<div className="h-[80px] w-[80px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
-                        <PartThumbnail3D fileUrl={thumb.url} fileName={thumb.name} size={80} />
-                      </Suspense>
-                    ) : (
-                      <div className="h-[80px] w-[80px] rounded bg-slate-50 border flex flex-col items-center justify-center">
-                        <Box className="h-5 w-5 text-slate-300" />
-                      </div>
-                    )}
-                  </div>
                   {/* Part info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -753,10 +779,46 @@ export default function RfqManagement() {
       if (treatment.includes('laser') || treatment.includes('marking') || treatment.includes('engrav')) hasLaserMarking = true;
     });
 
+    const orderThumb = order.rfq_id ? rfqThumbnails[order.rfq_id] : null;
+    const orderFirstPart = partsDetails[0] as any;
+    const orderFirstOv = orderFirstPart?.original_values || {};
+    const orderMaterial = orderFirstOv.materialSubtypeLabel || orderFirstOv.materialLabel || orderFirstOv.material || orderFirstPart?.material || '';
+    const orderRfqId = order.rfq_id || order.id;
+    const orderVolume = rfqVolumes[orderRfqId];
+    const orderWeight = orderVolume && orderMaterial ? calculateWeight(orderVolume, orderMaterial) : null;
+
     return (
       <Card key={order.id} className="mb-3 transition-shadow hover:shadow-md">
         <CardContent className="p-4 sm:p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            {/* Thumbnail — always visible */}
+            <div className="flex-shrink-0 hidden sm:block">
+              {orderThumb ? (
+                <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                  <PartThumbnail3D
+                    fileUrl={orderThumb.url}
+                    fileName={orderThumb.name}
+                    size={72}
+                    onMetrics={(m) => {
+                      setRfqVolumes(prev => {
+                        if (prev[orderRfqId]) return prev;
+                        return { ...prev, [orderRfqId]: m.volume };
+                      });
+                    }}
+                  />
+                  {orderWeight != null && orderWeight > 0 && (
+                    <p className="text-[10px] text-muted-foreground text-center mt-0.5 flex items-center justify-center gap-0.5">
+                      <Weight className="h-3 w-3" />{formatWeight(orderWeight)}
+                    </p>
+                  )}
+                </Suspense>
+              ) : (
+                <div className="h-[72px] w-[72px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                  <Box className="h-5 w-5 text-slate-300" />
+                </div>
+              )}
+            </div>
+
             {/* Left: order ID, title, customer, dates */}
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex items-center gap-3 flex-wrap">
@@ -886,27 +948,14 @@ export default function RfqManagement() {
             const tolerance = ov.toleranceLabel || ov.tolerance || '';
             const surfaceRoughness = ov.surfaceRoughnessLabel || ov.surfaceRoughness || '';
             const needsBending = ov.needsBending === true || ov.needsBending === 'true';
-            const volume = part?.volume || ov.volume;
+            const volume = part?.volume || ov.volume || rfqVolumes[orderRfqId];
             const estWeight = volume && material ? calculateWeight(volume, material) : null;
-            const thumb = order.rfq_id ? rfqThumbnails[order.rfq_id] : null;
             return (
               <div className="border-t mt-3 pt-3">
                 <div className="flex items-center gap-3">
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(order.id, 'prev', pd.length)}>
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
-                  {/* Thumbnail */}
-                  <div className="flex-shrink-0 hidden sm:block">
-                    {thumb ? (
-                      <Suspense fallback={<div className="h-[80px] w-[80px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
-                        <PartThumbnail3D fileUrl={thumb.url} fileName={thumb.name} size={80} />
-                      </Suspense>
-                    ) : (
-                      <div className="h-[80px] w-[80px] rounded bg-slate-50 border flex flex-col items-center justify-center">
-                        <Box className="h-5 w-5 text-slate-300" />
-                      </div>
-                    )}
-                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{part?.product_name || part?.name || `Part ${currentIdx + 1}`}</span>
