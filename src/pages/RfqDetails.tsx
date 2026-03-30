@@ -65,6 +65,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { generateAndSendRFQPDF } from '@/utils/rfqPdfEmailService';
+import { generateTechnicalDrawingPdf, generateFlatPatternPdf, PartInfo } from '@/utils/technicalDrawingPdf';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -1258,9 +1259,25 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
-  // Flat pattern extraction
+  // Generate PDF technical drawings from 3D files (client-side)
   const [flatPatternLoading, setFlatPatternLoading] = useState<string | null>(null);
-  const handleExtractFlatPattern = async (file: QuoteFile) => {
+  const [techDrawingLoading, setTechDrawingLoading] = useState<string | null>(null);
+
+  const buildPartInfo = (file: QuoteFile, item: any): PartInfo => {
+    const ov = item?.original_values as Record<string, any> | undefined;
+    return {
+      name: file.file_name.replace(/\.[^.]+$/, ''),
+      material: ov?.materialSubtypeLabel || ov?.materialLabel || ov?.material || '',
+      process: ov?.processLabel || ov?.process || '',
+      thickness: ov?.thickness || '',
+      tolerance: ov?.toleranceLabel || ov?.tolerance || '',
+      surfaceRoughness: ov?.surfaceRoughnessLabel || ov?.surfaceRoughness || '',
+      surfaceTreatment: ov?.surfaceTreatmentLabel || ov?.surfaceTreatment || '',
+      needsBending: ov?.needsBending === true || ov?.needsBending === 'true',
+    };
+  };
+
+  const handleExtractFlatPattern = async (file: QuoteFile, item: any) => {
     try {
       setFlatPatternLoading(file.id);
       const url = await getSignedUrl(file.file_path);
@@ -1268,25 +1285,33 @@ const RfqDetails = (props: RfqDetailsProps) => {
         toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
         return;
       }
-      const { data, error } = await supabase.functions.invoke('extract-flat-pattern', {
-        body: { file_url: url, file_name: file.file_name, rfq_id: rfq?.id }
-      });
-      if (error) throw error;
-      if (data?.pdf_url) {
-        const link = document.createElement('a');
-        link.href = data.pdf_url;
-        link.download = `${file.file_name.replace(/\.[^.]+$/, '')}_flat_pattern.pdf`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast({ title: 'Flat Pattern Generated', description: 'PDF technical drawing downloaded.' });
-      } else {
-        toast({ title: 'Processing', description: data?.message || 'Flat pattern extraction queued.' });
-      }
+      const partInfo = buildPartInfo(file, item);
+      await generateFlatPatternPdf(url, file.file_name, partInfo);
+      toast({ title: 'Flat Pattern Generated', description: 'PDF downloaded successfully.' });
     } catch (error: any) {
-      toast({ title: 'Flat Pattern Error', description: error.message || 'Failed to extract flat pattern.', variant: 'destructive' });
+      console.error('Flat pattern generation error:', error);
+      toast({ title: 'Flat Pattern Error', description: error.message || 'Failed to generate flat pattern PDF.', variant: 'destructive' });
     } finally {
       setFlatPatternLoading(null);
+    }
+  };
+
+  const handleTechnicalDrawing = async (file: QuoteFile, item: any) => {
+    try {
+      setTechDrawingLoading(file.id);
+      const url = await getSignedUrl(file.file_path);
+      if (!url) {
+        toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
+        return;
+      }
+      const partInfo = buildPartInfo(file, item);
+      await generateTechnicalDrawingPdf(url, file.file_name, partInfo);
+      toast({ title: 'Technical Drawing Generated', description: 'PDF downloaded successfully.' });
+    } catch (error: any) {
+      console.error('Technical drawing generation error:', error);
+      toast({ title: 'Technical Drawing Error', description: error.message || 'Failed to generate technical drawing PDF.', variant: 'destructive' });
+    } finally {
+      setTechDrawingLoading(null);
     }
   };
 
@@ -1679,22 +1704,34 @@ const RfqDetails = (props: RfqDetailsProps) => {
                               showPricing
                               showActions
                             />
-                            {/* Flat Pattern buttons for 3D files */}
+                            {/* PDF Generation buttons for 3D files */}
                             {itemPartFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {itemPartFiles.filter(f => is3DFile(f.file_name)).map(file => (
-                                  <Button
-                                    key={file.id}
-                                    variant="outline"
-                                    size="sm"
-                                    className="gap-1.5 text-xs"
-                                    disabled={flatPatternLoading === file.id}
-                                    onClick={() => handleExtractFlatPattern(file)}
-                                    title="Extract flat pattern and generate PDF technical drawing"
-                                  >
-                                    <FileOutput className="h-3.5 w-3.5" />
-                                    {flatPatternLoading === file.id ? 'Processing...' : `Flat Pattern: ${file.file_name}`}
-                                  </Button>
+                                  <React.Fragment key={file.id}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1.5 text-xs"
+                                      disabled={flatPatternLoading === file.id}
+                                      onClick={() => handleExtractFlatPattern(file, item)}
+                                      title="Generate flat pattern PDF"
+                                    >
+                                      <FileOutput className="h-3.5 w-3.5" />
+                                      {flatPatternLoading === file.id ? 'Processing...' : `Flat Pattern`}
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1.5 text-xs"
+                                      disabled={techDrawingLoading === file.id}
+                                      onClick={() => handleTechnicalDrawing(file, item)}
+                                      title="Generate technical drawing PDF with multi-view projections"
+                                    >
+                                      <FileText className="h-3.5 w-3.5" />
+                                      {techDrawingLoading === file.id ? 'Processing...' : `Technical Drawing`}
+                                    </Button>
+                                  </React.Fragment>
                                 ))}
                               </div>
                             )}
