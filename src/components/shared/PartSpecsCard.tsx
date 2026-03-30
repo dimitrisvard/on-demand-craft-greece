@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Box, Ruler, Weight, Layers, ChevronDown, ChevronUp,
   Maximize2, FileText, Eye, Copy, Trash2
@@ -36,6 +37,7 @@ interface PartSpecsCardProps {
   onEdit?: () => void;
   onDuplicate?: () => void;
   onDelete?: () => void;
+  onPriceChange?: (unitPrice: number) => void;
   showActions?: boolean;
   showPricing?: boolean;
   compact?: boolean;
@@ -59,11 +61,15 @@ export default function PartSpecsCard({
   onEdit,
   onDuplicate,
   onDelete,
+  onPriceChange,
   showActions = true,
   showPricing = true,
   compact = false,
 }: PartSpecsCardProps) {
   const [expanded, setExpanded] = useState(!compact);
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [editPrice, setEditPrice] = useState(String(part.unit_price || 0));
+  const priceInputRef = useRef<HTMLInputElement>(null);
 
   const estimatedWeight = part.weight ?? (part.volume && part.material
     ? calculateWeight(part.volume, part.material)
@@ -141,15 +147,60 @@ export default function PartSpecsCard({
 
           {/* Price + expand */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {showPricing && part.total_price != null && (
+            {showPricing && (
               <div className="text-right">
-                <p className="font-bold text-gray-900">
-                  {formatCurrency(part.total_price)}
-                </p>
-                {part.unit_price != null && part.quantity != null && part.quantity > 1 && (
-                  <p className="text-xs text-muted-foreground">
-                    {formatCurrency(part.unit_price)} x {part.quantity}
-                  </p>
+                {editingPrice && onPriceChange ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      ref={priceInputRef}
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="w-24 h-8 text-right text-sm"
+                      value={editPrice}
+                      onChange={(e) => setEditPrice(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = parseFloat(editPrice) || 0;
+                          onPriceChange(val);
+                          setEditingPrice(false);
+                        } else if (e.key === 'Escape') {
+                          setEditPrice(String(part.unit_price || 0));
+                          setEditingPrice(false);
+                        }
+                      }}
+                      onBlur={() => {
+                        const val = parseFloat(editPrice) || 0;
+                        onPriceChange(val);
+                        setEditingPrice(false);
+                      }}
+                      autoFocus
+                    />
+                    <span className="text-xs text-muted-foreground">/ea</span>
+                  </div>
+                ) : (
+                  <div
+                    className={onPriceChange ? 'cursor-pointer hover:bg-slate-50 rounded px-1 -mx-1' : ''}
+                    onClick={() => {
+                      if (onPriceChange) {
+                        setEditPrice(String(part.unit_price || 0));
+                        setEditingPrice(true);
+                      }
+                    }}
+                    title={onPriceChange ? 'Click to edit price' : undefined}
+                  >
+                    <p className="font-bold text-gray-900">
+                      {part.total_price != null ? formatCurrency(part.total_price) : '—'}
+                    </p>
+                    {part.unit_price != null && part.quantity != null && part.quantity > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        {formatCurrency(part.unit_price)} x {part.quantity}
+                      </p>
+                    )}
+                    {onPriceChange && part.total_price === 0 && (
+                      <p className="text-[10px] text-blue-500">click to set price</p>
+                    )}
+                  </div>
                 )}
               </div>
             )}

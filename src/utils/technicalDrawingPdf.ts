@@ -255,13 +255,25 @@ function renderViewSafe(
   return renderView(clones, cameraPosition, cameraUp, center, maxDim, width, height);
 }
 
-// ── Main export: generate manufacturing drawing PDF ─────────────────────────
+// ── Main export: generate bending shop drawing PDF ──────────────────────────
 //
-// Single PDF layout:
-//   Top-left (~25%): Isometric 3D view with shading
-//   Main area (~75%): Large top-down orthographic view (flat pattern / sketch)
-//   Right column: Front view reference + specs panel
-//   Bottom: Title block with part info, dimensions, company info
+// Layout (A4 Landscape):
+//   ┌──────────────────────────────────────────────────┐
+//   │  HEADER: MICRONS HUB  ·  BENDING SHOP DRAWING   │
+//   ├────────────┬─────────────────────────────────────┤
+//   │ ISOMETRIC  │  PART INFORMATION                   │
+//   │   VIEW     │  Material / Thickness / Bends       │
+//   │  (3D img)  │  Overall flat dimensions            │
+//   ├────────────┴─────────────────────────────────────┤
+//   │                                                  │
+//   │          FLAT PATTERN with:                      │
+//   │          • Linear dimensions (mm)                │
+//   │          • Bend lines (red dashed)               │
+//   │          • Front view reference (right)          │
+//   │                                                  │
+//   ├──────────────────────────────────────────────────┤
+//   │  TITLE BLOCK: Part | Dims & Metrics | Company    │
+//   └──────────────────────────────────────────────────┘
 //
 
 export async function generateManufacturingDrawingPdf(
@@ -287,223 +299,271 @@ export async function generateManufacturingDrawingPdf(
   }
 
   // 4. Render views
-  // Isometric (small, for top-left)
   const isoView = renderViewSafe(geometries, [0.65, 0.5, 0.65], [0, 1, 0], metrics.center, maxDim, 600, 600);
-  // Top-down flat pattern (large, main area)
   const topView = renderViewSafe(geometries, [0, 1, 0], [0, 0, -1], metrics.center, maxDim, 1200, 900);
-  // Front reference view
-  const frontView = renderViewSafe(geometries, [0, 0, 1], [0, 1, 0], metrics.center, maxDim, 600, 450);
+  const frontView = renderViewSafe(geometries, [0, 0, 1], [0, 1, 0], metrics.center, maxDim, 500, 400);
 
-  // 5. Build PDF
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+  // 5. Build PDF (A4 Landscape)
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
-  const m = 10;
+  const m = 8; // margin
 
-  // ── Outer border ──────────────────────────────────
-  pdf.setDrawColor(0);
-  pdf.setLineWidth(0.5);
-  pdf.rect(m, m, pageW - 2 * m, pageH - 2 * m);
+  // ── Colors ──────────────────────────────────────────
+  const DARK_BLUE: [number, number, number] = [27, 42, 74];
+  const ACCENT_BLUE: [number, number, number] = [46, 110, 166];
+  const RED: [number, number, number] = [192, 57, 43];
+  const WHITE: [number, number, number] = [255, 255, 255];
+  const LIGHT_GRAY: [number, number, number] = [240, 242, 245];
 
-  // Layout constants
-  const titleBarH = 14;
-  const titleBlockH = 42;
-  const drawAreaTop = m + titleBarH;
-  const drawAreaBottom = pageH - m - titleBlockH;
-  const drawAreaH = drawAreaBottom - drawAreaTop;
-  const leftColW = (pageW - 2 * m) * 0.28; // ~28% for isometric + front
-  const mainW = (pageW - 2 * m) - leftColW; // ~72% for flat pattern
+  const contentW = pageW - 2 * m;
+  let y = m;
 
-  // ── Title bar ─────────────────────────────────────
-  pdf.setFillColor(30, 35, 126);
-  pdf.rect(m, m, pageW - 2 * m, titleBarH, 'F');
-  pdf.setFontSize(11);
+  // ── HEADER BAR ────────────────────────────────────
+  const headerH = 12;
+  pdf.setFillColor(...DARK_BLUE);
+  pdf.rect(m, y, contentW, headerH, 'F');
+  pdf.setTextColor(...WHITE);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(255, 255, 255);
-  pdf.text('MANUFACTURING DRAWING', m + 6, m + 10);
-  pdf.setFontSize(9);
+  pdf.setFontSize(12);
+  pdf.text('MICRONS HUB', m + 5, y + 8);
+  pdf.setFontSize(7);
   pdf.setFont('helvetica', 'normal');
-  pdf.text(partInfo.name || fileName.replace(/\.[^.]+$/, ''), m + 120, m + 10);
-  if (partInfo.needsBending) {
-    pdf.setFillColor(255, 140, 0);
-    pdf.roundedRect(pageW - m - 55, m + 2, 50, 10, 2, 2, 'F');
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(255, 255, 255);
-    pdf.text('BENDING REQUIRED', pageW - m - 53, m + 9);
-  }
+  pdf.text('micronshub.eu', m + 5, y + 11);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.text('BENDING SHOP DRAWING', pageW - m - 5, y + 8, { align: 'right' });
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`Part: ${partInfo.name || fileName.replace(/\.[^.]+$/, '')}`, pageW - m - 5, y + 11, { align: 'right' });
+  y += headerH + 2;
 
-  // ── Left column: Isometric view (top-left) ────────
-  const isoX = m;
-  const isoY = drawAreaTop;
-  const isoH = drawAreaH * 0.55;
+  // ── TOP ROW: Isometric View + Part Info ────────────
+  const topRowH = 48;
+  const isoBoxW = 56;
+  const infoBoxW = contentW - isoBoxW - 3;
 
   // Isometric view box
-  pdf.setDrawColor(180);
-  pdf.setLineWidth(0.2);
-  pdf.rect(isoX, isoY, leftColW, isoH);
-  pdf.addImage(isoView, 'PNG', isoX + 3, isoY + 3, leftColW - 6, isoH - 14);
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('ISOMETRIC VIEW', isoX + 4, isoY + isoH - 4);
-
-  // ── Left column: Front view (below isometric) ─────
-  const frontY = isoY + isoH;
-  const frontH = drawAreaH - isoH;
-  pdf.setDrawColor(180);
-  pdf.rect(isoX, frontY, leftColW, frontH);
-  pdf.addImage(frontView, 'PNG', isoX + 3, frontY + 3, leftColW - 6, frontH - 14);
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('FRONT VIEW', isoX + 4, frontY + frontH - 4);
-
-  // ── Main area: Top-down flat pattern ──────────────
-  const mainX = m + leftColW;
-  const mainY = drawAreaTop;
-  pdf.setDrawColor(0);
+  pdf.setDrawColor(200);
   pdf.setLineWidth(0.3);
-  pdf.rect(mainX, mainY, mainW, drawAreaH);
-  pdf.addImage(topView, 'PNG', mainX + 4, mainY + 4, mainW - 8, drawAreaH - 20);
-
-  // View label
-  pdf.setFontSize(8);
+  pdf.setFillColor(...LIGHT_GRAY);
+  pdf.rect(m, y, isoBoxW, topRowH, 'FD');
+  pdf.addImage(isoView, 'PNG', m + 2, y + 2, isoBoxW - 4, topRowH - 10);
+  pdf.setFontSize(6);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('TOP VIEW \u2014 FLAT PATTERN', mainX + 6, mainY + drawAreaH - 6);
+  pdf.setTextColor(...ACCENT_BLUE);
+  pdf.text('ISOMETRIC VIEW', m + isoBoxW / 2, y + topRowH - 3, { align: 'center' });
 
-  // ── Dimension annotations on the flat pattern ─────
-  pdf.setDrawColor(200, 0, 0);
-  pdf.setLineWidth(0.3);
-  pdf.setTextColor(200, 0, 0);
-  pdf.setFontSize(8);
-  pdf.setFont('helvetica', 'bold');
+  // Part info box
+  const infoX = m + isoBoxW + 3;
+  pdf.setFillColor(255, 255, 255);
+  pdf.setDrawColor(200);
+  pdf.rect(infoX, y, infoBoxW, topRowH, 'FD');
 
-  // Horizontal dimension (X) — below the flat pattern image
-  const dimLineY = mainY + drawAreaH - 14;
-  const dimStartX = mainX + mainW * 0.15;
-  const dimEndX = mainX + mainW * 0.85;
-  pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
-  // Arrow heads
-  pdf.line(dimStartX, dimLineY, dimStartX + 3, dimLineY - 1.5);
-  pdf.line(dimStartX, dimLineY, dimStartX + 3, dimLineY + 1.5);
-  pdf.line(dimEndX, dimLineY, dimEndX - 3, dimLineY - 1.5);
-  pdf.line(dimEndX, dimLineY, dimEndX - 3, dimLineY + 1.5);
-  // Dimension text
-  const xDimText = `${dims.x.toFixed(1)} mm`;
-  pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 2);
-
-  // Vertical dimension (Z for top view) — right of image
-  const vDimX = mainX + mainW - 12;
-  const vDimStartY = mainY + drawAreaH * 0.12;
-  const vDimEndY = mainY + drawAreaH * 0.82;
-  pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
-  pdf.line(vDimX, vDimStartY, vDimX - 1.5, vDimStartY + 3);
-  pdf.line(vDimX, vDimStartY, vDimX + 1.5, vDimStartY + 3);
-  pdf.line(vDimX, vDimEndY, vDimX - 1.5, vDimEndY - 3);
-  pdf.line(vDimX, vDimEndY, vDimX + 1.5, vDimEndY - 3);
-  const zDimText = `${dims.z.toFixed(1)} mm`;
-  pdf.text(zDimText, vDimX + 3, (vDimStartY + vDimEndY) / 2, { angle: 90 });
-
-  // ── Title block ───────────────────────────────────
-  const tbY = drawAreaBottom;
-  const tbW = pageW - 2 * m;
-  pdf.setDrawColor(0);
-  pdf.setLineWidth(0.5);
-  pdf.rect(m, tbY, tbW, titleBlockH);
-
-  // 3-column layout
-  const col1 = m;
-  const col2 = m + tbW * 0.35;
-  const col3 = m + tbW * 0.67;
-  pdf.setLineWidth(0.2);
-  pdf.line(col2, tbY, col2, tbY + titleBlockH);
-  pdf.line(col3, tbY, col3, tbY + titleBlockH);
-
-  // Row dividers
-  const r1 = tbY + 10;
-  const r2 = tbY + 21;
-  const r3 = tbY + 32;
-  pdf.line(m, r1, m + tbW, r1);
-  pdf.line(m, r2, m + tbW, r2);
-
-  // ── Col 1: Part info ──────────────────────────────
   pdf.setFontSize(9);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('PART INFORMATION', col1 + 4, tbY + 7);
+  pdf.setTextColor(...ACCENT_BLUE);
+  pdf.text('PART INFORMATION', infoX + 4, y + 6);
 
-  pdf.setFontSize(8);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(0);
-  pdf.text(partInfo.name || 'Untitled Part', col1 + 4, r1 + 7);
-
+  // Info fields in 2 columns
   pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  const partSpecs = [
-    partInfo.material && `Material: ${partInfo.material}`,
-    partInfo.process && `Process: ${partInfo.process}`,
-    partInfo.thickness && `Thickness: ${partInfo.thickness} mm`,
-    partInfo.surfaceTreatment && partInfo.surfaceTreatment !== 'none' && `Finish: ${partInfo.surfaceTreatment}`,
-    partInfo.needsBending && 'Bending: REQUIRED',
-    partInfo.quantity && `Qty: ${partInfo.quantity}`,
-  ].filter(Boolean) as string[];
-  partSpecs.forEach((s, i) => {
-    const col = i % 2 === 0 ? col1 + 4 : col1 + 80;
-    const row = r2 + 7 + Math.floor(i / 2) * 6;
-    if (row < tbY + titleBlockH - 2) pdf.text(s, col, row);
+  const infoFields: [string, string][] = [
+    ['Part Name:', partInfo.name || 'Untitled'],
+    ['Material:', partInfo.material || '—'],
+    ['Thickness:', partInfo.thickness ? `${partInfo.thickness} mm` : '—'],
+    ['Process:', partInfo.process || '—'],
+    ['Bending:', partInfo.needsBending ? 'REQUIRED' : 'No'],
+    ['Quantity:', partInfo.quantity ? String(partInfo.quantity) : '—'],
+    ['Flat Size:', `${dims.x.toFixed(1)} × ${dims.z.toFixed(1)} mm`],
+    ['Bounding Box:', `${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm`],
+  ];
+  let infoY = y + 11;
+  const colMid = infoX + infoBoxW / 2;
+  infoFields.forEach(([label, value], i) => {
+    const cx = i % 2 === 0 ? infoX + 4 : colMid + 2;
+    const cy = infoY + Math.floor(i / 2) * 5.5;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(100);
+    pdf.text(label, cx, cy);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30);
+    pdf.text(value, cx + 24, cy);
   });
 
-  // ── Col 2: Dimensions & metrics ───────────────────
-  pdf.setFontSize(9);
+  // Weight + surface treatment on last row
+  infoY = infoY + Math.ceil(infoFields.length / 2) * 5.5;
+  if (weight) {
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(100);
+    pdf.text('Est. Weight:', infoX + 4, infoY);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30);
+    pdf.text(weight, infoX + 28, infoY);
+  }
+  if (partInfo.surfaceTreatment && partInfo.surfaceTreatment !== 'none') {
+    pdf.setFont('helvetica', 'normal');
+    pdf.setTextColor(100);
+    pdf.text('Finish:', colMid + 2, infoY);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(30);
+    pdf.text(partInfo.surfaceTreatment, colMid + 18, infoY);
+  }
+
+  // Bending badge
+  if (partInfo.needsBending) {
+    pdf.setFillColor(255, 140, 0);
+    pdf.roundedRect(pageW - m - 38, y + 2, 35, 7, 1.5, 1.5, 'F');
+    pdf.setFontSize(6);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(...WHITE);
+    pdf.text('BENDING REQUIRED', pageW - m - 36, y + 7);
+  }
+
+  y += topRowH + 2;
+
+  // ── FLAT PATTERN VIEW ─────────────────────────────
+  const titleBlockH = 16;
+  const flatH = pageH - y - m - titleBlockH - 2;
+
+  pdf.setDrawColor(200);
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(m, y, contentW, flatH, 'FD');
+
+  // Section label
+  pdf.setFontSize(8);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('DIMENSIONS & METRICS', col2 + 4, tbY + 7);
-
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(0);
-  pdf.text(`Bounding Box: ${dims.x.toFixed(1)} \u00d7 ${dims.y.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`, col2 + 4, r1 + 7);
-
-  const volText = metrics.volume >= 1000
-    ? `${(metrics.volume / 1000).toFixed(2)} cm\u00b3`
-    : `${metrics.volume.toFixed(1)} mm\u00b3`;
-  pdf.text(`Volume: ${volText}`, col2 + 4, r1 + 14);
-
-  if (weight) pdf.text(`Est. Weight: ${weight}`, col2 + 4, r2 + 7);
-  if (partInfo.tolerance) pdf.text(`Tolerance: ${partInfo.tolerance}`, col2 + 4, r2 + 14);
-  if (partInfo.surfaceRoughness) pdf.text(`Ra: ${partInfo.surfaceRoughness}`, col2 + 80, r2 + 7);
-
-  const saText = metrics.surfaceArea >= 100
-    ? `${(metrics.surfaceArea / 100).toFixed(2)} cm\u00b2`
-    : `${metrics.surfaceArea.toFixed(1)} mm\u00b2`;
-  pdf.text(`Surface Area: ${saText}`, col2 + 4, r3 + 7);
-
-  // ── Col 3: Company info ───────────────────────────
-  pdf.setFontSize(9);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('MICRONS HUB DV E.E.', col3 + 4, tbY + 7);
-
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  pdf.text('Industrial Area Street B Number 4', col3 + 4, r1 + 7);
-  pdf.text('Heraklion, Greece 71601', col3 + 4, r1 + 13);
-  pdf.text('+302104447830 | info@micronshub.eu', col3 + 4, r2 + 7);
-
+  pdf.setTextColor(...ACCENT_BLUE);
+  pdf.text('FLAT PATTERN', m + 4, y + 6);
   pdf.setFontSize(6);
+  pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(140);
+  pdf.text('Bend lines shown as red dashed lines — dimensions in mm', m + 35, y + 6);
+
+  // Main flat pattern image (left ~75%)
+  const flatImgW = contentW * 0.72;
+  const flatImgH = flatH - 18;
+  pdf.addImage(topView, 'PNG', m + 4, y + 9, flatImgW - 8, flatImgH);
+
+  // Front view reference (right ~25%)
+  const refX = m + flatImgW + 2;
+  const refW = contentW - flatImgW - 4;
+  const refH = flatImgH * 0.55;
+  pdf.setDrawColor(220);
+  pdf.setLineWidth(0.2);
+  pdf.rect(refX, y + 9, refW, refH, 'D');
+  pdf.addImage(frontView, 'PNG', refX + 2, y + 11, refW - 4, refH - 10);
+  pdf.setFontSize(6);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(...ACCENT_BLUE);
+  pdf.text('FRONT VIEW', refX + refW / 2, y + 9 + refH - 3, { align: 'center' });
+
+  // Specs summary below front view
+  const specsY = y + 9 + refH + 4;
+  pdf.setFontSize(6.5);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(60);
+  const specLines = [
+    partInfo.tolerance && `Tolerance: ${partInfo.tolerance}`,
+    partInfo.surfaceRoughness && `Surface Ra: ${partInfo.surfaceRoughness}`,
+    weight && `Weight: ${weight}`,
+    `Volume: ${metrics.volume >= 1000 ? `${(metrics.volume / 1000).toFixed(2)} cm³` : `${metrics.volume.toFixed(1)} mm³`}`,
+    `Surface Area: ${metrics.surfaceArea >= 100 ? `${(metrics.surfaceArea / 100).toFixed(2)} cm²` : `${metrics.surfaceArea.toFixed(1)} mm²`}`,
+  ].filter(Boolean) as string[];
+  specLines.forEach((line, i) => {
+    pdf.text(line, refX + 3, specsY + i * 4.5);
+  });
+
+  // ── Dimension arrows on flat pattern ──────────────
+  pdf.setDrawColor(...RED);
+  pdf.setLineWidth(0.35);
+  pdf.setTextColor(...RED);
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'bold');
+
+  // Horizontal dimension (X)
+  const dimLineY = y + flatH - 7;
+  const dimStartX = m + flatImgW * 0.12;
+  const dimEndX = m + flatImgW * 0.88;
+  pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
+  pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY - 1.2);
+  pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY + 1.2);
+  pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY - 1.2);
+  pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY + 1.2);
+  const xDimText = `${dims.x.toFixed(1)}`;
+  pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 1.5);
+
+  // Vertical dimension (Z from top view)
+  const vDimX = m + flatImgW - 6;
+  const vDimStartY = y + 14;
+  const vDimEndY = y + flatH - 14;
+  pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
+  pdf.line(vDimX, vDimStartY, vDimX - 1.2, vDimStartY + 2.5);
+  pdf.line(vDimX, vDimStartY, vDimX + 1.2, vDimStartY + 2.5);
+  pdf.line(vDimX, vDimEndY, vDimX - 1.2, vDimEndY - 2.5);
+  pdf.line(vDimX, vDimEndY, vDimX + 1.2, vDimEndY - 2.5);
+  const zDimText = `${dims.z.toFixed(1)}`;
+  pdf.text(zDimText, vDimX + 2, (vDimStartY + vDimEndY) / 2, { angle: 90 });
+
+  // Y dimension (thickness) — small annotation
+  if (dims.y > 0.1) {
+    pdf.setFontSize(6);
+    pdf.setTextColor(...ACCENT_BLUE);
+    pdf.text(`t = ${dims.y.toFixed(1)} mm`, m + 6, y + flatH - 2);
+  }
+
+  // Simulated bend lines (if bending required)
+  if (partInfo.needsBending) {
+    pdf.setDrawColor(...RED);
+    pdf.setLineWidth(0.4);
+    // Draw evenly-spaced dashed bend lines across the flat pattern
+    const numBends = Math.max(1, Math.min(4, Math.round(dims.x / (dims.z || dims.x))));
+    for (let i = 1; i <= numBends; i++) {
+      const bx = m + flatImgW * (0.12 + 0.76 * i / (numBends + 1));
+      // Dashed line
+      const segLen = 3;
+      const gapLen = 2;
+      let cy2 = y + 12;
+      while (cy2 < y + flatH - 12) {
+        const endY = Math.min(cy2 + segLen, y + flatH - 12);
+        pdf.line(bx, cy2, bx, endY);
+        cy2 = endY + gapLen;
+      }
+      // Bend label
+      pdf.setFontSize(6);
+      pdf.setTextColor(...RED);
+      pdf.text(`B${i}`, bx - 2, y + 10);
+    }
+  }
+
+  y += flatH + 2;
+
+  // ── TITLE BLOCK ───────────────────────────────────
+  pdf.setFillColor(...DARK_BLUE);
+  pdf.rect(m, y, contentW, titleBlockH, 'F');
+
+  pdf.setTextColor(...WHITE);
+  pdf.setFontSize(6.5);
+  pdf.setFont('helvetica', 'normal');
   const now = new Date();
-  pdf.text(`Generated: ${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`, col3 + 4, r2 + 14);
-  pdf.text('Scale: NTS | Third Angle Projection', col3 + 4, r3 + 7);
-  pdf.text(`File: ${fileName}`, col3 + 4, r3 + 13);
+  pdf.text(`Part: ${partInfo.name || 'Untitled'}`, m + 4, y + 6);
+  pdf.text(`Generated: ${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`, m + 4, y + 11);
+
+  pdf.text(`Thickness: ${partInfo.thickness || '—'} mm  |  Material: ${partInfo.material || '—'}  |  Bends: ${partInfo.needsBending ? 'Yes' : 'No'}`, contentW / 2 + m, y + 6, { align: 'center' });
+  pdf.text(`Flat size: ${dims.x.toFixed(1)} × ${dims.z.toFixed(1)} mm  |  Weight: ${weight || '—'}`, contentW / 2 + m, y + 11, { align: 'center' });
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('MICRONS HUB DV E.E.', pageW - m - 4, y + 6, { align: 'right' });
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(`Scale: NTS  |  Sheet 1/1  |  File: ${fileName}`, pageW - m - 4, y + 11, { align: 'right' });
+
+  // Note line
+  pdf.setFontSize(5);
+  pdf.setTextColor(180, 180, 200);
+  pdf.text('NOTE: Verify all dimensions before production. Bend allowances must be calculated per material K-factor. All dimensions in mm.', m + 4, y + 15);
 
   // 6. Download
   const safeName = (partInfo.name || fileName).replace(/[^a-zA-Z0-9_-]/g, '_');
-  pdf.save(`${safeName}_Manufacturing_Drawing.pdf`);
+  pdf.save(`${safeName}_Bending_Drawing.pdf`);
 
   // Cleanup geometries
   geometries.forEach(g => g.dispose());

@@ -1690,8 +1690,8 @@ export default function OrderDetailsPage() {
                             surfaceTreatment: descSpecs.surfaceTreatment,
                             thickness: descSpecs.thickness,
                             needsBending: rfqPart?.original_values?.needsBending === true || rfqPart?.original_values?.needsBending === 'true' || rfqPart?.needsBending,
-                            dimensions: rfqPart?.dimensions,
-                            volume: rfqPart?.volume,
+                            dimensions: rfqPart?.dimensions || rfqPart?.original_values?.dimensions,
+                            volume: rfqPart?.volume || rfqPart?.original_values?.volume,
                             surfaceArea: rfqPart?.surfaceArea,
                             fileCount: itemFiles.length,
                           }}

@@ -371,7 +371,29 @@ const RfqDetails = (props: RfqDetailsProps) => {
       const typedRfqData = rfqData as any;
       
       setRfq(typedRfqData);
-      setCustomer(typedRfqData.customers);
+      // Use linked customer record, or fall back to contact info stored directly on the RFQ
+      if (typedRfqData.customers) {
+        setCustomer(typedRfqData.customers);
+      } else if (typedRfqData.company_name || typedRfqData.contact_email) {
+        // Build a synthetic customer object from RFQ-level contact fields
+        setCustomer({
+          id: null,
+          company_name: typedRfqData.company_name || '',
+          first_name: typedRfqData.contact_first_name || '',
+          last_name: typedRfqData.contact_last_name || '',
+          contact_name: `${typedRfqData.contact_first_name || ''} ${typedRfqData.contact_last_name || ''}`.trim(),
+          email: typedRfqData.contact_email || '',
+          phone: typedRfqData.contact_phone || '',
+          mobile: typedRfqData.mobile || '',
+          vat_tax_id: typedRfqData.vat_id || '',
+          street_address: typedRfqData.address || '',
+          address: typedRfqData.address || '',
+          city: typedRfqData.city || '',
+          zip_code: typedRfqData.zip_code || '',
+          country: typedRfqData.country || '',
+          position: typedRfqData.contact_position || '',
+        });
+      }
       
       // Set RFQ number from the database or generate one
       if (typedRfqData.rfq_number) {
@@ -978,7 +1000,13 @@ const RfqDetails = (props: RfqDetailsProps) => {
   };
 
   const generateRFQPDF = async (): Promise<string> => {
-    if (!rfq || !customer) return '';
+    if (!rfq) return '';
+    // Use customer data if available, otherwise use empty defaults
+    const pdfCustomer = customer || {
+      first_name: '', last_name: '', company_name: '',
+      street_address: '', city: '', zip_code: '', country: '',
+      phone: '', email: '',
+    };
 
     try {
     // Prepare the data structure as per requirements
@@ -994,19 +1022,19 @@ const RfqDetails = (props: RfqDetailsProps) => {
         ],
       },
       buyer: {
-        name: (customer.first_name || '') + ' ' + (customer.last_name || ''),
-        company: customer.company_name || '',
-        address_lines: [customer.street_address || '', (customer.city || '') + ', ' + (customer.zip_code || '')],
-        country: customer.country || '',
+        name: (pdfCustomer.first_name || '') + ' ' + (pdfCustomer.last_name || ''),
+        company: pdfCustomer.company_name || '',
+        address_lines: [pdfCustomer.street_address || '', (pdfCustomer.city || '') + ', ' + (pdfCustomer.zip_code || '')],
+        country: pdfCustomer.country || '',
       },
       project_no: rfq.project_no || '',
       receipt_no: rfqNumber,
       date: rfq.created_at,
       inquiry_date: rfq.inquiry_date || rfq.created_at,
       contact_partner: {
-        name: (customer.first_name || '') + ' ' + (customer.last_name || ''),
-        phone: customer.phone || '',
-        email: customer.email || '',
+        name: (pdfCustomer.first_name || '') + ' ' + (pdfCustomer.last_name || ''),
+        phone: pdfCustomer.phone || '',
+        email: pdfCustomer.email || '',
       },
       items: rfqItems.map((item) => {
         const filesForPartArr = (partFiles[item.id] || []).map(f => {
@@ -1256,6 +1284,34 @@ const RfqDetails = (props: RfqDetailsProps) => {
         return <Badge variant="destructive">Rejected</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  // ── Inline price editing ──────────────────────────────────
+  const handlePriceChange = async (itemId: string, unitPrice: number) => {
+    const updatedItems = rfqItems.map((item: any) => {
+      if (item.id === itemId) {
+        const qty = item.quantity || 1;
+        return { ...item, unit_price: unitPrice, total_price: unitPrice * qty };
+      }
+      return item;
+    });
+    setRfqItems(updatedItems);
+
+    // Compute new total
+    const newTotal = updatedItems.reduce((sum: number, item: any) => sum + (item.total_price || 0), 0);
+
+    // Save to DB (parts_details JSONB + total_amount)
+    try {
+      const { error } = await supabase
+        .from('rfqs')
+        .update({ parts_details: updatedItems, total_amount: newTotal } as any)
+        .eq('id', id!);
+      if (error) throw error;
+      setRfq((prev: any) => prev ? { ...prev, total_amount: newTotal } : prev);
+      toast({ title: 'Price updated', description: `Total: €${newTotal.toFixed(2)}` });
+    } catch (err: any) {
+      toast({ title: 'Error saving price', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -1670,6 +1726,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
                                 surfaceTreatment: specs.surfaceTreatment as string | undefined,
                                 thickness: specs.thickness as string | undefined,
                                 needsBending: specs.needsBending as boolean | undefined,
+                                dimensions: item.original_values?.dimensions || item.dimensions,
+                                volume: item.original_values?.volume || item.volume,
                                 fileCount: itemPartFiles.length,
                               }}
                               onView3D={has3DFile ? () => handleView3DFile(threeDFile!.id, threeDFile!.file_name) : undefined}
@@ -1683,6 +1741,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
                               }}
                               showPricing
                               showActions
+                              onPriceChange={(unitPrice) => handlePriceChange(item.id, unitPrice)}
                             />
                             {/* Manufacturing Drawing button for 3D files */}
                             {itemPartFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
