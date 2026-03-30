@@ -65,7 +65,7 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { generateAndSendRFQPDF } from '@/utils/rfqPdfEmailService';
-import { generateTechnicalDrawingPdf, generateFlatPatternPdf, PartInfo } from '@/utils/technicalDrawingPdf';
+import { generateManufacturingDrawingPdf, PartInfo } from '@/utils/technicalDrawingPdf';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -1259,9 +1259,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
-  // Generate PDF technical drawings from 3D files (client-side)
-  const [flatPatternLoading, setFlatPatternLoading] = useState<string | null>(null);
-  const [techDrawingLoading, setTechDrawingLoading] = useState<string | null>(null);
+  // Generate manufacturing drawing PDF from 3D files (client-side)
+  const [drawingLoading, setDrawingLoading] = useState<string | null>(null);
 
   const buildPartInfo = (file: QuoteFile, item: any): PartInfo => {
     const ov = item?.original_values as Record<string, any> | undefined;
@@ -1277,41 +1276,22 @@ const RfqDetails = (props: RfqDetailsProps) => {
     };
   };
 
-  const handleExtractFlatPattern = async (file: QuoteFile, item: any) => {
+  const handleManufacturingDrawing = async (file: QuoteFile, item: any) => {
     try {
-      setFlatPatternLoading(file.id);
+      setDrawingLoading(file.id);
       const url = await getSignedUrl(file.file_path);
       if (!url) {
         toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
         return;
       }
       const partInfo = buildPartInfo(file, item);
-      await generateFlatPatternPdf(url, file.file_name, partInfo);
-      toast({ title: 'Flat Pattern Generated', description: 'PDF downloaded successfully.' });
+      await generateManufacturingDrawingPdf(url, file.file_name, partInfo);
+      toast({ title: 'Manufacturing Drawing Generated', description: 'PDF downloaded successfully.' });
     } catch (error: any) {
-      console.error('Flat pattern generation error:', error);
-      toast({ title: 'Flat Pattern Error', description: error.message || 'Failed to generate flat pattern PDF.', variant: 'destructive' });
+      console.error('Manufacturing drawing error:', error);
+      toast({ title: 'Drawing Error', description: error.message || 'Failed to generate manufacturing drawing PDF.', variant: 'destructive' });
     } finally {
-      setFlatPatternLoading(null);
-    }
-  };
-
-  const handleTechnicalDrawing = async (file: QuoteFile, item: any) => {
-    try {
-      setTechDrawingLoading(file.id);
-      const url = await getSignedUrl(file.file_path);
-      if (!url) {
-        toast({ title: 'Error', description: 'Could not get file URL', variant: 'destructive' });
-        return;
-      }
-      const partInfo = buildPartInfo(file, item);
-      await generateTechnicalDrawingPdf(url, file.file_name, partInfo);
-      toast({ title: 'Technical Drawing Generated', description: 'PDF downloaded successfully.' });
-    } catch (error: any) {
-      console.error('Technical drawing generation error:', error);
-      toast({ title: 'Technical Drawing Error', description: error.message || 'Failed to generate technical drawing PDF.', variant: 'destructive' });
-    } finally {
-      setTechDrawingLoading(null);
+      setDrawingLoading(null);
     }
   };
 
@@ -1704,34 +1684,22 @@ const RfqDetails = (props: RfqDetailsProps) => {
                               showPricing
                               showActions
                             />
-                            {/* PDF Generation buttons for 3D files */}
+                            {/* Manufacturing Drawing button for 3D files */}
                             {itemPartFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {itemPartFiles.filter(f => is3DFile(f.file_name)).map(file => (
-                                  <React.Fragment key={file.id}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1.5 text-xs"
-                                      disabled={flatPatternLoading === file.id}
-                                      onClick={() => handleExtractFlatPattern(file, item)}
-                                      title="Generate flat pattern PDF"
-                                    >
-                                      <FileOutput className="h-3.5 w-3.5" />
-                                      {flatPatternLoading === file.id ? 'Processing...' : `Flat Pattern`}
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="gap-1.5 text-xs"
-                                      disabled={techDrawingLoading === file.id}
-                                      onClick={() => handleTechnicalDrawing(file, item)}
-                                      title="Generate technical drawing PDF with multi-view projections"
-                                    >
-                                      <FileText className="h-3.5 w-3.5" />
-                                      {techDrawingLoading === file.id ? 'Processing...' : `Technical Drawing`}
-                                    </Button>
-                                  </React.Fragment>
+                                  <Button
+                                    key={file.id}
+                                    variant="outline"
+                                    size="sm"
+                                    className="gap-1.5 text-xs"
+                                    disabled={drawingLoading === file.id}
+                                    onClick={() => handleManufacturingDrawing(file, item)}
+                                    title="Generate manufacturing drawing PDF with isometric view and flat pattern"
+                                  >
+                                    <FileOutput className="h-3.5 w-3.5" />
+                                    {drawingLoading === file.id ? 'Generating...' : 'Manufacturing Drawing'}
+                                  </Button>
                                 ))}
                               </div>
                             )}

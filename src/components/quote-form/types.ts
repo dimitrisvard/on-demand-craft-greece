@@ -54,6 +54,7 @@ export interface PartDetails {
   surfaceTreatmentOther: string;
   thickness: string;
   needsBending: boolean;
+  _dimensions?: { x: number; y: number; z: number };
 }
 
 export interface StepComponentProps {

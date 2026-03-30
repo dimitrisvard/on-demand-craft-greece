@@ -22,6 +22,7 @@ interface PartThumbnail3DProps {
   fileUrl: string;
   fileName: string;
   className?: string;
+  size?: number; // px, defaults to 200
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -263,14 +264,16 @@ class ThumbnailErrorBoundary extends React.Component<
 function ThumbnailCanvas({
   children,
   onDimensions,
+  size = 200,
 }: {
   children: React.ReactNode;
   onDimensions: { x: number; y: number; z: number } | null;
+  size?: number;
 }) {
   return (
     <Canvas
       camera={{ position: [5, 5, 5], fov: 45 }}
-      style={{ width: 200, height: 200 }}
+      style={{ width: size, height: size }}
       gl={{ antialias: true, alpha: true }}
     >
       <ambientLight intensity={0.5} />
@@ -289,7 +292,7 @@ function ThumbnailCanvas({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function PartThumbnail3D({ fileUrl, fileName, className }: PartThumbnail3DProps) {
+export default function PartThumbnail3D({ fileUrl, fileName, className, size = 200 }: PartThumbnail3DProps) {
   const [dimensions, setDimensions] = useState<{ x: number; y: number; z: number } | null>(null);
 
   // Unsupported files get a static placeholder
@@ -318,9 +321,9 @@ export default function PartThumbnail3D({ fileUrl, fileName, className }: PartTh
   return (
     <ThumbnailErrorBoundary fileName={fileName}>
       <div className={`flex flex-col items-center ${className ?? ''}`}>
-        <div className="h-[200px] w-[200px] rounded-lg overflow-hidden bg-slate-50 border border-slate-200">
+        <div className="rounded-lg overflow-hidden bg-slate-50 border border-slate-200" style={{ width: size, height: size }}>
           <Suspense fallback={<LoadingSpinner />}>
-            <ThumbnailCanvas onDimensions={dimensions}>
+            <ThumbnailCanvas onDimensions={dimensions} size={size}>
               {isSTL(fileName) && (
                 <STLModel url={fileUrl} onDimensions={setDimensions} />
               )}

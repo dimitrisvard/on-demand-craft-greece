@@ -352,6 +352,7 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
           id: crypto.randomUUID(),
           rfq_id: '', // Will be filled in after RFQ creation
           product_name: `Part ${index + 1}`,
+          dimensions: (part as any)._dimensions || undefined,
           description: `Process: ${processLabel}
 Material: ${materialLabel}${materialSubtypeLabel ? ` (${materialSubtypeLabel})` : ''}
 ${surfaceRoughnessLabel ? `Surface Roughness: ${surfaceRoughnessLabel}` : ''}
@@ -384,6 +385,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
             comments: part.comments,
             thickness: part.thickness,
             needsBending: part.needsBending,
+            dimensions: (part as any)._dimensions || undefined,
           }
         };
       });

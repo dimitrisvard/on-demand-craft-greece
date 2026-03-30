@@ -155,7 +155,7 @@ const isViewableOBJ = (n: string) => /\.obj$/i.test(n);
 const isViewable3D = (n: string) => isViewableSTL(n) || isViewableSTEP(n) || isViewableOBJ(n);
 
 // Embedded 3D preview panel - shows first 3D file from the files array
-function Embedded3DPreview({ files }: { files: File[] }) {
+function Embedded3DPreview({ files, onDimensionsChange }: { files: File[]; onDimensionsChange?: (dims: { x: number; y: number; z: number }) => void }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [previewFileName, setPreviewFileName] = useState<string | null>(null);
@@ -209,6 +209,11 @@ function Embedded3DPreview({ files }: { files: File[] }) {
       </div>
     );
   }
+
+  // Notify parent when dimensions change
+  useEffect(() => {
+    if (dims && onDimensionsChange) onDimensionsChange(dims);
+  }, [dims, onDimensionsChange]);
 
   // No file at all
   if (!first3DFile || !blobUrl) {
@@ -740,6 +745,15 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                             <div>
                               <Embedded3DPreview
                                 files={part.files || []}
+                                onDimensionsChange={(dims) => {
+                                  // Store dimensions in part data for persistence
+                                  if (!values.parts[index]._dimensions ||
+                                      values.parts[index]._dimensions?.x !== dims.x ||
+                                      values.parts[index]._dimensions?.y !== dims.y ||
+                                      values.parts[index]._dimensions?.z !== dims.z) {
+                                    setFieldValue(`parts.${index}._dimensions`, dims);
+                                  }
+                                }}
                               />
                             </div>
                           </div>

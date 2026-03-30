@@ -239,251 +239,32 @@ function renderView(
   return dataUrl;
 }
 
-// ── Generate multi-view captures ─────────────────────────────────────────────
+// ── Render a single view (clone geometries to avoid disposal issues) ────────
 
-function captureViews(
+function renderViewSafe(
   geometries: THREE.BufferGeometry[],
+  cameraPosition: [number, number, number],
+  cameraUp: [number, number, number],
   center: THREE.Vector3,
   maxDim: number,
-): ViewCapture[] {
-  const viewWidth = 600;
-  const viewHeight = 450;
-
-  const views: { label: string; pos: [number, number, number]; up: [number, number, number] }[] = [
-    { label: 'Front View', pos: [0, 0, 1], up: [0, 1, 0] },
-    { label: 'Top View', pos: [0, 1, 0], up: [0, 0, -1] },
-    { label: 'Right View', pos: [1, 0, 0], up: [0, 1, 0] },
-    { label: 'Isometric View', pos: [0.65, 0.5, 0.65], up: [0, 1, 0] },
-  ];
-
-  return views.map(v => ({
-    label: v.label,
-    imageData: renderView(geometries, v.pos, v.up, center, maxDim, viewWidth, viewHeight),
-    cameraPosition: v.pos,
-    cameraUp: v.up,
-  }));
+  width: number,
+  height: number,
+): string {
+  // Clone geometries so original are not disposed
+  const clones = geometries.map(g => g.clone());
+  return renderView(clones, cameraPosition, cameraUp, center, maxDim, width, height);
 }
 
-// ── Build PDF ────────────────────────────────────────────────────────────────
+// ── Main export: generate manufacturing drawing PDF ─────────────────────────
+//
+// Single PDF layout:
+//   Top-left (~25%): Isometric 3D view with shading
+//   Main area (~75%): Large top-down orthographic view (flat pattern / sketch)
+//   Right column: Front view reference + specs panel
+//   Bottom: Title block with part info, dimensions, company info
+//
 
-function buildPdf(
-  views: ViewCapture[],
-  metrics: { size: THREE.Vector3; volume: number; surfaceArea: number },
-  partInfo: PartInfo,
-  weight: string | null,
-): jsPDF {
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 10;
-
-  // ── Border ─────────────────────────────────────────────
-  pdf.setDrawColor(0);
-  pdf.setLineWidth(0.5);
-  pdf.rect(margin, margin, pageW - 2 * margin, pageH - 2 * margin);
-
-  // Inner border for drawing area
-  pdf.setLineWidth(0.2);
-  pdf.rect(margin + 2, margin + 2, pageW - 2 * margin - 4, pageH - 2 * margin - 55);
-
-  // ── Views layout (2x2 grid) ────────────────────────────
-  const drawAreaW = pageW - 2 * margin - 4;
-  const drawAreaH = pageH - 2 * margin - 55;
-  const halfW = drawAreaW / 2;
-  const halfH = drawAreaH / 2;
-  const viewStartX = margin + 2;
-  const viewStartY = margin + 2;
-
-  const positions = [
-    [viewStartX, viewStartY],                         // Top-left: Front
-    [viewStartX + halfW, viewStartY],                 // Top-right: Top
-    [viewStartX, viewStartY + halfH],                 // Bottom-left: Right
-    [viewStartX + halfW, viewStartY + halfH],         // Bottom-right: Isometric
-  ];
-
-  views.forEach((view, idx) => {
-    const [x, y] = positions[idx];
-
-    // View border
-    pdf.setDrawColor(180);
-    pdf.setLineWidth(0.1);
-    pdf.rect(x, y, halfW, halfH);
-
-    // View image
-    const imgPadding = 4;
-    const imgW = halfW - imgPadding * 2;
-    const imgH = halfH - imgPadding * 2 - 6;
-    pdf.addImage(view.imageData, 'PNG', x + imgPadding, y + imgPadding, imgW, imgH);
-
-    // View label
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'bold');
-    pdf.setTextColor(30, 35, 126);
-    pdf.text(view.label, x + imgPadding, y + halfH - 3);
-  });
-
-  // ── Dimension annotations (below each view) ───────────
-  const dims = metrics.size;
-
-  // Front view dimensions (X width, Z height)
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  const frontX = positions[0][0] + 4;
-  const frontY = positions[0][1] + halfH - 8;
-  pdf.text(`${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} mm`, frontX, frontY);
-
-  // Top view (X width, Z depth)
-  const topX = positions[1][0] + 4;
-  const topY = positions[1][1] + halfH - 8;
-  pdf.text(`${dims.x.toFixed(1)} x ${dims.z.toFixed(1)} mm`, topX, topY);
-
-  // Right view (Z depth, Y height)
-  const rightX = positions[2][0] + 4;
-  const rightY = positions[2][1] + halfH - 8;
-  pdf.text(`${dims.z.toFixed(1)} x ${dims.y.toFixed(1)} mm`, rightX, rightY);
-
-  // Isometric - overall
-  const isoX = positions[3][0] + 4;
-  const isoY = positions[3][1] + halfH - 8;
-  pdf.text(`${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`, isoX, isoY);
-
-  // ── Title block ────────────────────────────────────────
-  const tbY = pageH - margin - 53;
-  const tbH = 51;
-  const tbW = pageW - 2 * margin;
-
-  pdf.setDrawColor(0);
-  pdf.setLineWidth(0.5);
-  pdf.rect(margin, tbY, tbW, tbH);
-
-  // Title block grid
-  const col1 = margin;
-  const col2 = margin + tbW * 0.35;
-  const col3 = margin + tbW * 0.65;
-
-  pdf.setLineWidth(0.2);
-  pdf.line(col2, tbY, col2, tbY + tbH);
-  pdf.line(col3, tbY, col3, tbY + tbH);
-
-  // Horizontal dividers in each column
-  const row1 = tbY + 12;
-  const row2 = tbY + 24;
-  const row3 = tbY + 36;
-  pdf.line(margin, row1, margin + tbW, row1);
-  pdf.line(margin, row2, margin + tbW, row2);
-  pdf.line(margin, row3, margin + tbW, row3);
-
-  // ── Column 1: Part info ────────────────────────────────
-  pdf.setFontSize(10);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('TECHNICAL DRAWING', col1 + 4, tbY + 9);
-
-  pdf.setFontSize(8);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(0);
-  pdf.text(partInfo.name || 'Untitled Part', col1 + 4, row1 + 9);
-
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  if (partInfo.material) pdf.text(`Material: ${partInfo.material}`, col1 + 4, row2 + 8);
-  if (partInfo.process) pdf.text(`Process: ${partInfo.process}`, col1 + 4, row2 + 14);
-  if (partInfo.quantity) pdf.text(`Qty: ${partInfo.quantity}`, col1 + 80, row2 + 8);
-
-  // Row 3
-  if (partInfo.thickness) pdf.text(`Thickness: ${partInfo.thickness} mm`, col1 + 4, row3 + 8);
-  if (partInfo.needsBending) pdf.text('Bending: Yes', col1 + 60, row3 + 8);
-  if (partInfo.surfaceTreatment) pdf.text(`Surface: ${partInfo.surfaceTreatment}`, col1 + 4, row3 + 14);
-
-  // ── Column 2: Dimensions & metrics ─────────────────────
-  pdf.setFontSize(8);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('DIMENSIONS & METRICS', col2 + 4, tbY + 9);
-
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(0);
-  pdf.text(`Bounding Box: ${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`, col2 + 4, row1 + 8);
-
-  const volText = metrics.volume >= 1000
-    ? `${(metrics.volume / 1000).toFixed(2)} cm³`
-    : `${metrics.volume.toFixed(1)} mm³`;
-  pdf.text(`Volume: ${volText}`, col2 + 4, row1 + 15);
-
-  const saText = metrics.surfaceArea >= 100
-    ? `${(metrics.surfaceArea / 100).toFixed(2)} cm²`
-    : `${metrics.surfaceArea.toFixed(1)} mm²`;
-  pdf.text(`Surface Area: ${saText}`, col2 + 4, row2 + 8);
-
-  if (weight) pdf.text(`Estimated Weight: ${weight}`, col2 + 4, row2 + 15);
-
-  if (partInfo.tolerance) pdf.text(`Tolerance: ${partInfo.tolerance}`, col2 + 4, row3 + 8);
-  if (partInfo.surfaceRoughness) pdf.text(`Surface Roughness: ${partInfo.surfaceRoughness}`, col2 + 4, row3 + 14);
-
-  // ── Column 3: Company info ─────────────────────────────
-  pdf.setFontSize(8);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('MICRONS HUB DV E.E.', col3 + 4, tbY + 9);
-
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  pdf.text('Industrial Area Street B Number 4', col3 + 4, row1 + 8);
-  pdf.text('Heraklion, Greece 71601', col3 + 4, row1 + 14);
-  pdf.text('+302104447830', col3 + 4, row2 + 8);
-  pdf.text('info@micronshub.eu', col3 + 4, row2 + 14);
-
-  pdf.setFontSize(6);
-  pdf.setTextColor(140);
-  const now = new Date();
-  pdf.text(`Generated: ${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`, col3 + 4, row3 + 8);
-  pdf.text('Scale: Not to scale (NTS)', col3 + 4, row3 + 14);
-  pdf.text('Third Angle Projection', col3 + 4, tbY + tbH - 3);
-
-  return pdf;
-}
-
-// ── Main export: generate technical drawing PDF ──────────────────────────────
-
-export async function generateTechnicalDrawingPdf(
-  fileUrl: string,
-  fileName: string,
-  partInfo: PartInfo,
-): Promise<void> {
-  // 1. Load geometry
-  const geometries = await loadGeometry(fileUrl, fileName);
-  if (!geometries.length) throw new Error('No geometry found in file');
-
-  // 2. Calculate metrics
-  const metrics = calculateMetrics(geometries);
-
-  // 3. Calculate weight
-  let weight: string | null = null;
-  if (partInfo.material) {
-    const { calculateWeight, formatWeight } = await import('./materialDensity');
-    const w = calculateWeight(metrics.volume, partInfo.material);
-    if (w != null) weight = formatWeight(w);
-  }
-
-  // 4. Capture multi-view renders
-  const maxDim = Math.max(metrics.size.x, metrics.size.y, metrics.size.z);
-  const views = captureViews(geometries, metrics.center, maxDim);
-
-  // 5. Build PDF
-  const pdf = buildPdf(views, metrics, partInfo, weight);
-
-  // 6. Download
-  const safeName = (partInfo.name || fileName).replace(/[^a-zA-Z0-9_-]/g, '_');
-  pdf.save(`${safeName}_Technical_Drawing.pdf`);
-}
-
-// ── Flat pattern: project geometry to 2D (top-down) ──────────────────────────
-
-export async function generateFlatPatternPdf(
+export async function generateManufacturingDrawingPdf(
   fileUrl: string,
   fileName: string,
   partInfo: PartInfo,
@@ -497,37 +278,21 @@ export async function generateFlatPatternPdf(
   const dims = metrics.size;
   const maxDim = Math.max(dims.x, dims.y, dims.z);
 
-  // 3. Render top-down (flat pattern) view
-  const width = 1200;
-  const height = 900;
-  const topView = renderView(
-    geometries,
-    [0, 1, 0],   // camera looking down
-    [0, 0, -1],  // up is -Z (so X goes right, Z goes down on screen)
-    metrics.center,
-    maxDim,
-    width,
-    height,
-  );
-
-  // Also render a front view for reference
-  const frontView = renderView(
-    geometries,
-    [0, 0, 1],
-    [0, 1, 0],
-    metrics.center,
-    maxDim,
-    width,
-    height,
-  );
-
-  // 4. Calculate weight
+  // 3. Calculate weight
   let weight: string | null = null;
   if (partInfo.material) {
-    const { calculateWeight, formatWeight } = await import('./materialDensity');
-    const w = calculateWeight(metrics.volume, partInfo.material);
-    if (w != null) weight = formatWeight(w);
+    const { calculateWeight: calcW, formatWeight: fmtW } = await import('./materialDensity');
+    const w = calcW(metrics.volume, partInfo.material);
+    if (w != null) weight = fmtW(w);
   }
+
+  // 4. Render views
+  // Isometric (small, for top-left)
+  const isoView = renderViewSafe(geometries, [0.65, 0.5, 0.65], [0, 1, 0], metrics.center, maxDim, 600, 600);
+  // Top-down flat pattern (large, main area)
+  const topView = renderViewSafe(geometries, [0, 1, 0], [0, 0, -1], metrics.center, maxDim, 1200, 900);
+  // Front reference view
+  const frontView = renderViewSafe(geometries, [0, 0, 1], [0, 1, 0], metrics.center, maxDim, 600, 450);
 
   // 5. Build PDF
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
@@ -535,112 +300,211 @@ export async function generateFlatPatternPdf(
   const pageH = pdf.internal.pageSize.getHeight();
   const m = 10;
 
-  // Border
+  // ── Outer border ──────────────────────────────────
   pdf.setDrawColor(0);
   pdf.setLineWidth(0.5);
   pdf.rect(m, m, pageW - 2 * m, pageH - 2 * m);
 
-  // Title
-  pdf.setFontSize(14);
-  pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('FLAT PATTERN / TOP VIEW PROJECTION', m + 4, m + 10);
+  // Layout constants
+  const titleBarH = 14;
+  const titleBlockH = 42;
+  const drawAreaTop = m + titleBarH;
+  const drawAreaBottom = pageH - m - titleBlockH;
+  const drawAreaH = drawAreaBottom - drawAreaTop;
+  const leftColW = (pageW - 2 * m) * 0.28; // ~28% for isometric + front
+  const mainW = (pageW - 2 * m) - leftColW; // ~72% for flat pattern
 
+  // ── Title bar ─────────────────────────────────────
+  pdf.setFillColor(30, 35, 126);
+  pdf.rect(m, m, pageW - 2 * m, titleBarH, 'F');
+  pdf.setFontSize(11);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(255, 255, 255);
+  pdf.text('MANUFACTURING DRAWING', m + 6, m + 10);
   pdf.setFontSize(9);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(80);
-  pdf.text(partInfo.name || fileName, m + 4, m + 17);
+  pdf.text(partInfo.name || fileName.replace(/\.[^.]+$/, ''), m + 120, m + 10);
+  if (partInfo.needsBending) {
+    pdf.setFillColor(255, 140, 0);
+    pdf.roundedRect(pageW - m - 55, m + 2, 50, 10, 2, 2, 'F');
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(255, 255, 255);
+    pdf.text('BENDING REQUIRED', pageW - m - 53, m + 9);
+  }
 
-  // Top-down view (main, large)
-  const imgY = m + 22;
-  const imgH = pageH - 2 * m - 65;
-  const imgW = (pageW - 2 * m - 8) * 0.65;
-  pdf.addImage(topView, 'PNG', m + 2, imgY, imgW, imgH);
+  // ── Left column: Isometric view (top-left) ────────
+  const isoX = m;
+  const isoY = drawAreaTop;
+  const isoH = drawAreaH * 0.55;
+
+  // Isometric view box
+  pdf.setDrawColor(180);
+  pdf.setLineWidth(0.2);
+  pdf.rect(isoX, isoY, leftColW, isoH);
+  pdf.addImage(isoView, 'PNG', isoX + 3, isoY + 3, leftColW - 6, isoH - 14);
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(30, 35, 126);
+  pdf.text('ISOMETRIC VIEW', isoX + 4, isoY + isoH - 4);
+
+  // ── Left column: Front view (below isometric) ─────
+  const frontY = isoY + isoH;
+  const frontH = drawAreaH - isoH;
+  pdf.setDrawColor(180);
+  pdf.rect(isoX, frontY, leftColW, frontH);
+  pdf.addImage(frontView, 'PNG', isoX + 3, frontY + 3, leftColW - 6, frontH - 14);
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(30, 35, 126);
+  pdf.text('FRONT VIEW', isoX + 4, frontY + frontH - 4);
+
+  // ── Main area: Top-down flat pattern ──────────────
+  const mainX = m + leftColW;
+  const mainY = drawAreaTop;
+  pdf.setDrawColor(0);
+  pdf.setLineWidth(0.3);
+  pdf.rect(mainX, mainY, mainW, drawAreaH);
+  pdf.addImage(topView, 'PNG', mainX + 4, mainY + 4, mainW - 8, drawAreaH - 20);
 
   // View label
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(30, 35, 126);
-  pdf.text('Top View (Flat Pattern)', m + 4, imgY + imgH + 5);
+  pdf.text('TOP VIEW \u2014 FLAT PATTERN', mainX + 6, mainY + drawAreaH - 6);
 
-  // Dimension text under main view
-  pdf.setFontSize(7);
-  pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(0);
-  pdf.text(`${dims.x.toFixed(1)} x ${dims.z.toFixed(1)} mm (Width x Depth)`, m + 4, imgY + imgH + 11);
+  // ── Dimension annotations on the flat pattern ─────
+  pdf.setDrawColor(200, 0, 0);
+  pdf.setLineWidth(0.3);
+  pdf.setTextColor(200, 0, 0);
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'bold');
 
-  // Front view (smaller, right side)
-  const refX = m + imgW + 8;
-  const refW = pageW - 2 * m - imgW - 12;
-  const refH = imgH * 0.55;
-  pdf.addImage(frontView, 'PNG', refX, imgY, refW, refH);
-  pdf.setFontSize(7);
+  // Horizontal dimension (X) — below the flat pattern image
+  const dimLineY = mainY + drawAreaH - 14;
+  const dimStartX = mainX + mainW * 0.15;
+  const dimEndX = mainX + mainW * 0.85;
+  pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
+  // Arrow heads
+  pdf.line(dimStartX, dimLineY, dimStartX + 3, dimLineY - 1.5);
+  pdf.line(dimStartX, dimLineY, dimStartX + 3, dimLineY + 1.5);
+  pdf.line(dimEndX, dimLineY, dimEndX - 3, dimLineY - 1.5);
+  pdf.line(dimEndX, dimLineY, dimEndX - 3, dimLineY + 1.5);
+  // Dimension text
+  const xDimText = `${dims.x.toFixed(1)} mm`;
+  pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 2);
+
+  // Vertical dimension (Z for top view) — right of image
+  const vDimX = mainX + mainW - 12;
+  const vDimStartY = mainY + drawAreaH * 0.12;
+  const vDimEndY = mainY + drawAreaH * 0.82;
+  pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
+  pdf.line(vDimX, vDimStartY, vDimX - 1.5, vDimStartY + 3);
+  pdf.line(vDimX, vDimStartY, vDimX + 1.5, vDimStartY + 3);
+  pdf.line(vDimX, vDimEndY, vDimX - 1.5, vDimEndY - 3);
+  pdf.line(vDimX, vDimEndY, vDimX + 1.5, vDimEndY - 3);
+  const zDimText = `${dims.z.toFixed(1)} mm`;
+  pdf.text(zDimText, vDimX + 3, (vDimStartY + vDimEndY) / 2, { angle: 90 });
+
+  // ── Title block ───────────────────────────────────
+  const tbY = drawAreaBottom;
+  const tbW = pageW - 2 * m;
+  pdf.setDrawColor(0);
+  pdf.setLineWidth(0.5);
+  pdf.rect(m, tbY, tbW, titleBlockH);
+
+  // 3-column layout
+  const col1 = m;
+  const col2 = m + tbW * 0.35;
+  const col3 = m + tbW * 0.67;
+  pdf.setLineWidth(0.2);
+  pdf.line(col2, tbY, col2, tbY + titleBlockH);
+  pdf.line(col3, tbY, col3, tbY + titleBlockH);
+
+  // Row dividers
+  const r1 = tbY + 10;
+  const r2 = tbY + 21;
+  const r3 = tbY + 32;
+  pdf.line(m, r1, m + tbW, r1);
+  pdf.line(m, r2, m + tbW, r2);
+
+  // ── Col 1: Part info ──────────────────────────────
+  pdf.setFontSize(9);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(30, 35, 126);
-  pdf.text('Front View (Reference)', refX + 2, imgY + refH + 5);
-
-  // Specs box (right side, below front view)
-  const specY = imgY + refH + 12;
-  pdf.setDrawColor(180);
-  pdf.setLineWidth(0.2);
-  pdf.rect(refX, specY, refW, imgH - refH - 12);
+  pdf.text('PART INFORMATION', col1 + 4, tbY + 7);
 
   pdf.setFontSize(8);
   pdf.setFont('helvetica', 'bold');
-  pdf.setTextColor(30, 35, 126);
-  pdf.text('SPECIFICATIONS', refX + 3, specY + 8);
+  pdf.setTextColor(0);
+  pdf.text(partInfo.name || 'Untitled Part', col1 + 4, r1 + 7);
 
   pdf.setFontSize(7);
   pdf.setFont('helvetica', 'normal');
-  pdf.setTextColor(0);
-  let specLine = specY + 16;
-  const specLineH = 6;
-
-  const specs = [
+  pdf.setTextColor(80);
+  const partSpecs = [
     partInfo.material && `Material: ${partInfo.material}`,
-    partInfo.thickness && `Thickness: ${partInfo.thickness} mm`,
     partInfo.process && `Process: ${partInfo.process}`,
-    `Bounding Box: ${dims.x.toFixed(1)} x ${dims.y.toFixed(1)} x ${dims.z.toFixed(1)} mm`,
-    weight && `Est. Weight: ${weight}`,
-    partInfo.tolerance && `Tolerance: ${partInfo.tolerance}`,
-    partInfo.surfaceRoughness && `Surface Roughness: ${partInfo.surfaceRoughness}`,
-    partInfo.surfaceTreatment && `Surface Treatment: ${partInfo.surfaceTreatment}`,
-    partInfo.needsBending && 'Bending: Required',
-    partInfo.quantity && `Quantity: ${partInfo.quantity}`,
-  ].filter(Boolean);
-
-  specs.forEach(s => {
-    pdf.text(s as string, refX + 3, specLine);
-    specLine += specLineH;
+    partInfo.thickness && `Thickness: ${partInfo.thickness} mm`,
+    partInfo.surfaceTreatment && partInfo.surfaceTreatment !== 'none' && `Finish: ${partInfo.surfaceTreatment}`,
+    partInfo.needsBending && 'Bending: REQUIRED',
+    partInfo.quantity && `Qty: ${partInfo.quantity}`,
+  ].filter(Boolean) as string[];
+  partSpecs.forEach((s, i) => {
+    const col = i % 2 === 0 ? col1 + 4 : col1 + 80;
+    const row = r2 + 7 + Math.floor(i / 2) * 6;
+    if (row < tbY + titleBlockH - 2) pdf.text(s, col, row);
   });
 
-  // Title block at bottom
-  const tbY = pageH - m - 35;
-  pdf.setDrawColor(0);
-  pdf.setLineWidth(0.3);
-  pdf.rect(m, tbY, pageW - 2 * m, 33);
-  pdf.line(m + (pageW - 2 * m) * 0.5, tbY, m + (pageW - 2 * m) * 0.5, tbY + 33);
-
-  pdf.setFontSize(8);
+  // ── Col 2: Dimensions & metrics ───────────────────
+  pdf.setFontSize(9);
   pdf.setFont('helvetica', 'bold');
   pdf.setTextColor(30, 35, 126);
-  pdf.text('MICRONS HUB DV E.E.', m + 4, tbY + 8);
+  pdf.text('DIMENSIONS & METRICS', col2 + 4, tbY + 7);
+
+  pdf.setFontSize(7);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(0);
+  pdf.text(`Bounding Box: ${dims.x.toFixed(1)} \u00d7 ${dims.y.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`, col2 + 4, r1 + 7);
+
+  const volText = metrics.volume >= 1000
+    ? `${(metrics.volume / 1000).toFixed(2)} cm\u00b3`
+    : `${metrics.volume.toFixed(1)} mm\u00b3`;
+  pdf.text(`Volume: ${volText}`, col2 + 4, r1 + 14);
+
+  if (weight) pdf.text(`Est. Weight: ${weight}`, col2 + 4, r2 + 7);
+  if (partInfo.tolerance) pdf.text(`Tolerance: ${partInfo.tolerance}`, col2 + 4, r2 + 14);
+  if (partInfo.surfaceRoughness) pdf.text(`Ra: ${partInfo.surfaceRoughness}`, col2 + 80, r2 + 7);
+
+  const saText = metrics.surfaceArea >= 100
+    ? `${(metrics.surfaceArea / 100).toFixed(2)} cm\u00b2`
+    : `${metrics.surfaceArea.toFixed(1)} mm\u00b2`;
+  pdf.text(`Surface Area: ${saText}`, col2 + 4, r3 + 7);
+
+  // ── Col 3: Company info ───────────────────────────
+  pdf.setFontSize(9);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setTextColor(30, 35, 126);
+  pdf.text('MICRONS HUB DV E.E.', col3 + 4, tbY + 7);
+
   pdf.setFontSize(7);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(80);
-  pdf.text('Industrial Area Street B Number 4, Heraklion, Greece 71601', m + 4, tbY + 15);
-  pdf.text('+302104447830 | info@micronshub.eu', m + 4, tbY + 21);
+  pdf.text('Industrial Area Street B Number 4', col3 + 4, r1 + 7);
+  pdf.text('Heraklion, Greece 71601', col3 + 4, r1 + 13);
+  pdf.text('+302104447830 | info@micronshub.eu', col3 + 4, r2 + 7);
 
-  const rightCol = m + (pageW - 2 * m) * 0.5 + 4;
-  pdf.setFontSize(7);
-  pdf.setTextColor(80);
+  pdf.setFontSize(6);
+  pdf.setTextColor(140);
   const now = new Date();
-  pdf.text(`Date: ${now.toLocaleDateString('en-GB')}`, rightCol, tbY + 8);
-  pdf.text('Scale: Not to scale (NTS)', rightCol, tbY + 14);
-  pdf.text('Projection: Third Angle / Top-Down', rightCol, tbY + 20);
-  pdf.text(`File: ${fileName}`, rightCol, tbY + 26);
+  pdf.text(`Generated: ${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`, col3 + 4, r2 + 14);
+  pdf.text('Scale: NTS | Third Angle Projection', col3 + 4, r3 + 7);
+  pdf.text(`File: ${fileName}`, col3 + 4, r3 + 13);
 
   // 6. Download
   const safeName = (partInfo.name || fileName).replace(/[^a-zA-Z0-9_-]/g, '_');
-  pdf.save(`${safeName}_Flat_Pattern.pdf`);
+  pdf.save(`${safeName}_Manufacturing_Drawing.pdf`);
+
+  // Cleanup geometries
+  geometries.forEach(g => g.dispose());
 }

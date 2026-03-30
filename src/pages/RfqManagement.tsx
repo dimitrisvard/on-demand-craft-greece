@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { RFQ, RfqItem } from "@/types/customer";
 import { Database } from '@/integrations/supabase/types';
+import { getSignedUrl } from '@/utils/awsS3Storage';
+import { calculateWeight, formatWeight } from '@/utils/materialDensity';
 import {
   FilePlus,
   Search,
@@ -27,6 +29,9 @@ import {
   Weight,
   Box,
 } from "lucide-react";
+
+const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
+const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp)$/i.test(name);
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -105,6 +110,8 @@ export default function RfqManagement() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [partIndexes, setPartIndexes] = useState<Record<string, number>>({});
+  // Thumbnail state: rfqId -> { fileUrl, fileName } for the first 3D file per RFQ
+  const [rfqThumbnails, setRfqThumbnails] = useState<Record<string, { url: string; name: string }>>({});
 
   const toggleExpand = (id: string) => {
     setExpandedCards(prev => {
@@ -231,6 +238,50 @@ export default function RfqManagement() {
       toast({ title: "Error", description: error.message || "Failed to load orders", variant: "destructive" });
     }
   }
+
+  // ── Fetch 3D file thumbnails for all RFQs ──────────────────
+  async function fetchThumbnails(rfqIds: string[]) {
+    if (rfqIds.length === 0) return;
+    try {
+      const { data: files } = await supabase
+        .from('rfq_files')
+        .select('id, rfq_id, file_name, file_path')
+        .in('rfq_id', rfqIds);
+      if (!files || files.length === 0) return;
+
+      // Pick first 3D file per rfq_id
+      const firstPerRfq: Record<string, { file_path: string; file_name: string }> = {};
+      for (const f of files) {
+        if (!firstPerRfq[f.rfq_id] && is3DFile(f.file_name)) {
+          firstPerRfq[f.rfq_id] = { file_path: f.file_path, file_name: f.file_name };
+        }
+      }
+
+      // Generate signed URLs
+      const entries = Object.entries(firstPerRfq);
+      const results = await Promise.all(
+        entries.map(async ([rfqId, file]) => {
+          const url = await getSignedUrl(file.file_path);
+          return url ? [rfqId, { url, name: file.file_name }] as const : null;
+        })
+      );
+      const thumbMap: Record<string, { url: string; name: string }> = {};
+      for (const r of results) {
+        if (r) thumbMap[r[0]] = r[1];
+      }
+      setRfqThumbnails(prev => ({ ...prev, ...thumbMap }));
+    } catch (e) {
+      // Silent fail — thumbnails are not critical
+    }
+  }
+
+  // Load thumbnails when RFQs or orders change
+  useEffect(() => {
+    const rfqIds = rfqs.map(r => r.id);
+    const orderRfqIds = orders.filter(o => o.rfq_id).map(o => o.rfq_id);
+    const allIds = [...new Set([...rfqIds, ...orderRfqIds])];
+    if (allIds.length > 0) fetchThumbnails(allIds);
+  }, [rfqs, orders]);
 
   // ── Filtered & paginated data ──────────────────────────────
   const filteredRfqs = useMemo(() => {
@@ -616,6 +667,13 @@ export default function RfqManagement() {
             const material = ov.materialSubtypeLabel || ov.materialLabel || ov.material || part?.material || '';
             const process = ov.processLabel || ov.process || part?.process || '';
             const thickness = ov.thickness || part?.thickness || '';
+            const surfaceTreatment = ov.surfaceTreatmentLabel || ov.surfaceTreatment || '';
+            const tolerance = ov.toleranceLabel || ov.tolerance || '';
+            const surfaceRoughness = ov.surfaceRoughnessLabel || ov.surfaceRoughness || '';
+            const needsBending = ov.needsBending === true || ov.needsBending === 'true';
+            const volume = part?.volume || ov.volume;
+            const estWeight = volume && material ? calculateWeight(volume, material) : null;
+            const thumb = rfqThumbnails[rfq.id];
             return (
               <div className="border-t mt-3 pt-3">
                 <div className="flex items-center gap-3">
@@ -623,10 +681,21 @@ export default function RfqManagement() {
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(rfq.id, 'prev', pd.length)}>
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
+                  {/* Thumbnail */}
+                  <div className="flex-shrink-0 hidden sm:block">
+                    {thumb ? (
+                      <Suspense fallback={<div className="h-[80px] w-[80px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                        <PartThumbnail3D fileUrl={thumb.url} fileName={thumb.name} size={80} />
+                      </Suspense>
+                    ) : (
+                      <div className="h-[80px] w-[80px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                        <Box className="h-5 w-5 text-slate-300" />
+                      </div>
+                    )}
+                  </div>
                   {/* Part info */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Box className="h-4 w-4 text-slate-400 flex-shrink-0" />
                       <span className="text-sm font-medium truncate">{part?.product_name || part?.name || `Part ${currentIdx + 1}`}</span>
                       <span className="text-xs text-muted-foreground">({currentIdx + 1}/{pd.length})</span>
                     </div>
@@ -636,6 +705,14 @@ export default function RfqManagement() {
                       {thickness && <span>t: {thickness}mm</span>}
                       {part?.quantity > 1 && <span>Qty: {part.quantity}</span>}
                       {part?.dimensions && <span>{part.dimensions.x?.toFixed(1)}x{part.dimensions.y?.toFixed(1)}x{part.dimensions.z?.toFixed(1)}mm</span>}
+                      {estWeight != null && estWeight > 0 && <span><Weight className="h-3 w-3 inline mr-0.5" />{formatWeight(estWeight)}</span>}
+                    </div>
+                    {/* Additional specs row */}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
+                      {surfaceTreatment && surfaceTreatment !== 'none' && <span>Finish: {surfaceTreatment}</span>}
+                      {tolerance && <span>Tol: {tolerance}</span>}
+                      {surfaceRoughness && <span>Ra: {surfaceRoughness}</span>}
+                      {needsBending && <span className="text-orange-600 font-medium">Bending</span>}
                     </div>
                   </div>
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(rfq.id, 'next', pd.length)}>
@@ -805,15 +882,33 @@ export default function RfqManagement() {
             const material = ov.materialSubtypeLabel || ov.materialLabel || ov.material || part?.material || '';
             const process = ov.processLabel || ov.process || part?.process || '';
             const thickness = ov.thickness || part?.thickness || '';
+            const surfaceTreatment = ov.surfaceTreatmentLabel || ov.surfaceTreatment || '';
+            const tolerance = ov.toleranceLabel || ov.tolerance || '';
+            const surfaceRoughness = ov.surfaceRoughnessLabel || ov.surfaceRoughness || '';
+            const needsBending = ov.needsBending === true || ov.needsBending === 'true';
+            const volume = part?.volume || ov.volume;
+            const estWeight = volume && material ? calculateWeight(volume, material) : null;
+            const thumb = order.rfq_id ? rfqThumbnails[order.rfq_id] : null;
             return (
               <div className="border-t mt-3 pt-3">
                 <div className="flex items-center gap-3">
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(order.id, 'prev', pd.length)}>
                     <ChevronLeft className="h-4 w-4" />
                   </Button>
+                  {/* Thumbnail */}
+                  <div className="flex-shrink-0 hidden sm:block">
+                    {thumb ? (
+                      <Suspense fallback={<div className="h-[80px] w-[80px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                        <PartThumbnail3D fileUrl={thumb.url} fileName={thumb.name} size={80} />
+                      </Suspense>
+                    ) : (
+                      <div className="h-[80px] w-[80px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                        <Box className="h-5 w-5 text-slate-300" />
+                      </div>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <Box className="h-4 w-4 text-slate-400 flex-shrink-0" />
                       <span className="text-sm font-medium truncate">{part?.product_name || part?.name || `Part ${currentIdx + 1}`}</span>
                       <span className="text-xs text-muted-foreground">({currentIdx + 1}/{pd.length})</span>
                     </div>
@@ -823,6 +918,14 @@ export default function RfqManagement() {
                       {thickness && <span>t: {thickness}mm</span>}
                       {part?.quantity > 1 && <span>Qty: {part.quantity}</span>}
                       {part?.dimensions && <span>{part.dimensions.x?.toFixed(1)}x{part.dimensions.y?.toFixed(1)}x{part.dimensions.z?.toFixed(1)}mm</span>}
+                      {estWeight != null && estWeight > 0 && <span><Weight className="h-3 w-3 inline mr-0.5" />{formatWeight(estWeight)}</span>}
+                    </div>
+                    {/* Additional specs row */}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-0.5">
+                      {surfaceTreatment && surfaceTreatment !== 'none' && <span>Finish: {surfaceTreatment}</span>}
+                      {tolerance && <span>Tol: {tolerance}</span>}
+                      {surfaceRoughness && <span>Ra: {surfaceRoughness}</span>}
+                      {needsBending && <span className="text-orange-600 font-medium">Bending</span>}
                     </div>
                   </div>
                   <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={pd.length <= 1} onClick={() => navigatePart(order.id, 'next', pd.length)}>
