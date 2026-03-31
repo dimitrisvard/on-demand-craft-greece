@@ -7,7 +7,7 @@
  *
  * Supported formats:
  *   - STL: Native binary/ASCII mesh parsing
- *   - STEP/STP: Tessellation via OpenCascade WASM (occt-import-js)
+ *   - STEP/STP: Pure-text geometry extraction from ISO 10303-21 format
  *   - DXF: 2D entity extraction (LINE, ARC, CIRCLE, LWPOLYLINE)
  *
  * POST body:
@@ -99,21 +99,20 @@ serve(async (req) => {
     let analysis;
 
     if (fileType === "dxf") {
-      // DXF: parse 2D entities directly → synthetic MeshAnalysis
+      // DXF: parse 2D entities directly → MeshAnalysis
       const dxfData = parseDXF(buffer);
       analysis = dxfToMeshAnalysis(dxfData);
       console.log(`DXF analysis complete: ${dxfData.entityCount} entities, ${dxfData.bendLines.length} bends`);
+    } else if (fileType === "step") {
+      // STEP: pure-text geometry extraction → MeshAnalysis
+      console.log("Parsing STEP file geometry...");
+      analysis = await parseSTEP(buffer);
+      console.log(
+        `STEP analysis complete: ${analysis.featureEdges.length} edges`,
+      );
     } else {
-      // STL or STEP: parse to triangles → mesh analysis
-      let stlData;
-
-      if (fileType === "step") {
-        console.log("Tessellating STEP file via OpenCascade WASM...");
-        stlData = await parseSTEP(buffer);
-      } else {
-        stlData = parseSTL(buffer);
-      }
-
+      // STL: parse triangles → mesh analysis
+      const stlData = parseSTL(buffer);
       console.log(`Parsed ${stlData.triangles.length} triangles`);
 
       analysis = analyzeMesh(stlData.triangles);
