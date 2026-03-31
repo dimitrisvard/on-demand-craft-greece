@@ -65,6 +65,14 @@ function downloadBase64Pdf(base64: string, fileName: string): void {
 }
 
 /**
+ * Check if the file type is supported by the server-side edge function.
+ * Currently only STL files are natively supported.
+ */
+function isServerSupported(fileName: string): boolean {
+  return /\.stl$/i.test(fileName);
+}
+
+/**
  * Generate manufacturing PDF via server-side edge function.
  * Returns true if successful, false if the caller should fall back to client-side.
  */
@@ -73,6 +81,11 @@ export async function generateServerManufacturingPdf(
   fileName: string,
   partInfo: PartInfo,
 ): Promise<boolean> {
+  // Skip server call for file types not supported server-side
+  if (!isServerSupported(fileName)) {
+    console.log(`File type not supported server-side (${fileName}), using client-side generation`);
+    return false;
+  }
   try {
     const { data, error } = await supabase.functions.invoke(
       'generate-manufacturing-pdf',
