@@ -3,20 +3,42 @@
  *
  * Uses occt-import-js (WebAssembly OpenCascade) to convert STEP files
  * into triangle mesh data compatible with the existing analysis pipeline.
+ *
+ * The WASM binary is fetched over HTTP from a CDN since Supabase Edge
+ * Functions don't have filesystem access for WASM files.
  */
 
 import { type Triangle, type Vec3, type STLData } from "./stl-parser.ts";
 
-// Dynamic import of occt-import-js — WASM loads on first call
+const WASM_CDN_URL =
+  "https://cdn.jsdelivr.net/npm/occt-import-js@0.0.23/dist/occt-import-js.wasm";
+
+// Cache the loaded module across requests (warm instances)
 let occtModule: any = null;
 
 async function getOCCT(): Promise<any> {
   if (occtModule) return occtModule;
 
-  const occtimportjs = (
-    await import("https://esm.sh/occt-import-js@0.0.23")
-  ).default;
-  occtModule = await occtimportjs();
+  console.log("Fetching OpenCascade WASM binary from CDN...");
+  const wasmResp = await fetch(WASM_CDN_URL);
+  if (!wasmResp.ok) {
+    throw new Error(`Failed to fetch OpenCascade WASM: HTTP ${wasmResp.status}`);
+  }
+  const wasmBinary = await wasmResp.arrayBuffer();
+  console.log(`WASM downloaded: ${(wasmBinary.byteLength / 1024 / 1024).toFixed(1)} MB`);
+
+  // Import the JS wrapper using browser target to avoid Deno filesystem WASM loading
+  const { default: occtimportjs } = await import(
+    "https://esm.sh/occt-import-js@0.0.23?target=browser"
+  );
+
+  // Pass the WASM binary directly so it doesn't try to read from filesystem
+  occtModule = await occtimportjs({
+    wasmBinary,
+    locateFile: () => WASM_CDN_URL,
+  });
+
+  console.log("OpenCascade WASM module initialized");
   return occtModule;
 }
 
