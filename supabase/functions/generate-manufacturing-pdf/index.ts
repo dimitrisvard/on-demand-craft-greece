@@ -21,7 +21,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { parseSTL } from "./stl-parser.ts";
 import { parseSTEP } from "./step-parser.ts";
 import { parseDXF, dxfToMeshAnalysis } from "./dxf-parser.ts";
-import { analyzeMesh } from "./mesh-analyzer.ts";
+import { analyzeMesh, type UnfoldData } from "./mesh-analyzer.ts";
 import { buildManufacturingPDF, type PartInfo } from "./pdf-builder.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.190.0/encoding/base64.ts";
 
@@ -39,6 +39,79 @@ function getFileType(name: string): "stl" | "step" | "dxf" | "obj" | null {
   if (/\.dxf$/i.test(name)) return "dxf";
   if (/\.obj$/i.test(name)) return "obj";
   return null;
+}
+
+/**
+ * Call the FreeCAD unfold service for STEP files.
+ * Returns unfold data with real bend positions or null if unavailable.
+ */
+async function callUnfoldService(
+  fileUrl: string,
+  fileName: string,
+  partInfo: PartInfo,
+): Promise<UnfoldData | null> {
+  const serviceUrl = Deno.env.get("UNFOLD_SERVICE_URL");
+  if (!serviceUrl) return null;
+
+  try {
+    // Try the new FastAPI /unfold endpoint first (returns JSON metadata)
+    // We call /flat-pattern for backward compat with the Flask service
+    const resp = await fetch(`${serviceUrl}/flat-pattern`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file_url: fileUrl,
+        file_name: fileName,
+        part_info: {
+          material: partInfo.material || "Steel",
+          thickness: partInfo.thickness ? parseFloat(partInfo.thickness) : 0,
+        },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+
+    if (!resp.ok) {
+      console.log(`FreeCAD service returned ${resp.status}`);
+      return null;
+    }
+
+    const data = await resp.json();
+
+    // Normalize response to UnfoldData format
+    if (data.flat_pattern) {
+      return {
+        success: true,
+        part_name: data.part_name || fileName.replace(/\.[^.]+$/, ""),
+        thickness_mm: data.flat_pattern?.dimensions?.thickness || data.thickness_mm || 0,
+        flat_pattern: {
+          width_mm: data.flat_pattern?.dimensions?.width || data.flat_pattern?.width_mm || 0,
+          height_mm: data.flat_pattern?.dimensions?.height || data.flat_pattern?.height_mm || 0,
+          outline_edges: data.flat_pattern?.outline_edges || [],
+        },
+        bends: (data.flat_pattern?.bends || data.bends || []).map(
+          (b: Record<string, unknown>, i: number) => ({
+            index: (b.index as number) || i + 1,
+            angle_deg: (b.angle_deg as number) || (b.angle as number) || 90,
+            inner_radius_mm: (b.inner_radius_mm as number) || (b.radius as number) || 0,
+            direction: (b.direction as string) || "UP",
+            length_mm: (b.length_mm as number) || (b.length as number) || 0,
+            k_factor: (b.k_factor as number) || 0.44,
+            bend_allowance_mm: (b.bend_allowance_mm as number) || 0,
+            bend_deduction_mm: (b.bend_deduction_mm as number) || 0,
+            bend_line_on_flat: b.bend_line_on_flat || undefined,
+            distance_from_left_edge_mm: (b.distance_from_left_edge_mm as number) || 0,
+          }),
+        ),
+        linear_dimensions: data.linear_dimensions || [],
+        unfold_method: data.unfold_method || data.flat_pattern?.source || "unknown",
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.log(`FreeCAD service call failed: ${err}`);
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -97,6 +170,7 @@ serve(async (req) => {
 
     // 2. Parse file and analyze geometry based on type
     let analysis;
+    let unfoldData: UnfoldData | null = null;
 
     if (fileType === "dxf") {
       // DXF: parse 2D entities directly → MeshAnalysis
@@ -108,8 +182,40 @@ serve(async (req) => {
       console.log("Parsing STEP file geometry...");
       analysis = await parseSTEP(buffer);
       console.log(
-        `STEP analysis complete: ${analysis.featureEdges.length} edges`,
+        `STEP analysis complete: ${analysis.featureEdges.length} edges, ${analysis.bendLines.length} bend lines`,
       );
+
+      // Try calling FreeCAD unfold service for enhanced bend data
+      unfoldData = await callUnfoldService(file_url, file_name, info);
+      if (unfoldData?.success) {
+        console.log(`FreeCAD unfold succeeded: ${unfoldData.bends?.length || 0} bends, method: ${unfoldData.unfold_method}`);
+
+        // Use FreeCAD bend lines if available (more accurate than STEP text parsing)
+        if (unfoldData.bends && unfoldData.bends.length > 0) {
+          // Override parsed bend lines with FreeCAD data
+          analysis.bendLines = unfoldData.bends.map((b) => ({
+            start: { x: b.bend_line_on_flat?.start?.[0] ?? 0, y: 0, z: b.bend_line_on_flat?.start?.[1] ?? 0 },
+            end: { x: b.bend_line_on_flat?.end?.[0] ?? 0, y: 0, z: b.bend_line_on_flat?.end?.[1] ?? 0 },
+            angle: b.angle_deg,
+          }));
+        }
+
+        // Use flat pattern dimensions from unfold if available
+        if (unfoldData.flat_pattern && unfoldData.flat_pattern.width_mm > 0) {
+          analysis.dimensions = {
+            ...analysis.dimensions,
+            x: unfoldData.flat_pattern.width_mm,
+            z: unfoldData.flat_pattern.height_mm,
+          };
+        }
+
+        // Use thickness from unfold if available
+        if (unfoldData.thickness_mm && unfoldData.thickness_mm > 0) {
+          analysis.dimensions.y = unfoldData.thickness_mm;
+        }
+      } else {
+        console.log("FreeCAD unfold not available or failed, using STEP text parsing only");
+      }
     } else {
       // STL: parse triangles → mesh analysis
       const stlData = parseSTL(buffer);
@@ -122,7 +228,7 @@ serve(async (req) => {
     }
 
     // 3. Generate PDF
-    const pdfBytes = await buildManufacturingPDF(analysis, info, file_name);
+    const pdfBytes = await buildManufacturingPDF(analysis, info, file_name, unfoldData);
     console.log(`PDF generated: ${(pdfBytes.length / 1024).toFixed(0)} KB`);
 
     // 4. Return as base64

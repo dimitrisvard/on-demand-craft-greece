@@ -357,8 +357,94 @@ export async function parseSTEP(buffer: ArrayBuffer): Promise<MeshAnalysis> {
     allEdges.push({ start: corners[3], end: corners[7] });
   }
 
-  // 5. Detect potential bend lines (edges with sharp angles between adjacent faces)
+  // 5. Detect bends from CYLINDRICAL_SURFACE entities
   const bendLines: BendLine[] = [];
+  const cylindricalSurfaces: Array<{
+    radius: number;
+    center: Vec3;
+    axis: Vec3;
+  }> = [];
+
+  for (const [, entity] of entities) {
+    if (entity.type === "CYLINDRICAL_SURFACE") {
+      // CYLINDRICAL_SURFACE('',#axis2_placement,radius)
+      const parts = splitParams(entity.params);
+      if (parts.length >= 3) {
+        const radius = parseFloat(parts[2]);
+        if (isNaN(radius) || radius <= 0 || radius > 50) continue;
+
+        // Resolve axis placement for center point
+        const axisId = parseRef(parts[1]);
+        if (axisId === null) continue;
+        const axisEnt = entities.get(axisId);
+        if (!axisEnt) continue;
+
+        const axisParts = splitParams(axisEnt.params);
+        if (axisParts.length < 2) continue;
+        const cylCenter = resolvePoint(entities, axisParts[1]);
+        if (!cylCenter) continue;
+
+        // Resolve axis direction
+        let axisDir: Vec3 = { x: 0, y: 0, z: 1 };
+        if (axisParts.length >= 3) {
+          const dirId = parseRef(axisParts[2]);
+          if (dirId !== null) {
+            const dirEnt = entities.get(dirId);
+            if (dirEnt && dirEnt.type === "DIRECTION") {
+              const dirParts = splitParams(dirEnt.params);
+              if (dirParts.length >= 2) {
+                const tupleMatch = dirParts[1].match(/\(([^)]+)\)/);
+                if (tupleMatch) {
+                  const coords = parseFloats(tupleMatch[1]);
+                  if (coords.length >= 3) {
+                    axisDir = { x: coords[0], y: coords[1], z: coords[2] };
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        cylindricalSurfaces.push({
+          radius,
+          center: cylCenter,
+          axis: axisDir,
+        });
+      }
+    }
+  }
+
+  // Deduplicate cylindrical surfaces (inner/outer pairs at same location)
+  const seenBendCenters = new Set<string>();
+  const maxDim = Math.max(dimensions.x, dimensions.y, dimensions.z);
+
+  for (const cyl of cylindricalSurfaces) {
+    // Round center for dedup
+    const key = `${Math.round(cyl.center.x * 10)},${Math.round(cyl.center.y * 10)},${Math.round(cyl.center.z * 10)}`;
+    if (seenBendCenters.has(key)) continue;
+    seenBendCenters.add(key);
+
+    // Create a bend line along the cylinder axis through the center
+    const axLen = maxDim * 0.3; // reasonable length for the bend line
+    const ax = cyl.axis;
+    const axNorm = Math.sqrt(ax.x * ax.x + ax.y * ax.y + ax.z * ax.z) || 1;
+
+    bendLines.push({
+      start: {
+        x: cyl.center.x - (ax.x / axNorm) * axLen,
+        y: cyl.center.y - (ax.y / axNorm) * axLen,
+        z: cyl.center.z - (ax.z / axNorm) * axLen,
+      },
+      end: {
+        x: cyl.center.x + (ax.x / axNorm) * axLen,
+        y: cyl.center.y + (ax.y / axNorm) * axLen,
+        z: cyl.center.z + (ax.z / axNorm) * axLen,
+      },
+      angle: 90, // Default — STEP text doesn't directly encode the bend angle
+    });
+  }
+
+  console.log(`Detected ${cylindricalSurfaces.length} cylindrical surfaces → ${bendLines.length} bend lines`);
 
   // 6. Generate 2D projections
   const featureEdges = allEdges.map((e) => ({ start: e.start, end: e.end }));

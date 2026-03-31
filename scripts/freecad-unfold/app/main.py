@@ -130,6 +130,108 @@ async def unfold_step_file(
         pass
 
 
+@app.api_route("/flat-pattern", methods=["POST"])
+async def flat_pattern_endpoint(request):
+    """
+    Backward-compatible /flat-pattern endpoint.
+    Accepts JSON: { file_url, file_name, part_info? }
+    Returns JSON with flat pattern data, bends, and optional DXF base64.
+    """
+    import base64
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+
+    file_url = body.get("file_url")
+    file_name = body.get("file_name", "part.step")
+    part_info = body.get("part_info", {})
+
+    if not file_url:
+        raise HTTPException(400, "file_url is required")
+
+    # Download the file
+    import urllib.request
+    tmpdir = tempfile.mkdtemp(prefix="flatpattern_")
+    try:
+        step_path = os.path.join(tmpdir, file_name)
+        urllib.request.urlretrieve(file_url, step_path)
+
+        output_dir = os.path.join(tmpdir, "output")
+        os.makedirs(output_dir)
+
+        material = part_info.get("material", "Steel")
+        thickness = float(part_info.get("thickness", 0))
+        k_factor = K_FACTORS.get(material, DEFAULT_K_FACTOR)
+
+        unfold_result = run_freecad_unfold(step_path, output_dir, thickness, k_factor)
+
+        if not unfold_result.get("success"):
+            raise HTTPException(500, unfold_result.get("error", "Unfold failed"))
+
+        # Build response compatible with extract-flat-pattern edge function
+        flat_data = unfold_result.get("flat_pattern", {})
+        bends = unfold_result.get("bends", [])
+
+        # Read DXF file as base64 if available
+        dxf_base64 = None
+        dxf_path = flat_data.get("dxf_path", "")
+        if dxf_path and os.path.exists(dxf_path):
+            with open(dxf_path, "rb") as f:
+                dxf_base64 = base64.b64encode(f.read()).decode()
+
+        return JSONResponse({
+            "status": "completed",
+            "source": "freecad",
+            "file_name": file_name,
+            "part_name": unfold_result.get("part_name", "Part"),
+            "thickness_mm": unfold_result.get("thickness_mm", 0),
+            "unfold_method": unfold_result.get("unfold_method", "unknown"),
+            "flat_pattern": {
+                "dimensions": {
+                    "width": flat_data.get("width_mm", 0),
+                    "height": flat_data.get("height_mm", 0),
+                    "thickness": unfold_result.get("thickness_mm", 0),
+                },
+                "bends": [
+                    {
+                        "id": f"B{b.get('index', i + 1)}",
+                        "index": b.get("index", i + 1),
+                        "angle": b.get("angle_deg", 90),
+                        "angle_deg": b.get("angle_deg", 90),
+                        "radius": b.get("inner_radius_mm", 0),
+                        "inner_radius_mm": b.get("inner_radius_mm", 0),
+                        "direction": b.get("direction", "UP"),
+                        "length": b.get("length_mm", 0),
+                        "length_mm": b.get("length_mm", 0),
+                        "k_factor": b.get("k_factor", 0.44),
+                        "bend_allowance_mm": b.get("bend_allowance_mm", 0),
+                        "bend_deduction_mm": b.get("bend_deduction_mm", 0),
+                        "bend_line_on_flat": b.get("bend_line_on_flat"),
+                        "distance_from_left_edge_mm": b.get("distance_from_left_edge_mm", 0),
+                    }
+                    for i, b in enumerate(bends)
+                ],
+                "bend_count": len(bends),
+                "outline_edges": flat_data.get("outline_edges", []),
+            },
+            "bends": bends,
+            "linear_dimensions": unfold_result.get("linear_dimensions", []),
+            "analysis": {
+                "dimensions": unfold_result.get("bounding_box_3d", {}),
+            },
+            **({"dxf_base64": dxf_base64} if dxf_base64 else {}),
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Processing error: {e}")
+    finally:
+        pass
+
+
 @app.get("/health")
 async def health():
     """Health check — verifies FreeCAD is available."""

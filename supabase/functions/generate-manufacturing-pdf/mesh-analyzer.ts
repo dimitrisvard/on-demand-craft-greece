@@ -63,6 +63,43 @@ export interface BendLine {
   angle: number; // degrees
 }
 
+/** Enhanced bend data from FreeCAD unfold service */
+export interface BendDetail {
+  index: number;
+  angle_deg: number;
+  inner_radius_mm: number;
+  direction: string;       // "UP" or "DOWN"
+  length_mm: number;
+  k_factor: number;
+  bend_allowance_mm: number;
+  bend_deduction_mm: number;
+  bend_line_on_flat?: {
+    start: number[];
+    end: number[];
+  };
+  distance_from_left_edge_mm: number;
+}
+
+/** Unfold data from FreeCAD service */
+export interface UnfoldData {
+  success: boolean;
+  part_name?: string;
+  thickness_mm?: number;
+  material?: string;
+  flat_pattern?: {
+    width_mm: number;
+    height_mm: number;
+    outline_edges?: Array<{ start: number[]; end: number[] }>;
+  };
+  bends?: BendDetail[];
+  linear_dimensions?: Array<{
+    label: string;
+    value_mm: number;
+    type: string;
+  }>;
+  unfold_method?: string;
+}
+
 export interface MeshAnalysis {
   // Metrics
   boundingBox: { min: Vec3; max: Vec3 };

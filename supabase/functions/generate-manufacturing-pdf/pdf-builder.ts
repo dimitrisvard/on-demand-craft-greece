@@ -31,7 +31,7 @@ import {
   PDFPage,
   PDFFont,
 } from "https://esm.sh/pdf-lib@1.17.1";
-import { type Edge2D, type MeshAnalysis, type BendLine } from "./mesh-analyzer.ts";
+import { type Edge2D, type MeshAnalysis, type BendLine, type UnfoldData, type BendDetail } from "./mesh-analyzer.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -296,6 +296,7 @@ export async function buildManufacturingPDF(
   analysis: MeshAnalysis,
   partInfo: PartInfo,
   fileName: string,
+  unfoldData?: UnfoldData | null,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -408,18 +409,24 @@ export async function buildManufacturingPDF(
     color: ACCENT_BLUE,
   });
 
+  // Use unfold data for enhanced info when available
+  const flatW = unfoldData?.flat_pattern?.width_mm || dims.x;
+  const flatH_mm = unfoldData?.flat_pattern?.height_mm || dims.z;
+  const thicknessMm = unfoldData?.thickness_mm || (partInfo.thickness ? parseFloat(partInfo.thickness) : dims.y);
+  const bendCount = unfoldData?.bends?.length || analysis.bendLines.length;
+
   const infoFields: [string, string][] = [
     ["Part Name:", partInfo.name || "Untitled"],
     ["Material:", partInfo.material || "\u2014"],
-    ["Thickness:", partInfo.thickness ? `${partInfo.thickness} mm` : "\u2014"],
-    ["Process:", partInfo.process || "\u2014"],
-    ["Bending:", partInfo.needsBending ? "REQUIRED" : "No"],
-    ["Quantity:", partInfo.quantity ? String(partInfo.quantity) : "\u2014"],
-    ["Flat Size:", `${dims.x.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`],
+    ["Thickness:", thicknessMm > 0 ? `${thicknessMm.toFixed(2)} mm` : (partInfo.thickness ? `${partInfo.thickness} mm` : "\u2014")],
+    ["Number of Bends:", bendCount > 0 ? String(bendCount) : "0"],
+    ["Flat Pattern:", `${flatW.toFixed(1)} \u00d7 ${flatH_mm.toFixed(1)} mm`],
     [
       "Bounding Box:",
       `${dims.x.toFixed(1)} \u00d7 ${dims.y.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`,
     ],
+    ["Process:", partInfo.process || "\u2014"],
+    ["Quantity:", partInfo.quantity ? String(partInfo.quantity) : "\u2014"],
   ];
 
   let infoY = curY - 30;
@@ -483,8 +490,11 @@ export async function buildManufacturingPDF(
 
   // ── FLAT PATTERN VIEW ─────────────────────────────────
 
+  const hasBendTable = !!(unfoldData?.bends && unfoldData.bends.length > 0) || analysis.bendLines.length > 0;
+  const bendTableRowCount = unfoldData?.bends?.length || analysis.bendLines.length;
+  const bendTableH = hasBendTable ? Math.min(22 + bendTableRowCount * 14, 120) : 0;
   const titleBlockH = 46;
-  const flatH = curY - m - titleBlockH - 6;
+  const flatH = curY - m - titleBlockH - bendTableH - (hasBendTable ? 12 : 6);
 
   page.drawRectangle({
     x: m,
@@ -497,7 +507,10 @@ export async function buildManufacturingPDF(
   });
 
   // Section label
-  page.drawText("FLAT PATTERN", {
+  const flatLabel = unfoldData?.success
+    ? `FLAT PATTERN (${unfoldData.unfold_method || "unfolded"})`
+    : "FLAT PATTERN";
+  page.drawText(flatLabel, {
     x: m + 12,
     y: curY - 14,
     size: 9,
@@ -507,7 +520,7 @@ export async function buildManufacturingPDF(
   page.drawText(
     "Bend lines shown as red dashed lines \u2014 dimensions in mm",
     {
-      x: m + 85,
+      x: m + 12 + fontBold.widthOfTextAtSize(flatLabel, 9) + 8,
       y: curY - 13,
       size: 6,
       font,
@@ -565,9 +578,10 @@ export async function buildManufacturingPDF(
     weight && `Weight: ${weight}`,
     `Volume: ${analysis.volume >= 1000 ? `${(analysis.volume / 1000).toFixed(2)} cm\u00b3` : `${analysis.volume.toFixed(1)} mm\u00b3`}`,
     `Surface Area: ${analysis.surfaceArea >= 100 ? `${(analysis.surfaceArea / 100).toFixed(2)} cm\u00b2` : `${analysis.surfaceArea.toFixed(1)} mm\u00b2`}`,
-    `Triangles: ${analysis.triangleCount.toLocaleString()}`,
+    analysis.triangleCount > 0 && `Triangles: ${analysis.triangleCount.toLocaleString()}`,
     `Feature edges: ${analysis.featureEdges.length.toLocaleString()}`,
-    `Detected bends: ${analysis.bendLines.length}`,
+    `Detected bends: ${unfoldData?.bends?.length || analysis.bendLines.length}`,
+    unfoldData?.unfold_method && `Unfold: ${unfoldData.unfold_method}`,
   ].filter(Boolean) as string[];
   for (let i = 0; i < specLines.length; i++) {
     page.drawText(specLines[i], {
@@ -595,7 +609,15 @@ export async function buildManufacturingPDF(
     const ox = flatRect.x + padding + (availW - drawW) / 2;
     const oy = flatRect.y + padding + (availH - drawH) / 2;
 
-    // Horizontal dimension (X)
+    // Use flat pattern dims from unfold data if available
+    const flatWidthLabel = unfoldData?.flat_pattern?.width_mm
+      ? `${unfoldData.flat_pattern.width_mm.toFixed(1)}`
+      : `${dims.x.toFixed(1)}`;
+    const flatHeightLabel = unfoldData?.flat_pattern?.height_mm
+      ? `${unfoldData.flat_pattern.height_mm.toFixed(1)}`
+      : `${dims.z.toFixed(1)}`;
+
+    // Horizontal dimension (overall width)
     drawDimension(
       page,
       fontBold,
@@ -603,12 +625,12 @@ export async function buildManufacturingPDF(
       oy - 2,
       ox + drawW,
       oy - 2,
-      `${dims.x.toFixed(1)}`,
+      flatWidthLabel,
       -14,
       true,
     );
 
-    // Vertical dimension (Z)
+    // Vertical dimension (overall height)
     drawDimension(
       page,
       fontBold,
@@ -616,14 +638,56 @@ export async function buildManufacturingPDF(
       oy,
       ox + drawW + 2,
       oy + drawH,
-      `${dims.z.toFixed(1)}`,
+      flatHeightLabel,
       14,
       false,
     );
 
+    // Draw edge-to-bend dimension chain if unfold data has linear dimensions
+    if (unfoldData?.linear_dimensions && unfoldData.linear_dimensions.length > 0 && unfoldData.flat_pattern) {
+      const flatW = unfoldData.flat_pattern.width_mm || dims.x;
+      let dimChainY = oy - 30; // below the overall width dimension
+
+      for (const dim of unfoldData.linear_dimensions) {
+        // Calculate position on the drawing based on the cumulative distances
+        // We need to map mm positions to drawing coordinates
+        const sortedBends = (unfoldData.bends || []).sort(
+          (a, b) => a.distance_from_left_edge_mm - b.distance_from_left_edge_mm,
+        );
+
+        // Build positions array: [0, bend1_pos, bend2_pos, ..., flat_width]
+        const positions = [0, ...sortedBends.map((b) => b.distance_from_left_edge_mm), flatW];
+
+        for (let pi = 0; pi < positions.length - 1; pi++) {
+          const leftMm = positions[pi];
+          const rightMm = positions[pi + 1];
+          const valueMm = rightMm - leftMm;
+
+          if (valueMm < 0.5) continue;
+
+          const x1Draw = ox + (leftMm / flatW) * drawW;
+          const x2Draw = ox + (rightMm / flatW) * drawW;
+
+          drawDimension(
+            page,
+            font,
+            x1Draw,
+            dimChainY,
+            x2Draw,
+            dimChainY,
+            `${valueMm.toFixed(1)}`,
+            -10,
+            true,
+          );
+        }
+        break; // Only draw one row of dimension chain
+      }
+    }
+
     // Thickness annotation
-    if (dims.y > 0.1) {
-      page.drawText(`t = ${dims.y.toFixed(1)} mm`, {
+    const thickVal = unfoldData?.thickness_mm || dims.y;
+    if (thickVal > 0.1) {
+      page.drawText(`t = ${thickVal.toFixed(1)} mm`, {
         x: flatRect.x + 8,
         y: flatRect.y + 6,
         size: 6,
@@ -634,6 +698,159 @@ export async function buildManufacturingPDF(
   }
 
   curY -= flatH + 6;
+
+  // ── BEND TABLE ────────────────────────────────────────
+
+  if (hasBendTable) {
+    const bends = unfoldData?.bends || [];
+    const bendLinesForTable = analysis.bendLines;
+    const rowH = 14;
+    const headerH = 16;
+    const tableTopY = curY;
+    const tableW = contentW;
+
+    // Section label
+    page.drawText("BEND TABLE", {
+      x: m + 12,
+      y: curY - 12,
+      size: 9,
+      font: fontBold,
+      color: ACCENT_BLUE,
+    });
+
+    curY -= 18;
+
+    // Table header
+    const cols = bends.length > 0
+      ? ["#", "Angle (\u00b0)", "Inner R (mm)", "Direction", "Length (mm)", "K-Factor", "BA (mm)", "BD (mm)"]
+      : ["#", "Angle (\u00b0)", "Length (mm)"];
+    const colWidths = bends.length > 0
+      ? [0.05, 0.12, 0.13, 0.10, 0.13, 0.12, 0.17, 0.18].map((w) => w * tableW)
+      : [0.10, 0.45, 0.45].map((w) => w * tableW);
+
+    // Header background
+    page.drawRectangle({
+      x: m,
+      y: curY - headerH,
+      width: tableW,
+      height: headerH,
+      color: DARK_BLUE,
+    });
+
+    // Header text
+    let colX = m;
+    for (let i = 0; i < cols.length; i++) {
+      const textW = fontBold.widthOfTextAtSize(cols[i], 6.5);
+      page.drawText(cols[i], {
+        x: colX + colWidths[i] / 2 - textW / 2,
+        y: curY - headerH + 5,
+        size: 6.5,
+        font: fontBold,
+        color: WHITE,
+      });
+      colX += colWidths[i];
+    }
+
+    curY -= headerH;
+
+    // Data rows
+    if (bends.length > 0) {
+      // Use detailed unfold data
+      for (let ri = 0; ri < bends.length; ri++) {
+        const bend = bends[ri];
+
+        // Alternating row background
+        if (ri % 2 === 1) {
+          page.drawRectangle({
+            x: m,
+            y: curY - rowH,
+            width: tableW,
+            height: rowH,
+            color: LIGHT_GRAY,
+          });
+        }
+
+        const values = [
+          String(bend.index),
+          bend.angle_deg.toFixed(1),
+          bend.inner_radius_mm.toFixed(2),
+          bend.direction,
+          bend.length_mm.toFixed(1),
+          bend.k_factor.toFixed(2),
+          bend.bend_allowance_mm.toFixed(2),
+          bend.bend_deduction_mm.toFixed(2),
+        ];
+
+        colX = m;
+        for (let ci = 0; ci < values.length; ci++) {
+          const textW = font.widthOfTextAtSize(values[ci], 6.5);
+          page.drawText(values[ci], {
+            x: colX + colWidths[ci] / 2 - textW / 2,
+            y: curY - rowH + 4,
+            size: 6.5,
+            font,
+            color: DARK_GRAY,
+          });
+          colX += colWidths[ci];
+        }
+
+        curY -= rowH;
+      }
+    } else {
+      // Use basic bend line data
+      for (let ri = 0; ri < bendLinesForTable.length; ri++) {
+        const bl = bendLinesForTable[ri];
+
+        if (ri % 2 === 1) {
+          page.drawRectangle({
+            x: m,
+            y: curY - rowH,
+            width: tableW,
+            height: rowH,
+            color: LIGHT_GRAY,
+          });
+        }
+
+        const edgeLen = Math.sqrt(
+          (bl.end.x - bl.start.x) ** 2 +
+          (bl.end.y - bl.start.y) ** 2 +
+          (bl.end.z - bl.start.z) ** 2,
+        );
+        const values = [
+          `B${ri + 1}`,
+          bl.angle.toFixed(1),
+          edgeLen.toFixed(1),
+        ];
+
+        colX = m;
+        for (let ci = 0; ci < values.length; ci++) {
+          const textW = font.widthOfTextAtSize(values[ci], 6.5);
+          page.drawText(values[ci], {
+            x: colX + colWidths[ci] / 2 - textW / 2,
+            y: curY - rowH + 4,
+            size: 6.5,
+            font,
+            color: DARK_GRAY,
+          });
+          colX += colWidths[ci];
+        }
+
+        curY -= rowH;
+      }
+    }
+
+    // Table border
+    page.drawRectangle({
+      x: m,
+      y: curY,
+      width: tableW,
+      height: tableTopY - curY - 18,
+      borderColor: BORDER_GRAY,
+      borderWidth: 0.5,
+    });
+
+    curY -= 6;
+  }
 
   // ── TITLE BLOCK ───────────────────────────────────────
 
@@ -673,8 +890,12 @@ export async function buildManufacturingPDF(
   });
 
   // Center column
-  const centerText1 = `Thickness: ${partInfo.thickness || "\u2014"} mm  |  Material: ${partInfo.material || "\u2014"}  |  Bends: ${partInfo.needsBending ? "Yes" : "No"}`;
-  const centerText2 = `Flat size: ${dims.x.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm  |  Weight: ${weight || "\u2014"}`;
+  const footerThickness = unfoldData?.thickness_mm ? unfoldData.thickness_mm.toFixed(2) : (partInfo.thickness || "\u2014");
+  const footerBends = unfoldData?.bends?.length || analysis.bendLines.length;
+  const centerText1 = `Thickness: ${footerThickness} mm  |  Material: ${partInfo.material || "\u2014"}  |  Bends: ${footerBends}`;
+  const footerFlatW = unfoldData?.flat_pattern?.width_mm || dims.x;
+  const footerFlatH = unfoldData?.flat_pattern?.height_mm || dims.z;
+  const centerText2 = `Flat size: ${footerFlatW.toFixed(1)} \u00d7 ${footerFlatH.toFixed(1)} mm  |  Weight: ${weight || "\u2014"}`;
   page.drawText(centerText1, {
     x: m + contentW / 2 - font.widthOfTextAtSize(centerText1, 7) / 2,
     y: curY - 14,
