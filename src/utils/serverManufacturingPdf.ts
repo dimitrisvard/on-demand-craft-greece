@@ -66,10 +66,10 @@ function downloadBase64Pdf(base64: string, fileName: string): void {
 
 /**
  * Check if the file type is supported by the server-side edge function.
- * Currently only STL files are natively supported.
+ * Supports STL, STEP/STP, and DXF files.
  */
 function isServerSupported(fileName: string): boolean {
-  return /\.stl$/i.test(fileName);
+  return /\.(stl|step|stp|dxf)$/i.test(fileName);
 }
 
 /**
