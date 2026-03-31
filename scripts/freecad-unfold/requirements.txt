@@ -1,3 +1,8 @@
-flask==3.0.3
-gunicorn==22.0.0
-requests==2.31.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+reportlab>=4.0
+ezdxf>=0.18
+Pillow>=10.0
+networkx>=3.0
+svglib>=0.11

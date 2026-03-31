@@ -1,40 +1,45 @@
-# FreeCAD Sheet Metal Unfolding Service
+# FreeCAD Sheet Metal Unfolding & Bending Shop Drawing Service
 #
-# Provides true B-Rep flat pattern extraction from STEP/STP files
-# using FreeCAD's Sheet Metal workbench + OpenCascade.
+# Production-grade service that takes STEP files and produces:
+# - Professional PDF bending shop drawings (A4 landscape)
+# - DXF flat patterns with bend lines on separate layers
+# - JSON metadata with all bend/dimension data
 #
 # Build:  docker build -t freecad-unfold .
-# Run:    docker run -p 8090:8090 freecad-unfold
-#
-# The edge function calls this service when UNFOLD_SERVICE_URL is set.
+# Run:    docker run -p 8000:8000 freecad-unfold
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV FREECAD_PATH=/usr/lib/freecad
+ENV LANG=C.UTF-8
 
-# Install FreeCAD + dependencies
+# Install FreeCAD, Xvfb, and system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     freecad \
     freecad-python3 \
+    xvfb \
+    libgl1-mesa-dri \
+    libgl1-mesa-glx \
     python3-pip \
     python3-dev \
-    xvfb \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps
+# Install FreeCAD SheetMetal Workbench
+RUN mkdir -p /root/.local/share/FreeCAD/Mod && \
+    cd /root/.local/share/FreeCAD/Mod && \
+    git clone https://github.com/shaise/FreeCAD_SheetMetal.git SheetMetal
+
+# Python dependencies
 COPY requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r /app/requirements.txt
 
 # Copy application code
-COPY app.py /app/app.py
-COPY unfold_worker.py /app/unfold_worker.py
+COPY app/ /app/
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 WORKDIR /app
+EXPOSE 8000
 
-EXPOSE 8090
-
-# Run with xvfb for headless FreeCAD
-CMD ["xvfb-run", "--auto-servernum", "gunicorn", "-w", "2", "-b", "0.0.0.0:8090", "--timeout", "300", "app:app"]
+CMD ["/app/start.sh"]

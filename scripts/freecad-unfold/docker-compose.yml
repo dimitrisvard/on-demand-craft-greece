@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  unfold-service:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DISPLAY=:99
+    volumes:
+      - /tmp/unfold-output:/tmp/unfold-output
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+    restart: unless-stopped
