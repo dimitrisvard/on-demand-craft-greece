@@ -43,7 +43,8 @@ import { downloadAllRfqFiles, getRfqFiles } from '@/utils/rfqFileStorage';
 import { getSignedUrl } from '@/utils/awsS3Storage';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackFileDownload, trackUserInteraction } from '@/utils/analytics';
-import { generateManufacturingDrawingPdf, PartInfo } from '@/utils/technicalDrawingPdf';
+import { type PartInfo } from '@/utils/technicalDrawingPdf';
+import { generateManufacturingPdfWithFallback } from '@/utils/serverManufacturingPdf';
 
 interface QuoteFile {
   id: string;
@@ -1235,7 +1236,7 @@ export default function OrderDetailsPage() {
         return;
       }
       const partInfo = buildPartInfo(file, partIdx);
-      await generateManufacturingDrawingPdf(signedUrl, file.file_name, partInfo);
+      await generateManufacturingPdfWithFallback(signedUrl, file.file_name, partInfo);
       toast({ title: 'Manufacturing Drawing Generated', description: 'PDF downloaded successfully.' });
     } catch (error: any) {
       console.error('Manufacturing drawing error:', error);

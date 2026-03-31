@@ -34,3 +34,9 @@ verify_jwt = false
 
 [functions.telegram-leads-bot]
 verify_jwt = false
+
+[functions.generate-manufacturing-pdf]
+verify_jwt = false
+
+[functions.extract-flat-pattern]
+verify_jwt = false

@@ -65,7 +65,8 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { generateAndSendRFQPDF } from '@/utils/rfqPdfEmailService';
-import { generateManufacturingDrawingPdf, PartInfo } from '@/utils/technicalDrawingPdf';
+import { type PartInfo } from '@/utils/technicalDrawingPdf';
+import { generateManufacturingPdfWithFallback } from '@/utils/serverManufacturingPdf';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -1341,7 +1342,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
         return;
       }
       const partInfo = buildPartInfo(file, item);
-      await generateManufacturingDrawingPdf(url, file.file_name, partInfo);
+      await generateManufacturingPdfWithFallback(url, file.file_name, partInfo);
       toast({ title: 'Manufacturing Drawing Generated', description: 'PDF downloaded successfully.' });
     } catch (error: any) {
       console.error('Manufacturing drawing error:', error);

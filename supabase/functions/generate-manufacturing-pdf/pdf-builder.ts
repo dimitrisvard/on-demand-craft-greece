@@ -1,0 +1,724 @@
+/**
+ * PDF Builder — generates professional manufacturing drawing PDFs
+ *
+ * Uses pdf-lib (pure JS, works in Deno) to create A4 landscape
+ * bending shop drawings with vector wireframe projections.
+ *
+ * Layout:
+ *   +----------------------------------------------------+
+ *   | HEADER: MICRONS HUB  .  BENDING SHOP DRAWING       |
+ *   +---------------+------------------------------------+
+ *   | ISOMETRIC     |  PART INFORMATION                   |
+ *   | VIEW          |  Material / Thickness / Bends       |
+ *   | (wireframe)   |  Overall flat dimensions            |
+ *   +---------------+------------------------------------+
+ *   |                                                     |
+ *   |  FLAT PATTERN (top view wireframe) with:            |
+ *   |  - Linear dimensions (mm)                           |
+ *   |  - Bend lines (red dashed)                          |
+ *   |  - FRONT VIEW reference (inset right)               |
+ *   |                                                     |
+ *   +----------------------------------------------------+
+ *   | TITLE BLOCK: Part | Dims & Metrics | Company        |
+ *   +----------------------------------------------------+
+ */
+
+import {
+  PDFDocument,
+  rgb,
+  StandardFonts,
+  LineCapStyle,
+  PDFPage,
+  PDFFont,
+} from "https://esm.sh/pdf-lib@1.17.1";
+import { type Edge2D, type MeshAnalysis, type BendLine } from "./mesh-analyzer.ts";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+export interface PartInfo {
+  name: string;
+  material?: string;
+  process?: string;
+  thickness?: string;
+  tolerance?: string;
+  surfaceRoughness?: string;
+  surfaceTreatment?: string;
+  quantity?: number;
+  needsBending?: boolean;
+}
+
+// ── Color constants ─────────────────────────────────────────────────────────
+
+const DARK_BLUE = rgb(27 / 255, 42 / 255, 74 / 255);
+const ACCENT_BLUE = rgb(46 / 255, 110 / 255, 166 / 255);
+const RED = rgb(192 / 255, 57 / 255, 43 / 255);
+const WHITE = rgb(1, 1, 1);
+const LIGHT_GRAY = rgb(240 / 255, 242 / 255, 245 / 255);
+const MEDIUM_GRAY = rgb(0.55, 0.55, 0.55);
+const DARK_GRAY = rgb(0.12, 0.12, 0.12);
+const EDGE_COLOR = rgb(0.1, 0.14, 0.27);
+const BORDER_GRAY = rgb(0.78, 0.78, 0.78);
+
+// ── Material density lookup (subset) ────────────────────────────────────────
+
+const DENSITIES: Record<string, number> = {
+  aluminum: 2.7, "6061": 2.7, "6082": 2.7, "5052": 2.68, "7075": 2.81,
+  steel: 7.85, "mild steel": 7.85, "carbon steel": 7.85,
+  "stainless": 8.0, "304": 8.0, "316": 8.0, "316l": 8.0,
+  copper: 8.96, brass: 8.5, bronze: 8.8,
+  titanium: 4.51, "ti-6al-4v": 4.43,
+  zinc: 7.13, nickel: 8.9, inconel: 8.44,
+  abs: 1.04, pla: 1.24, nylon: 1.14, peek: 1.3, ptfe: 2.2, pom: 1.41,
+};
+
+function estimateWeight(volumeMm3: number, material?: string): string | null {
+  if (!material) return null;
+  const lower = material.toLowerCase();
+  for (const [key, density] of Object.entries(DENSITIES)) {
+    if (lower.includes(key)) {
+      const grams = (volumeMm3 / 1000) * density; // mm³ → cm³ → grams
+      return grams >= 1000
+        ? `${(grams / 1000).toFixed(2)} kg`
+        : `${grams.toFixed(1)} g`;
+    }
+  }
+  return null;
+}
+
+// ── Drawing helpers ─────────────────────────────────────────────────────────
+
+/** Compute bounding box of 2D edges */
+function edges2DBounds(edges: Edge2D[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+} {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const e of edges) {
+    minX = Math.min(minX, e.x1, e.x2);
+    minY = Math.min(minY, e.y1, e.y2);
+    maxX = Math.max(maxX, e.x1, e.x2);
+    maxY = Math.max(maxY, e.y1, e.y2);
+  }
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+/** Draw 2D wireframe edges onto a PDF page within a given rectangle */
+function drawWireframe(
+  page: PDFPage,
+  edges: Edge2D[],
+  rect: { x: number; y: number; w: number; h: number },
+  color = EDGE_COLOR,
+  lineWidth = 0.4,
+) {
+  if (edges.length === 0) return;
+
+  const bounds = edges2DBounds(edges);
+  if (bounds.width === 0 && bounds.height === 0) return;
+
+  // Scale to fit with padding
+  const padding = 8;
+  const availW = rect.w - 2 * padding;
+  const availH = rect.h - 2 * padding;
+  const scale = Math.min(
+    availW / (bounds.width || 1),
+    availH / (bounds.height || 1),
+  );
+
+  // Center offset
+  const drawW = bounds.width * scale;
+  const drawH = bounds.height * scale;
+  const offsetX = rect.x + padding + (availW - drawW) / 2;
+  const offsetY = rect.y + padding + (availH - drawH) / 2;
+
+  for (const e of edges) {
+    const x1 = offsetX + (e.x1 - bounds.minX) * scale;
+    const y1 = offsetY + (e.y1 - bounds.minY) * scale;
+    const x2 = offsetX + (e.x2 - bounds.minX) * scale;
+    const y2 = offsetY + (e.y2 - bounds.minY) * scale;
+
+    page.drawLine({
+      start: { x: x1, y: y1 },
+      end: { x: x2, y: y2 },
+      thickness: lineWidth,
+      color,
+    });
+  }
+}
+
+/** Draw dashed line */
+function drawDashedLine(
+  page: PDFPage,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  dashLen: number,
+  gapLen: number,
+  color = RED,
+  thickness = 0.5,
+) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const totalLen = Math.sqrt(dx * dx + dy * dy);
+  if (totalLen < 0.1) return;
+
+  const ux = dx / totalLen;
+  const uy = dy / totalLen;
+  let pos = 0;
+
+  while (pos < totalLen) {
+    const end = Math.min(pos + dashLen, totalLen);
+    page.drawLine({
+      start: { x: x1 + ux * pos, y: y1 + uy * pos },
+      end: { x: x1 + ux * end, y: y1 + uy * end },
+      thickness,
+      color,
+    });
+    pos = end + gapLen;
+  }
+}
+
+/** Draw dimension arrow with text */
+function drawDimension(
+  page: PDFPage,
+  font: PDFFont,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  label: string,
+  offset: number,
+  horizontal: boolean,
+) {
+  const arrowSize = 3;
+
+  if (horizontal) {
+    const lineY = y1 + offset;
+    // Extension lines
+    page.drawLine({ start: { x: x1, y: y1 }, end: { x: x1, y: lineY }, thickness: 0.2, color: RED });
+    page.drawLine({ start: { x: x2, y: y1 }, end: { x: x2, y: lineY }, thickness: 0.2, color: RED });
+    // Dimension line
+    page.drawLine({ start: { x: x1, y: lineY }, end: { x: x2, y: lineY }, thickness: 0.35, color: RED });
+    // Arrowheads
+    page.drawLine({ start: { x: x1, y: lineY }, end: { x: x1 + arrowSize, y: lineY + 1.2 }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: x1, y: lineY }, end: { x: x1 + arrowSize, y: lineY - 1.2 }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: x2, y: lineY }, end: { x: x2 - arrowSize, y: lineY + 1.2 }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: x2, y: lineY }, end: { x: x2 - arrowSize, y: lineY - 1.2 }, thickness: 0.3, color: RED });
+    // Label
+    const textW = font.widthOfTextAtSize(label, 7);
+    page.drawText(label, {
+      x: (x1 + x2) / 2 - textW / 2,
+      y: lineY + 2,
+      size: 7,
+      font,
+      color: RED,
+    });
+  } else {
+    const lineX = x1 + offset;
+    // Extension lines
+    page.drawLine({ start: { x: x1, y: y1 }, end: { x: lineX, y: y1 }, thickness: 0.2, color: RED });
+    page.drawLine({ start: { x: x1, y: y2 }, end: { x: lineX, y: y2 }, thickness: 0.2, color: RED });
+    // Dimension line
+    page.drawLine({ start: { x: lineX, y: y1 }, end: { x: lineX, y: y2 }, thickness: 0.35, color: RED });
+    // Arrowheads
+    page.drawLine({ start: { x: lineX, y: y1 }, end: { x: lineX + 1.2, y: y1 + arrowSize }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: lineX, y: y1 }, end: { x: lineX - 1.2, y: y1 + arrowSize }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: lineX, y: y2 }, end: { x: lineX + 1.2, y: y2 - arrowSize }, thickness: 0.3, color: RED });
+    page.drawLine({ start: { x: lineX, y: y2 }, end: { x: lineX - 1.2, y: y2 - arrowSize }, thickness: 0.3, color: RED });
+    // Label (rotated text not supported in pdf-lib, so place sideways)
+    page.drawText(label, {
+      x: lineX + 3,
+      y: (y1 + y2) / 2 - 3,
+      size: 7,
+      font,
+      color: RED,
+    });
+  }
+}
+
+/** Draw projected bend lines onto the flat pattern view */
+function drawBendLines(
+  page: PDFPage,
+  font: PDFFont,
+  bendLines: BendLine[],
+  topViewEdges: Edge2D[],
+  rect: { x: number; y: number; w: number; h: number },
+) {
+  if (bendLines.length === 0) return;
+
+  const bounds = edges2DBounds(topViewEdges);
+  if (bounds.width === 0 && bounds.height === 0) return;
+
+  const padding = 8;
+  const availW = rect.w - 2 * padding;
+  const availH = rect.h - 2 * padding;
+  const scale = Math.min(
+    availW / (bounds.width || 1),
+    availH / (bounds.height || 1),
+  );
+
+  const drawW = bounds.width * scale;
+  const drawH = bounds.height * scale;
+  const offsetX = rect.x + padding + (availW - drawW) / 2;
+  const offsetY = rect.y + padding + (availH - drawH) / 2;
+
+  // Project bend lines to top view (XZ plane)
+  for (let i = 0; i < bendLines.length; i++) {
+    const bl = bendLines[i];
+    // Project to top view: x stays, z becomes y (inverted)
+    const x1 = offsetX + (bl.start.x - bounds.minX - (bounds.width - drawW / scale) / 2) * scale;
+    const y1 = offsetY + (-bl.start.z - bounds.minY - (bounds.height - drawH / scale) / 2) * scale;
+    const x2 = offsetX + (bl.end.x - bounds.minX - (bounds.width - drawW / scale) / 2) * scale;
+    const y2 = offsetY + (-bl.end.z - bounds.minY - (bounds.height - drawH / scale) / 2) * scale;
+
+    drawDashedLine(page, x1, y1, x2, y2, 4, 2.5, RED, 0.6);
+
+    // Label
+    const labelX = Math.min(x1, x2) - 2;
+    const labelY = Math.max(y1, y2) + 4;
+    page.drawText(`B${i + 1} (${bl.angle.toFixed(0)}°)`, {
+      x: labelX,
+      y: labelY,
+      size: 5.5,
+      font,
+      color: RED,
+    });
+  }
+}
+
+// ── Main PDF builder ────────────────────────────────────────────────────────
+
+export async function buildManufacturingPDF(
+  analysis: MeshAnalysis,
+  partInfo: PartInfo,
+  fileName: string,
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  // A4 Landscape: 841.89 x 595.28 pt
+  const page = doc.addPage([841.89, 595.28]);
+  const pageW = page.getWidth();
+  const pageH = page.getHeight();
+  const m = 22; // margin in points
+
+  const contentW = pageW - 2 * m;
+  let curY = pageH - m; // start from top (pdf-lib uses bottom-left origin)
+
+  const dims = analysis.dimensions;
+  const weight = estimateWeight(analysis.volume, partInfo.material);
+
+  // ── HEADER BAR ─────────────────────────────────────────
+
+  const headerH = 34;
+  page.drawRectangle({
+    x: m,
+    y: curY - headerH,
+    width: contentW,
+    height: headerH,
+    color: DARK_BLUE,
+  });
+
+  page.drawText("MICRONS HUB", {
+    x: m + 14,
+    y: curY - 14,
+    size: 14,
+    font: fontBold,
+    color: WHITE,
+  });
+  page.drawText("micronshub.eu", {
+    x: m + 14,
+    y: curY - 26,
+    size: 7,
+    font,
+    color: rgb(0.7, 0.7, 0.8),
+  });
+
+  page.drawText("BENDING SHOP DRAWING", {
+    x: pageW - m - 14 - fontBold.widthOfTextAtSize("BENDING SHOP DRAWING", 13),
+    y: curY - 14,
+    size: 13,
+    font: fontBold,
+    color: WHITE,
+  });
+  const partLabel = `Part: ${partInfo.name || fileName.replace(/\.[^.]+$/, "")}`;
+  page.drawText(partLabel, {
+    x: pageW - m - 14 - font.widthOfTextAtSize(partLabel, 7),
+    y: curY - 26,
+    size: 7,
+    font,
+    color: rgb(0.7, 0.7, 0.8),
+  });
+
+  curY -= headerH + 6;
+
+  // ── TOP ROW: Isometric View + Part Info ────────────────
+
+  const topRowH = 140;
+  const isoBoxW = 170;
+  const infoBoxW = contentW - isoBoxW - 8;
+
+  // Isometric view box
+  page.drawRectangle({
+    x: m,
+    y: curY - topRowH,
+    width: isoBoxW,
+    height: topRowH,
+    color: LIGHT_GRAY,
+    borderColor: BORDER_GRAY,
+    borderWidth: 0.5,
+  });
+  drawWireframe(page, analysis.isoView, {
+    x: m,
+    y: curY - topRowH,
+    w: isoBoxW,
+    h: topRowH - 16,
+  });
+  const isoLabel = "ISOMETRIC VIEW";
+  page.drawText(isoLabel, {
+    x: m + isoBoxW / 2 - fontBold.widthOfTextAtSize(isoLabel, 7) / 2,
+    y: curY - topRowH + 5,
+    size: 7,
+    font: fontBold,
+    color: ACCENT_BLUE,
+  });
+
+  // Part info box
+  const infoX = m + isoBoxW + 8;
+  page.drawRectangle({
+    x: infoX,
+    y: curY - topRowH,
+    width: infoBoxW,
+    height: topRowH,
+    color: WHITE,
+    borderColor: BORDER_GRAY,
+    borderWidth: 0.5,
+  });
+
+  page.drawText("PART INFORMATION", {
+    x: infoX + 12,
+    y: curY - 16,
+    size: 10,
+    font: fontBold,
+    color: ACCENT_BLUE,
+  });
+
+  const infoFields: [string, string][] = [
+    ["Part Name:", partInfo.name || "Untitled"],
+    ["Material:", partInfo.material || "\u2014"],
+    ["Thickness:", partInfo.thickness ? `${partInfo.thickness} mm` : "\u2014"],
+    ["Process:", partInfo.process || "\u2014"],
+    ["Bending:", partInfo.needsBending ? "REQUIRED" : "No"],
+    ["Quantity:", partInfo.quantity ? String(partInfo.quantity) : "\u2014"],
+    ["Flat Size:", `${dims.x.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`],
+    [
+      "Bounding Box:",
+      `${dims.x.toFixed(1)} \u00d7 ${dims.y.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`,
+    ],
+  ];
+
+  let infoY = curY - 30;
+  const colMid = infoX + infoBoxW / 2;
+  for (let i = 0; i < infoFields.length; i++) {
+    const [label, value] = infoFields[i];
+    const cx = i % 2 === 0 ? infoX + 12 : colMid + 6;
+    const cy = infoY - Math.floor(i / 2) * 16;
+
+    page.drawText(label, { x: cx, y: cy, size: 7, font, color: MEDIUM_GRAY });
+    page.drawText(value, {
+      x: cx + 70,
+      y: cy,
+      size: 7,
+      font: fontBold,
+      color: DARK_GRAY,
+    });
+  }
+
+  // Weight + surface treatment
+  const extraY = infoY - Math.ceil(infoFields.length / 2) * 16;
+  if (weight) {
+    page.drawText("Est. Weight:", { x: infoX + 12, y: extraY, size: 7, font, color: MEDIUM_GRAY });
+    page.drawText(weight, { x: infoX + 82, y: extraY, size: 7, font: fontBold, color: DARK_GRAY });
+  }
+  if (partInfo.surfaceTreatment && partInfo.surfaceTreatment !== "none") {
+    page.drawText("Finish:", { x: colMid + 6, y: extraY, size: 7, font, color: MEDIUM_GRAY });
+    page.drawText(partInfo.surfaceTreatment, {
+      x: colMid + 50,
+      y: extraY,
+      size: 7,
+      font: fontBold,
+      color: DARK_GRAY,
+    });
+  }
+
+  // Bending badge
+  if (partInfo.needsBending) {
+    const badgeW = 90;
+    const badgeH = 18;
+    page.drawRectangle({
+      x: pageW - m - badgeW - 8,
+      y: curY - 22,
+      width: badgeW,
+      height: badgeH,
+      color: rgb(1, 140 / 255, 0),
+      borderColor: rgb(0.8, 0.4, 0),
+      borderWidth: 0.3,
+    });
+    const badgeText = "BENDING REQUIRED";
+    page.drawText(badgeText, {
+      x: pageW - m - badgeW - 8 + (badgeW - fontBold.widthOfTextAtSize(badgeText, 7)) / 2,
+      y: curY - 17,
+      size: 7,
+      font: fontBold,
+      color: WHITE,
+    });
+  }
+
+  curY -= topRowH + 6;
+
+  // ── FLAT PATTERN VIEW ─────────────────────────────────
+
+  const titleBlockH = 46;
+  const flatH = curY - m - titleBlockH - 6;
+
+  page.drawRectangle({
+    x: m,
+    y: curY - flatH,
+    width: contentW,
+    height: flatH,
+    color: WHITE,
+    borderColor: BORDER_GRAY,
+    borderWidth: 0.5,
+  });
+
+  // Section label
+  page.drawText("FLAT PATTERN", {
+    x: m + 12,
+    y: curY - 14,
+    size: 9,
+    font: fontBold,
+    color: ACCENT_BLUE,
+  });
+  page.drawText(
+    "Bend lines shown as red dashed lines \u2014 dimensions in mm",
+    {
+      x: m + 85,
+      y: curY - 13,
+      size: 6,
+      font,
+      color: MEDIUM_GRAY,
+    },
+  );
+
+  // Main flat pattern wireframe (left ~72%)
+  const flatImgW = contentW * 0.72;
+  const flatContentH = flatH - 22;
+  const flatRect = {
+    x: m + 4,
+    y: curY - flatH + 4,
+    w: flatImgW - 8,
+    h: flatContentH,
+  };
+  drawWireframe(page, analysis.topView, flatRect, EDGE_COLOR, 0.5);
+
+  // Draw bend lines on the flat pattern
+  drawBendLines(page, fontBold, analysis.bendLines, analysis.topView, flatRect);
+
+  // Front view reference (right ~28%)
+  const refX = m + flatImgW + 4;
+  const refW = contentW - flatImgW - 8;
+  const refH = flatContentH * 0.55;
+  page.drawRectangle({
+    x: refX,
+    y: curY - 18 - refH,
+    width: refW,
+    height: refH,
+    borderColor: rgb(0.85, 0.85, 0.85),
+    borderWidth: 0.3,
+  });
+  drawWireframe(
+    page,
+    analysis.frontView,
+    { x: refX, y: curY - 18 - refH, w: refW, h: refH - 14 },
+    EDGE_COLOR,
+    0.35,
+  );
+  const fvLabel = "FRONT VIEW";
+  page.drawText(fvLabel, {
+    x: refX + refW / 2 - fontBold.widthOfTextAtSize(fvLabel, 6) / 2,
+    y: curY - 18 - refH + 4,
+    size: 6,
+    font: fontBold,
+    color: ACCENT_BLUE,
+  });
+
+  // Specs summary below front view
+  const specsY = curY - 22 - refH - 8;
+  const specLines = [
+    partInfo.tolerance && `Tolerance: ${partInfo.tolerance}`,
+    partInfo.surfaceRoughness && `Surface Ra: ${partInfo.surfaceRoughness}`,
+    weight && `Weight: ${weight}`,
+    `Volume: ${analysis.volume >= 1000 ? `${(analysis.volume / 1000).toFixed(2)} cm\u00b3` : `${analysis.volume.toFixed(1)} mm\u00b3`}`,
+    `Surface Area: ${analysis.surfaceArea >= 100 ? `${(analysis.surfaceArea / 100).toFixed(2)} cm\u00b2` : `${analysis.surfaceArea.toFixed(1)} mm\u00b2`}`,
+    `Triangles: ${analysis.triangleCount.toLocaleString()}`,
+    `Feature edges: ${analysis.featureEdges.length.toLocaleString()}`,
+    `Detected bends: ${analysis.bendLines.length}`,
+  ].filter(Boolean) as string[];
+  for (let i = 0; i < specLines.length; i++) {
+    page.drawText(specLines[i], {
+      x: refX + 8,
+      y: specsY - i * 12,
+      size: 6.5,
+      font,
+      color: rgb(0.23, 0.23, 0.23),
+    });
+  }
+
+  // ── Dimension arrows on flat pattern ──────────────────
+
+  if (analysis.topView.length > 0) {
+    const bounds = edges2DBounds(analysis.topView);
+    const padding = 8;
+    const availW = flatRect.w - 2 * padding;
+    const availH = flatRect.h - 2 * padding;
+    const scale = Math.min(
+      availW / (bounds.width || 1),
+      availH / (bounds.height || 1),
+    );
+    const drawW = bounds.width * scale;
+    const drawH = bounds.height * scale;
+    const ox = flatRect.x + padding + (availW - drawW) / 2;
+    const oy = flatRect.y + padding + (availH - drawH) / 2;
+
+    // Horizontal dimension (X)
+    drawDimension(
+      page,
+      fontBold,
+      ox,
+      oy - 2,
+      ox + drawW,
+      oy - 2,
+      `${dims.x.toFixed(1)}`,
+      -14,
+      true,
+    );
+
+    // Vertical dimension (Z)
+    drawDimension(
+      page,
+      fontBold,
+      ox + drawW + 2,
+      oy,
+      ox + drawW + 2,
+      oy + drawH,
+      `${dims.z.toFixed(1)}`,
+      14,
+      false,
+    );
+
+    // Thickness annotation
+    if (dims.y > 0.1) {
+      page.drawText(`t = ${dims.y.toFixed(1)} mm`, {
+        x: flatRect.x + 8,
+        y: flatRect.y + 6,
+        size: 6,
+        font: fontBold,
+        color: ACCENT_BLUE,
+      });
+    }
+  }
+
+  curY -= flatH + 6;
+
+  // ── TITLE BLOCK ───────────────────────────────────────
+
+  page.drawRectangle({
+    x: m,
+    y: curY - titleBlockH,
+    width: contentW,
+    height: titleBlockH,
+    color: DARK_BLUE,
+  });
+
+  const now = new Date();
+  const dateStr = `${now.getDate().toString().padStart(2, "0")}/${(now.getMonth() + 1).toString().padStart(2, "0")}/${now.getFullYear()}`;
+  const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+  // Left column
+  page.drawText(`Part: ${partInfo.name || "Untitled"}`, {
+    x: m + 12,
+    y: curY - 14,
+    size: 7,
+    font,
+    color: WHITE,
+  });
+  page.drawText(`Generated: ${dateStr} ${timeStr}`, {
+    x: m + 12,
+    y: curY - 26,
+    size: 7,
+    font,
+    color: rgb(0.7, 0.7, 0.8),
+  });
+  page.drawText(`Server-side PDF (vector wireframe)`, {
+    x: m + 12,
+    y: curY - 38,
+    size: 6,
+    font,
+    color: rgb(0.5, 0.5, 0.6),
+  });
+
+  // Center column
+  const centerText1 = `Thickness: ${partInfo.thickness || "\u2014"} mm  |  Material: ${partInfo.material || "\u2014"}  |  Bends: ${partInfo.needsBending ? "Yes" : "No"}`;
+  const centerText2 = `Flat size: ${dims.x.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm  |  Weight: ${weight || "\u2014"}`;
+  page.drawText(centerText1, {
+    x: m + contentW / 2 - font.widthOfTextAtSize(centerText1, 7) / 2,
+    y: curY - 14,
+    size: 7,
+    font,
+    color: WHITE,
+  });
+  page.drawText(centerText2, {
+    x: m + contentW / 2 - font.widthOfTextAtSize(centerText2, 7) / 2,
+    y: curY - 26,
+    size: 7,
+    font,
+    color: rgb(0.7, 0.7, 0.8),
+  });
+
+  // Right column
+  const companyName = "MICRONS HUB DV E.E.";
+  page.drawText(companyName, {
+    x: pageW - m - 12 - fontBold.widthOfTextAtSize(companyName, 8),
+    y: curY - 14,
+    size: 8,
+    font: fontBold,
+    color: WHITE,
+  });
+  const sheetInfo = `Scale: NTS  |  Sheet 1/1  |  File: ${fileName}`;
+  page.drawText(sheetInfo, {
+    x: pageW - m - 12 - font.widthOfTextAtSize(sheetInfo, 7),
+    y: curY - 26,
+    size: 7,
+    font,
+    color: rgb(0.7, 0.7, 0.8),
+  });
+
+  // Note line
+  page.drawText(
+    "NOTE: Verify all dimensions before production. Bend allowances must be calculated per material K-factor. All dimensions in mm.",
+    {
+      x: m + 12,
+      y: curY - titleBlockH + 4,
+      size: 5,
+      font,
+      color: rgb(0.5, 0.5, 0.6),
+    },
+  );
+
+  return await doc.save();
+}
