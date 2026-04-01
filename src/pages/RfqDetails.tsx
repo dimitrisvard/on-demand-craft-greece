@@ -6,7 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Download, FileText, Plus, Edit2, Trash2, CheckCircle,
   XCircle, Loader2, ChevronLeft, Send, Edit,
-  Trash, FileDown, ShoppingBag, Upload, User, Box, Eye, FileOutput
+  Trash, FileDown, ShoppingBag, Upload, User, Box, Eye, FileOutput, LayoutGrid
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import PartSpecsCard from '@/components/shared/PartSpecsCard';
@@ -1318,6 +1318,101 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
   // Generate manufacturing drawing PDF from 3D files (client-side)
   const [drawingLoading, setDrawingLoading] = useState<string | null>(null);
+  const [nestingOpen, setNestingOpen] = useState(false);
+  const [nestingLoading, setNestingLoading] = useState(false);
+  const [nestingResult, setNestingResult] = useState<any>(null);
+  const [nestingError, setNestingError] = useState<string | null>(null);
+
+  const handleNesting = async () => {
+    setNestingLoading(true);
+    setNestingError(null);
+    setNestingResult(null);
+    setNestingOpen(true);
+
+    try {
+      // Collect all DXF files and their associated items
+      const dxfEntries: { file: QuoteFile; item: any }[] = [];
+      for (const item of rfqItems) {
+        const itemFiles = partFiles[item.id] || [];
+        const dxfFiles = itemFiles.filter(f => /\.dxf$/i.test(f.file_name));
+        for (const file of dxfFiles) {
+          dxfEntries.push({ file, item });
+        }
+      }
+
+      if (dxfEntries.length === 0) {
+        setNestingError('No DXF files found. Upload DXF flat pattern files to use nesting.');
+        return;
+      }
+
+      // Fetch DXF file contents from S3
+      const dxfContents: string[] = [];
+      const partsMetadata: any[] = [];
+
+      for (let i = 0; i < dxfEntries.length; i++) {
+        const { file, item } = dxfEntries[i];
+        const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
+        if (!url) {
+          toast({ title: 'Warning', description: `Could not get URL for ${file.file_name}`, variant: 'destructive' });
+          continue;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          toast({ title: 'Warning', description: `Could not download ${file.file_name}`, variant: 'destructive' });
+          continue;
+        }
+        const content = await response.text();
+        dxfContents.push(content);
+
+        const ov = item.original_values as Record<string, any> | undefined;
+        partsMetadata.push({
+          fileIndex: dxfContents.length - 1,
+          name: item.product_name || file.file_name.replace(/\.dxf$/i, ''),
+          material: ov?.materialSubtypeLabel || ov?.materialLabel || ov?.material || 'unknown',
+          thickness: parseFloat(ov?.thickness) || 1.0,
+          quantity: item.quantity || 1,
+        });
+      }
+
+      if (dxfContents.length === 0) {
+        setNestingError('Failed to download any DXF files.');
+        return;
+      }
+
+      // Call nesting API
+      const nestResponse = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'nest',
+          files: dxfContents,
+          metadata: {
+            parts: partsMetadata,
+            config: {
+              gap: 3,
+              edgeMargin: 5,
+              rotationMode: '90deg',
+              optimizationLevel: 'balanced',
+            },
+          },
+        }),
+      });
+
+      const result = await nestResponse.json();
+      if (!nestResponse.ok || !result.success) {
+        setNestingError(result.error || result.message || 'Nesting failed');
+        return;
+      }
+
+      setNestingResult(result);
+    } catch (error: any) {
+      console.error('Nesting error:', error);
+      setNestingError(error.message || 'An unexpected error occurred during nesting.');
+    } finally {
+      setNestingLoading(false);
+    }
+  };
 
   const buildPartInfo = (file: QuoteFile, item: any): PartInfo => {
     const ov = item?.original_values as Record<string, any> | undefined;
@@ -1657,7 +1752,30 @@ const RfqDetails = (props: RfqDetailsProps) => {
               </div>
 
               <div className="mt-6">
-                <h3 className="text-lg font-semibold mb-3">Items</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-semibold">Items</h3>
+                  {rfqItems.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={nestingLoading}
+                      onClick={handleNesting}
+                    >
+                      {nestingLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Nesting...
+                        </>
+                      ) : (
+                        <>
+                          <LayoutGrid className="h-4 w-4" />
+                          Nesting Layout
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
                 <div ref={animationParent} className="space-y-4">
                   {rfqItems.length === 0 ? (
                     <Card>
@@ -2290,6 +2408,122 @@ const RfqDetails = (props: RfqDetailsProps) => {
                 )}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Nesting Layout Dialog */}
+        <Dialog open={nestingOpen} onOpenChange={setNestingOpen}>
+          <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Nesting Layout</DialogTitle>
+              <DialogDescription>
+                Parts grouped by material and thickness, nested onto standard sheets.
+              </DialogDescription>
+            </DialogHeader>
+
+            {nestingLoading && (
+              <div className="flex flex-col items-center justify-center py-16">
+                <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
+                <p className="text-sm text-muted-foreground">Running nesting algorithm...</p>
+              </div>
+            )}
+
+            {nestingError && (
+              <div className="py-8 text-center">
+                <XCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
+                <p className="text-sm text-destructive">{nestingError}</p>
+              </div>
+            )}
+
+            {nestingResult && (
+              <div className="space-y-6">
+                {/* Summary */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold">{nestingResult.summary?.totalParts || 0}</p>
+                    <p className="text-xs text-muted-foreground">Total Parts</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold">{nestingResult.summary?.totalSheets || 0}</p>
+                    <p className="text-xs text-muted-foreground">Sheets Needed</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold">{nestingResult.summary?.overallUtilization || 0}%</p>
+                    <p className="text-xs text-muted-foreground">Utilization</p>
+                  </div>
+                </div>
+
+                {/* Groups */}
+                {nestingResult.groups?.map((group: any, gi: number) => (
+                  <div key={gi} className="border rounded-lg overflow-hidden">
+                    <div className="bg-gray-100 px-4 py-2 flex items-center justify-between">
+                      <h4 className="font-medium text-sm">
+                        {group.material} &middot; {group.thickness}mm
+                      </h4>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span>Sheet: {group.sheetSize?.w} x {group.sheetSize?.h}mm</span>
+                        <span>{group.totalSheets} sheet{group.totalSheets !== 1 ? 's' : ''}</span>
+                        <span>Avg. util: {group.avgUtilization}%</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                      {group.sheets?.map((sheet: any, si: number) => (
+                        <div key={si}>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              Sheet {si + 1} &mdash; {sheet.placements?.length} part{sheet.placements?.length !== 1 ? 's' : ''} &middot; {sheet.utilization}% utilization
+                            </p>
+                            {sheet.nestedDxfBase64 && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => {
+                                  const byteCharacters = atob(sheet.nestedDxfBase64);
+                                  const byteArray = new Uint8Array(byteCharacters.length);
+                                  for (let i = 0; i < byteCharacters.length; i++) {
+                                    byteArray[i] = byteCharacters.charCodeAt(i);
+                                  }
+                                  const blob = new Blob([byteArray], { type: 'application/dxf' });
+                                  const url = URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `nested_${group.material}_${group.thickness}mm_sheet${si + 1}.dxf`;
+                                  a.click();
+                                  URL.revokeObjectURL(url);
+                                }}
+                              >
+                                <Download className="h-3 w-3" />
+                                DXF
+                              </Button>
+                            )}
+                          </div>
+                          {sheet.previewSvg && (
+                            <div
+                              className="border rounded bg-white overflow-hidden"
+                              dangerouslySetInnerHTML={{ __html: sheet.previewSvg }}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Warnings */}
+                {nestingResult.warnings?.length > 0 && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <p className="text-xs font-medium text-yellow-800 mb-1">Warnings</p>
+                    <ul className="text-xs text-yellow-700 list-disc pl-4 space-y-0.5">
+                      {nestingResult.warnings.map((w: string, i: number) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 
