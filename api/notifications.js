@@ -8,6 +8,7 @@
 
 import { Resend } from 'resend';
 import { nestOrder, NestingError } from '../lib/nesting/index.js';
+import { handleInventoryAction } from '../lib/inventory/index.js';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -248,12 +249,18 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   try {
     const action = req.body?.action || new URL(req.url, 'http://localhost').searchParams.get('action') || 'partner';
+
+    // Inventory actions (support GET and POST)
+    if (action.startsWith('inv-')) {
+      return handleInventoryAction(action, req, res);
+    }
+
+    // Original actions (POST only)
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
     switch (action) {
       case 'nest':

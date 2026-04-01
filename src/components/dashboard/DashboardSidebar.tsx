@@ -8,7 +8,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { Users, FileText, Factory, PackageCheck, UserCircle } from "lucide-react"
+import { Users, FileText, Factory, PackageCheck, UserCircle, Package } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -36,6 +36,12 @@ const menuItems = [
     icon: Factory,
     path: "/dashboard/partners",
     description: "Manage production partners"
+  },
+  {
+    title: "Material Inventory",
+    icon: Package,
+    path: "/dashboard/inventory",
+    description: "Inventory & nesting sessions"
   }
 ]
 

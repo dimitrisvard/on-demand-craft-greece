@@ -61,6 +61,14 @@ const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
 const Education = lazy(() => import('./pages/Education'));
 
+// Inventory Management Pages
+const InventoryDashboard = lazy(() => import('./pages/inventory/InventoryDashboard'));
+const StockReceive = lazy(() => import('./pages/inventory/StockReceive'));
+const NestingSessionManager = lazy(() => import('./pages/inventory/NestingSessionManager'));
+const QRScanner = lazy(() => import('./pages/inventory/QRScanner'));
+const InventoryAlerts = lazy(() => import('./pages/inventory/InventoryAlerts'));
+const InventorySettingsPage = lazy(() => import('./pages/inventory/InventorySettingsPage'));
+
 // Customer Portal Pages
 const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
 const MyProjectsPage = lazy(() => import('./pages/customer/MyProjectsPage'));
@@ -100,7 +108,8 @@ function ConditionalFooter() {
                           path.startsWith('/products') ||
                           path.startsWith('/rfq') ||
                           path.startsWith('/customer') ||
-                          path.startsWith('/partner');
+                          path.startsWith('/partner') ||
+                          path.startsWith('/dashboard/inventory');
   
   if (isDashboardRoute) {
     return null;
@@ -235,6 +244,15 @@ function AppContent() {
                 <Route path="/dashboard/company-scanner" element={<CompanyScannerPage />} />
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
                 <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />
+
+                {/* Inventory Management */}
+                <Route path="/dashboard/inventory" element={<InventoryDashboard />} />
+                <Route path="/dashboard/inventory/receive" element={<StockReceive />} />
+                <Route path="/dashboard/inventory/sessions" element={<NestingSessionManager />} />
+                <Route path="/dashboard/inventory/scan" element={<QRScanner />} />
+                <Route path="/dashboard/inventory/scan/:qrCode" element={<QRScanner />} />
+                <Route path="/dashboard/inventory/alerts" element={<InventoryAlerts />} />
+                <Route path="/dashboard/inventory/settings" element={<InventorySettingsPage />} />
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />

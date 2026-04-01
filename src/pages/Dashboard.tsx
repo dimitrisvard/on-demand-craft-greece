@@ -54,6 +54,10 @@ const ProductsModule = () => {
             <ShoppingBag className="h-4 w-4 mr-2" />
             <span>Manage Products</span>
           </Button>
+          <Button variant="outline" onClick={() => navigate('/dashboard/inventory')}>
+            <Package className="h-4 w-4 mr-2" />
+            <span>Material Inventory</span>
+          </Button>
         </div>
       </div>
       <Card className="shadow-sm hover:shadow-md transition-shadow duration-200">
