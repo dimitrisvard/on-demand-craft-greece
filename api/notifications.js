@@ -1,11 +1,13 @@
 /**
- * Consolidated Notifications API
+ * Consolidated Notifications & Production API
  * Routes via `action` body parameter:
- *   action=partner           → notify production partner of new order (was send-partner-notification.js)
- *   action=production-status → notify admin of production status change (was send-production-status-notification.js)
+ *   action=partner           → notify production partner of new order
+ *   action=production-status → notify admin of production status change
+ *   action=nest              → sheet metal 2D nesting engine (POST with files[] + metadata)
  */
 
 import { Resend } from 'resend';
+import { nestOrder, NestingError } from '../lib/nesting/index.js';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -105,6 +107,52 @@ async function handlePartner(req, res) {
   });
 
   return res.status(200).json({ success: true, partnerEmail: partnerEmailResult, message: 'Partner notification email sent successfully' });
+}
+
+// ─── Sheet metal nesting ───
+async function handleNest(req, res) {
+  try {
+    const { files, metadata } = req.body || {};
+
+    if (!files || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or empty "files" array. Provide DXF file contents as strings.',
+      });
+    }
+
+    if (!metadata || !metadata.parts || !Array.isArray(metadata.parts) || metadata.parts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or empty "metadata.parts" array.',
+      });
+    }
+
+    for (const part of metadata.parts) {
+      if (part.fileIndex === undefined || part.fileIndex < 0 || part.fileIndex >= files.length) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid fileIndex ${part.fileIndex} for part "${part.name}".`,
+        });
+      }
+      if (!part.material) {
+        return res.status(400).json({ success: false, error: `Missing "material" for part "${part.name}".` });
+      }
+      if (!part.thickness || part.thickness <= 0) {
+        return res.status(400).json({ success: false, error: `Invalid "thickness" for part "${part.name}".` });
+      }
+    }
+
+    const result = await nestOrder(files, metadata);
+    return res.status(200).json(result);
+  } catch (err) {
+    if (err instanceof NestingError) {
+      const statusMap = { INVALID_DXF: 400, NO_CLOSED_CONTOURS: 400, PART_TOO_LARGE: 400, EMPTY_ORDER: 400, INVALID_METADATA: 400, TIMEOUT: 504 };
+      return res.status(statusMap[err.code] || 500).json({ success: false, error: err.message, code: err.code, details: err.details });
+    }
+    console.error('Nesting error:', err);
+    return res.status(500).json({ success: false, error: 'Internal server error during nesting.' });
+  }
 }
 
 // ─── Production status notification ───
@@ -208,6 +256,8 @@ export default async function handler(req, res) {
     const action = req.body?.action || new URL(req.url, 'http://localhost').searchParams.get('action') || 'partner';
 
     switch (action) {
+      case 'nest':
+        return handleNest(req, res);
       case 'production-status':
         return handleProductionStatus(req, res);
       case 'partner':
