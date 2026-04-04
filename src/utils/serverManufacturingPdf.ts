@@ -130,6 +130,7 @@ export async function generateServerManufacturingPdf(
  *
  * 1. Tries server-side edge function first (vector wireframe PDF)
  * 2. Falls back to client-side Three.js rendering if server unavailable
+ *    (only for STL/OBJ — DXF and STEP require server-side processing)
  */
 export async function generateManufacturingPdfWithFallback(
   fileUrl: string,
@@ -140,10 +141,32 @@ export async function generateManufacturingPdfWithFallback(
   const serverSuccess = await generateServerManufacturingPdf(fileUrl, fileName, partInfo);
   if (serverSuccess) return;
 
-  // Fall back to client-side
+  // DXF files cannot be rendered client-side — provide clear error
+  if (/\.dxf$/i.test(fileName)) {
+    throw new Error(
+      'DXF manufacturing drawing requires the server-side service. ' +
+      'The server may be temporarily unavailable. Please try again or check the edge function logs.'
+    );
+  }
+
+  // STEP files: client-side fallback is fragile, warn clearly on failure
+  if (/\.(step|stp)$/i.test(fileName)) {
+    console.warn('Server-side STEP processing failed. Attempting client-side fallback (may be limited).');
+  }
+
+  // Fall back to client-side for STL/OBJ
   console.log('Falling back to client-side PDF generation');
-  const { generateManufacturingDrawingPdf } = await import('./technicalDrawingPdf');
-  await generateManufacturingDrawingPdf(fileUrl, fileName, partInfo);
+  try {
+    const { generateManufacturingDrawingPdf } = await import('./technicalDrawingPdf');
+    await generateManufacturingDrawingPdf(fileUrl, fileName, partInfo);
+  } catch (err: any) {
+    const isStep = /\.(step|stp)$/i.test(fileName);
+    throw new Error(
+      isStep
+        ? `STEP file processing failed on both server and client. Server-side FreeCAD service may need attention. Error: ${err.message}`
+        : `Client-side PDF generation failed: ${err.message}`
+    );
+  }
 }
 
 /**
