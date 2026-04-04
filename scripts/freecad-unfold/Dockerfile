@@ -8,7 +8,7 @@
 # Build:  docker build -t freecad-unfold .
 # Run:    docker run -p 8000:8000 freecad-unfold
 
-FROM ubuntu:24.04
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
@@ -23,6 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-dev \
     git \
+    meson \
+    ninja-build \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Install FreeCAD SheetMetal Workbench
@@ -32,7 +35,7 @@ RUN mkdir -p /root/.local/share/FreeCAD/Mod && \
 
 # Python dependencies
 COPY requirements.txt /app/requirements.txt
-RUN pip3 install --break-system-packages --no-cache-dir -r /app/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/requirements.txt
 
 # Copy application code
 COPY app/ /app/
