@@ -51,9 +51,13 @@ async function callUnfoldService(
   partInfo: PartInfo,
 ): Promise<UnfoldData | null> {
   const serviceUrl = Deno.env.get("UNFOLD_SERVICE_URL");
-  if (!serviceUrl) return null;
+  if (!serviceUrl) {
+    console.log("UNFOLD_SERVICE_URL not configured — skipping FreeCAD unfold");
+    return null;
+  }
 
   try {
+    console.log(`Calling FreeCAD service at ${serviceUrl}/flat-pattern for ${fileName}`);
     // Try the new FastAPI /unfold endpoint first (returns JSON metadata)
     // We call /flat-pattern for backward compat with the Flask service
     const resp = await fetch(`${serviceUrl}/flat-pattern`, {
@@ -71,7 +75,8 @@ async function callUnfoldService(
     });
 
     if (!resp.ok) {
-      console.log(`FreeCAD service returned ${resp.status}`);
+      const errorBody = await resp.text().catch(() => "");
+      console.log(`FreeCAD service returned ${resp.status}: ${errorBody.slice(0, 200)}`);
       return null;
     }
 
@@ -109,7 +114,7 @@ async function callUnfoldService(
 
     return null;
   } catch (err) {
-    console.log(`FreeCAD service call failed: ${err}`);
+    console.log(`FreeCAD service call failed: ${err}. Service URL: ${serviceUrl}`);
     return null;
   }
 }
@@ -215,6 +220,19 @@ serve(async (req) => {
         }
       } else {
         console.log("FreeCAD unfold not available or failed, using STEP text parsing only");
+        // Surface unfold status in the response for debugging
+        unfoldData = {
+          success: false,
+          part_name: file_name,
+          thickness_mm: 0,
+          flat_pattern: { width_mm: 0, height_mm: 0, outline_edges: [] },
+          bends: [],
+          linear_dimensions: [],
+          unfold_method: "unavailable",
+          _debug_reason: Deno.env.get("UNFOLD_SERVICE_URL")
+            ? "FreeCAD service returned error or timed out"
+            : "UNFOLD_SERVICE_URL not configured in edge function secrets",
+        } as UnfoldData & { _debug_reason: string };
       }
     } else {
       // STL: parse triangles → mesh analysis
@@ -254,6 +272,9 @@ serve(async (req) => {
             id: `B${i + 1}`,
             angle: bl.angle,
           })),
+          unfold_status: unfoldData?.success ? "enhanced" : "basic",
+          unfold_method: unfoldData?.unfold_method || "none",
+          unfold_debug: (unfoldData as Record<string, unknown>)?._debug_reason || undefined,
         },
       }),
       {

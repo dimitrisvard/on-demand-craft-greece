@@ -2438,32 +2438,47 @@ const RfqDetails = (props: RfqDetailsProps) => {
             {nestingResult && (
               <div className="space-y-6">
                 {/* Summary */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-gray-50 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold">{nestingResult.summary?.totalParts || 0}</p>
-                    <p className="text-xs text-muted-foreground">Total Parts</p>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-blue-800">{nestingResult.summary?.totalParts || 0}</p>
+                    <p className="text-xs text-blue-600 font-medium">Total Parts</p>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold">{nestingResult.summary?.totalSheets || 0}</p>
-                    <p className="text-xs text-muted-foreground">Sheets Needed</p>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-emerald-800">{nestingResult.summary?.totalSheets || 0}</p>
+                    <p className="text-xs text-emerald-600 font-medium">Sheets Needed</p>
                   </div>
-                  <div className="bg-gray-50 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold">{nestingResult.summary?.overallUtilization || 0}%</p>
-                    <p className="text-xs text-muted-foreground">Utilization</p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-amber-800">{nestingResult.summary?.overallUtilization || 0}%</p>
+                    <p className="text-xs text-amber-600 font-medium">Utilization</p>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-purple-800">{nestingResult.summary?.totalWeightKg || 0} kg</p>
+                    <p className="text-xs text-purple-600 font-medium">Total Weight</p>
                   </div>
                 </div>
 
                 {/* Groups */}
                 {nestingResult.groups?.map((group: any, gi: number) => (
                   <div key={gi} className="border rounded-lg overflow-hidden">
-                    <div className="bg-gray-100 px-4 py-2 flex items-center justify-between">
-                      <h4 className="font-medium text-sm">
-                        {group.material} &middot; {group.thickness}mm
-                      </h4>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>Sheet: {group.sheetSize?.w} x {group.sheetSize?.h}mm</span>
-                        <span>{group.totalSheets} sheet{group.totalSheets !== 1 ? 's' : ''}</span>
-                        <span>Avg. util: {group.avgUtilization}%</span>
+                    <div className="bg-slate-100 px-4 py-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-sm text-slate-800">
+                          {group.material} &middot; {group.thickness}mm
+                        </h4>
+                        <div className="flex items-center gap-3 text-xs text-slate-600">
+                          <span className="font-medium">Sheet: {group.sheetSize?.w} x {group.sheetSize?.h}mm</span>
+                          <span>{group.totalSheets} sheet{group.totalSheets !== 1 ? 's' : ''}</span>
+                          <span>Avg. util: {group.avgUtilization}%</span>
+                        </div>
+                      </div>
+                      {/* Material summary: total dimensions + weight */}
+                      <div className="flex items-center gap-4 mt-1.5 text-xs">
+                        <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium">
+                          Total area: {group.totalMaterialDimensions?.totalAreaM2 || '—'} m²
+                        </span>
+                        <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded font-medium">
+                          Weight: {group.weightKg || '—'} kg ({group.densityKgM3 || '—'} kg/m³)
+                        </span>
                       </div>
                     </div>
 
