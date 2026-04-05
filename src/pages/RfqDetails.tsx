@@ -417,7 +417,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
       if (typedRfqData.parts_details && Array.isArray(typedRfqData.parts_details)) {
         // Use parts_details from JSONB field
         setRfqItems(typedRfqData.parts_details);
-        await fetchQuoteFiles();
+        // Note: fetchQuoteFiles() is triggered by the useEffect watching rfqItems
+        // Do NOT call it here - rfqItems state has not updated yet in this render cycle,
+        // so the function would read stale (empty) rfqItems and fail to match files.
       } else {
         // Fetch from rfq_items table as fallback (though we're not using this table now)
         const { data: itemsData, error: itemsError } = await supabase
@@ -431,7 +433,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
         } else {
           setRfqItems(itemsData || []);
         }
-        await fetchQuoteFiles();
+        // Note: fetchQuoteFiles() is triggered by the useEffect watching rfqItems
       }
       
     } catch (error) {
