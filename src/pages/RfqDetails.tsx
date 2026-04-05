@@ -2413,7 +2413,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
         {/* Nesting Layout Dialog */}
         <Dialog open={nestingOpen} onOpenChange={setNestingOpen}>
-          <DialogContent className="sm:max-w-[900px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-[95vw] lg:max-w-[1400px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Nesting Layout</DialogTitle>
               <DialogDescription>
