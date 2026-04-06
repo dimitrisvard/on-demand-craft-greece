@@ -137,13 +137,35 @@ export default function OrderDetailsPage() {
         if (rfqError) throw rfqError;
         setRfq(rfqData);
 
+        const typedRfq = rfqData as any;
+
         // Fall back to RFQ's customer if order doesn't have one
-        if (!orderCustomer && (rfqData as any).customers) {
-          orderCustomer = (rfqData as any).customers;
+        if (!orderCustomer && typedRfq.customers) {
+          orderCustomer = typedRfq.customers;
+        }
+
+        // If still no customer, build synthetic customer from RFQ contact fields
+        if (!orderCustomer && (typedRfq.company_name || typedRfq.contact_email)) {
+          orderCustomer = {
+            id: null,
+            company_name: typedRfq.company_name || '',
+            first_name: typedRfq.contact_first_name || '',
+            last_name: typedRfq.contact_last_name || '',
+            contact_name: `${typedRfq.contact_first_name || ''} ${typedRfq.contact_last_name || ''}`.trim(),
+            email: typedRfq.contact_email || '',
+            phone: typedRfq.contact_phone || '',
+            mobile: typedRfq.mobile || '',
+            vat_tax_id: typedRfq.vat_id || '',
+            street_address: typedRfq.address || '',
+            address: typedRfq.address || '',
+            city: typedRfq.city || '',
+            zip_code: typedRfq.zip_code || '',
+            country: typedRfq.country || '',
+          };
         }
 
         // Defensive: parts_details may be undefined or not an array
-        const partsDetails = (rfqData as any).parts_details;
+        const partsDetails = typedRfq.parts_details;
         setParts(Array.isArray(partsDetails) ? partsDetails : []);
         // Fetch files from rfq_files and organize them by parts
         await fetchQuoteFiles(orderData.rfq_id, partsDetails);

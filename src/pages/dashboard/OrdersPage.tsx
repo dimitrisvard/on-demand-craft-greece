@@ -127,7 +127,7 @@ export default function OrdersPage() {
         id: item.id,
         title: item.title,
         customer_id: item.customer_id,
-        customer_name: item.customers?.company_name,
+        customer_name: item.customers?.company_name || 'Unassigned',
         customer_vat: item.customers?.vat_tax_id,
         rfq_id: item.rfq_id,
         partner_id: item.partner_id,

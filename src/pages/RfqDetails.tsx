@@ -1324,6 +1324,17 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [nestingLoading, setNestingLoading] = useState(false);
   const [nestingResult, setNestingResult] = useState<any>(null);
   const [nestingError, setNestingError] = useState<string | null>(null);
+  const [selectedSheetSize, setSelectedSheetSize] = useState<{ w: number; h: number } | null>(null);
+
+  const STANDARD_SHEETS = [
+    { w: 1000, h: 500, name: '1000 x 500' },
+    { w: 1000, h: 1000, name: '1000 x 1000' },
+    { w: 1250, h: 625, name: '1250 x 625' },
+    { w: 1500, h: 750, name: '1500 x 750' },
+    { w: 2000, h: 1000, name: '2000 x 1000' },
+    { w: 2500, h: 1250, name: '2500 x 1250' },
+    { w: 3000, h: 1500, name: '3000 x 1500' },
+  ];
 
   const handleNesting = async () => {
     setNestingLoading(true);
@@ -1371,7 +1382,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
         partsMetadata.push({
           fileIndex: dxfContents.length - 1,
           name: item.product_name || file.file_name.replace(/\.dxf$/i, ''),
-          material: ov?.materialSubtypeLabel || ov?.materialLabel || ov?.material || 'unknown',
+          material: (ov?.materialSubtypeLabel || ov?.materialLabel || ov?.material || 'unknown').trim(),
           thickness: parseFloat(ov?.thickness) || 1.0,
           quantity: item.quantity || 1,
         });
@@ -1396,6 +1407,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
               edgeMargin: 5,
               rotationMode: '90deg',
               optimizationLevel: 'balanced',
+              ...(selectedSheetSize ? { sheetSize: selectedSheetSize } : {}),
             },
           },
         }),
@@ -2423,6 +2435,40 @@ const RfqDetails = (props: RfqDetailsProps) => {
               </DialogDescription>
             </DialogHeader>
 
+            {/* Sheet size selector */}
+            <div className="flex items-center gap-3 border-b pb-3">
+              <label className="text-sm font-medium whitespace-nowrap">Sheet Size:</label>
+              <Select
+                value={selectedSheetSize ? `${selectedSheetSize.w}x${selectedSheetSize.h}` : 'auto'}
+                onValueChange={(val) => {
+                  if (val === 'auto') {
+                    setSelectedSheetSize(null);
+                  } else {
+                    const [w, h] = val.split('x').map(Number);
+                    setSelectedSheetSize({ w, h });
+                  }
+                }}
+              >
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Auto" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto (smallest fit)</SelectItem>
+                  {STANDARD_SHEETS.map(s => (
+                    <SelectItem key={s.name} value={`${s.w}x${s.h}`}>{s.name} mm</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={nestingLoading}
+                onClick={handleNesting}
+              >
+                {nestingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Re-run Nesting'}
+              </Button>
+            </div>
+
             {nestingLoading && (
               <div className="flex flex-col items-center justify-center py-16">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
@@ -2527,6 +2573,27 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     </div>
                   </div>
                 ))}
+
+                {/* Grand Total Summary */}
+                {nestingResult.groups?.length > 1 && (
+                  <div className="bg-slate-50 border border-slate-300 rounded-lg p-4">
+                    <h4 className="font-semibold text-sm text-slate-800 mb-2">Total Material Required</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                      {nestingResult.groups.map((group: any, gi: number) => (
+                        <div key={gi} className="bg-white rounded border p-2">
+                          <p className="text-xs text-muted-foreground">{group.material} {group.thickness}mm</p>
+                          <p className="font-medium">{group.totalSheets} x {group.sheetSize?.w}x{group.sheetSize?.h}mm</p>
+                          <p className="text-xs text-muted-foreground">{group.totalMaterialDimensions?.totalAreaM2 || '—'} m² &middot; {group.weightKg || '—'} kg</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 pt-2 border-t flex items-center gap-6 text-sm font-medium">
+                      <span>Total Sheets: {nestingResult.summary?.totalSheets || 0}</span>
+                      <span>Total Weight: {nestingResult.summary?.totalWeightKg || 0} kg</span>
+                      <span>Overall Utilization: {nestingResult.summary?.overallUtilization || 0}%</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Warnings */}
                 {nestingResult.warnings?.length > 0 && (

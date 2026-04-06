@@ -298,6 +298,26 @@ export async function generateManufacturingDrawingPdf(
     if (w != null) weight = fmtW(w);
   }
 
+  // 3b. Extract flat pattern data (bend info) from server-side analysis
+  let flatPatternData: { dimensions?: { width: number; height: number; thickness: number }; bends?: Array<{ id: string; angle: number; length: number }>; bend_count?: number } | null = null;
+  try {
+    const { extractFlatPattern } = await import('./serverManufacturingPdf');
+    const fpResult = await extractFlatPattern(fileUrl, fileName);
+    if (fpResult?.status === 'completed' && fpResult.flat_pattern) {
+      flatPatternData = fpResult.flat_pattern;
+    }
+  } catch {
+    // Flat pattern extraction failed, continue with fallback
+  }
+
+  // Use flat pattern dimensions if available, otherwise use 3D bounding box
+  const flatW = flatPatternData?.dimensions?.width ?? dims.x;
+  const flatH = flatPatternData?.dimensions?.height ?? dims.z;
+  const flatThickness = flatPatternData?.dimensions?.thickness ?? dims.y;
+  const realBendCount = flatPatternData?.bend_count ?? 0;
+  const realBends = flatPatternData?.bends ?? [];
+  const hasBends = partInfo.needsBending || realBendCount > 0;
+
   // 4. Render views
   const isoView = renderViewSafe(geometries, [0.65, 0.5, 0.65], [0, 1, 0], metrics.center, maxDim, 600, 600);
   const topView = renderViewSafe(geometries, [0, 1, 0], [0, 0, -1], metrics.center, maxDim, 1200, 900);
@@ -372,9 +392,9 @@ export async function generateManufacturingDrawingPdf(
     ['Material:', partInfo.material || '—'],
     ['Thickness:', partInfo.thickness ? `${partInfo.thickness} mm` : '—'],
     ['Process:', partInfo.process || '—'],
-    ['Bending:', partInfo.needsBending ? 'REQUIRED' : 'No'],
+    ['Bending:', hasBends ? `REQUIRED (${realBendCount || '?'} bends)` : 'No'],
     ['Quantity:', partInfo.quantity ? String(partInfo.quantity) : '—'],
-    ['Flat Size:', `${dims.x.toFixed(1)} × ${dims.z.toFixed(1)} mm`],
+    ['Flat Size:', `${flatW.toFixed(1)} × ${flatH.toFixed(1)} mm`],
     ['Bounding Box:', `${dims.x.toFixed(1)} × ${dims.y.toFixed(1)} × ${dims.z.toFixed(1)} mm`],
   ];
   let infoY = y + 11;
@@ -410,7 +430,7 @@ export async function generateManufacturingDrawingPdf(
   }
 
   // Bending badge
-  if (partInfo.needsBending) {
+  if (hasBends) {
     pdf.setFillColor(255, 140, 0);
     pdf.roundedRect(pageW - m - 38, y + 2, 35, 7, 1.5, 1.5, 'F');
     pdf.setFontSize(6);
@@ -423,11 +443,11 @@ export async function generateManufacturingDrawingPdf(
 
   // ── FLAT PATTERN VIEW ─────────────────────────────
   const titleBlockH = 16;
-  const flatH = pageH - y - m - titleBlockH - 2;
+  const flatSectionH = pageH - y - m - titleBlockH - 2;
 
   pdf.setDrawColor(200);
   pdf.setFillColor(255, 255, 255);
-  pdf.rect(m, y, contentW, flatH, 'FD');
+  pdf.rect(m, y, contentW, flatSectionH, 'FD');
 
   // Section label
   pdf.setFontSize(8);
@@ -437,11 +457,11 @@ export async function generateManufacturingDrawingPdf(
   pdf.setFontSize(6);
   pdf.setFont('helvetica', 'normal');
   pdf.setTextColor(140);
-  pdf.text('Bend lines shown as red dashed lines — dimensions in mm', m + 35, y + 6);
+  pdf.text(flatPatternData ? 'Bend lines from analysis — dimensions in mm' : 'Bend lines shown as red dashed lines — dimensions in mm', m + 35, y + 6);
 
   // Main flat pattern image (left ~75%)
   const flatImgW = contentW * 0.72;
-  const flatImgH = flatH - 18;
+  const flatImgH = flatSectionH - 18;
   pdf.addImage(topView, 'PNG', m + 4, y + 9, flatImgW - 8, flatImgH);
 
   // Front view reference (right ~25%)
@@ -480,8 +500,8 @@ export async function generateManufacturingDrawingPdf(
   pdf.setFontSize(7);
   pdf.setFont('helvetica', 'bold');
 
-  // Horizontal dimension (X)
-  const dimLineY = y + flatH - 7;
+  // Horizontal dimension (flat pattern width)
+  const dimLineY = y + flatSectionH - 7;
   const dimStartX = m + flatImgW * 0.12;
   const dimEndX = m + flatImgW * 0.88;
   pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
@@ -489,53 +509,55 @@ export async function generateManufacturingDrawingPdf(
   pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY + 1.2);
   pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY - 1.2);
   pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY + 1.2);
-  const xDimText = `${dims.x.toFixed(1)}`;
+  const xDimText = `${flatW.toFixed(1)}`;
   pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 1.5);
 
-  // Vertical dimension (Z from top view)
+  // Vertical dimension (flat pattern height)
   const vDimX = m + flatImgW - 6;
   const vDimStartY = y + 14;
-  const vDimEndY = y + flatH - 14;
+  const vDimEndY = y + flatSectionH - 14;
   pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
   pdf.line(vDimX, vDimStartY, vDimX - 1.2, vDimStartY + 2.5);
   pdf.line(vDimX, vDimStartY, vDimX + 1.2, vDimStartY + 2.5);
   pdf.line(vDimX, vDimEndY, vDimX - 1.2, vDimEndY - 2.5);
   pdf.line(vDimX, vDimEndY, vDimX + 1.2, vDimEndY - 2.5);
-  const zDimText = `${dims.z.toFixed(1)}`;
+  const zDimText = `${flatH.toFixed(1)}`;
   pdf.text(zDimText, vDimX + 2, (vDimStartY + vDimEndY) / 2, { angle: 90 });
 
-  // Y dimension (thickness) — small annotation
-  if (dims.y > 0.1) {
+  // Thickness annotation
+  if (flatThickness > 0.1) {
     pdf.setFontSize(6);
     pdf.setTextColor(...ACCENT_BLUE);
-    pdf.text(`t = ${dims.y.toFixed(1)} mm`, m + 6, y + flatH - 2);
+    pdf.text(`t = ${flatThickness.toFixed(1)} mm`, m + 6, y + flatSectionH - 2);
   }
 
-  // Simulated bend lines (if bending required)
-  if (partInfo.needsBending) {
+  // Bend lines (red dashed) — use real bend data when available, otherwise simulate
+  if (hasBends) {
     pdf.setDrawColor(...RED);
     pdf.setLineWidth(0.4);
-    // Draw evenly-spaced dashed bend lines across the flat pattern
-    const numBends = Math.max(1, Math.min(4, Math.round(dims.x / (dims.z || dims.x))));
+
+    const numBends = realBendCount > 0 ? realBendCount : Math.max(1, Math.min(4, Math.round(flatW / (flatH || flatW))));
     for (let i = 1; i <= numBends; i++) {
       const bx = m + flatImgW * (0.12 + 0.76 * i / (numBends + 1));
       // Dashed line
       const segLen = 3;
       const gapLen = 2;
       let cy2 = y + 12;
-      while (cy2 < y + flatH - 12) {
-        const endY = Math.min(cy2 + segLen, y + flatH - 12);
+      while (cy2 < y + flatSectionH - 12) {
+        const endY = Math.min(cy2 + segLen, y + flatSectionH - 12);
         pdf.line(bx, cy2, bx, endY);
         cy2 = endY + gapLen;
       }
-      // Bend label
+      // Bend label with angle info from real data
       pdf.setFontSize(6);
       pdf.setTextColor(...RED);
-      pdf.text(`B${i}`, bx - 2, y + 10);
+      const bendInfo = realBends[i - 1];
+      const bendLabel = bendInfo ? `B${i} (${bendInfo.angle}\u00B0)` : `B${i}`;
+      pdf.text(bendLabel, bx - 4, y + 10);
     }
   }
 
-  y += flatH + 2;
+  y += flatSectionH + 2;
 
   // ── TITLE BLOCK ───────────────────────────────────
   pdf.setFillColor(...DARK_BLUE);
@@ -548,8 +570,8 @@ export async function generateManufacturingDrawingPdf(
   pdf.text(`Part: ${partInfo.name || 'Untitled'}`, m + 4, y + 6);
   pdf.text(`Generated: ${now.toLocaleDateString('en-GB')} ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`, m + 4, y + 11);
 
-  pdf.text(`Thickness: ${partInfo.thickness || '—'} mm  |  Material: ${partInfo.material || '—'}  |  Bends: ${partInfo.needsBending ? 'Yes' : 'No'}`, contentW / 2 + m, y + 6, { align: 'center' });
-  pdf.text(`Flat size: ${dims.x.toFixed(1)} × ${dims.z.toFixed(1)} mm  |  Weight: ${weight || '—'}`, contentW / 2 + m, y + 11, { align: 'center' });
+  pdf.text(`Thickness: ${partInfo.thickness || '—'} mm  |  Material: ${partInfo.material || '—'}  |  Bends: ${hasBends ? `Yes (${realBendCount || '?'})` : 'No'}`, contentW / 2 + m, y + 6, { align: 'center' });
+  pdf.text(`Flat size: ${flatW.toFixed(1)} × ${flatH.toFixed(1)} mm  |  Weight: ${weight || '—'}`, contentW / 2 + m, y + 11, { align: 'center' });
 
   pdf.setFont('helvetica', 'bold');
   pdf.text('MICRONS HUB DV E.E.', pageW - m - 4, y + 6, { align: 'right' });
