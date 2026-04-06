@@ -22,7 +22,8 @@ import {
   Radio,
   Scan,
   Building2,
-  Rocket
+  Rocket,
+  Layers
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -62,6 +63,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     const path = location.pathname;
     if (path === '/dashboard' || path === '/') return 'overview';
     if (path === '/dashboard/analytics') return 'analytics';
+    if (path.startsWith('/dashboard/materials')) return 'materials';
     if (path.startsWith('/dashboard/blog')) return 'blog';
     if (path.startsWith('/dashboard/auto-blog')) return 'auto-blog';
     if (path.startsWith('/dashboard/email-marketing')) return 'email-marketing';
@@ -168,11 +170,17 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<Factory className="h-4 w-4" />}
                       label="Production Partners"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "products"}
                       onClick={() => handleNavigation("/products")}
                       icon={<ShoppingBag className="h-4 w-4" />}
                       label="Products & Inventory"
+                    />
+                    <NavButton
+                      active={activeModule === "materials"}
+                      onClick={() => handleNavigation("/dashboard/materials")}
+                      icon={<Layers className="h-4 w-4" />}
+                      label="Material Catalog"
                     />
                     <NavButton
                       active={activeModule === "rfq-orders"}
@@ -383,11 +391,17 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<Factory className="h-4 w-4" />}
                       label="Production Partners"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "products"}
                       onClick={() => handleNavigation("/products")}
                       icon={<ShoppingBag className="h-4 w-4" />}
                       label="Products & Inventory"
+                    />
+                    <NavButton
+                      active={activeModule === "materials"}
+                      onClick={() => handleNavigation("/dashboard/materials")}
+                      icon={<Layers className="h-4 w-4" />}
+                      label="Material Catalog"
                     />
                     <NavButton
                       active={activeModule === "rfq-orders"}
