@@ -28,6 +28,8 @@ import {
   Layers,
   Weight,
   Box,
+  ArrowLeft,
+  Sparkles,
 } from "lucide-react";
 
 const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
@@ -207,9 +209,17 @@ export default function RfqManagement() {
 
   async function fetchCustomers() {
     try {
-      const { data, error } = await supabase.from('customers').select('id, company_name').order('company_name', { ascending: true });
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, company_name, email, first_name, last_name, contact_name')
+        .order('company_name', { ascending: true });
       if (error) throw error;
-      setCustomers(data as Customer[]);
+      // Use company_name, fall back to contact_name/email so self-registered customers are visible
+      const mapped: Customer[] = (data || []).map((c: any) => ({
+        id: c.id,
+        company_name: c.company_name || c.contact_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.email || 'Unknown',
+      }));
+      setCustomers(mapped);
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to load customers", variant: "destructive" });
     }
@@ -517,6 +527,30 @@ export default function RfqManagement() {
     }
   };
 
+  const generateRfqNumber = async (): Promise<string> => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const dateStr = `${day}${month}${year}`;
+    const prefix = `RFQ-${dateStr}-`;
+
+    // Count existing RFQs with same prefix
+    const { data: todayRfqs } = await supabase
+      .from('rfqs')
+      .select('title')
+      .like('title', `${prefix}%`);
+
+    const seq = (todayRfqs?.length || 0) + 1;
+    return `${prefix}${seq}`;
+  };
+
+  const handleOpenCreateRfq = async () => {
+    const rfqNumber = await generateRfqNumber();
+    setNewRfq(prev => ({ ...prev, title: rfqNumber }));
+    setIsRfqDialogOpen(true);
+  };
+
   const handleRfqInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setNewRfq({ ...newRfq, [e.target.name]: e.target.value });
   };
@@ -534,11 +568,20 @@ export default function RfqManagement() {
     return rfq.parts_details[0].product_name || null;
   };
 
-  // ── RFQ Card (matching customer-side pattern) ──────────────
+  // Check if an RFQ is "new" — received status or created within 48 hours
+  const isNewRfq = (rfq: RFQ): boolean => {
+    if (rfq.status === 'received') return true;
+    const created = new Date(rfq.created_at);
+    const hoursAgo = (Date.now() - created.getTime()) / (1000 * 60 * 60);
+    return hoursAgo < 48 && rfq.status === 'draft';
+  };
+
+  // ── RFQ Card ──────────────
   const renderRfqCard = (rfq: RFQ) => {
     const partsQty = getPartsQtySummary(rfq);
     const statusConfig = RFQ_STATUS_CONFIG[rfq.status];
     const isDeleting = deleteConfirmId === rfq.id;
+    const isNew = isNewRfq(rfq);
 
     // Collect tags from parts
     const processes = new Set<string>();
@@ -562,10 +605,10 @@ export default function RfqManagement() {
     const rfqWeight = rfqVolume && rfqMaterial ? calculateWeight(rfqVolume, rfqMaterial) : null;
 
     return (
-      <Card key={rfq.id} className="mb-3 transition-shadow hover:shadow-md">
-        <CardContent className="p-4 sm:p-6">
+      <div key={rfq.id} className={`bg-white border rounded-lg transition-all hover:shadow-md ${isNew ? 'border-l-4 border-l-blue-500 ring-1 ring-blue-100' : 'border-slate-200'} mb-3`}>
+        <div className="p-4 sm:p-5">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            {/* Thumbnail — always visible */}
+            {/* Thumbnail */}
             <div className="flex-shrink-0 hidden sm:block">
               {rfqThumb ? (
                 <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
@@ -595,14 +638,19 @@ export default function RfqManagement() {
 
             {/* Left: ID, customer, date, status */}
             <div className="flex-1 min-w-0 space-y-1">
-              <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Link
                   to={`/rfq/${rfq.id}`}
-                  className="text-base font-semibold text-primary hover:underline truncate"
+                  className="text-sm font-semibold text-slate-900 hover:text-blue-700 hover:underline truncate"
                 >
                   {rfq.rfq_number || rfq.title || `RFQ ${rfq.id.slice(0, 8)}`}
                 </Link>
-                <Badge className={`${statusConfig.className} border-0 text-xs`}>
+                {isNew && (
+                  <span className="inline-flex items-center gap-1 bg-blue-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                    <Sparkles className="h-3 w-3" />New
+                  </span>
+                )}
+                <Badge className={`${statusConfig.className} border-0 text-[11px] font-medium`}>
                   {statusConfig.label}
                 </Badge>
               </div>
@@ -785,8 +833,8 @@ export default function RfqManagement() {
               </div>
             );
           })()}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   };
 
@@ -825,10 +873,10 @@ export default function RfqManagement() {
     const orderWeight = orderVolume && orderMaterial ? calculateWeight(orderVolume, orderMaterial) : null;
 
     return (
-      <Card key={order.id} className="mb-3 transition-shadow hover:shadow-md">
-        <CardContent className="p-4 sm:p-6">
+      <div key={order.id} className="bg-white border border-slate-200 rounded-lg mb-3 transition-all hover:shadow-md">
+        <div className="p-4 sm:p-5">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-            {/* Thumbnail — always visible */}
+            {/* Thumbnail */}
             <div className="flex-shrink-0 hidden sm:block">
               {orderThumb ? (
                 <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
@@ -1042,8 +1090,8 @@ export default function RfqManagement() {
               </div>
             );
           })()}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   };
 
@@ -1094,19 +1142,19 @@ export default function RfqManagement() {
 
   // ── Empty state ────────────────────────────────────────────
   const renderEmptyState = (type: 'rfqs' | 'orders') => (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="rounded-full bg-muted p-6 mb-6">
-        {type === 'rfqs' ? <FileText className="h-12 w-12 text-muted-foreground" /> : <Package className="h-12 w-12 text-muted-foreground" />}
+    <div className="bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center py-16 text-center">
+      <div className="rounded-full bg-slate-100 p-5 mb-5">
+        {type === 'rfqs' ? <FileText className="h-10 w-10 text-slate-400" /> : <Package className="h-10 w-10 text-slate-400" />}
       </div>
-      <h3 className="text-xl font-semibold mb-2">No {type === 'rfqs' ? 'RFQs' : 'orders'} found</h3>
-      <p className="text-muted-foreground mb-6 max-w-md">
+      <h3 className="text-lg font-semibold text-slate-900 mb-1">No {type === 'rfqs' ? 'RFQs' : 'orders'} found</h3>
+      <p className="text-sm text-slate-500 mb-5 max-w-md">
         {type === 'rfqs'
           ? 'Create a new RFQ to get started with quoting.'
           : 'Orders are created when RFQs are approved.'}
       </p>
       {type === 'rfqs' && (
-        <Button onClick={() => { setIsRfqDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" /> New RFQ
+        <Button onClick={handleOpenCreateRfq} size="sm" className="gap-1.5">
+          <Plus className="h-3.5 w-3.5" /> New RFQ
         </Button>
       )}
     </div>
@@ -1114,8 +1162,8 @@ export default function RfqManagement() {
 
   // ── Loading state ──────────────────────────────────────────
   const renderLoading = () => (
-    <div className="flex items-center justify-center py-20">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+    <div className="bg-white border border-slate-200 rounded-lg flex items-center justify-center py-20">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
     </div>
   );
 
@@ -1141,83 +1189,98 @@ export default function RfqManagement() {
 
   return (
     <PersistentDashboardLayout>
-      <div className="container mx-auto max-w-5xl space-y-6">
-        {/* Page Header */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold tracking-tight">RFQ & Orders</h1>
-          <Button onClick={() => setIsRfqDialogOpen(true)}>
-            <FilePlus className="mr-2 h-4 w-4" /> New RFQ
+      <div className="min-h-screen bg-slate-50">
+        {/* Top bar — materials section style */}
+        <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <Link to="/dashboard" className="text-sm text-slate-500 hover:text-slate-700">
+              <ArrowLeft className="h-4 w-4" />
+            </Link>
+            <div>
+              <h1 className="text-lg font-semibold text-slate-900">RFQ & Orders</h1>
+              <p className="text-xs text-slate-500">Manage requests for quotation and production orders</p>
+            </div>
+          </div>
+          <Button onClick={handleOpenCreateRfq} size="sm" className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> New RFQ
           </Button>
         </div>
 
-        {/* Search and Filters */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search by RFQ number, order ID, title, or customer..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-muted-foreground whitespace-nowrap">From</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring" />
-            <label className="text-sm text-muted-foreground whitespace-nowrap">To</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border rounded-md px-2 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring" />
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as "rfqs" | "orders")}>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <TabsList>
-              <TabsTrigger value="rfqs">
-                RFQs
-                {rfqCount > 0 && (
-                  <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">{rfqCount}</span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="orders">
-                Orders
-                {orderCount > 0 && (
-                  <span className="ml-1.5 text-xs bg-muted-foreground/20 rounded-full px-2 py-0.5">{orderCount}</span>
-                )}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Status filter for RFQs */}
-            {mainTab === 'rfqs' && (
-              <div className="flex gap-1 flex-wrap">
-                {(['all', 'draft', 'sent', 'received', 'approved', 'rejected'] as const).map(s => (
-                  <Button
-                    key={s}
-                    variant={statusFilter === s ? 'default' : 'outline'}
-                    size="sm"
-                    className="text-xs"
-                    onClick={() => setStatusFilter(s)}
-                  >
-                    {s === 'all' ? 'All' : RFQ_STATUS_CONFIG[s].label}
-                  </Button>
-                ))}
+        {/* Content */}
+        <div className="px-6 py-5 max-w-6xl mx-auto space-y-4">
+          {/* Filters bar */}
+          <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search by RFQ number, order ID, title, or customer..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-md text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
               </div>
-            )}
-
-            {/* Calendar link for orders */}
-            {mainTab === 'orders' && (
-              <Button variant="outline" size="sm" onClick={() => navigate('/calendar')}>
-                <Calendar className="h-4 w-4 mr-1" /> Calendar
-              </Button>
-            )}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 whitespace-nowrap">From</label>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-slate-200 rounded-md px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                <label className="text-xs text-slate-500 whitespace-nowrap">To</label>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="border border-slate-200 rounded-md px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+              </div>
+            </div>
           </div>
 
-          <div className="mt-6">
-            <TabsContent value="rfqs" className="mt-0">{renderContent()}</TabsContent>
-            <TabsContent value="orders" className="mt-0">{renderContent()}</TabsContent>
-          </div>
-        </Tabs>
+          {/* Tabs */}
+          <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as "rfqs" | "orders")}>
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <TabsList className="bg-slate-100">
+                <TabsTrigger value="rfqs">
+                  RFQs
+                  {rfqCount > 0 && (
+                    <span className="ml-1.5 text-[10px] bg-slate-300/50 rounded-full px-2 py-0.5">{rfqCount}</span>
+                  )}
+                </TabsTrigger>
+                <TabsTrigger value="orders">
+                  Orders
+                  {orderCount > 0 && (
+                    <span className="ml-1.5 text-[10px] bg-slate-300/50 rounded-full px-2 py-0.5">{orderCount}</span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Status filter pills for RFQs */}
+              {mainTab === 'rfqs' && (
+                <div className="flex gap-1 flex-wrap">
+                  {(['all', 'draft', 'sent', 'received', 'approved', 'rejected'] as const).map(s => (
+                    <button
+                      key={s}
+                      onClick={() => setStatusFilter(s)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                        statusFilter === s
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {s === 'all' ? 'All' : RFQ_STATUS_CONFIG[s].label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Calendar link for orders */}
+              {mainTab === 'orders' && (
+                <Button variant="outline" size="sm" className="text-xs gap-1" onClick={() => navigate('/calendar')}>
+                  <Calendar className="h-3.5 w-3.5" /> Calendar
+                </Button>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <TabsContent value="rfqs" className="mt-0">{renderContent()}</TabsContent>
+              <TabsContent value="orders" className="mt-0">{renderContent()}</TabsContent>
+            </div>
+          </Tabs>
+        </div>
       </div>
 
       {/* ── Dialogs ────────────────────────────────────────── */}

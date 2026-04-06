@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { LayoutGrid, Table2, ArrowLeft, Plus } from 'lucide-react';
+import { LayoutGrid, Table2, ArrowLeft, Plus, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import CatalogSidebar from '@/components/catalog/CatalogSidebar';
@@ -139,6 +139,12 @@ export default function MaterialCatalogPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link to="/dashboard">
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1">
+                <Home className="h-3 w-3" />
+                Dashboard
+              </Button>
+            </Link>
             {/* View toggle */}
             <div className="bg-slate-100 rounded-md p-0.5 flex">
               <button
