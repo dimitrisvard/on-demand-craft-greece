@@ -69,6 +69,10 @@ const QRScanner = lazy(() => import('./pages/inventory/QRScanner'));
 const InventoryAlerts = lazy(() => import('./pages/inventory/InventoryAlerts'));
 const InventorySettingsPage = lazy(() => import('./pages/inventory/InventorySettingsPage'));
 
+// Material Catalog Pages
+const MaterialCatalogPage = lazy(() => import('./pages/catalog/MaterialCatalogPage'));
+const MaterialAdminPage = lazy(() => import('./pages/catalog/MaterialAdminPage'));
+
 // Customer Portal Pages
 const CustomerDashboard = lazy(() => import('./pages/customer/CustomerDashboard'));
 const MyProjectsPage = lazy(() => import('./pages/customer/MyProjectsPage'));
@@ -244,6 +248,11 @@ function AppContent() {
                 <Route path="/dashboard/company-scanner" element={<CompanyScannerPage />} />
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
                 <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />
+
+                {/* Material Catalog */}
+                <Route path="/dashboard/materials" element={<MaterialCatalogPage />} />
+                <Route path="/dashboard/materials/admin" element={<MaterialAdminPage />} />
+                <Route path="/dashboard/materials/:categorySlug" element={<MaterialCatalogPage />} />
 
                 {/* Inventory Management */}
                 <Route path="/dashboard/inventory" element={<InventoryDashboard />} />
