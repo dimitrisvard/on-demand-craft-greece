@@ -1325,7 +1325,10 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [nestingResult, setNestingResult] = useState<any>(null);
   const [nestingError, setNestingError] = useState<string | null>(null);
   const [selectedSheetSize, setSelectedSheetSize] = useState<{ w: number; h: number } | null>(null);
+  const [dbMaterials, setDbMaterials] = useState<any[]>([]);
+  const [selectedDbMaterial, setSelectedDbMaterial] = useState<string>('');
 
+  // Standard fallback sheets (used when no DB materials available)
   const STANDARD_SHEETS = [
     { w: 1000, h: 500, name: '1000 x 500' },
     { w: 1000, h: 1000, name: '1000 x 1000' },
@@ -1336,6 +1339,22 @@ const RfqDetails = (props: RfqDetailsProps) => {
     { w: 3000, h: 1500, name: '3000 x 1500' },
   ];
 
+  // Fetch sheet metal materials from database
+  useEffect(() => {
+    const fetchDbMaterials = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('materials')
+          .select('*')
+          .eq('category', 'sheet_metal')
+          .eq('is_active', true)
+          .order('name');
+        if (!error && data) setDbMaterials(data);
+      } catch { /* DB materials optional */ }
+    };
+    fetchDbMaterials();
+  }, []);
+
   const handleNesting = async () => {
     setNestingLoading(true);
     setNestingError(null);
@@ -1345,38 +1364,79 @@ const RfqDetails = (props: RfqDetailsProps) => {
     try {
       // Collect all DXF files and their associated items
       const dxfEntries: { file: QuoteFile; item: any }[] = [];
+      const stepItemsWithoutDxf: { file: QuoteFile; item: any }[] = [];
+
       for (const item of rfqItems) {
         const itemFiles = partFiles[item.id] || [];
         const dxfFiles = itemFiles.filter(f => /\.dxf$/i.test(f.file_name));
-        for (const file of dxfFiles) {
-          dxfEntries.push({ file, item });
+        if (dxfFiles.length > 0) {
+          for (const file of dxfFiles) {
+            dxfEntries.push({ file, item });
+          }
+        } else {
+          // No DXF — check for STEP/STL files that can be converted
+          const cadFiles = itemFiles.filter(f => /\.(step|stp|stl)$/i.test(f.file_name));
+          if (cadFiles.length > 0) {
+            stepItemsWithoutDxf.push({ file: cadFiles[0], item });
+          }
+        }
+      }
+
+      // Auto-extract DXF flat patterns from STEP/STL files
+      if (stepItemsWithoutDxf.length > 0) {
+        toast({ title: 'Extracting flat patterns', description: `Converting ${stepItemsWithoutDxf.length} CAD file(s) to DXF...` });
+        const { extractFlatPattern } = await import('@/utils/serverManufacturingPdf');
+        for (const { file, item } of stepItemsWithoutDxf) {
+          try {
+            const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
+            if (!url) continue;
+            const result = await extractFlatPattern(url, file.file_name, undefined, id);
+            if (result?.dxf_base64) {
+              // Decode base64 DXF and add to entries
+              const dxfContent = atob(result.dxf_base64);
+              dxfEntries.push({
+                file: { ...file, file_name: file.file_name.replace(/\.[^.]+$/, '.dxf') },
+                item,
+                _dxfContent: dxfContent,
+              } as any);
+            }
+          } catch (err) {
+            console.warn(`Failed to extract flat pattern from ${file.file_name}:`, err);
+          }
         }
       }
 
       if (dxfEntries.length === 0) {
-        setNestingError('No DXF files found. Upload DXF flat pattern files to use nesting.');
+        setNestingError('No DXF files found and flat pattern extraction failed. Upload DXF flat pattern files or ensure the FreeCAD service is running for STEP files.');
         return;
       }
 
-      // Fetch DXF file contents from S3
+      // Fetch DXF file contents from S3 (or use pre-extracted content)
       const dxfContents: string[] = [];
       const partsMetadata: any[] = [];
 
       for (let i = 0; i < dxfEntries.length; i++) {
-        const { file, item } = dxfEntries[i];
-        const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
-        if (!url) {
-          toast({ title: 'Warning', description: `Could not get URL for ${file.file_name}`, variant: 'destructive' });
-          continue;
-        }
+        const entry = dxfEntries[i] as any;
+        const { file, item } = entry;
 
-        const response = await fetch(url);
-        if (!response.ok) {
-          toast({ title: 'Warning', description: `Could not download ${file.file_name}`, variant: 'destructive' });
-          continue;
+        // Use pre-extracted DXF content if available (from STEP conversion)
+        if (entry._dxfContent) {
+          dxfContents.push(entry._dxfContent);
+        } else {
+          const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
+          if (!url) {
+            toast({ title: 'Warning', description: `Could not get URL for ${file.file_name}`, variant: 'destructive' });
+            continue;
+          }
+
+          const response = await fetch(url);
+          if (!response.ok) {
+            toast({ title: 'Warning', description: `Could not download ${file.file_name}`, variant: 'destructive' });
+            continue;
+          }
+          const content = await response.text();
+          dxfContents.push(content);
         }
-        const content = await response.text();
-        dxfContents.push(content);
 
         const ov = item.original_values as Record<string, any> | undefined;
         partsMetadata.push({
@@ -2435,8 +2495,40 @@ const RfqDetails = (props: RfqDetailsProps) => {
               </DialogDescription>
             </DialogHeader>
 
-            {/* Sheet size selector */}
-            <div className="flex items-center gap-3 border-b pb-3">
+            {/* Sheet size & material selector */}
+            <div className="flex flex-wrap items-center gap-3 border-b pb-3">
+              {/* DB material selection */}
+              {dbMaterials.length > 0 && (
+                <>
+                  <label className="text-sm font-medium whitespace-nowrap">Material:</label>
+                  <Select
+                    value={selectedDbMaterial}
+                    onValueChange={(val) => {
+                      setSelectedDbMaterial(val);
+                      if (val) {
+                        const mat = dbMaterials.find((m: any) => m.id === val);
+                        if (mat) {
+                          // If the material has associated stock with known dimensions, could auto-select
+                          // For now just store the selection for display
+                        }
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-[260px]">
+                      <SelectValue placeholder="Select from inventory..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Any material</SelectItem>
+                      {dbMaterials.map((m: any) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}{m.grade ? ` ${m.grade}` : ''}{m.thickness_mm ? ` — ${m.thickness_mm}mm` : ''}
+                          {m.density_kg_per_m3 ? ` (${m.density_kg_per_m3} kg/m³)` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
               <label className="text-sm font-medium whitespace-nowrap">Sheet Size:</label>
               <Select
                 value={selectedSheetSize ? `${selectedSheetSize.w}x${selectedSheetSize.h}` : 'auto'}
@@ -2533,10 +2625,11 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     <div className="p-4 space-y-4">
                       {group.sheets?.map((sheet: any, si: number) => (
                         <div key={si}>
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Sheet {si + 1} &mdash; {sheet.placements?.length} part{sheet.placements?.length !== 1 ? 's' : ''} &middot; {sheet.utilization}% utilization
-                            </p>
+                          <div className="flex flex-col gap-1 mb-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Sheet {si + 1} &mdash; {sheet.placements?.length} part{sheet.placements?.length !== 1 ? 's' : ''} &middot; {sheet.utilization}% utilization
+                              </p>
                             {sheet.nestedDxfBase64 && (
                               <Button
                                 variant="ghost"
@@ -2560,6 +2653,21 @@ const RfqDetails = (props: RfqDetailsProps) => {
                                 <Download className="h-3 w-3" />
                                 DXF
                               </Button>
+                            )}
+                            </div>
+                            {/* Used area info */}
+                            {sheet.usedBbox && (
+                              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                                <span className="bg-green-50 text-green-800 border border-green-200 px-2 py-0.5 rounded">
+                                  Used area: {sheet.usedBbox.w} x {sheet.usedBbox.h} mm
+                                </span>
+                                <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded">
+                                  Part fill: {sheet.usedUtilization || 0}% of used area
+                                </span>
+                                <span className="bg-orange-50 text-orange-800 border border-orange-200 px-2 py-0.5 rounded">
+                                  Material needed: {sheet.usedBbox.w} x {sheet.usedBbox.h} mm = {sheet.usedWeightKg || 0} kg
+                                </span>
+                              </div>
                             )}
                           </div>
                           {sheet.previewSvg && (
