@@ -66,6 +66,8 @@ const formatStatusLabel = (status: string) =>
   status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+const is3DRenderable = (name: string) => /\.(step|stp|stl|obj|glb|gltf)$/i.test(name);
+const findBest3DFile = (files: any[]) => files.find(f => is3DRenderable(f.file_name)) || files.find(f => is3DFile(f.file_name));
 
 export default function PartnerOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -144,7 +146,7 @@ export default function PartnerOrderDetailPage() {
   const getFilesForPart = (partId: string) => files.filter((f) => f.part_id === partId);
 
   const handleView3D = (partFiles: RfqFile[]) => {
-    const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+    const threeDFile = findBest3DFile(partFiles);
     if (threeDFile) {
       setViewerFile({ url: threeDFile.file_path, type: threeDFile.file_type, name: threeDFile.file_name });
       setViewerOpen(true);

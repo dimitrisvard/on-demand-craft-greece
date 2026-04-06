@@ -11,7 +11,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Save, Loader2, FileText, Download } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Upload, Rocket, Box, Save, Loader2, FileText, Download, Trash2 } from 'lucide-react';
+import { uploadRfqFile, deleteRfqFile } from '@/utils/rfqFileStorage';
 import {
   materialOptions,
   surfaceRoughnessOptions,
@@ -36,6 +37,8 @@ interface RfqFile {
 }
 
 const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+const is3DRenderable = (name: string) => /\.(step|stp|stl|obj|glb|gltf)$/i.test(name);
+const findBest3DFile = (files: any[]) => files.find(f => is3DRenderable(f.file_name)) || files.find(f => is3DFile(f.file_name));
 
 const thicknessOptions = [
   { value: '0.5', label: '0.5 mm' },
@@ -96,6 +99,9 @@ export default function PartConfigurationPage() {
   const [notes, setNotes] = useState('');
   const [deliverySpeed, setDeliverySpeed] = useState('standard');
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
 
   const idx = parseInt(partIndex || '0', 10);
 
@@ -171,8 +177,61 @@ export default function PartConfigurationPage() {
   const selectedMaterial = materialOptions.find((m) => m.value === materialCategory);
 
   // Find the primary 3D file for this part
-  const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+  const threeDFile = findBest3DFile(partFiles);
   const threeDFileUrl = threeDFile ? signedUrls[threeDFile.id] : null;
+
+  // File upload handlers
+  const handleFileDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
+  };
+
+  const handleFileDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) await uploadFiles(files);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) await uploadFiles(files);
+    e.target.value = '';
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (!quoteId) return;
+    setUploading(true);
+    const partId = part?.part_id || undefined;
+    let successCount = 0;
+    for (const file of files) {
+      const result = await uploadRfqFile(file, quoteId, partId);
+      if (result.success) successCount++;
+    }
+    if (successCount > 0) {
+      toast({ title: `${successCount} file${successCount > 1 ? 's' : ''} uploaded` });
+      await fetchRfq();
+    } else {
+      toast({ title: 'Upload failed', variant: 'destructive' });
+    }
+    setUploading(false);
+  };
+
+  const handleDeleteFile = async (file: RfqFile) => {
+    if (!confirm(`Delete "${file.file_name}"?`)) return;
+    setDeletingFileId(file.id);
+    const success = await deleteRfqFile(file.file_path, file.id);
+    if (success) {
+      toast({ title: 'File deleted' });
+      setPartFiles((prev) => prev.filter((f) => f.id !== file.id));
+    } else {
+      toast({ title: 'Failed to delete file', variant: 'destructive' });
+    }
+    setDeletingFileId(null);
+  };
 
   const handlePartMarkingToggle = (markingId: string) => {
     setPartMarking((prev) =>
@@ -651,10 +710,29 @@ export default function PartConfigurationPage() {
                 <CardTitle className="text-base">Part Files</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center">
-                  <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm font-medium">Drag &amp; drop files</p>
+                <div
+                  className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${dragActive ? 'border-primary bg-primary/5' : 'hover:border-primary/50'}`}
+                  onDragEnter={handleFileDrag}
+                  onDragOver={handleFileDrag}
+                  onDragLeave={handleFileDrag}
+                  onDrop={handleFileDrop}
+                  onClick={() => document.getElementById('part-file-input')?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-8 w-8 text-primary animate-spin mb-2" />
+                  ) : (
+                    <Upload className="h-8 w-8 text-muted-foreground mb-2" />
+                  )}
+                  <p className="text-sm font-medium">{uploading ? 'Uploading...' : 'Drag & drop files'}</p>
                   <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
+                  <input
+                    id="part-file-input"
+                    type="file"
+                    multiple
+                    accept=".stl,.step,.stp,.obj,.dxf,.dwg,.pdf,.png,.jpg,.jpeg,.tiff,.iges,.igs"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
                 </div>
                 {partFiles.length > 0 ? (
                   <div className="space-y-2">
@@ -670,9 +748,24 @@ export default function PartConfigurationPage() {
                           <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="truncate">{file.file_name}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                          {(file.file_size / 1024).toFixed(0)} KB
-                        </span>
+                        <div className="flex items-center gap-2 ml-2">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {(file.file_size / 1024).toFixed(0)} KB
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteFile(file)}
+                            disabled={deletingFileId === file.id}
+                          >
+                            {deletingFileId === file.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>

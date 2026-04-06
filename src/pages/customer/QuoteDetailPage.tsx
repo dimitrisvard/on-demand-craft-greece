@@ -104,6 +104,8 @@ export default function QuoteDetailPage() {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+  const is3DRenderable = (name: string) => /\.(step|stp|stl|obj|glb|gltf)$/i.test(name);
+  const findBest3DFile = (files: any[]) => files.find((f: any) => is3DRenderable(f.file_name)) || files.find((f: any) => is3DFile(f.file_name));
 
   useEffect(() => {
     if (id) {
@@ -213,7 +215,7 @@ export default function QuoteDetailPage() {
   };
 
   const handleView3D = (partFiles: RfqFile[]) => {
-    const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+    const threeDFile = findBest3DFile(partFiles);
     if (threeDFile) {
       const signedUrl = signedUrls[threeDFile.id];
       setViewerFile({ url: signedUrl || threeDFile.file_path, type: threeDFile.file_type, name: threeDFile.file_name });
@@ -272,7 +274,7 @@ export default function QuoteDetailPage() {
               const partFiles = getFilesForPart(part.id);
               const has3DFile = partFiles.some((f) => is3DFile(f.file_name));
 
-              const threeDFile = partFiles.find((f) => is3DFile(f.file_name));
+              const threeDFile = findBest3DFile(partFiles);
 
               return (
                 <div key={part.id || index} className="flex gap-3 items-start">

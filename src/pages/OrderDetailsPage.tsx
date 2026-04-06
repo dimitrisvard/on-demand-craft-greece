@@ -102,6 +102,8 @@ export default function OrderDetailsPage() {
     const extension = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
     return threeDExtensions.includes(extension);
   };
+  const is3DRenderable = (name: string) => /\.(step|stp|stl|obj|glb|gltf)$/i.test(name);
+  const findBest3DFile = (files: any[]) => files.find(f => is3DRenderable(f.file_name)) || files.find(f => is3DFile(f.file_name));
 
   useEffect(() => {
     fetchOrderDetails();
@@ -1669,7 +1671,7 @@ export default function OrderDetailsPage() {
                     }
                   }
 
-                  const threeDFile = itemFiles.find(f => is3DFile(f.file_name));
+                  const threeDFile = findBest3DFile(itemFiles);
                   const has3DFile = !!threeDFile;
                   const isPartner = user?.role === 'partner_seller';
 

@@ -123,6 +123,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   const is3DFile = (name: string) => /\.(stl|obj|glb|gltf|step|stp|dxf)$/i.test(name);
+  const is3DRenderable = (name: string) => /\.(step|stp|stl|obj|glb|gltf)$/i.test(name);
+  const findBest3DFile = (files: any[]) => files.find(f => is3DRenderable(f.file_name)) || files.find(f => is3DFile(f.file_name));
 
   const [newItem, setNewItem] = useState<Partial<RfqItem>>({
     product_name: "",
@@ -1876,7 +1878,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
                           })()
                         : parseSpecsFromDescription(item.description || '');
                       const itemPartFiles = partFiles[item.id] || [];
-                      const threeDFile = itemPartFiles.find(f => is3DFile(f.file_name));
+                      const threeDFile = findBest3DFile(itemPartFiles);
                       const has3DFile = !!threeDFile;
 
                       return (
