@@ -74,8 +74,10 @@ export default function CustomersPage() {
     
     const lowercaseQuery = searchQuery.toLowerCase();
     const filtered = customers.filter(customer =>
-      customer.company_name.toLowerCase().includes(lowercaseQuery) ||
-      customer.email.toLowerCase().includes(lowercaseQuery) ||
+      (customer.company_name || '').toLowerCase().includes(lowercaseQuery) ||
+      (customer.email || '').toLowerCase().includes(lowercaseQuery) ||
+      (customer.contact_name || '').toLowerCase().includes(lowercaseQuery) ||
+      (`${customer.first_name || ''} ${customer.last_name || ''}`).toLowerCase().includes(lowercaseQuery) ||
       (customer.vat_tax_id && customer.vat_tax_id.toLowerCase().includes(lowercaseQuery))
     );
     
@@ -451,7 +453,7 @@ export default function CustomersPage() {
             ) : (
               filteredCustomers.map((customer) => (
                 <TableRow key={customer.id}>
-                  <TableCell className="font-medium">{customer.company_name}</TableCell>
+                  <TableCell className="font-medium">{customer.company_name || customer.contact_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || customer.email || 'Unknown'}</TableCell>
                   <TableCell>{customer.vat_tax_id || '-'}</TableCell>
                   <TableCell>{`${customer.first_name} ${customer.last_name}`}</TableCell>
                   <TableCell>{customer.email}</TableCell>

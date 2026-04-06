@@ -568,8 +568,17 @@ export default function RfqManagement() {
     return rfq.parts_details[0].product_name || null;
   };
 
-  // Check if an RFQ is "new" — received status or created within 48 hours
+  // Track which RFQs have been viewed (persisted in localStorage)
+  const [viewedRfqIds, setViewedRfqIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('viewedRfqIds');
+      return new Set(stored ? JSON.parse(stored) : []);
+    } catch { return new Set(); }
+  });
+
+  // Check if an RFQ is "new" — received status or created within 48h, AND not yet viewed
   const isNewRfq = (rfq: RFQ): boolean => {
+    if (viewedRfqIds.has(rfq.id)) return false;
     if (rfq.status === 'received') return true;
     const created = new Date(rfq.created_at);
     const hoursAgo = (Date.now() - created.getTime()) / (1000 * 60 * 60);

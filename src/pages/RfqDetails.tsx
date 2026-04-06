@@ -137,6 +137,14 @@ const RfqDetails = (props: RfqDetailsProps) => {
   useEffect(() => {
     if (id) {
       fetchRfqDetails();
+      // Mark this RFQ as viewed (removes NEW badge in listing)
+      try {
+        const stored = JSON.parse(localStorage.getItem('viewedRfqIds') || '[]');
+        if (!stored.includes(id)) {
+          stored.push(id);
+          localStorage.setItem('viewedRfqIds', JSON.stringify(stored));
+        }
+      } catch { /* ignore */ }
     }
   }, [id]);
 
