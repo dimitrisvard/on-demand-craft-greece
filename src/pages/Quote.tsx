@@ -3,14 +3,16 @@ import { Toaster } from '@/components/ui/toaster';
 import SEOMeta from '../components/SEOMeta';
 import MultiStepQuoteForm from '../components/quote-form/MultiStepQuoteForm';
 import { useTranslation } from 'react-i18next';
+import { useTenant } from '@/contexts/TenantContext';
 
 const Quote = () => {
   const { t } = useTranslation();
+  const { tenant } = useTenant();
 
   return (
     <div className="min-h-screen pt-16">
-      <SEOMeta 
-        title={`${t('seo_quote_title', 'Get Your Manufacturing Quote')} | Microns Hub`}
+      <SEOMeta
+        title={`${t('seo_quote_title', 'Get Your Manufacturing Quote')} | ${tenant?.name || 'Microns Hub'}`}
         description={t('seo_quote_description', 'Upload your CAD files and get a detailed manufacturing quote within 24 hours. Our team of experts is ready to bring your designs to life.')}
         keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
       />

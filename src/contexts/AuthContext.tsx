@@ -3,11 +3,14 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
+import type { TenantRole } from '@/types/tenant';
 
 type UserRole = 'admin' | 'sales_rep' | 'production_manager' | 'customer' | 'supplier' | 'accountant' | 'partner_seller';
 
 interface UserWithRole extends User {
   role?: UserRole;
+  tenantRole?: TenantRole;
+  tenantId?: string | null;
 }
 
 interface AuthContextType {
@@ -23,6 +26,8 @@ interface AuthContextType {
   isAdmin: () => boolean;
   isPartner: () => boolean;
   isCustomer: () => boolean;
+  isSuperAdmin: () => boolean;
+  isTenantAdmin: () => boolean;
   getDefaultRoute: () => string;
 }
 
@@ -54,14 +59,25 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const navigate = useNavigate();
 
   useEffect(() => {
+    const loadUserWithRoles = async (authUser: User) => {
+      const [role, tenantRoleData] = await Promise.all([
+        fetchUserRole(authUser.id),
+        fetchTenantRole(authUser.id),
+      ]);
+      setUser({
+        ...authUser,
+        role,
+        tenantRole: tenantRoleData.tenantRole,
+        tenantId: tenantRoleData.tenantId,
+      });
+    };
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
 
         if (session?.user) {
-          fetchUserRole(session.user.id).then(role => {
-            setUser({ ...session.user, role });
-          });
+          loadUserWithRoles(session.user);
         } else {
           setUser(null);
         }
@@ -74,9 +90,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       setSession(session);
 
       if (session?.user) {
-        fetchUserRole(session.user.id).then(role => {
-          setUser({ ...session.user, role });
-        });
+        loadUserWithRoles(session.user);
       } else {
         setUser(null);
       }
@@ -102,6 +116,24 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
   };
 
+  const fetchTenantRole = async (userId: string): Promise<{ tenantRole?: TenantRole; tenantId?: string | null }> => {
+    try {
+      const { data, error } = await supabase
+        .from('user_tenant_roles')
+        .select('role, tenant_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error && error.code !== 'PGRST116') throw error;
+      return {
+        tenantRole: data?.role as TenantRole | undefined,
+        tenantId: data?.tenant_id,
+      };
+    } catch (error) {
+      console.error("Error fetching tenant role:", error);
+      return {};
+    }
+  };
+
   const signIn = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -112,10 +144,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       throw error;
     }
 
-    // Fetch user role and navigate to the correct portal
+    // Fetch user role + tenant role and navigate to the correct portal
     if (data.user) {
-      const role = await fetchUserRole(data.user.id);
-      setUser({ ...data.user, role });
+      const [role, tenantRoleData] = await Promise.all([
+        fetchUserRole(data.user.id),
+        fetchTenantRole(data.user.id),
+      ]);
+      setUser({ ...data.user, role, tenantRole: tenantRoleData.tenantRole, tenantId: tenantRoleData.tenantId });
       const targetRoute = getRouteForRole(role);
       navigate(targetRoute);
     }
@@ -228,6 +263,14 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     return hasRole('customer') || (!user?.role && !!user);
   };
 
+  const isSuperAdmin = (): boolean => {
+    return user?.tenantRole === 'super_admin';
+  };
+
+  const isTenantAdmin = (): boolean => {
+    return user?.tenantRole === 'tenant_admin';
+  };
+
   const getDefaultRoute = (): string => {
     return getRouteForRole(user?.role);
   };
@@ -246,6 +289,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       isAdmin,
       isPartner,
       isCustomer,
+      isSuperAdmin,
+      isTenantAdmin,
       getDefaultRoute,
     }}>
       {children}

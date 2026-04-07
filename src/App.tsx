@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePageTracking } from './hooks/usePageTracking';
 import AuthProvider from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
+import { TenantProvider } from './contexts/TenantContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
@@ -89,6 +90,10 @@ const PartnerFinancePage = lazy(() => import('./pages/partner/PartnerFinancePage
 const PartnerOrderDetailPage = lazy(() => import('./pages/partner/PartnerOrderDetailPage'));
 const PartnerOrdersPage = lazy(() => import('./pages/partner/PartnerOrdersPage'));
 
+// Multi-Tenant Admin Pages
+const TenantsListPage = lazy(() => import('./pages/dashboard/tenants/TenantsListPage'));
+const TenantEditPage = lazy(() => import('./pages/dashboard/tenants/TenantEditPage'));
+
 // Loading component
 const PageLoader = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -130,6 +135,7 @@ function AppContent() {
     <>
       <ScrollToTop />
       <SEORedirects />
+      <TenantProvider>
       <LanguageProvider>
         <AuthProvider>
             <Navbar />
@@ -262,6 +268,11 @@ function AppContent() {
                 <Route path="/dashboard/inventory/scan/:qrCode" element={<QRScanner />} />
                 <Route path="/dashboard/inventory/alerts" element={<InventoryAlerts />} />
                 <Route path="/dashboard/inventory/settings" element={<InventorySettingsPage />} />
+
+                {/* Multi-Tenant Management */}
+                <Route path="/dashboard/tenants" element={<TenantsListPage />} />
+                <Route path="/dashboard/tenants/:id" element={<TenantEditPage />} />
+
                 <Route path="/cookie-policy" element={<CookiePolicy />} />
                 {/* Legacy impressum route without language prefix - for backward compatibility */}
                 <Route path="/impressum" element={<ImpressumPage />} />
@@ -272,6 +283,7 @@ function AppContent() {
           <ConditionalFooter />
         </AuthProvider>
       </LanguageProvider>
+      </TenantProvider>
     </>
   );
 }

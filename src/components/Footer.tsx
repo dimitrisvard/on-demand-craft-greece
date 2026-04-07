@@ -2,10 +2,12 @@ import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Facebook, Twitter, Linkedin, Instagram, FileText, Scale } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useTenant } from '@/contexts/TenantContext';
 
 const Footer = () => {
   const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
+  const { tenant } = useTenant();
   
   return (
     <footer className="bg-white text-gray-800 border-t border-gray-200">
@@ -13,14 +15,14 @@ const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           <div className="space-y-4">
             <Link to={getLocalizedPath('/')}>
-              <img 
-                src="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png" 
-                alt="Microns Hub Logo" 
+              <img
+                src={tenant?.logoUrl || "/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"}
+                alt={`${tenant?.name || 'Microns Hub'} Logo`}
                 className="h-12"
               />
             </Link>
             <p className="text-sm mt-4 text-gray-600">
-              {t('footer_company_desc', "Microns Hub is Greece's premier on-demand manufacturing platform, specializing in precision CNC machining, sheet metal fabrication and more.")}
+              {tenant?.welcomeMessage || t('footer_company_desc', "Microns Hub is Greece's premier on-demand manufacturing platform, specializing in precision CNC machining, sheet metal fabrication and more.")}
             </p>
             <div className="flex space-x-4 pt-2">
               <SocialIcon icon={<Facebook size={18} />} />
@@ -58,15 +60,15 @@ const Footer = () => {
             <ul className="space-y-3">
               <li className="flex items-start">
                 <MapPin size={18} className="mr-2 text-brand-accent shrink-0 mt-1" />
-                <span className="text-gray-600">{t('footer_address', 'Kosti Fragkouli 3, Heraklion Greece 71414')}</span>
+                <span className="text-gray-600">{tenant?.address || t('footer_address', 'Kosti Fragkouli 3, Heraklion Greece 71414')}</span>
               </li>
               <li className="flex items-center">
                 <Phone size={18} className="mr-2 text-brand-accent" />
-                <span className="text-gray-600">+302104447830</span>
+                <span className="text-gray-600">{tenant?.contactPhone || '+302104447830'}</span>
               </li>
               <li className="flex items-center">
                 <Mail size={18} className="mr-2 text-brand-accent" />
-                <span className="text-gray-600">info@micronshub.eu</span>
+                <span className="text-gray-600">{tenant?.contactEmail || 'info@micronshub.eu'}</span>
               </li>
               <li className="flex items-center">
                 <FileText size={18} className="mr-2 text-brand-accent" />
@@ -83,7 +85,7 @@ const Footer = () => {
         </div>
 
         <div className="border-t border-gray-200 mt-12 pt-6 text-center text-sm text-gray-500">
-          <p>&copy; {new Date().getFullYear()} Microns Hub. {t('footer_rights_reserved', 'All rights reserved.')}</p>
+          <p>&copy; {new Date().getFullYear()} {tenant?.name || 'Microns Hub'}. {t('footer_rights_reserved', 'All rights reserved.')}</p>
         </div>
       </div>
     </footer>

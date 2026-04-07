@@ -35,6 +35,7 @@ import {
 } from 'three';
 import { getCatalogMaterials } from '@/utils/catalogApi';
 import type { CatalogMaterial } from '@/types/catalog';
+import { useTenant } from '@/contexts/TenantContext';
 
 // ── Darker material for embedded viewer ──
 const darkCadMaterial = new MeshPhongMaterial({
@@ -311,11 +312,31 @@ function getSubtypesForMaterial(materialValue: string, options: DbMaterialOption
   return options.find(m => m.value === materialValue)?.subtypes || [];
 }
 
+// Map capability keys to quote form process values
+const CAPABILITY_TO_PROCESS: Record<string, string> = {
+  'cnc_milling': 'cnc-milling',
+  'cnc_turning': 'turning',
+  'laser_cutting': 'laser-cutting',
+  'sheet_metal': 'sheet-metal',
+  '3d_printing': '3d-printing',
+  'injection_molding': 'injection-molding',
+};
+
 const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
   const { values, errors, touched, handleChange, setFieldValue } = formikProps;
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { tenant } = useTenant();
   const [expandedParts, setExpandedParts] = useState<Set<number>>(new Set([0]));
+
+  // Determine which processes are enabled for this tenant
+  const enabledProcesses = useMemo(() => {
+    if (!tenant?.capabilities) return null; // null = show all (no tenant loaded yet)
+    return tenant.capabilities
+      .filter((c) => c.isEnabled)
+      .map((c) => CAPABILITY_TO_PROCESS[c.key])
+      .filter(Boolean);
+  }, [tenant]);
 
   // Fetch materials from database, fall back to static options
   const [materialOptions, setMaterialOptions] = useState<DbMaterialOption[]>(staticMaterialOptions);
@@ -520,12 +541,24 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                               <SelectValue placeholder={t('quote_form_select_manufacturing_process')} />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="cnc-milling">{t('quote_form_cnc_milling')}</SelectItem>
-                              <SelectItem value="turning">{t('quote_form_turning')}</SelectItem>
-                              <SelectItem value="laser-cutting">{t('quote_form_laser_cutting')}</SelectItem>
-                              <SelectItem value="sheet-metal">{t('quote_form_sheet_metal')}</SelectItem>
-                              <SelectItem value="3d-printing">{t('quote_form_3d_printing')}</SelectItem>
-                              <SelectItem value="injection-molding">{t('quote_form_injection_molding')}</SelectItem>
+                              {(!enabledProcesses || enabledProcesses.includes('cnc-milling')) && (
+                                <SelectItem value="cnc-milling">{t('quote_form_cnc_milling')}</SelectItem>
+                              )}
+                              {(!enabledProcesses || enabledProcesses.includes('turning')) && (
+                                <SelectItem value="turning">{t('quote_form_turning')}</SelectItem>
+                              )}
+                              {(!enabledProcesses || enabledProcesses.includes('laser-cutting')) && (
+                                <SelectItem value="laser-cutting">{t('quote_form_laser_cutting')}</SelectItem>
+                              )}
+                              {(!enabledProcesses || enabledProcesses.includes('sheet-metal')) && (
+                                <SelectItem value="sheet-metal">{t('quote_form_sheet_metal')}</SelectItem>
+                              )}
+                              {(!enabledProcesses || enabledProcesses.includes('3d-printing')) && (
+                                <SelectItem value="3d-printing">{t('quote_form_3d_printing')}</SelectItem>
+                              )}
+                              {(!enabledProcesses || enabledProcesses.includes('injection-molding')) && (
+                                <SelectItem value="injection-molding">{t('quote_form_injection_molding')}</SelectItem>
+                              )}
                             </SelectContent>
                           </Select>
                           {touched.parts?.[index]?.process && errors.parts?.[index]?.process && (

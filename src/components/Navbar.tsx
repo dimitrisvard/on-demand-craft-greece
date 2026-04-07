@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, LogOut, ChevronDown, Cog, Square, Box, Layers, User, FolderOpen, Database, Wallet, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTenant } from '@/contexts/TenantContext';
 import { Button } from '@/components/ui/button';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -20,6 +21,7 @@ const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
   const { user, signOut, isAdmin, isPartner, isCustomer } = useAuth();
+  const { tenant, isTenantSubdomain } = useTenant();
   const { t } = useTranslation();
   const { getLocalizedPath, getPathWithoutLanguage } = useLanguage();
 
@@ -47,9 +49,9 @@ const Navbar = () => {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white shadow-md py-3">
       <div className="container-custom flex justify-between items-center">
         <Link to={getLocalizedPath('/')} className="flex items-center">
-          <img 
-            src="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png" 
-            alt="Microns Hub Logo" 
+          <img
+            src={tenant?.logoUrl || "/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"}
+            alt={`${tenant?.name || 'Microns Hub'} Logo`}
             className="h-10"
           />
         </Link>

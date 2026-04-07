@@ -81,6 +81,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/company-scanner') return 'company-scanner';
     if (path === '/dashboard/tenders') return 'tenders';
     if (path === '/dashboard/funded-startups') return 'funded-startups';
+    if (path.startsWith('/dashboard/tenants')) return 'tenants';
     return 'overview';
   };
 
@@ -303,6 +304,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
                     <NavButton
+                      active={activeModule === "tenants"}
+                      onClick={() => handleNavigation("/dashboard/tenants")}
+                      icon={<Building2 className="h-4 w-4" />}
+                      label="Tenants"
+                    />
+                    <NavButton
                       active={activeModule === "notifications"}
                       onClick={() => handleNavigation("/dashboard/notifications")}
                       icon={<Bell className="h-4 w-4" />}
@@ -518,6 +525,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                     System
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
+                    <NavButton
+                      active={activeModule === "tenants"}
+                      onClick={() => handleNavigation("/dashboard/tenants")}
+                      icon={<Building2 className="h-4 w-4" />}
+                      label="Tenants"
+                    />
                     <NavButton
                       active={activeModule === "notifications"}
                       onClick={() => handleNavigation("/dashboard/notifications")}
