@@ -1,7 +1,7 @@
 import React, { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Canvas, useThree, useFrame, extend } from '@react-three/fiber';
-import { useGLTF, GizmoHelper, GizmoViewcube } from '@react-three/drei';
+import { useGLTF, GizmoHelper, GizmoViewcube, Environment, ContactShadows } from '@react-three/drei';
 // @ts-expect-error: no types for TrackballControls
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
 // @ts-expect-error: no types for BufferGeometryUtils
@@ -9,7 +9,7 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils';
 import {
   BufferGeometry,
   Float32BufferAttribute,
-  MeshPhongMaterial,
+  MeshStandardMaterial,
   EdgesGeometry,
   LineBasicMaterial,
   LineSegments,
@@ -27,6 +27,8 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for STLLoader
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { useLoader } from '@react-three/fiber';
+import { EffectComposer, SSAO } from '@react-three/postprocessing';
+import { BlendFunction } from 'postprocessing';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -64,39 +66,40 @@ const isDXF = (name: string) => name.toLowerCase().endsWith('.dxf');
 
 // ── Materials ──────────────────────────────────────────────────────────────────
 
-// MeshPhongMaterial — same approach as Online3DViewer and occt-import-js examples.
-// Phong interpolates normals per-pixel without PBR complexity, producing the
-// cleanest look on tessellated CAD geometry. MeshStandard/PhysicalMaterial require
-// high-quality environment maps to look good; Phong looks great with simple lights.
+// MeshStandardMaterial with environment map — produces the professional "studio"
+// look used by Fusion 360 and OnShape. The environment map provides ambient PBR
+// lighting; metalness/roughness tuned for a brushed-metal/machined-part appearance.
 function createCADMaterial(wireframe = false, renderMode: RenderMode = 'solid') {
   if (renderMode === 'xray') {
-    return new MeshPhongMaterial({
+    return new MeshStandardMaterial({
       color: new Color('#90caf9'),
-      specular: new Color('#333333'),
-      shininess: 30,
+      metalness: 0.0,
+      roughness: 0.8,
       side: DoubleSide,
       wireframe: false,
       flatShading: false,
       transparent: true,
       opacity: 0.35,
       depthWrite: false,
+      envMapIntensity: 0.4,
     });
   }
-  return new MeshPhongMaterial({
-    color: new Color('#546e7a'),     // darker blue-grey for better visibility
-    specular: new Color('#222222'),
-    shininess: 50,
+  return new MeshStandardMaterial({
+    color: new Color('#546e7a'),
+    metalness: 0.15,
+    roughness: 0.55,
     side: DoubleSide,
     wireframe: wireframe || renderMode === 'wireframe',
     flatShading: false,
+    envMapIntensity: 0.8,
   });
 }
 
 function createEdgeMaterial() {
   return new LineBasicMaterial({
-    color: new Color('#546e7a'),
+    color: new Color('#263238'),
     transparent: true,
-    opacity: 0.15,
+    opacity: 0.3,
     depthTest: true,
   });
 }
@@ -258,7 +261,7 @@ function CADMesh({ geometry, wireframe, clippingPlanes }: {
   wireframe: boolean;
   clippingPlanes?: Plane[];
 }) {
-  const edges = useMemo(() => new EdgesGeometry(geometry, 15), [geometry]);
+  const edges = useMemo(() => new EdgesGeometry(geometry, 20), [geometry]);
 
   const material = useMemo(() => {
     const mat = createCADMaterial(wireframe);
@@ -293,7 +296,7 @@ function applyCADMaterialToObj(obj: any, wireframe: boolean, clippingPlanes?: Pl
       if (clippingPlanes?.length) mat.clippingPlanes = clippingPlanes;
       child.material = mat;
       if (!wireframe) {
-        const edgesGeo = new EdgesGeometry(child.geometry, 15);
+        const edgesGeo = new EdgesGeometry(child.geometry, 20);
         const edgeMat = createEdgeMaterial();
         if (clippingPlanes?.length) edgeMat.clippingPlanes = clippingPlanes;
         child.add(new LineSegments(edgesGeo, edgeMat));
@@ -569,7 +572,7 @@ function ViewerScene({ children, state, onStateChange, onResetView, initialView 
   });
 
   return (
-    <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: '#e8ecf0' }}>
+    <div style={{ height: 560, borderRadius: 8, overflow: 'hidden', position: 'relative', background: 'radial-gradient(ellipse at 50% 40%, #f5f7fa 0%, #e2e6ec 100%)' }}>
       <ViewerToolbar
         state={state}
         onStateChange={onStateChange}
@@ -626,22 +629,23 @@ function ViewerScene({ children, state, onStateChange, onResetView, initialView 
         dpr={[1.5, 2]}
         gl={{
           antialias: true,
-          alpha: false,
+          alpha: true,
           powerPreference: 'high-performance',
           toneMapping: ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          toneMappingExposure: 1.0,
           outputColorSpace: 'srgb',
         }}
       >
         <EnableClipping enabled={state.clipping} />
 
-        <color attach="background" args={['#eef1f5']} />
+        {/* Environment map for PBR studio lighting */}
+        <Environment preset="studio" environmentIntensity={0.6} />
 
-        <ambientLight intensity={0.5} color={new Color('#e0e4e8')} />
-        <hemisphereLight args={[new Color('#ffffff'), new Color('#607080'), 0.45]} />
-        <directionalLight position={[10, 15, 8]} intensity={0.9} color={new Color('#ffffff')} />
-        <directionalLight position={[-8, 5, -3]} intensity={0.4} color={new Color('#e8f0ff')} />
-        <directionalLight position={[-2, 8, -10]} intensity={0.25} />
+        {/* 3-point lighting: key + fill + rim */}
+        <ambientLight intensity={0.2} />
+        <directionalLight position={[10, 15, 8]} intensity={0.7} color={new Color('#fff8f0')} />
+        <directionalLight position={[-8, 5, -3]} intensity={0.35} color={new Color('#e8f0ff')} />
+        <directionalLight position={[-2, -3, -10]} intensity={0.3} color={new Color('#e0e8ff')} />
 
         <Suspense fallback={null}>
           <AutoFrame onReady={handleReady}>
@@ -650,6 +654,18 @@ function ViewerScene({ children, state, onStateChange, onResetView, initialView 
         </Suspense>
 
         {bounds && <SimpleGrid modelSize={bounds.size} />}
+
+        {bounds && (
+          <ContactShadows
+            position={[0, -bounds.dims.y * 0.5, 0]}
+            opacity={0.35}
+            scale={bounds.size * 3}
+            blur={2.5}
+            far={bounds.size * 2}
+            resolution={512}
+            color="#1a1a2e"
+          />
+        )}
 
         {state.clipping && bounds && clippingPlanes && (
           <ClipPlaneHelper plane={clippingPlanes[0]} size={bounds.size} />
@@ -670,6 +686,17 @@ function ViewerScene({ children, state, onStateChange, onResetView, initialView 
         </GizmoHelper>
 
         <FreeControls targetRef={targetRef} />
+
+        {/* SSAO for depth perception in crevices and corners */}
+        <EffectComposer multisampling={4}>
+          <SSAO
+            samples={21}
+            radius={0.15}
+            intensity={2.5}
+            luminanceInfluence={0.5}
+            blendFunction={BlendFunction.MULTIPLY}
+          />
+        </EffectComposer>
       </Canvas>
     </div>
   );

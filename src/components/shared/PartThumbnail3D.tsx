@@ -1,6 +1,6 @@
 import React, { Suspense, useState, useMemo, useRef, useEffect } from 'react';
 import { Canvas, useLoader, useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { OrbitControls, Environment } from '@react-three/drei';
 // @ts-expect-error: no types for STLLoader
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 // @ts-expect-error: no types for BufferGeometryUtils
@@ -8,7 +8,8 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils';
 import {
   BufferGeometry,
   Float32BufferAttribute,
-  MeshPhongMaterial,
+  MeshStandardMaterial,
+  ACESFilmicToneMapping,
   Color,
   DoubleSide,
   Vector3,
@@ -64,11 +65,12 @@ function computeVolume(geom: BufferGeometry): number {
   return Math.abs(vol);
 }
 
-const cadMaterial = new MeshPhongMaterial({
+const cadMaterial = new MeshStandardMaterial({
   color: new Color('#546e7a'),
-  specular: new Color('#222222'),
-  shininess: 50,
+  metalness: 0.15,
+  roughness: 0.55,
   side: DoubleSide,
+  envMapIntensity: 0.8,
 });
 
 // ── Smooth geometry (same as ThreeDViewerModal) ──────────────────────────────
@@ -320,11 +322,19 @@ function ThumbnailCanvas({
     <Canvas
       camera={{ position: [5, 5, 5], fov: 45 }}
       style={{ width: size, height: size }}
-      gl={{ antialias: true, alpha: true }}
+      dpr={[1.5, 2]}
+      gl={{
+        antialias: true,
+        alpha: true,
+        toneMapping: ACESFilmicToneMapping,
+        toneMappingExposure: 1.05,
+        outputColorSpace: 'srgb',
+      }}
     >
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 10, 7]} intensity={1} />
-      <directionalLight position={[-5, -3, -5]} intensity={0.3} />
+      <Environment preset="studio" environmentIntensity={0.5} />
+      <ambientLight intensity={0.25} />
+      <directionalLight position={[5, 10, 7]} intensity={0.7} color="#fff8f0" />
+      <directionalLight position={[-5, -3, -5]} intensity={0.3} color="#e8f0ff" />
       {children}
       <OrbitControls
         enableZoom={false}
