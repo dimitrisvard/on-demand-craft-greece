@@ -115,49 +115,198 @@ export interface TenantPageContent {
   sections: TenantPageSection[];
 }
 
+// ─── Shared style options for per-section customization ─────────────────────
+
+export interface SectionStyles {
+  bg_color?: string;            // background color override
+  bg_gradient?: string;         // e.g. "linear-gradient(135deg, #1a1a2e, #16213e)"
+  bg_image?: string;            // background image URL
+  bg_overlay_opacity?: number;  // 0-1, darkens bg_image
+  text_color?: string;          // 'light' | 'dark' — drives white vs dark text
+  padding_y?: string;           // e.g. '80px', '120px'
+  max_width?: string;           // container max-width override
+}
+
+// ─── 15 Section Types ───────────────────────────────────────────────────────
+
 export type TenantPageSection =
   | HeroSection
   | ServicesSection
   | StatsSection
   | CtaBannerSection
   | TestimonialsSection
-  | FaqSection;
+  | FaqSection
+  | FeaturesGridSection
+  | TimelineSection
+  | TeamSection
+  | GallerySection
+  | LogoCloudSection
+  | PricingSection
+  | VideoSection
+  | ContactInfoSection
+  | RichTextSection;
 
+// 1. Hero — with layout variants
 export interface HeroSection {
   type: 'hero';
+  variant?: 'centered' | 'left' | 'split';  // default: 'left'
   headline: string;
   subheadline: string;
   cta_text: string;
   cta_link: string;
+  secondary_cta_text?: string;
+  secondary_cta_link?: string;
   background_image: string | null;
+  badge_text?: string;           // small label above headline, e.g. "ISO 9001 Certified"
+  styles?: SectionStyles;
 }
 
+// 2. Services grid
 export interface ServicesSection {
   type: 'services';
+  variant?: 'cards' | 'icons' | 'minimal';  // default: 'cards'
   title: string;
-  items: { capability: string; description: string }[];
+  subtitle?: string;
+  columns?: 2 | 3 | 4;            // default: 3
+  items: { capability: string; description: string; icon?: string }[];
+  styles?: SectionStyles;
 }
 
+// 3. Stats / counters
 export interface StatsSection {
   type: 'stats';
-  items: { value: string; label: string }[];
+  variant?: 'simple' | 'cards' | 'bordered';  // default: 'simple'
+  title?: string;
+  items: { value: string; label: string; suffix?: string }[];
+  styles?: SectionStyles;
 }
 
+// 4. CTA banner
 export interface CtaBannerSection {
   type: 'cta_banner';
+  variant?: 'solid' | 'outlined' | 'gradient'; // default: 'solid'
   headline: string;
+  subheadline?: string;
   cta_text: string;
   cta_link: string;
+  styles?: SectionStyles;
 }
 
+// 5. Testimonials
 export interface TestimonialsSection {
   type: 'testimonials';
-  items: { name: string; company: string; quote: string }[];
+  variant?: 'cards' | 'quotes' | 'single';  // default: 'cards'
+  title?: string;
+  items: { name: string; company: string; quote: string; avatar?: string; role?: string }[];
+  styles?: SectionStyles;
 }
 
+// 6. FAQ accordion
 export interface FaqSection {
   type: 'faq';
+  title?: string;
+  subtitle?: string;
   items: { question: string; answer: string }[];
+  styles?: SectionStyles;
+}
+
+// 7. Features grid — icon + title + description blocks
+export interface FeaturesGridSection {
+  type: 'features_grid';
+  variant?: 'icons_top' | 'icons_left' | 'numbered';
+  title: string;
+  subtitle?: string;
+  columns?: 2 | 3 | 4;
+  items: { title: string; description: string; icon?: string }[];
+  styles?: SectionStyles;
+}
+
+// 8. Timeline / process steps
+export interface TimelineSection {
+  type: 'timeline';
+  variant?: 'vertical' | 'horizontal';
+  title: string;
+  subtitle?: string;
+  items: { step: string; title: string; description: string }[];
+  styles?: SectionStyles;
+}
+
+// 9. Team members
+export interface TeamSection {
+  type: 'team';
+  title: string;
+  subtitle?: string;
+  items: { name: string; role: string; bio?: string; image?: string }[];
+  styles?: SectionStyles;
+}
+
+// 10. Image gallery
+export interface GallerySection {
+  type: 'gallery';
+  variant?: 'grid' | 'masonry';
+  title: string;
+  subtitle?: string;
+  columns?: 2 | 3 | 4;
+  items: { image_url: string; caption?: string; alt?: string }[];
+  styles?: SectionStyles;
+}
+
+// 11. Logo cloud / partner logos
+export interface LogoCloudSection {
+  type: 'logo_cloud';
+  title?: string;
+  subtitle?: string;
+  items: { name: string; logo_url: string; link?: string }[];
+  styles?: SectionStyles;
+}
+
+// 12. Pricing table
+export interface PricingSection {
+  type: 'pricing';
+  title: string;
+  subtitle?: string;
+  items: {
+    name: string;
+    price: string;
+    period?: string;
+    description?: string;
+    features: string[];
+    cta_text: string;
+    cta_link: string;
+    is_featured?: boolean;
+  }[];
+  styles?: SectionStyles;
+}
+
+// 13. Video embed
+export interface VideoSection {
+  type: 'video';
+  title?: string;
+  subtitle?: string;
+  video_url: string;           // YouTube or Vimeo embed URL
+  poster_image?: string;
+  styles?: SectionStyles;
+}
+
+// 14. Contact info block (address, phone, email, map)
+export interface ContactInfoSection {
+  type: 'contact_info';
+  title?: string;
+  subtitle?: string;
+  show_email?: boolean;
+  show_phone?: boolean;
+  show_address?: boolean;
+  custom_fields?: { label: string; value: string }[];
+  styles?: SectionStyles;
+}
+
+// 15. Rich text / markdown-like content block
+export interface RichTextSection {
+  type: 'rich_text';
+  title?: string;
+  content: string;            // plain text with line breaks
+  text_align?: 'left' | 'center';
+  styles?: SectionStyles;
 }
 
 // Combined tenant config for frontend use
