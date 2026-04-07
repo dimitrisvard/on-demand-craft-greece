@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Layers, Plus, Play, CheckCircle, Trash2, ArrowRight } from 'lucide-react';
+import { Layers, Plus, Play, CheckCircle, Trash2, ArrowRight, Info, Weight, DollarSign } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -16,6 +16,8 @@ import {
   addJobsToSession, removeJobFromSession,
   startSession, selectStockForSession,
 } from '@/utils/inventoryApi';
+import { getCatalogMaterials } from '@/utils/catalogApi';
+import type { CatalogMaterial } from '@/types/catalog';
 import type { NestingSession, Material, SessionStatus } from '@/types/inventory';
 
 const STATUS_COLORS: Record<SessionStatus, string> = {
@@ -37,6 +39,7 @@ export default function NestingSessionManager() {
   const [showCreate, setShowCreate] = useState(false);
   const [showAddJob, setShowAddJob] = useState<string | null>(null);
   const [completingSession, setCompletingSession] = useState<NestingSession | null>(null);
+  const [catalogMaterials, setCatalogMaterials] = useState<CatalogMaterial[]>([]);
 
   // Create session form
   const [createForm, setCreateForm] = useState({ material_id: '', batch_name: '' });
@@ -49,9 +52,14 @@ export default function NestingSessionManager() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sessData, matData] = await Promise.all([getSessions(), getMaterials()]);
+      const [sessData, matData, catData] = await Promise.all([
+        getSessions(),
+        getMaterials(),
+        getCatalogMaterials().catch(() => [] as CatalogMaterial[]),
+      ]);
       setSessions(sessData || []);
       setMaterials(matData || []);
+      setCatalogMaterials(catData || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -120,6 +128,51 @@ export default function NestingSessionManager() {
     const m = materials.find(mat => mat.id === materialId);
     if (!m) return 'Unknown';
     return `${m.name}${m.grade ? ' ' + m.grade : ''}${m.thickness_mm ? ' — ' + m.thickness_mm + 'mm' : ''}`;
+  }
+
+  /**
+   * Calculate sheet weight and price for a nesting session.
+   * Weight = totalAreaNeeded (m²) × thickness (m) × density (kg/m³)
+   * Price  = weight (kg) × price_per_kg (EUR/kg)
+   *
+   * Uses inventory material for density/thickness, catalog material for price_per_kg.
+   */
+  function getSheetCostInfo(session: NestingSession): {
+    weightKg: number | null;
+    pricePerKg: number | null;
+    totalPrice: number | null;
+    sheetAreaM2: number | null;
+  } {
+    const mat = materials.find(m => m.id === session.material_id);
+    if (!mat) return { weightKg: null, pricePerKg: null, totalPrice: null, sheetAreaM2: null };
+
+    const totalAreaMm2 = session.total_part_area_mm2;
+    if (!totalAreaMm2) return { weightKg: null, pricePerKg: null, totalPrice: null, sheetAreaM2: null };
+
+    const sheetAreaM2 = totalAreaMm2 / 1_000_000;
+
+    // Compute weight: area(m²) × thickness(m) × density(kg/m³)
+    let weightKg: number | null = null;
+    if (mat.thickness_mm && mat.density_kg_per_m3) {
+      const thicknessM = mat.thickness_mm / 1000;
+      weightKg = sheetAreaM2 * thicknessM * mat.density_kg_per_m3;
+    }
+
+    // Find price_per_kg from catalog materials (match by grade/name)
+    let pricePerKg: number | null = null;
+    const catalogMatch = catalogMaterials.find(cm =>
+      cm.material_grade === mat.grade ||
+      cm.name.toLowerCase().includes(mat.name.toLowerCase())
+    );
+    if (catalogMatch && (catalogMatch as any).price_per_kg) {
+      pricePerKg = (catalogMatch as any).price_per_kg;
+    }
+
+    const totalPrice = weightKg !== null && pricePerKg !== null
+      ? weightKg * pricePerKg
+      : null;
+
+    return { weightKg, pricePerKg, totalPrice, sheetAreaM2 };
   }
 
   if (loading) {
@@ -218,14 +271,44 @@ export default function NestingSessionManager() {
 
                     {/* Session stats */}
                     {session.total_part_area_mm2 && (
-                      <div className="mt-3 flex gap-4 text-sm text-gray-600">
-                        <span>Total area: <strong>{formatArea(session.total_part_area_mm2)} m²</strong></span>
-                        {session.total_sheets_needed && (
-                          <span>Sheets needed: <strong>{session.total_sheets_needed}</strong></span>
-                        )}
-                        {session.avg_utilization && (
-                          <span>Utilization: <strong>{session.avg_utilization}%</strong></span>
-                        )}
+                      <div className="mt-3 space-y-2">
+                        <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                          <span>Total area: <strong>{formatArea(session.total_part_area_mm2)} m²</strong></span>
+                          {session.total_sheets_needed && (
+                            <span>Sheets needed: <strong>{session.total_sheets_needed}</strong></span>
+                          )}
+                          {session.avg_utilization && (
+                            <span>Utilization: <strong>{session.avg_utilization}%</strong></span>
+                          )}
+                        </div>
+
+                        {/* Material cost info */}
+                        {(() => {
+                          const costInfo = getSheetCostInfo(session);
+                          if (!costInfo.weightKg && !costInfo.totalPrice) return null;
+                          return (
+                            <div className="flex flex-wrap gap-3 items-center p-2 rounded-md bg-blue-50 border border-blue-200 text-sm">
+                              <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                              {costInfo.weightKg !== null && (
+                                <span className="flex items-center gap-1 text-gray-700">
+                                  <Weight className="h-3.5 w-3.5 text-gray-400" />
+                                  Weight: <strong>{costInfo.weightKg.toFixed(2)} kg</strong>
+                                </span>
+                              )}
+                              {costInfo.pricePerKg !== null && (
+                                <span className="text-gray-500">
+                                  @ {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(costInfo.pricePerKg)}/kg
+                                </span>
+                              )}
+                              {costInfo.totalPrice !== null && (
+                                <span className="flex items-center gap-1 text-gray-700 font-semibold">
+                                  <DollarSign className="h-3.5 w-3.5 text-green-600" />
+                                  Material cost: {new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(costInfo.totalPrice)}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
 

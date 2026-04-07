@@ -632,31 +632,38 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4">{t('quote_form_request_quote')}</h2>
-        <div className="flex items-center justify-between mb-6">
+    <div className="max-w-4xl mx-auto px-4 py-5">
+      {/* Dark header with stepper */}
+      <div className="mb-5 bg-slate-900 rounded-xl border border-slate-700/60 p-4">
+        <h2 className="text-lg font-bold text-slate-100 mb-3">{t('quote_form_request_quote')}</h2>
+        <div className="flex items-center gap-1">
           {steps.map((step, index) => (
             <React.Fragment key={index}>
-              <div className="flex items-center">
+              <div className="flex items-center gap-1.5">
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
                     index === currentStep
-                      ? 'bg-teal-600 text-white'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
                       : index < currentStep
-                      ? 'bg-teal-100 text-teal-600'
-                      : 'bg-gray-100 text-gray-400'
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700'
                   }`}
                 >
-                  {index + 1}
+                  {index < currentStep ? (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    index + 1
+                  )}
                 </div>
                 <span
-                  className={`ml-2 ${
+                  className={`text-xs hidden sm:inline ${
                     index === currentStep
-                      ? 'text-teal-600 font-medium'
+                      ? 'text-blue-400 font-semibold'
                       : index < currentStep
-                      ? 'text-teal-600'
-                      : 'text-gray-400'
+                      ? 'text-blue-400/70'
+                      : 'text-slate-600'
                   }`}
                 >
                   {step.title}
@@ -664,8 +671,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
               </div>
               {index < steps.length - 1 && (
                 <div
-                  className={`flex-1 h-0.5 mx-4 ${
-                    index < currentStep ? 'bg-teal-600' : 'bg-gray-200'
+                  className={`flex-1 h-px mx-1 ${
+                    index < currentStep ? 'bg-blue-500/40' : 'bg-slate-700'
                   }`}
                 />
               )}
@@ -674,6 +681,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         </div>
       </div>
 
+      {/* Form content */}
       <Formik
         initialValues={prefillValues ? { ...initialValues, ...prefillValues } : initialValues}
         validationSchema={validationSchemas[currentStep]}
@@ -684,39 +692,37 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
       >
         {(formikProps) => {
           const { values, errors, touched, setErrors, setTouched, handleChange, handleBlur, setFieldValue, validateForm, isSubmitting, submitForm } = formikProps;
-          
-          console.log('Formik render - current step:', currentStep);
-          console.log('Formik values:', values);
-          console.log('Formik errors:', errors);
-          console.log('Formik touched:', touched);
-          
-          return (
-            <Form className="space-y-6">
-              {React.createElement(steps[currentStep].component, {
-                formikProps: {
-                  ...formikProps,
-                  setFieldValue,
-                  validateForm,
-                  submitForm,
-                  isSubmitting,
-                },
-              })}
 
-              <div className="flex justify-between pt-6">
-                {currentStep > (skipCompanyStep ? 1 : 0) && (
+          return (
+            <Form>
+              <div className="bg-slate-900 rounded-xl border border-slate-700/60 p-4 mb-4">
+                {React.createElement(steps[currentStep].component, {
+                  formikProps: {
+                    ...formikProps,
+                    setFieldValue,
+                    validateForm,
+                    submitForm,
+                    isSubmitting,
+                  },
+                })}
+              </div>
+
+              <div className="flex justify-between">
+                {currentStep > (skipCompanyStep ? 1 : 0) ? (
                   <Button
                     type="button"
                     variant="outline"
                     onClick={handleBack}
+                    className="bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-slate-100"
                   >
                     {t('quote_form_back')}
                   </Button>
-                )}
-                <div className="flex-1" />
+                ) : <div />}
                 {currentStep < steps.length - 1 ? (
                   <Button
                     type="button"
                     onClick={() => handleNext(values, setErrors, setTouched)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6"
                   >
                     {t('quote_form_next')}
                   </Button>

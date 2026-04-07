@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense, useCallback } from 'react';
 import { FormikProps, FieldArray } from 'formik';
-import { Plus, Trash2, FileText, X, Box as BoxIcon } from 'lucide-react';
+import { Plus, Trash2, FileText, X, Box as BoxIcon, ChevronDown, ChevronUp, Layers } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -13,14 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { materialOptions, surfaceRoughnessOptions, toleranceOptions, surfaceTreatmentOptions } from '../constants/materialOptions';
+import { materialOptions as staticMaterialOptions, surfaceRoughnessOptions, toleranceOptions, surfaceTreatmentOptions } from '../constants/materialOptions';
 import { StepComponentProps } from '../types';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion';
 import { Upload as UploadIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useTranslation } from 'react-i18next';
@@ -39,6 +33,8 @@ import {
   Vector3,
   Box3,
 } from 'three';
+import { getCatalogMaterials } from '@/utils/catalogApi';
+import type { CatalogMaterial } from '@/types/catalog';
 
 // ── Darker material for embedded viewer ──
 const darkCadMaterial = new MeshPhongMaterial({
@@ -160,13 +156,11 @@ function Embedded3DPreview({ files, onDimensionsChange }: { files: File[]; onDim
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [previewFileName, setPreviewFileName] = useState<string | null>(null);
 
-  // Find the first viewable 3D file (STL, STEP/STP, OBJ -- NOT DXF)
   const first3DFile = useMemo(() => {
     if (!files || files.length === 0) return null;
     return files.find((f: File) => isViewable3D(f.name)) || null;
   }, [files]);
 
-  // Check if there's only a DXF (no viewable 3D file)
   const firstDxfFile = useMemo(() => {
     if (!files || files.length === 0) return null;
     if (first3DFile) return null;
@@ -178,7 +172,6 @@ function Embedded3DPreview({ files, onDimensionsChange }: { files: File[]; onDim
       URL.revokeObjectURL(blobUrl);
     }
     setDims(null);
-
     if (first3DFile) {
       const url = URL.createObjectURL(first3DFile);
       setBlobUrl(url);
@@ -187,57 +180,53 @@ function Embedded3DPreview({ files, onDimensionsChange }: { files: File[]; onDim
       setBlobUrl(null);
       setPreviewFileName(null);
     }
-
     return () => {
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [first3DFile]);
 
-  // No 3D file but there is a DXF
+  useEffect(() => {
+    if (dims && onDimensionsChange) onDimensionsChange(dims);
+  }, [dims, onDimensionsChange]);
+
   if (firstDxfFile) {
     return (
-      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <div className="h-full min-h-[180px] rounded bg-slate-800 border border-slate-600 flex flex-col items-center justify-center">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <polyline points="14 2 14 8 20 8"/>
           <line x1="16" y1="13" x2="8" y2="13"/>
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
-        <span className="text-sm text-slate-500 mt-2 font-medium">2D Drawing</span>
-        <span className="text-xs text-slate-400 mt-1">{firstDxfFile.name}</span>
+        <span className="text-xs text-slate-400 mt-1.5 font-medium">2D Drawing</span>
+        <span className="text-[10px] text-slate-500 mt-0.5">{firstDxfFile.name}</span>
       </div>
     );
   }
 
-  // Notify parent when dimensions change
-  useEffect(() => {
-    if (dims && onDimensionsChange) onDimensionsChange(dims);
-  }, [dims, onDimensionsChange]);
-
-  // No file at all
   if (!first3DFile || !blobUrl) {
     return (
-      <div className="h-full min-h-[200px] rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center">
-        <BoxIcon className="h-10 w-10 text-slate-300 mb-2" />
-        <span className="text-sm text-slate-400">Upload a 3D file to preview</span>
+      <div className="h-full min-h-[180px] rounded bg-slate-800 border border-slate-600 flex flex-col items-center justify-center">
+        <BoxIcon className="h-8 w-8 text-slate-500 mb-1.5" />
+        <span className="text-xs text-slate-500">Upload a 3D file to preview</span>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 rounded-lg overflow-hidden bg-slate-100 border border-teal-300" style={{ minHeight: 200 }}>
+      <div className="flex-1 min-h-0 rounded overflow-hidden bg-slate-800 border border-slate-600" style={{ minHeight: 180 }}>
         <Suspense
           fallback={
             <div className="flex items-center justify-center h-full w-full">
-              <div className="animate-spin rounded-full h-6 w-6 border-2 border-slate-300 border-t-slate-600" />
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-500 border-t-slate-300" />
             </div>
           }
         >
           <Canvas
             camera={{ position: [5, 5, 5], fov: 40 }}
-            style={{ width: '100%', height: '100%', minHeight: 180 }}
+            style={{ width: '100%', height: '100%', minHeight: 170 }}
             gl={{ antialias: true, alpha: true }}
           >
             <ambientLight intensity={0.5} />
@@ -257,7 +246,7 @@ function Embedded3DPreview({ files, onDimensionsChange }: { files: File[]; onDim
         </Suspense>
       </div>
       {dims && (
-        <div className="text-xs text-slate-500 text-center py-1.5">
+        <div className="text-[10px] text-slate-400 text-center py-1">
           {dims.x.toFixed(1)} &times; {dims.y.toFixed(1)} &times; {dims.z.toFixed(1)} mm
         </div>
       )}
@@ -284,26 +273,88 @@ const thicknessOptions = [
   { value: '25', label: '25.0 mm' },
 ];
 
+// ── Material options from database ──
+interface DbMaterialOption {
+  value: string;
+  label: string;
+  subtypes: Array<{ value: string; label: string }>;
+}
+
+function buildMaterialOptionsFromDb(dbMaterials: CatalogMaterial[]): DbMaterialOption[] {
+  // Group by category name; derive subtypes from material_grade
+  const catMap = new Map<string, { catName: string; grades: Map<string, string> }>();
+
+  for (const mat of dbMaterials) {
+    const catName = mat.category?.name || 'Other';
+    const catSlug = catName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (!catMap.has(catSlug)) {
+      catMap.set(catSlug, { catName, grades: new Map() });
+    }
+    const entry = catMap.get(catSlug)!;
+    if (!entry.grades.has(mat.material_grade)) {
+      entry.grades.set(mat.material_grade, `${mat.name} (${mat.material_grade})`);
+    }
+  }
+
+  const result: DbMaterialOption[] = [];
+  for (const [slug, { catName, grades }] of catMap) {
+    const subtypes = Array.from(grades.entries()).map(([val, label]) => ({ value: val, label }));
+    subtypes.sort((a, b) => a.label.localeCompare(b.label));
+    result.push({ value: slug, label: catName, subtypes });
+  }
+  result.sort((a, b) => a.label.localeCompare(b.label));
+  return result;
+}
+
+// ── Helper: get subtypes for a given material value ──
+function getSubtypesForMaterial(materialValue: string, options: DbMaterialOption[]) {
+  return options.find(m => m.value === materialValue)?.subtypes || [];
+}
+
 const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
   const { values, errors, touched, handleChange, setFieldValue } = formikProps;
   const { toast } = useToast();
   const { t } = useTranslation();
-  const [materialSubtypes, setMaterialSubtypes] = useState<any[]>([]);
-  const [expandedAccordions, setExpandedAccordions] = useState<string[]>(['part-0']);
+  const [expandedParts, setExpandedParts] = useState<Set<number>>(new Set([0]));
 
-  const handleMaterialChange = (partIndex: number, value: string) => {
-    const selectedMaterial = materialOptions.find((m) => m.value === value);
-    setMaterialSubtypes(selectedMaterial?.subtypes || []);
+  // Fetch materials from database, fall back to static options
+  const [materialOptions, setMaterialOptions] = useState<DbMaterialOption[]>(staticMaterialOptions);
+  const [dbLoaded, setDbLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const dbMats = await getCatalogMaterials();
+        if (cancelled) return;
+        if (dbMats && dbMats.length > 0) {
+          const dbOptions = buildMaterialOptionsFromDb(dbMats);
+          if (dbOptions.length > 0) {
+            setMaterialOptions(dbOptions);
+          }
+        }
+      } catch {
+        // Silently fall back to static options
+      } finally {
+        if (!cancelled) setDbLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // BUG FIX: No shared materialSubtypes state. Subtypes are derived per-part
+  // from the part's own material value using getSubtypesForMaterial()
+
+  const handleMaterialChange = useCallback((partIndex: number, value: string) => {
     setFieldValue(`parts[${partIndex}].material`, value);
     setFieldValue(`parts[${partIndex}].materialSubtype`, '');
-  };
+  }, [setFieldValue]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, partIndex: number) => {
     if (e.target.files) {
       try {
         const fileList = Array.from(e.target.files);
         const invalidFiles = fileList.filter(file => file.size > 50 * 1024 * 1024);
-        
         if (invalidFiles.length > 0) {
           toast({
             title: t('quote_form_file_size_exceeded'),
@@ -317,11 +368,7 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
         }
       } catch (error) {
         console.error('Error handling file upload:', error);
-        toast({
-          title: t('quote_form_upload_error'),
-          description: t('quote_form_upload_error_desc'),
-          variant: "destructive"
-        });
+        toast({ title: t('quote_form_upload_error'), description: t('quote_form_upload_error_desc'), variant: "destructive" });
       }
     }
   };
@@ -330,7 +377,6 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
     const newFiles = [...values.parts[partIndex].files];
     newFiles.splice(fileIndex, 1);
     setFieldValue(`parts[${partIndex}].files`, newFiles);
-    
     if (newFiles.length === 0) {
       setFieldValue(`parts[${partIndex}].name`, `${t('quote_form_part')} ${partIndex + 1}`);
     } else {
@@ -338,88 +384,112 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
     }
   };
 
+  const togglePart = (index: number) => {
+    setExpandedParts(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
   const acceptedFileTypes = ".stp,.step,.stl,.obj,.dxf,.pdf,.png,.jpg,.jpeg,.tiff";
 
   return (
-    <div className="space-y-8">
-      <h3 className="text-xl font-medium mb-6">{t('quote_form_parts_configuration_title')}</h3>
+    <div className="space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-1">
+        <div className="flex items-center gap-2">
+          <Layers className="h-5 w-5 text-slate-400" />
+          <h3 className="text-base font-semibold text-slate-200">{t('quote_form_parts_configuration_title')}</h3>
+        </div>
+        <span className="text-xs text-slate-500">
+          {values.parts.length} {values.parts.length === 1 ? 'part' : 'parts'}
+        </span>
+      </div>
 
       <FieldArray name="parts">
         {({ remove, push }) => (
-          <div className="space-y-4">
+          <div className="space-y-2">
             {values.parts.length > 0 &&
-              values.parts.map((part, index) => (
-                <div key={index}>
-                  <Accordion
-                    type="single"
-                    collapsible
-                    value={expandedAccordions.includes(`part-${index}`) ? `part-${index}` : ''}
-                    onValueChange={(value) => setExpandedAccordions((prev) =>
-                      value ? [...prev, `part-${index}`] : prev.filter(item => item !== `part-${index}`)
-                    )}
-                    className="border rounded-lg overflow-hidden"
-                  >
-                    <AccordionItem value={`part-${index}`} className="border-0">
-                      <AccordionTrigger 
-                        className="px-6 py-4 bg-gray-50 hover:bg-gray-100 hover:no-underline"
-                        data-part-index={index}
-                      >
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center">
-                            <span className="text-lg font-medium">
-                              {part.name || `${t('quote_form_part')} ${index + 1}`}
-                            </span>
-                            {part.quantity > 1 && (
-                              <span className="ml-2 text-sm text-gray-500">
-                                × {part.quantity}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            {values.parts.length > 1 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  remove(index);
-                                }}
-                              >
-                                <span className="sr-only">{t('quote_form_remove_part')}</span>
-                                <Trash2 size={16} />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </AccordionTrigger>
+              values.parts.map((part, index) => {
+                const isExpanded = expandedParts.has(index);
+                const partSubtypes = getSubtypesForMaterial(part.material, materialOptions);
+                const hasError = touched.parts?.[index] && errors.parts?.[index];
 
-                      <AccordionContent className="px-6 py-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                          <div>
-                            <Label htmlFor={`parts[${index}].name`}>
-                              {t('quote_form_part_name_id')} <span className="text-red-500">*</span>
+                return (
+                  <div
+                    key={index}
+                    className={`rounded-lg border transition-colors ${
+                      hasError
+                        ? 'border-red-500/40 bg-slate-800/80'
+                        : 'border-slate-600/50 bg-slate-800/60'
+                    }`}
+                  >
+                    {/* Part header - always visible */}
+                    <button
+                      type="button"
+                      onClick={() => togglePart(index)}
+                      className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-700/30 transition-colors rounded-t-lg"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="flex items-center justify-center h-6 w-6 rounded bg-blue-600/20 text-blue-400 text-xs font-bold flex-shrink-0">
+                          {index + 1}
+                        </span>
+                        <span className="text-sm font-medium text-slate-200 truncate">
+                          {part.name || `${t('quote_form_part')} ${index + 1}`}
+                        </span>
+                        {part.quantity > 1 && (
+                          <span className="text-[10px] font-medium bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">
+                            x{part.quantity}
+                          </span>
+                        )}
+                        {part.material && part.materialSubtype && (
+                          <span className="text-[10px] text-slate-500 hidden sm:inline">
+                            {materialOptions.find(m => m.value === part.material)?.label} / {part.materialSubtype}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {values.parts.length > 1 && (
+                          <span
+                            role="button"
+                            onClick={(e) => { e.stopPropagation(); remove(index); }}
+                            className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                        {isExpanded ? (
+                          <ChevronUp className="h-4 w-4 text-slate-500" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4 text-slate-500" />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Part content - collapsible */}
+                    {isExpanded && (
+                      <div className="px-4 pb-4 pt-1 border-t border-slate-700/50">
+                        {/* Row 1: Name + Quantity */}
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          <div className="col-span-2">
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                              {t('quote_form_part_name_id')} <span className="text-red-400">*</span>
                             </Label>
                             <Input
                               id={`parts[${index}].name`}
                               name={`parts[${index}].name`}
                               value={part.name}
                               readOnly
-                              className={
-                                touched.parts?.[index]?.name && errors.parts?.[index]?.name
-                                  ? 'border-red-500 bg-gray-100'
-                                  : 'bg-gray-100'
-                              }
+                              className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-300 ${
+                                touched.parts?.[index]?.name && errors.parts?.[index]?.name ? 'border-red-500' : ''
+                              }`}
                             />
-                            {touched.parts?.[index]?.name && errors.parts?.[index]?.name && (
-                              <p className="text-red-500 text-sm mt-1">{String(errors.parts?.[index]?.name || '')}</p>
-                            )}
                           </div>
-
                           <div>
-                            <Label htmlFor={`parts[${index}].quantity`}>
-                              {t('quote_form_quantity')} <span className="text-red-500">*</span>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                              {t('quote_form_quantity')} <span className="text-red-400">*</span>
                             </Label>
                             <Input
                               id={`parts[${index}].quantity`}
@@ -428,35 +498,25 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                               min="1"
                               value={part.quantity}
                               onChange={handleChange}
-                              className={
-                                touched.parts?.[index]?.quantity && errors.parts?.[index]?.quantity
-                                  ? 'border-red-500'
-                                  : ''
-                              }
+                              className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200 ${
+                                touched.parts?.[index]?.quantity && errors.parts?.[index]?.quantity ? 'border-red-500' : ''
+                              }`}
                             />
-                            {touched.parts?.[index]?.quantity && errors.parts?.[index]?.quantity && (
-                              <p className="text-red-500 text-sm mt-1">{String(errors.parts?.[index]?.quantity || '')}</p>
-                            )}
                           </div>
                         </div>
 
-                        <div className="mb-6">
-                          <Label htmlFor={`parts[${index}].process`}>
-                            {t('quote_form_manufacturing_process')} <span className="text-red-500">*</span>
+                        {/* Row 2: Process */}
+                        <div className="mb-2">
+                          <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                            {t('quote_form_manufacturing_process')} <span className="text-red-400">*</span>
                           </Label>
                           <Select
                             value={part.process}
-                            onValueChange={(value) =>
-                              setFieldValue(`parts[${index}].process`, value)
-                            }
+                            onValueChange={(value) => setFieldValue(`parts[${index}].process`, value)}
                           >
-                            <SelectTrigger
-                              className={
-                                touched.parts?.[index]?.process && errors.parts?.[index]?.process
-                                  ? 'border-red-500'
-                                  : ''
-                              }
-                            >
+                            <SelectTrigger className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200 ${
+                              touched.parts?.[index]?.process && errors.parts?.[index]?.process ? 'border-red-500' : ''
+                            }`}>
                               <SelectValue placeholder={t('quote_form_select_manufacturing_process')} />
                             </SelectTrigger>
                             <SelectContent>
@@ -469,26 +529,23 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                             </SelectContent>
                           </Select>
                           {touched.parts?.[index]?.process && errors.parts?.[index]?.process && (
-                            <p className="text-red-500 text-sm mt-1">{String(errors.parts?.[index]?.process || '')}</p>
+                            <p className="text-red-400 text-[10px] mt-0.5">{String(errors.parts?.[index]?.process || '')}</p>
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        {/* Row 3: Material + Grade (FIX: per-part subtypes) */}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <Label htmlFor={`parts[${index}].material`}>
-                              {t('quote_form_material')} <span className="text-red-500">*</span>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                              {t('quote_form_material')} <span className="text-red-400">*</span>
                             </Label>
                             <Select
                               value={part.material}
                               onValueChange={(value) => handleMaterialChange(index, value)}
                             >
-                              <SelectTrigger
-                                className={
-                                  touched.parts?.[index]?.material && errors.parts?.[index]?.material
-                                    ? 'border-red-500'
-                                    : ''
-                                }
-                              >
+                              <SelectTrigger className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200 ${
+                                touched.parts?.[index]?.material && errors.parts?.[index]?.material ? 'border-red-500' : ''
+                              }`}>
                                 <SelectValue placeholder={t('quote_form_select_material')} />
                               </SelectTrigger>
                               <SelectContent>
@@ -500,32 +557,25 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                               </SelectContent>
                             </Select>
                             {touched.parts?.[index]?.material && errors.parts?.[index]?.material && (
-                              <p className="text-red-500 text-sm mt-1">{String(errors.parts?.[index]?.material || '')}</p>
+                              <p className="text-red-400 text-[10px] mt-0.5">{String(errors.parts?.[index]?.material || '')}</p>
                             )}
                           </div>
-
                           <div>
-                            <Label htmlFor={`parts[${index}].materialSubtype`}>
-                              {t('quote_form_material_grade')} <span className="text-red-500">*</span>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                              {t('quote_form_material_grade')} <span className="text-red-400">*</span>
                             </Label>
                             <Select
                               value={part.materialSubtype}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].materialSubtype`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].materialSubtype`, value)}
                               disabled={!part.material}
                             >
-                              <SelectTrigger
-                                className={
-                                  touched.parts?.[index]?.materialSubtype && errors.parts?.[index]?.materialSubtype
-                                    ? 'border-red-500'
-                                    : ''
-                                }
-                              >
+                              <SelectTrigger className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200 ${
+                                touched.parts?.[index]?.materialSubtype && errors.parts?.[index]?.materialSubtype ? 'border-red-500' : ''
+                              }`}>
                                 <SelectValue placeholder={t('quote_form_select_material_grade')} />
                               </SelectTrigger>
                               <SelectContent>
-                                {materialSubtypes.map((subtype) => (
+                                {partSubtypes.map((subtype) => (
                                   <SelectItem key={subtype.value} value={subtype.value}>
                                     {subtype.label}
                                   </SelectItem>
@@ -533,94 +583,72 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                               </SelectContent>
                             </Select>
                             {touched.parts?.[index]?.materialSubtype && errors.parts?.[index]?.materialSubtype && (
-                              <p className="text-red-500 text-sm mt-1">{String(errors.parts?.[index]?.materialSubtype)}</p>
+                              <p className="text-red-400 text-[10px] mt-0.5">{String(errors.parts?.[index]?.materialSubtype)}</p>
                             )}
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        {/* Row 4: Surface Roughness + Treatment */}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <Label htmlFor={`parts[${index}].surfaceRoughness`}>
-                              {t('quote_form_surface_roughness')}
-                            </Label>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">{t('quote_form_surface_roughness')}</Label>
                             <Select
                               value={part.surfaceRoughness}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].surfaceRoughness`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].surfaceRoughness`, value)}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
                                 <SelectValue placeholder={t('quote_form_select_surface_roughness')} />
                               </SelectTrigger>
                               <SelectContent>
                                 {surfaceRoughnessOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
-
                           <div>
-                            <Label htmlFor={`parts[${index}].surfaceTreatment`}>
-                              {t('quote_form_surface_treatment')}
-                            </Label>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">{t('quote_form_surface_treatment')}</Label>
                             <Select
                               value={part.surfaceTreatment}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].surfaceTreatment`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].surfaceTreatment`, value)}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
                                 <SelectValue placeholder={t('quote_form_select_surface_treatment')} />
                               </SelectTrigger>
                               <SelectContent>
                                 {surfaceTreatmentOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        {/* Row 5: Tolerance + Documentation */}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <Label htmlFor={`parts[${index}].tolerance`}>
-                              {t('quote_form_tolerance')}
-                            </Label>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">{t('quote_form_tolerance')}</Label>
                             <Select
                               value={part.tolerance}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].tolerance`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].tolerance`, value)}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
                                 <SelectValue placeholder={t('quote_form_select_tolerance')} />
                               </SelectTrigger>
                               <SelectContent>
                                 {toleranceOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
-
                           <div>
-                            <Label htmlFor={`parts[${index}].documentation`}>
-                              {t('quote_form_documentation')}
-                            </Label>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">{t('quote_form_documentation')}</Label>
                             <Select
                               value={part.documentation}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].documentation`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].documentation`, value)}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
                                 <SelectValue placeholder={t('quote_form_select_documentation')} />
                               </SelectTrigger>
                               <SelectContent>
@@ -632,76 +660,65 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                           </div>
                         </div>
 
-                        {/* Thickness & Bending */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        {/* Row 6: Thickness + Bending */}
+                        <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <Label htmlFor={`parts[${index}].thickness`}>
-                              Material Thickness
-                            </Label>
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">Material Thickness</Label>
                             <Select
                               value={part.thickness || ''}
-                              onValueChange={(value) =>
-                                setFieldValue(`parts[${index}].thickness`, value)
-                              }
+                              onValueChange={(value) => setFieldValue(`parts[${index}].thickness`, value)}
                             >
-                              <SelectTrigger>
+                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
                                 <SelectValue placeholder="Select thickness" />
                               </SelectTrigger>
                               <SelectContent>
                                 {thicknessOptions.map((opt) => (
-                                  <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
+                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
-
-                          <div className="flex items-end pb-2">
-                            <div className="flex items-center space-x-2">
+                          <div className="flex items-end pb-1">
+                            <div className="flex items-center gap-1.5">
                               <Checkbox
                                 id={`parts[${index}].needsBending`}
                                 checked={part.needsBending || false}
-                                onCheckedChange={(checked) =>
-                                  setFieldValue(`parts[${index}].needsBending`, !!checked)
-                                }
+                                onCheckedChange={(checked) => setFieldValue(`parts[${index}].needsBending`, !!checked)}
+                                className="border-slate-500 data-[state=checked]:bg-blue-600"
                               />
-                              <Label
-                                htmlFor={`parts[${index}].needsBending`}
-                                className="text-sm font-normal cursor-pointer"
-                              >
-                                This part requires bending
+                              <Label htmlFor={`parts[${index}].needsBending`} className="text-xs text-slate-400 font-normal cursor-pointer">
+                                Requires bending
                               </Label>
                             </div>
                           </div>
                         </div>
 
-                        <div className="mb-6">
-                          <Label htmlFor={`parts[${index}].comments`}>
-                            {t('quote_form_comments')}
-                          </Label>
+                        {/* Comments */}
+                        <div className="mb-3">
+                          <Label className="text-[11px] text-slate-400 mb-0.5 block">{t('quote_form_comments')}</Label>
                           <Textarea
                             id={`parts[${index}].comments`}
                             name={`parts[${index}].comments`}
                             value={part.comments}
                             onChange={handleChange}
-                            placeholder="Any additional specifications or requirements..."
-                            rows={3}
+                            placeholder="Additional specifications or requirements..."
+                            rows={2}
+                            className="text-sm bg-slate-900/50 border-slate-600 text-slate-200 placeholder:text-slate-600 resize-none"
                           />
                         </div>
 
-                        {/* Upload + 3D Preview side by side */}
-                        <div className="mb-6">
-                          <Label className="block mb-2">
-                            {t('quote_form_upload_files')} <span className="text-red-500">*</span>
+                        {/* Upload + 3D Preview */}
+                        <div>
+                          <Label className="text-[11px] text-slate-400 mb-1 block">
+                            {t('quote_form_upload_files')} <span className="text-red-400">*</span>
                           </Label>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Left: Upload area */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {/* Upload area */}
                             <div>
-                              <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
-                                <UploadIcon className="mx-auto h-8 w-8 text-gray-400" />
-                                <p className="text-sm text-gray-600 mt-2">{t('quote_form_drag_drop_files')}</p>
-                                <p className="text-[11px] text-gray-400 mt-1">{t('quote_form_accepted_file_types')}</p>
+                              <div className="border border-dashed border-slate-600 rounded bg-slate-900/40 p-3 text-center">
+                                <UploadIcon className="mx-auto h-6 w-6 text-slate-500" />
+                                <p className="text-xs text-slate-500 mt-1">{t('quote_form_drag_drop_files')}</p>
+                                <p className="text-[10px] text-slate-600 mt-0.5">{t('quote_form_accepted_file_types')}</p>
                                 <input
                                   type="file"
                                   multiple
@@ -712,28 +729,28 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                                 />
                                 <label
                                   htmlFor={`file-upload-${index}`}
-                                  className="mt-3 inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-white bg-teal-600 hover:bg-teal-700 cursor-pointer"
+                                  className="mt-2 inline-flex items-center px-3 py-1 text-xs font-medium rounded bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-colors"
                                 >
                                   {t('quote_form_upload_files')}
                                 </label>
                               </div>
                               {/* File list */}
                               {part.files && part.files.length > 0 && (
-                                <div className="mt-3 space-y-1.5">
+                                <div className="mt-1.5 space-y-1">
                                   {part.files.map((file: any, fileIndex: number) => (
-                                    <div key={fileIndex} className="flex items-center justify-between p-1.5 bg-gray-50 rounded text-sm">
-                                      <div className="flex items-center min-w-0">
-                                        <FileText className="h-3.5 w-3.5 text-gray-400 mr-1.5 flex-shrink-0" />
-                                        <span className="truncate text-xs">{file.name}</span>
+                                    <div key={fileIndex} className="flex items-center justify-between px-2 py-1 bg-slate-900/60 border border-slate-700/50 rounded text-xs">
+                                      <div className="flex items-center min-w-0 gap-1">
+                                        <FileText className="h-3 w-3 text-slate-500 flex-shrink-0" />
+                                        <span className="truncate text-slate-300">{file.name}</span>
                                       </div>
                                       <Button
                                         type="button"
                                         variant="ghost"
                                         size="sm"
                                         onClick={() => removeFile(index, fileIndex)}
-                                        className="h-5 w-5 p-0 flex-shrink-0"
+                                        className="h-4 w-4 p-0 flex-shrink-0 text-slate-500 hover:text-red-400"
                                       >
-                                        <X className="h-3.5 w-3.5" />
+                                        <X className="h-3 w-3" />
                                       </Button>
                                     </div>
                                   ))}
@@ -741,12 +758,11 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                               )}
                             </div>
 
-                            {/* Right: Embedded 3D Preview */}
+                            {/* 3D Preview */}
                             <div>
                               <Embedded3DPreview
                                 files={part.files || []}
                                 onDimensionsChange={(dims) => {
-                                  // Store dimensions in part data for persistence
                                   if (!values.parts[index]._dimensions ||
                                       values.parts[index]._dimensions?.x !== dims.x ||
                                       values.parts[index]._dimensions?.y !== dims.y ||
@@ -758,69 +774,46 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                             </div>
                           </div>
                         </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  </Accordion>
-                </div>
-              ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
-            <div className="flex justify-center">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  const newPartIndex = values.parts.length;
-                  push({
-                    name: `${t('quote_form_part')} ${values.parts.length + 1}`,
-                    quantity: 1,
-                    multiplier: 1,
-                    files: [],
-                    process: '',
-                    material: '',
-                    materialSubtype: '',
-                    surfaceTreatment: '',
-                    surfaceRoughness: '',
-                    documentation: 'none',
-                    comments: '',
-                    userModifiedName: false,
-                    tolerance: '',
-                    surfaceTreatmentOther: '',
-                    thickness: '',
-                    needsBending: false,
-                  });
-                  // Auto-open the new part accordion
-                  setTimeout(() => {
-                    const accordionTrigger = document.querySelector(`[data-part-index="${newPartIndex}"]`);
-                    if (accordionTrigger) {
-                      (accordionTrigger as HTMLElement).click();
-                    }
-                  }, 100);
-                }}
-                className="flex items-center"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                {t('quote_form_add_part')}
-              </Button>
-            </div>
+            {/* Add Part button */}
+            <button
+              type="button"
+              onClick={() => {
+                push({
+                  name: `${t('quote_form_part')} ${values.parts.length + 1}`,
+                  quantity: 1,
+                  multiplier: 1,
+                  files: [],
+                  process: '',
+                  material: '',
+                  materialSubtype: '',
+                  surfaceTreatment: '',
+                  surfaceRoughness: '',
+                  documentation: 'none',
+                  comments: '',
+                  userModifiedName: false,
+                  tolerance: '',
+                  surfaceTreatmentOther: '',
+                  thickness: '',
+                  needsBending: false,
+                });
+                setTimeout(() => {
+                  setExpandedParts(prev => new Set([...prev, values.parts.length]));
+                }, 50);
+              }}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-slate-600 text-slate-400 hover:text-blue-400 hover:border-blue-500/50 hover:bg-blue-500/5 transition-colors text-sm"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t('quote_form_add_part')}
+            </button>
           </div>
         )}
       </FieldArray>
-
-      <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-          </div>
-          <div className="ml-3">
-            <p className="text-sm text-blue-700">
-              {t('quote_form_add_parts_description')}
-            </p>
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 };

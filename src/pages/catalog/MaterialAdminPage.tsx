@@ -40,6 +40,7 @@ const emptyForm = (): Partial<CatalogMaterial> => ({
   min_stock_alert: 0,
   location: '',
   price_per_unit: null,
+  price_per_kg: null,
   currency: 'EUR',
   supplier: '',
   supplier_sku: '',
@@ -264,7 +265,8 @@ export default function MaterialAdminPage() {
                   <TableHead className="text-xs">Category</TableHead>
                   <TableHead className="text-xs">Dimensions</TableHead>
                   <TableHead className="text-xs text-right">Stock</TableHead>
-                  <TableHead className="text-xs text-right">Price</TableHead>
+                  <TableHead className="text-xs text-right">Price/Unit</TableHead>
+                  <TableHead className="text-xs text-right">Price/kg</TableHead>
                   <TableHead className="text-xs text-center">Available</TableHead>
                   <TableHead className="text-xs text-right">Actions</TableHead>
                 </TableRow>
@@ -272,7 +274,7 @@ export default function MaterialAdminPage() {
               <TableBody>
                 {materials.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-slate-400">
+                    <TableCell colSpan={9} className="text-center py-12 text-slate-400">
                       No materials yet. Click "Add Material" to get started.
                     </TableCell>
                   </TableRow>
@@ -295,6 +297,11 @@ export default function MaterialAdminPage() {
                     <TableCell className="text-right text-sm">
                       {mat.price_per_unit
                         ? new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(mat.price_per_unit)
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-right text-sm">
+                      {(mat as any).price_per_kg
+                        ? new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format((mat as any).price_per_kg) + '/kg'
                         : '—'}
                     </TableCell>
                     <TableCell className="text-center">
@@ -430,7 +437,7 @@ export default function MaterialAdminPage() {
             </div>
 
             {/* Row 4 — Stock & pricing */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-5 gap-3">
               <div>
                 <Label className="text-xs">Stock Qty</Label>
                 <Input
@@ -463,6 +470,17 @@ export default function MaterialAdminPage() {
                   value={form.price_per_unit ?? ''}
                   onChange={e => setForm(p => ({ ...p, price_per_unit: e.target.value ? Number(e.target.value) : null }))}
                   className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Price/kg (EUR)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={(form as any).price_per_kg ?? ''}
+                  onChange={e => setForm(p => ({ ...p, price_per_kg: e.target.value ? Number(e.target.value) : null }))}
+                  className="mt-1"
+                  placeholder="e.g. 3.50"
                 />
               </div>
               <div>

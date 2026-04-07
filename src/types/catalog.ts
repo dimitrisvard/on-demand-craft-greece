@@ -115,6 +115,7 @@ export interface CatalogMaterial {
   min_stock_alert: number;
   location: string | null;
   price_per_unit: number | null;
+  price_per_kg: number | null;
   currency: string;
   supplier: string | null;
   supplier_sku: string | null;
