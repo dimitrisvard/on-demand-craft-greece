@@ -87,30 +87,77 @@ export default function CustomersPage() {
   async function fetchCustomers() {
     try {
       setLoading(true)
-      console.log("Fetching customers...")
+
+      // Fetch existing customers
       const { data, error } = await supabase
         .from('customers')
         .select('*')
         .order('created_at', { ascending: false })
 
-      if (error) {
-        console.error("Error fetching customers:", error)
-        throw error
+      if (error) throw error
+
+      // Also fetch users with 'customer' role who may not have a customer record
+      const { data: customerRoles } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'customer')
+
+      if (customerRoles && customerRoles.length > 0) {
+        // Get existing customer emails to avoid duplicates
+        const existingEmails = new Set((data || []).map(c => c.email?.toLowerCase()).filter(Boolean))
+
+        // For each customer role user, check if they exist in auth and create customer record if missing
+        for (const role of customerRoles) {
+          try {
+            const { data: userData } = await supabase.auth.admin.getUserById(role.user_id)
+            if (userData?.user && userData.user.email && !existingEmails.has(userData.user.email.toLowerCase())) {
+              const meta = userData.user.user_metadata || {}
+              const firstName = meta.first_name || ''
+              const lastName = meta.last_name || ''
+              const contactName = `${firstName} ${lastName}`.trim()
+
+              await supabase.from('customers').insert({
+                email: userData.user.email,
+                first_name: firstName,
+                last_name: lastName,
+                contact_name: contactName,
+                company_name: contactName || userData.user.email,
+                status: 'active',
+                created_at: userData.user.created_at || new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              existingEmails.add(userData.user.email.toLowerCase())
+            }
+          } catch {
+            // Skip users we can't access — admin API may not be available from client
+          }
+        }
+
+        // Re-fetch to get any newly created records
+        const { data: refreshedData, error: refreshError } = await supabase
+          .from('customers')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (!refreshError && refreshedData) {
+          const typedCustomers = refreshedData.map(customer => ({
+            ...customer,
+            status: customer.status as CustomerStatus,
+            customer_id: (customer as any).customer_id || generateSimpleCustomerId()
+          })) as Customer[];
+
+          setCustomers(typedCustomers)
+          setFilteredCustomers(typedCustomers)
+          return
+        }
       }
 
-      console.log("Fetched customers data:", data)
+      const typedCustomers = (data || []).map(customer => ({
+        ...customer,
+        status: customer.status as CustomerStatus,
+        customer_id: (customer as any).customer_id || generateSimpleCustomerId()
+      })) as Customer[];
 
-      const typedCustomers = data?.map(customer => {
-        const typedCustomer: Customer = {
-          ...customer,
-          status: customer.status as CustomerStatus,
-          customer_id: (customer as any).customer_id || generateSimpleCustomerId()
-        };
-        
-        return typedCustomer;
-      }) || [];
-
-      console.log("Processed customers:", typedCustomers)
       setCustomers(typedCustomers)
       setFilteredCustomers(typedCustomers)
     } catch (error: any) {

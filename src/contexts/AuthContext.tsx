@@ -138,6 +138,25 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
 
     // The database trigger (handle_new_user_role) auto-assigns 'customer' role
+    // Also create a record in the customers table so admins can see this customer
+    if (data.user) {
+      try {
+        const contactName = `${firstName} ${lastName}`.trim();
+        await supabase.from('customers').insert({
+          email,
+          first_name: firstName,
+          last_name: lastName,
+          contact_name: contactName,
+          company_name: contactName,
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } catch (insertError) {
+        console.error('Failed to create customer record during signup:', insertError);
+      }
+    }
+
     toast({
       title: "Account created",
       description: "Please check your email to verify your account.",

@@ -102,7 +102,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
   }
 
   return (
-    <div className="flex min-h-screen bg-background pt-16">
+    <div className="flex min-h-screen bg-slate-100 pt-16">
       {/* Mobile Menu Button */}
       <button
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -122,9 +122,9 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       )}
 
       {/* Persistent Sidebar - Desktop */}
-      <div className="w-64 border-r bg-card/50 hidden md:flex flex-col h-[calc(100vh-4rem)] sticky top-16 shadow-sm">
-        <div className="p-6 border-b shrink-0">
-          <div className="flex items-center gap-2 text-primary">
+      <div className="w-64 border-r border-[hsl(217,40%,25%)] bg-[hsl(217,50%,18%)] hidden md:flex flex-col h-[calc(100vh-4rem)] sticky top-16 shadow-lg">
+        <div className="p-6 border-b border-[hsl(217,40%,25%)] shrink-0">
+          <div className="flex items-center gap-2 text-white">
             <LayoutDashboard className="h-6 w-6" />
             <h2 className="text-lg font-bold tracking-tight">CRM System</h2>
           </div>
@@ -154,7 +154,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Management Section */}
               {!isProductionPartner && (
                 <AccordionItem value="management" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Management
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -195,7 +195,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Content Section */}
               {!isProductionPartner && (
                 <AccordionItem value="content" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Content
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -217,7 +217,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
 
               {/* Operations Section */}
               <AccordionItem value="operations" className="border-none">
-                <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                   Operations
                 </AccordionTrigger>
                 <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -263,7 +263,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Lead Monitor Section */}
               {!isProductionPartner && (
                 <AccordionItem value="leads" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Lead Monitor
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -298,7 +298,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* System Section */}
               {!isProductionPartner && (
                 <AccordionItem value="system" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     System
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -324,14 +324,14 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
 
         {/* User info at bottom - Fixed */}
         {user && (
-          <div className="p-4 border-t bg-card/50 shrink-0">
+          <div className="p-4 border-t border-[hsl(217,40%,25%)] shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold border border-primary/20 ring-2 ring-background">
+              <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white font-semibold border border-white/20">
                 {user.email?.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-medium truncate text-foreground">{user.email}</p>
-                <p className="text-xs text-muted-foreground capitalize">
+                <p className="text-sm font-medium truncate text-slate-200">{user.email}</p>
+                <p className="text-xs text-slate-500 capitalize">
                   {user.role?.replace('_', ' ') || 'User'}
                 </p>
               </div>
@@ -341,11 +341,11 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       </div>
 
       {/* Mobile Sidebar */}
-      <div className={`md:hidden fixed left-0 top-16 w-72 h-[calc(100vh-4rem)] bg-card border-r shadow-xl z-[55] transition-transform duration-300 ease-in-out overflow-y-auto ${
+      <div className={`md:hidden fixed left-0 top-16 w-72 h-[calc(100vh-4rem)] bg-[hsl(217,50%,18%)] border-r border-[hsl(217,40%,25%)] shadow-xl z-[55] transition-transform duration-300 ease-in-out overflow-y-auto ${
         isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
-        <div className="p-4 border-b shrink-0">
-          <div className="flex items-center gap-2 text-primary">
+        <div className="p-4 border-b border-[hsl(217,40%,25%)] shrink-0">
+          <div className="flex items-center gap-2 text-white">
             <LayoutDashboard className="h-6 w-6" />
             <h2 className="text-lg font-bold tracking-tight">CRM System</h2>
           </div>
@@ -375,7 +375,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Management Section */}
               {!isProductionPartner && (
                 <AccordionItem value="management" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Management
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -416,7 +416,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Content Section */}
               {!isProductionPartner && (
                 <AccordionItem value="content" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Content
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -438,7 +438,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
 
               {/* Operations Section */}
               <AccordionItem value="operations" className="border-none">
-                <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                   Operations
                 </AccordionTrigger>
                 <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -479,7 +479,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* Lead Monitor Section */}
               {!isProductionPartner && (
                 <AccordionItem value="leads" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Lead Monitor
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -514,7 +514,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               {/* System Section */}
               {!isProductionPartner && (
                 <AccordionItem value="system" className="border-none">
-                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-accent/50 rounded-md text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     System
                   </AccordionTrigger>
                   <AccordionContent className="pb-0 pt-1 space-y-1">
@@ -540,14 +540,14 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
 
         {/* User info at bottom - Fixed */}
         {user && (
-          <div className="p-4 border-t bg-card/50 shrink-0">
+          <div className="p-4 border-t border-[hsl(217,40%,25%)] shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold border border-primary/20 ring-2 ring-background">
+              <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white font-semibold border border-white/20">
                 {user.email?.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-medium truncate text-foreground">{user.email}</p>
-                <p className="text-xs text-muted-foreground capitalize">
+                <p className="text-sm font-medium truncate text-slate-200">{user.email}</p>
+                <p className="text-xs text-slate-500 capitalize">
                   {user.role?.replace('_', ' ') || 'User'}
                 </p>
               </div>
@@ -557,7 +557,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-muted/20 relative z-0 md:ml-0">
+      <div className="flex-1 overflow-auto min-h-[calc(100vh-4rem)] bg-slate-100 relative z-0 md:ml-0">
         <div className="p-4 md:p-8 max-w-7xl mx-auto animate-fade-in w-full min-h-full">
           {children}
         </div>
@@ -574,16 +574,16 @@ interface NavButtonProps {
 }
 
 const NavButton = ({ active, onClick, icon, label }: NavButtonProps) => (
-  <button 
+  <button
     className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 group relative ${
-      active 
-        ? "bg-primary/10 text-primary" 
-        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      active
+        ? "bg-white/10 text-white"
+        : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
     }`}
     onClick={onClick}
   >
     {active && (
-      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-primary" />
+      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-r-full bg-white" />
     )}
     <span className="relative z-10 flex items-center gap-3">
       {icon}

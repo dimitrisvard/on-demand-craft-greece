@@ -30,6 +30,7 @@ import {
   Box,
   ArrowLeft,
   Sparkles,
+  X,
 } from "lucide-react";
 
 const PartThumbnail3D = lazy(() => import('@/components/shared/PartThumbnail3D'));
@@ -65,6 +66,11 @@ type RfqRow = Database['public']['Tables']['rfqs']['Row'];
 type Customer = {
   id: string;
   company_name: string;
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  contact_name?: string;
+  vat_tax_id?: string;
 };
 
 // Status config matching customer-side
@@ -111,6 +117,8 @@ export default function RfqManagement() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [partIndexes, setPartIndexes] = useState<Record<string, number>>({});
   // Thumbnail state: key (rfqId or partId) -> { url, name } for 3D files
@@ -211,13 +219,18 @@ export default function RfqManagement() {
     try {
       const { data, error } = await supabase
         .from('customers')
-        .select('id, company_name, email, first_name, last_name, contact_name')
+        .select('id, company_name, email, first_name, last_name, contact_name, vat_tax_id')
         .order('company_name', { ascending: true });
       if (error) throw error;
       // Use company_name, fall back to contact_name/email so self-registered customers are visible
       const mapped: Customer[] = (data || []).map((c: any) => ({
         id: c.id,
         company_name: c.company_name || c.contact_name || `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.email || 'Unknown',
+        email: c.email || '',
+        first_name: c.first_name || '',
+        last_name: c.last_name || '',
+        contact_name: c.contact_name || '',
+        vat_tax_id: c.vat_tax_id || '',
       }));
       setCustomers(mapped);
     } catch (error: any) {
@@ -547,7 +560,9 @@ export default function RfqManagement() {
 
   const handleOpenCreateRfq = async () => {
     const rfqNumber = await generateRfqNumber();
-    setNewRfq(prev => ({ ...prev, title: rfqNumber }));
+    setNewRfq(prev => ({ ...prev, title: rfqNumber, customer_id: '' }));
+    setCustomerSearch('');
+    setIsCustomerDropdownOpen(false);
     setIsRfqDialogOpen(true);
   };
 
@@ -620,11 +635,11 @@ export default function RfqManagement() {
             {/* Thumbnail */}
             <div className="flex-shrink-0 hidden sm:block">
               {rfqThumb ? (
-                <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                <Suspense fallback={<div className="h-[144px] w-[144px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
                   <PartThumbnail3D
                     fileUrl={rfqThumb.url}
                     fileName={rfqThumb.name}
-                    size={72}
+                    size={144}
                     onMetrics={(m) => {
                       setRfqVolumes(prev => {
                         if (prev[rfq.id]) return prev;
@@ -639,7 +654,7 @@ export default function RfqManagement() {
                   )}
                 </Suspense>
               ) : (
-                <div className="h-[72px] w-[72px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                <div className="h-[144px] w-[144px] rounded bg-slate-50 border flex flex-col items-center justify-center">
                   <Box className="h-5 w-5 text-slate-300" />
                 </div>
               )}
@@ -797,18 +812,18 @@ export default function RfqManagement() {
                   {/* Per-part thumbnail */}
                   <div className="flex-shrink-0 hidden sm:block">
                     {partThumb ? (
-                      <Suspense fallback={<div className="h-[64px] w-[64px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-3 w-3 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                      <Suspense fallback={<div className="h-[128px] w-[128px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-3 w-3 border-2 border-slate-300 border-t-slate-600" /></div>}>
                         <PartThumbnail3D
                           fileUrl={partThumb.url}
                           fileName={partThumb.name}
-                          size={64}
+                          size={128}
                           onMetrics={(m) => {
                             if (part?.id) setRfqVolumes(prev => prev[part.id] ? prev : { ...prev, [part.id]: m.volume });
                           }}
                         />
                       </Suspense>
                     ) : (
-                      <div className="h-[64px] w-[64px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                      <div className="h-[128px] w-[128px] rounded bg-slate-50 border flex flex-col items-center justify-center">
                         <Box className="h-4 w-4 text-slate-300" />
                       </div>
                     )}
@@ -888,11 +903,11 @@ export default function RfqManagement() {
             {/* Thumbnail */}
             <div className="flex-shrink-0 hidden sm:block">
               {orderThumb ? (
-                <Suspense fallback={<div className="h-[72px] w-[72px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                <Suspense fallback={<div className="h-[144px] w-[144px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-4 w-4 border-2 border-slate-300 border-t-slate-600" /></div>}>
                   <PartThumbnail3D
                     fileUrl={orderThumb.url}
                     fileName={orderThumb.name}
-                    size={72}
+                    size={144}
                     onMetrics={(m) => {
                       setRfqVolumes(prev => {
                         if (prev[orderRfqId]) return prev;
@@ -907,7 +922,7 @@ export default function RfqManagement() {
                   )}
                 </Suspense>
               ) : (
-                <div className="h-[72px] w-[72px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                <div className="h-[144px] w-[144px] rounded bg-slate-50 border flex flex-col items-center justify-center">
                   <Box className="h-5 w-5 text-slate-300" />
                 </div>
               )}
@@ -1055,18 +1070,18 @@ export default function RfqManagement() {
                   {/* Per-part thumbnail */}
                   <div className="flex-shrink-0 hidden sm:block">
                     {partThumb ? (
-                      <Suspense fallback={<div className="h-[64px] w-[64px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-3 w-3 border-2 border-slate-300 border-t-slate-600" /></div>}>
+                      <Suspense fallback={<div className="h-[128px] w-[128px] rounded bg-slate-50 border flex items-center justify-center"><div className="animate-spin rounded-full h-3 w-3 border-2 border-slate-300 border-t-slate-600" /></div>}>
                         <PartThumbnail3D
                           fileUrl={partThumb.url}
                           fileName={partThumb.name}
-                          size={64}
+                          size={128}
                           onMetrics={(m) => {
                             if (part?.id) setRfqVolumes(prev => prev[part.id] ? prev : { ...prev, [part.id]: m.volume });
                           }}
                         />
                       </Suspense>
                     ) : (
-                      <div className="h-[64px] w-[64px] rounded bg-slate-50 border flex flex-col items-center justify-center">
+                      <div className="h-[128px] w-[128px] rounded bg-slate-50 border flex flex-col items-center justify-center">
                         <Box className="h-4 w-4 text-slate-300" />
                       </div>
                     )}
@@ -1308,10 +1323,68 @@ export default function RfqManagement() {
             </div>
             <div className="space-y-2">
               <label htmlFor="customer_id" className="text-sm font-medium">Customer *</label>
-              <select id="customer_id" name="customer_id" value={newRfq.customer_id} onChange={handleRfqInputChange} className="w-full p-2 border rounded-md" required>
-                <option value="">Select a customer...</option>
-                {customers.map((c) => (<option key={c.id} value={c.id}>{c.company_name}</option>))}
-              </select>
+              <div className="relative">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    placeholder="Search by name, company, email, or VAT..."
+                    className="pl-10"
+                    value={customerSearch}
+                    onChange={(e) => {
+                      setCustomerSearch(e.target.value);
+                      setIsCustomerDropdownOpen(true);
+                      if (!e.target.value) {
+                        setNewRfq(prev => ({ ...prev, customer_id: '' }));
+                      }
+                    }}
+                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                  />
+                </div>
+                {newRfq.customer_id && (
+                  <div className="mt-1.5 flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5">
+                    <span className="text-sm font-medium text-blue-900">{customers.find(c => c.id === newRfq.customer_id)?.company_name}</span>
+                    <button type="button" onClick={() => { setNewRfq(prev => ({ ...prev, customer_id: '' })); setCustomerSearch(''); }} className="ml-auto text-blue-400 hover:text-blue-600"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+                {isCustomerDropdownOpen && !newRfq.customer_id && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-[240px] overflow-y-auto">
+                    {(() => {
+                      const q = customerSearch.toLowerCase();
+                      const filtered = q
+                        ? customers.filter(c =>
+                            c.company_name.toLowerCase().includes(q) ||
+                            (c.email || '').toLowerCase().includes(q) ||
+                            (c.contact_name || '').toLowerCase().includes(q) ||
+                            (c.first_name || '').toLowerCase().includes(q) ||
+                            (c.last_name || '').toLowerCase().includes(q) ||
+                            (c.vat_tax_id || '').toLowerCase().includes(q)
+                          )
+                        : customers.slice(0, 15);
+                      if (filtered.length === 0) {
+                        return <div className="px-4 py-3 text-sm text-slate-500">No customers found</div>;
+                      }
+                      return filtered.map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="w-full text-left px-4 py-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                          onClick={() => {
+                            setNewRfq(prev => ({ ...prev, customer_id: c.id }));
+                            setCustomerSearch(c.company_name);
+                            setIsCustomerDropdownOpen(false);
+                          }}
+                        >
+                          <p className="text-sm font-medium text-slate-900">{c.company_name}</p>
+                          <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                            {c.email && <span>{c.email}</span>}
+                            {c.vat_tax_id && <><span className="text-slate-300">|</span><span className="font-mono">{c.vat_tax_id}</span></>}
+                          </div>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
