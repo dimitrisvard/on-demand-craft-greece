@@ -11,11 +11,12 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { BackToDashboardButton } from '@/components/dashboard/BackToDashboardButton';
 import PersistentDashboardLayout from '@/components/dashboard/PersistentDashboardLayout';
-import { ArrowLeft, Save, Upload, Settings2, Globe, Palette, FileText, Sparkles } from 'lucide-react';
+import { ArrowLeft, Save, Upload, Settings2, Globe, Palette, FileText, Sparkles, Link2, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import {
   getTenant, createTenant, updateTenant, uploadTenantLogo, uploadTenantFavicon,
   getCapabilitiesRegistry, getTenantCapabilities, updateTenantCapabilities,
   getQuoteFieldsRegistry, getTenantQuoteFields, updateTenantQuoteFields,
+  verifyTenantDomain,
 } from '@/utils/tenantApi';
 import type {
   Tenant, TenantInsert, TenantUpdate, CapabilityRegistry,
@@ -33,7 +34,8 @@ export default function TenantEditPage() {
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<TenantInsert & { id?: string }>({
+  const [domainChecking, setDomainChecking] = useState(false);
+  const [form, setForm] = useState<TenantInsert & { id?: string; domain_verified?: boolean }>({
     slug: '',
     name: '',
     logo_url: null,
@@ -45,7 +47,9 @@ export default function TenantEditPage() {
     contact_phone: null,
     address: null,
     website: null,
+    custom_domain: null,
     is_active: true,
+    domain_verified: false,
   });
 
   // Capabilities state
@@ -78,6 +82,8 @@ export default function TenantEditPage() {
         contact_phone: tenant.contact_phone,
         address: tenant.address,
         website: tenant.website,
+        custom_domain: tenant.custom_domain,
+        domain_verified: tenant.domain_verified,
         is_active: tenant.is_active,
       });
       const [caps, fields] = await Promise.all([
@@ -134,6 +140,7 @@ export default function TenantEditPage() {
           contact_phone: form.contact_phone,
           address: form.address,
           website: form.website,
+          custom_domain: form.custom_domain || null,
           is_active: form.is_active,
         });
         toast({ title: 'Created', description: `${tenant.name} created successfully` });
@@ -150,6 +157,7 @@ export default function TenantEditPage() {
           contact_phone: form.contact_phone,
           address: form.address,
           website: form.website,
+          custom_domain: form.custom_domain || null,
           is_active: form.is_active,
         };
         await updateTenant(id, updates);
@@ -474,6 +482,92 @@ export default function TenantEditPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Custom Domain — full width below the 2-col grid */}
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Link2 className="h-5 w-5" /> Custom Domain
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label>Custom Domain</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={form.custom_domain || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, custom_domain: e.target.value.toLowerCase().trim() || null }))}
+                      placeholder="www.laserkritis.gr"
+                      className="max-w-sm"
+                    />
+                    {form.custom_domain && (
+                      <Badge variant={form.domain_verified ? 'default' : 'outline'} className="gap-1">
+                        {form.domain_verified
+                          ? <><CheckCircle2 className="h-3 w-3" /> Verified</>
+                          : <><AlertCircle className="h-3 w-3" /> Pending</>}
+                      </Badge>
+                    )}
+                    {form.custom_domain && !isNew && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={domainChecking}
+                        onClick={async () => {
+                          if (!form.custom_domain) return;
+                          setDomainChecking(true);
+                          try {
+                            const ok = await verifyTenantDomain(form.custom_domain);
+                            if (ok && id) {
+                              await updateTenant(id, { domain_verified: true });
+                              setForm((prev) => ({ ...prev, domain_verified: true }));
+                              toast({ title: 'Domain verified', description: `${form.custom_domain} is reachable.` });
+                            } else {
+                              toast({ title: 'Domain not reachable', description: 'Check DNS configuration and Vercel domain setup.', variant: 'destructive' });
+                            }
+                          } catch {
+                            toast({ title: 'Check failed', variant: 'destructive' });
+                          } finally {
+                            setDomainChecking(false);
+                          }
+                        }}
+                        className="gap-1"
+                      >
+                        {domainChecking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Globe className="h-3 w-3" />}
+                        Check DNS
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Optional. Allows this tenant to be accessed via their own domain instead of {form.slug || 'slug'}.micronshub.eu
+                  </p>
+                </div>
+
+                {form.custom_domain && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm space-y-3">
+                    <p className="font-semibold text-amber-800">Setup Instructions</p>
+                    <ol className="list-decimal list-inside space-y-2 text-amber-900">
+                      <li>
+                        <strong>Add domain in Vercel:</strong> Go to Vercel Dashboard &gt; Project &gt; Settings &gt; Domains &gt; Add <code className="bg-amber-100 px-1 rounded">{form.custom_domain}</code>
+                      </li>
+                      <li>
+                        <strong>Configure DNS:</strong> The tenant owner must add this record to their domain registrar:
+                        <div className="mt-1 bg-white border border-amber-200 rounded p-2 font-mono text-xs">
+                          <div>Type: <strong>CNAME</strong></div>
+                          <div>Name: <strong>{form.custom_domain.startsWith('www.') ? 'www' : '@'}</strong></div>
+                          <div>Value: <strong>cname.vercel-dns.com</strong></div>
+                        </div>
+                      </li>
+                      <li>
+                        <strong>Wait for SSL:</strong> Vercel will automatically provision an SSL certificate (usually &lt; 5 minutes).
+                      </li>
+                      <li>
+                        <strong>Verify:</strong> Click "Check DNS" above to confirm the domain is working.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             <div className="flex justify-end mt-6">
               <Button onClick={handleSave} disabled={saving} className="gap-2">

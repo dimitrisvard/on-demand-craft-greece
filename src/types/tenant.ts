@@ -13,6 +13,8 @@ export interface Tenant {
   contact_phone: string | null;
   address: string | null;
   website: string | null;
+  custom_domain: string | null;
+  domain_verified: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -30,6 +32,7 @@ export interface TenantInsert {
   contact_phone?: string | null;
   address?: string | null;
   website?: string | null;
+  custom_domain?: string | null;
   is_active?: boolean;
 }
 
@@ -44,6 +47,8 @@ export interface TenantUpdate {
   contact_phone?: string | null;
   address?: string | null;
   website?: string | null;
+  custom_domain?: string | null;
+  domain_verified?: boolean;
   is_active?: boolean;
 }
 
@@ -323,6 +328,7 @@ export interface TenantConfig {
   contactPhone: string | null;
   address: string | null;
   website: string | null;
+  customDomain: string | null;
   capabilities: TenantCapabilityConfig[];
 }
 
