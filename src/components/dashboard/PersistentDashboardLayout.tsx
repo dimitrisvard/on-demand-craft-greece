@@ -47,6 +47,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
 
   // Check if user is a production partner
   const isProductionPartner = user?.role === 'partner_seller';
+  // Check if user is a tenant admin (has limited dashboard access - no Lead Monitor, no Content)
+  const isTenantAdminUser = user?.tenantRole === 'tenant_admin';
   
   // Close mobile menu when route changes
   useEffect(() => {
@@ -193,8 +195,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                 </AccordionItem>
               )}
 
-              {/* Content Section */}
-              {!isProductionPartner && (
+              {/* Content Section - hidden from production partners and tenant admins */}
+              {!isProductionPartner && !isTenantAdminUser && (
                 <AccordionItem value="content" className="border-none">
                   <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Content
@@ -261,8 +263,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               </AccordionContent>
             </AccordionItem>
 
-              {/* Lead Monitor Section */}
-              {!isProductionPartner && (
+              {/* Lead Monitor Section - hidden from production partners and tenant admins */}
+              {!isProductionPartner && !isTenantAdminUser && (
                 <AccordionItem value="leads" className="border-none">
                   <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Lead Monitor
@@ -420,8 +422,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                 </AccordionItem>
               )}
 
-              {/* Content Section */}
-              {!isProductionPartner && (
+              {/* Content Section - hidden from production partners and tenant admins */}
+              {!isProductionPartner && !isTenantAdminUser && (
                 <AccordionItem value="content" className="border-none">
                   <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Content
@@ -483,8 +485,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
               </AccordionContent>
             </AccordionItem>
 
-              {/* Lead Monitor Section */}
-              {!isProductionPartner && (
+              {/* Lead Monitor Section - hidden from production partners and tenant admins */}
+              {!isProductionPartner && !isTenantAdminUser && (
                 <AccordionItem value="leads" className="border-none">
                   <AccordionTrigger className="py-2 px-4 hover:no-underline hover:bg-white/5 rounded-md text-sm font-medium text-slate-500 uppercase tracking-wider">
                     Lead Monitor

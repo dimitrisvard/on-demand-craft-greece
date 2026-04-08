@@ -4,7 +4,7 @@ import * as Yup from 'yup';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { uploadFileToS3 } from '@/utils/awsS3Storage';
 import StepCompanyInfo from './steps/StepCompanyInfo';
@@ -17,6 +17,8 @@ import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { trackQuoteRequest, trackFormSubmission, trackQuoteFormSubmitSuccess } from '@/utils/analytics';
 import { sendRFQEmails } from '@/utils/emailService';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { LogIn, UserPlus } from 'lucide-react';
 
 const validationSchemas = [
   // Step 1: Company & Contact Information
@@ -48,6 +50,11 @@ const validationSchemas = [
         process: Yup.string().required('Manufacturing process is required'),
         material: Yup.string().required('Material is required'),
         materialSubtype: Yup.string().required('Material grade is required'),
+        thickness: Yup.string().when('process', {
+          is: (val: string) => ['laser-cutting', 'sheet-metal', 'plasma-cutting'].includes(val),
+          then: (schema) => schema.required('Thickness is required for this process'),
+          otherwise: (schema) => schema,
+        }),
       })
     ).min(1, 'At least one part is required'),
   }),
@@ -128,9 +135,11 @@ interface MultiStepQuoteFormProps {
 const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false, skipCompanyStep = false }) => {
   const [currentStep, setCurrentStep] = useState(skipCompanyStep ? 1 : 0);
   const [prefillValues, setPrefillValues] = useState<Partial<typeof initialValues> | null>(null);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
 
@@ -264,9 +273,18 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
 
   const handleSubmit = async (values: FormValues, { setSubmitting, setErrors, setTouched }: any) => {
     console.log('Formik handleSubmit called with values:', values);
+
+    // Check if user is logged in before allowing submission
+    if (!user) {
+      console.log('User not logged in, showing login dialog');
+      setShowLoginDialog(true);
+      setSubmitting(false);
+      return;
+    }
+
     try {
       console.log('Starting form submission...');
-      
+
       // Validate all steps before submission (skip step 0 if company step is skipped)
       const startSchema = skipCompanyStep ? 1 : 0;
       for (let i = startSchema; i < validationSchemas.length; i++) {
@@ -732,6 +750,50 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
           );
         }}
       </Formik>
+
+      {/* Login/Register Dialog */}
+      <Dialog open={showLoginDialog} onOpenChange={setShowLoginDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-center">
+              {t('quote_form_login_required_title') !== 'quote_form_login_required_title'
+                ? t('quote_form_login_required_title')
+                : 'Account Required'}
+            </DialogTitle>
+            <DialogDescription className="text-center text-muted-foreground">
+              {t('quote_form_login_required_desc') !== 'quote_form_login_required_desc'
+                ? t('quote_form_login_required_desc')
+                : 'Please log in or create an account to submit your quote request. Your form data will be preserved.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 mt-4">
+            <Button
+              onClick={() => {
+                setShowLoginDialog(false);
+                // Pass current location so login page can redirect back
+                const returnUrl = location.pathname + location.search;
+                navigate(getLocalizedPath('/login') + `?returnTo=${encodeURIComponent(returnUrl)}`);
+              }}
+              className="w-full gap-2"
+            >
+              <LogIn className="h-4 w-4" />
+              {t('quote_form_sign_in') !== 'quote_form_sign_in' ? t('quote_form_sign_in') : 'Sign In'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowLoginDialog(false);
+                const returnUrl = location.pathname + location.search;
+                navigate(getLocalizedPath('/login') + `?returnTo=${encodeURIComponent(returnUrl)}&tab=register`);
+              }}
+              className="w-full gap-2"
+            >
+              <UserPlus className="h-4 w-4" />
+              {t('quote_form_create_account') !== 'quote_form_create_account' ? t('quote_form_create_account') : 'Create Account'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -39,12 +39,12 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
   return (
     <div className="space-y-8">
       <div className="mb-8">
-        <h3 className="text-xl font-medium mb-4">{t('quote_form_company_info_title')}</h3>
+        <h3 className="text-xl font-medium mb-4 text-slate-100">{t('quote_form_company_info_title')}</h3>
         
         <div className="space-y-4">
           <div>
-            <Label htmlFor="companyName">
-              {t('quote_form_company_name')} <span className="text-red-500">*</span>
+            <Label htmlFor="companyName" className="text-slate-200">
+              {t('quote_form_company_name')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="companyName"
@@ -52,7 +52,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.companyName}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('companyName') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('companyName') ? 'border-red-500' : ''}`}
             />
             {hasError('companyName') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('companyName')}</p>
@@ -60,8 +60,8 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="vatId">
-              {t('quote_form_vat_tax_id')} <span className="text-red-500">*</span>
+            <Label htmlFor="vatId" className="text-slate-200">
+              {t('quote_form_vat_tax_id')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="vatId"
@@ -69,7 +69,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.vatId}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('vatId') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('vatId') ? 'border-red-500' : ''}`}
             />
             {hasError('vatId') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('vatId')}</p>
@@ -79,12 +79,12 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
       </div>
 
       <div className="mb-8">
-        <h3 className="text-xl font-medium mb-4">{t('quote_form_company_address_title')}</h3>
+        <h3 className="text-xl font-medium mb-4 text-slate-100">{t('quote_form_company_address_title')}</h3>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
-            <Label htmlFor="address.street">
-              {t('quote_form_street_address')} <span className="text-red-500">*</span>
+            <Label htmlFor="address.street" className="text-slate-200">
+              {t('quote_form_street_address')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="address.street"
@@ -92,7 +92,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.address?.street || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('address.street') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('address.street') ? 'border-red-500' : ''}`}
             />
             {hasError('address.street') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('address.street')}</p>
@@ -100,8 +100,8 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="address.city">
-              {t('quote_form_city')} <span className="text-red-500">*</span>
+            <Label htmlFor="address.city" className="text-slate-200">
+              {t('quote_form_city')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="address.city"
@@ -109,7 +109,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.address?.city || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('address.city') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('address.city') ? 'border-red-500' : ''}`}
             />
             {hasError('address.city') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('address.city')}</p>
@@ -117,8 +117,8 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="address.zipCode">
-              {t('quote_form_zip_postal_code')} <span className="text-red-500">*</span>
+            <Label htmlFor="address.zipCode" className="text-slate-200">
+              {t('quote_form_zip_postal_code')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="address.zipCode"
@@ -126,7 +126,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.address?.zipCode || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('address.zipCode') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('address.zipCode') ? 'border-red-500' : ''}`}
             />
             {hasError('address.zipCode') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('address.zipCode')}</p>
@@ -134,15 +134,15 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div className="md:col-span-2">
-            <Label htmlFor="address.country">
-              {t('quote_form_country')} <span className="text-red-500">*</span>
+            <Label htmlFor="address.country" className="text-slate-200">
+              {t('quote_form_country')} <span className="text-red-400">*</span>
             </Label>
-            <Select 
+            <Select
               name="address.country"
-              value={values.address?.country || ''} 
+              value={values.address?.country || ''}
               onValueChange={(value) => setFieldValue('address.country', value)}
             >
-              <SelectTrigger className={hasError('address.country') ? 'border-red-500' : ''}>
+              <SelectTrigger className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('address.country') ? 'border-red-500' : ''}`}>
                 <SelectValue placeholder={t('quote_form_select_country')} />
               </SelectTrigger>
               <SelectContent>
@@ -161,12 +161,12 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
       </div>
 
       <div className="mb-8">
-        <h3 className="text-xl font-medium mb-4">{t('quote_form_contact_person_title')}</h3>
+        <h3 className="text-xl font-medium mb-4 text-slate-100">{t('quote_form_contact_person_title')}</h3>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="contact.firstName">
-              {t('quote_form_first_name')} <span className="text-red-500">*</span>
+            <Label htmlFor="contact.firstName" className="text-slate-200">
+              {t('quote_form_first_name')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="contact.firstName"
@@ -174,7 +174,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.contact?.firstName || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('contact.firstName') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('contact.firstName') ? 'border-red-500' : ''}`}
             />
             {hasError('contact.firstName') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('contact.firstName')}</p>
@@ -182,8 +182,8 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="contact.lastName">
-              {t('quote_form_last_name')} <span className="text-red-500">*</span>
+            <Label htmlFor="contact.lastName" className="text-slate-200">
+              {t('quote_form_last_name')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="contact.lastName"
@@ -191,7 +191,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.contact?.lastName || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('contact.lastName') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('contact.lastName') ? 'border-red-500' : ''}`}
             />
             {hasError('contact.lastName') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('contact.lastName')}</p>
@@ -199,7 +199,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="contact.position">
+            <Label htmlFor="contact.position" className="text-slate-200">
               {t('quote_form_position')}
             </Label>
             <Input
@@ -208,12 +208,13 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.contact?.position || ''}
               onChange={handleChange}
               onBlur={handleBlur}
+              className="bg-slate-900/50 border-slate-600 text-slate-200"
             />
           </div>
 
           <div>
-            <Label htmlFor="contact.email">
-              {t('quote_form_email')} <span className="text-red-500">*</span>
+            <Label htmlFor="contact.email" className="text-slate-200">
+              {t('quote_form_email')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="contact.email"
@@ -222,7 +223,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.contact?.email || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('contact.email') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('contact.email') ? 'border-red-500' : ''}`}
             />
             {hasError('contact.email') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('contact.email')}</p>
@@ -230,8 +231,8 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="contact.phone">
-              {t('quote_form_phone')} <span className="text-red-500">*</span>
+            <Label htmlFor="contact.phone" className="text-slate-200">
+              {t('quote_form_phone')} <span className="text-red-400">*</span>
             </Label>
             <Input
               id="contact.phone"
@@ -240,7 +241,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               value={values.contact?.phone || ''}
               onChange={handleChange}
               onBlur={handleBlur}
-              className={hasError('contact.phone') ? 'border-red-500' : ''}
+              className={`bg-slate-900/50 border-slate-600 text-slate-200 ${hasError('contact.phone') ? 'border-red-500' : ''}`}
             />
             {hasError('contact.phone') && (
               <p className="text-red-500 text-sm mt-1">{getErrorMessage('contact.phone')}</p>
@@ -248,7 +249,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
 
           <div>
-            <Label htmlFor="contact.mobile">
+            <Label htmlFor="contact.mobile" className="text-slate-200">
               {t('quote_form_mobile')}
             </Label>
             <Input
@@ -259,12 +260,13 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
               onChange={handleChange}
               onBlur={handleBlur}
               placeholder={t('quote_form_mobile_placeholder')}
+              className="bg-slate-900/50 border-slate-600 text-slate-200"
             />
           </div>
         </div>
       </div>
 
-      <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+      <div className="bg-blue-500/10 border-l-4 border-blue-400 p-4 rounded">
         <div className="flex">
           <div className="flex-shrink-0">
             <svg className="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
@@ -272,7 +274,7 @@ const StepCompanyInfo: React.FC<StepComponentProps> = ({ formikProps }) => {
             </svg>
           </div>
           <div className="ml-3">
-            <p className="text-sm text-blue-700">
+            <p className="text-sm text-blue-300">
               {t('quote_form_contact_info_message')}
             </p>
           </div>

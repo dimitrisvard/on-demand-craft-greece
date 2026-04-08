@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { Eye, EyeOff, Lock, Mail, User, Building, Phone, Globe, Hash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,9 @@ const Login = () => {
   const { toast } = useToast();
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
+  const defaultTab = searchParams.get('tab') || 'login';
 
   // Registration fields
   const [regFirstName, setRegFirstName] = useState("");
@@ -45,7 +48,12 @@ const Login = () => {
     try {
       setLoading(true);
       await signIn(email, password);
-      // Navigation is handled by AuthContext based on user role
+      // If there's a return URL, redirect there instead of default
+      if (returnTo) {
+        navigate(returnTo);
+        return;
+      }
+      // Otherwise navigation is handled by AuthContext based on user role
     } catch (error: any) {
       console.error('Login error:', error);
       let description = error?.message || "Please check your credentials and try again.";
@@ -156,7 +164,7 @@ const Login = () => {
 
         // Small delay to let role assignment trigger complete
         setTimeout(() => {
-          navigate('/customer/dashboard');
+          navigate(returnTo || '/customer/dashboard');
         }, 500);
       } else if (data.user && !data.session) {
         // Email verification required - still create customer record
@@ -236,7 +244,7 @@ const Login = () => {
             </CardDescription>
           </CardHeader>
 
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs defaultValue={defaultTab} className="w-full">
             <TabsList className="grid grid-cols-2 w-full">
               <TabsTrigger value="login">Sign In</TabsTrigger>
               <TabsTrigger value="register">Register</TabsTrigger>

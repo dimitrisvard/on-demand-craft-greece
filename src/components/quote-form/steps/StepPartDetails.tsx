@@ -338,30 +338,8 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
       .filter(Boolean);
   }, [tenant]);
 
-  // Fetch materials from database, fall back to static options
-  const [materialOptions, setMaterialOptions] = useState<DbMaterialOption[]>(staticMaterialOptions);
-  const [dbLoaded, setDbLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const dbMats = await getCatalogMaterials();
-        if (cancelled) return;
-        if (dbMats && dbMats.length > 0) {
-          const dbOptions = buildMaterialOptionsFromDb(dbMats);
-          if (dbOptions.length > 0) {
-            setMaterialOptions(dbOptions);
-          }
-        }
-      } catch {
-        // Silently fall back to static options
-      } finally {
-        if (!cancelled) setDbLoaded(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  // Use static material options (Aluminum, Steel, Stainless Steel, etc.)
+  const materialOptions: DbMaterialOption[] = staticMaterialOptions;
 
   // BUG FIX: No shared materialSubtypes state. Subtypes are derived per-part
   // from the part's own material value using getSubtypesForMaterial()
@@ -696,20 +674,28 @@ const StepPartDetails: React.FC<StepComponentProps> = ({ formikProps }) => {
                         {/* Row 6: Thickness + Bending */}
                         <div className="grid grid-cols-2 gap-2 mb-2">
                           <div>
-                            <Label className="text-[11px] text-slate-400 mb-0.5 block">Material Thickness</Label>
-                            <Select
+                            <Label className="text-[11px] text-slate-400 mb-0.5 block">
+                              Material Thickness (mm)
+                              {['laser-cutting', 'sheet-metal', 'plasma-cutting'].includes(part.process) && (
+                                <span className="text-red-400"> *</span>
+                              )}
+                            </Label>
+                            <Input
+                              id={`parts[${index}].thickness`}
+                              name={`parts[${index}].thickness`}
+                              type="number"
+                              step="0.1"
+                              min="0.1"
                               value={part.thickness || ''}
-                              onValueChange={(value) => setFieldValue(`parts[${index}].thickness`, value)}
-                            >
-                              <SelectTrigger className="h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200">
-                                <SelectValue placeholder="Select thickness" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {thicknessOptions.map((opt) => (
-                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              onChange={handleChange}
+                              placeholder="e.g. 2.5"
+                              className={`h-8 text-sm bg-slate-900/50 border-slate-600 text-slate-200 ${
+                                touched.parts?.[index]?.thickness && errors.parts?.[index]?.thickness ? 'border-red-500' : ''
+                              }`}
+                            />
+                            {touched.parts?.[index]?.thickness && errors.parts?.[index]?.thickness && (
+                              <p className="text-red-400 text-[10px] mt-0.5">{String(errors.parts?.[index]?.thickness)}</p>
+                            )}
                           </div>
                           <div className="flex items-end pb-1">
                             <div className="flex items-center gap-1.5">

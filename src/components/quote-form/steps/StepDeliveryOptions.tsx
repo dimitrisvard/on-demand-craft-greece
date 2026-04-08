@@ -38,11 +38,11 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
 
   return (
     <div className="space-y-8">
-      <h3 className="text-xl font-medium mb-4">{t('quote_form_delivery_options_title')}</h3>
+      <h3 className="text-xl font-medium mb-4 text-slate-100">{t('quote_form_delivery_options_title')}</h3>
 
       <div className="space-y-6">
         <div>
-          <h4 className="text-base font-medium mb-3">{t('quote_form_select_production_speed')}</h4>
+          <h4 className="text-base font-medium mb-3 text-slate-200">{t('quote_form_select_production_speed')}</h4>
           <RadioGroup
             value={values.delivery.speed}
             onValueChange={(value) => setFieldValue('delivery.speed', value)}
@@ -58,15 +58,15 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
                 <Label
                   htmlFor={option.id}
                   className={cn(
-                    "flex flex-col h-full p-4 rounded-md border-2 border-muted bg-popover hover:bg-accent hover:text-accent-foreground cursor-pointer",
+                    "flex flex-col h-full p-4 rounded-md border-2 border-slate-600 bg-slate-800/60 hover:bg-slate-700/60 cursor-pointer",
                     "peer-data-[state=checked]:border-teal-600",
                     values.delivery.speed === option.id ? "border-teal-600" : ""
                   )}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <span className="font-medium block">{option.name}</span>
-                      <span className="text-sm text-muted-foreground flex items-center mt-1">
+                      <span className="font-medium block text-slate-200">{option.name}</span>
+                      <span className="text-sm text-slate-400 flex items-center mt-1">
                         <Clock className="h-3.5 w-3.5 mr-1" />
                         {option.description}
                       </span>
@@ -90,7 +90,7 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <Label htmlFor="delivery.maxDeliveryDate">
+            <Label htmlFor="delivery.maxDeliveryDate" className="text-slate-200">
               {t('quote_form_latest_delivery_date')}
             </Label>
             <Popover>
@@ -98,8 +98,8 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
                 <Button
                   variant="outline"
                   className={cn(
-                    "w-full justify-start text-left font-normal mt-1.5",
-                    !values.delivery.maxDeliveryDate && "text-muted-foreground"
+                    "w-full justify-start text-left font-normal mt-1.5 bg-slate-900/50 border-slate-600 text-slate-200",
+                    !values.delivery.maxDeliveryDate && "text-slate-400"
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
@@ -120,13 +120,13 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
                 />
               </PopoverContent>
             </Popover>
-            <p className="text-xs text-gray-500 mt-1.5">
+            <p className="text-xs text-slate-500 mt-1.5">
               {t('quote_form_delivery_deadline_note')}
             </p>
           </div>
 
           <div>
-            <Label htmlFor="delivery.latestOfferDate">
+            <Label htmlFor="delivery.latestOfferDate" className="text-slate-200">
               {t('quote_form_offer_needed_by')}
             </Label>
             <Popover>
@@ -134,8 +134,8 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
                 <Button
                   variant="outline"
                   className={cn(
-                    "w-full justify-start text-left font-normal mt-1.5",
-                    !values.delivery.latestOfferDate && "text-muted-foreground"
+                    "w-full justify-start text-left font-normal mt-1.5 bg-slate-900/50 border-slate-600 text-slate-200",
+                    !values.delivery.latestOfferDate && "text-slate-400"
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
@@ -156,13 +156,13 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
                 />
               </PopoverContent>
             </Popover>
-            <p className="text-xs text-gray-500 mt-1.5">
+            <p className="text-xs text-slate-500 mt-1.5">
               {t('quote_form_offer_deadline_note')}
             </p>
           </div>
         </div>
         
-        <div className="bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+        <div className="bg-blue-500/10 border-l-4 border-blue-400 p-4 rounded">
           <div className="flex">
             <div className="flex-shrink-0">
               <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
@@ -170,7 +170,7 @@ const StepDeliveryOptions: React.FC<StepComponentProps> = ({ formikProps }) => {
               </svg>
             </div>
             <div className="ml-3">
-              <p className="text-sm text-blue-700">
+              <p className="text-sm text-blue-300">
                 {t('quote_form_faster_production_note')}
               </p>
             </div>

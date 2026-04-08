@@ -39,65 +39,65 @@ const StepReviewSubmit: React.FC<StepComponentProps> = ({ formikProps }) => {
   
   return (
     <div className="space-y-8">
-      <h3 className="text-xl font-medium mb-6">{t('quote_form_review_submit_title')}</h3>
+      <h3 className="text-xl font-medium mb-6 text-slate-100">{t('quote_form_review_submit_title')}</h3>
       
       <div className="space-y-6">
-        <div className="bg-gray-50 p-5 rounded-lg">
-          <h4 className="font-medium mb-3">{t('quote_form_company_information')}</h4>
+        <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+          <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_company_information')}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_company_name')}</p>
-              <p className="font-medium">{values.companyName}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_company_name')}</p>
+              <p className="font-medium text-slate-200">{values.companyName}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_vat_tax_id')}</p>
-              <p className="font-medium">{values.vatId}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_vat_tax_id')}</p>
+              <p className="font-medium text-slate-200">{values.vatId}</p>
             </div>
           </div>
         </div>
         
-        <div className="bg-gray-50 p-5 rounded-lg">
-          <h4 className="font-medium mb-3">{t('quote_form_address')}</h4>
-          <p className="font-medium">{values.address?.street}</p>
-          <p className="font-medium">
+        <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+          <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_address')}</h4>
+          <p className="font-medium text-slate-200">{values.address?.street}</p>
+          <p className="font-medium text-slate-200">
             {values.address?.city}, {values.address?.zipCode}
           </p>
-          <p className="font-medium">{values.address?.country}</p>
+          <p className="font-medium text-slate-200">{values.address?.country}</p>
         </div>
         
-        <div className="bg-gray-50 p-5 rounded-lg">
-          <h4 className="font-medium mb-3">{t('quote_form_contact_person')}</h4>
+        <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+          <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_contact_person')}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_name')}</p>
-              <p className="font-medium">{values.contact?.firstName} {values.contact?.lastName}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_name')}</p>
+              <p className="font-medium text-slate-200">{values.contact?.firstName} {values.contact?.lastName}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_position')}</p>
-              <p className="font-medium">{values.contact?.position || '-'}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_position')}</p>
+              <p className="font-medium text-slate-200">{values.contact?.position || '-'}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_email')}</p>
-              <p className="font-medium">{values.contact?.email}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_email')}</p>
+              <p className="font-medium text-slate-200">{values.contact?.email}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">{t('quote_form_phone')}</p>
-              <p className="font-medium">{values.contact?.phone}</p>
+              <p className="text-sm text-slate-400">{t('quote_form_phone')}</p>
+              <p className="font-medium text-slate-200">{values.contact?.phone}</p>
             </div>
             {values.contact?.mobile && (
               <div>
-                <p className="text-sm text-gray-500">{t('quote_form_mobile')}</p>
-                <p className="font-medium">{values.contact?.mobile}</p>
+                <p className="text-sm text-slate-400">{t('quote_form_mobile')}</p>
+                <p className="font-medium text-slate-200">{values.contact?.mobile}</p>
               </div>
             )}
           </div>
         </div>
         
         {allFiles.length > 0 && (
-          <div className="bg-gray-50 p-5 rounded-lg">
-            <h4 className="font-medium mb-3">{t('quote_form_files')}</h4>
-            <p className="font-medium">{allFiles.length} {t('quote_form_files_uploaded_count')}</p>
-            <ul className="list-disc list-inside text-sm text-gray-600">
+          <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+            <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_files')}</h4>
+            <p className="font-medium text-slate-200">{allFiles.length} {t('quote_form_files_uploaded_count')}</p>
+            <ul className="list-disc list-inside text-sm text-slate-300">
               {allFiles.map((file: any, index: number) => (
                 <li key={index}>{file.name}</li>
               ))}
@@ -105,50 +105,50 @@ const StepReviewSubmit: React.FC<StepComponentProps> = ({ formikProps }) => {
           </div>
         )}
         
-        <div className="bg-gray-50 p-5 rounded-lg">
-          <h4 className="font-medium mb-3">{t('quote_form_parts')}</h4>
+        <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+          <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_parts')}</h4>
           {values.parts.map((part: any, index: number) => (
-            <div key={index} className="border border-gray-200 rounded-md p-4 mb-4 last:mb-0">
-              <h5 className="font-medium text-lg mb-2">{part.name} - Qty: {part.quantity}</h5>
+            <div key={index} className="border border-slate-600/50 rounded-md p-4 mb-4 last:mb-0">
+              <h5 className="font-medium text-lg mb-2 text-slate-200">{part.name} - Qty: {part.quantity}</h5>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                 <div>
-                  <p className="text-gray-600">{t('quote_form_process')}</p>
-                  <p className="font-medium">{part.process || '-'}</p>
+                  <p className="text-slate-400">{t('quote_form_process')}</p>
+                  <p className="font-medium text-slate-200">{part.process || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">{t('quote_form_material')}</p>
-                  <p className="font-medium">{part.material || '-'}{part.materialSubtype ? ` (${part.materialSubtype})` : ''}</p>
+                  <p className="text-slate-400">{t('quote_form_material')}</p>
+                  <p className="font-medium text-slate-200">{part.material || '-'}{part.materialSubtype ? ` (${part.materialSubtype})` : ''}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">{t('quote_form_surface_roughness')}</p>
-                  <p className="font-medium">{part.surfaceRoughness || '-'}</p>
+                  <p className="text-slate-400">{t('quote_form_surface_roughness')}</p>
+                  <p className="font-medium text-slate-200">{part.surfaceRoughness || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">{t('quote_form_surface_treatment')}</p>
-                  <p className="font-medium">{part.surfaceTreatment && part.surfaceTreatment !== 'none' ? 
+                  <p className="text-slate-400">{t('quote_form_surface_treatment')}</p>
+                  <p className="font-medium text-slate-200">{part.surfaceTreatment && part.surfaceTreatment !== 'none' ? 
                     (part.surfaceTreatment === 'other' ? `Other - ${part.surfaceTreatmentOther}` : part.surfaceTreatment) 
                     : '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">{t('quote_form_tolerance')}</p>
-                  <p className="font-medium">{part.tolerance || '-'}</p>
+                  <p className="text-slate-400">{t('quote_form_tolerance')}</p>
+                  <p className="font-medium text-slate-200">{part.tolerance || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-gray-600">{t('quote_form_documentation')}</p>
-                  <p className="font-medium">{part.documentation || '-'}</p>
+                  <p className="text-slate-400">{t('quote_form_documentation')}</p>
+                  <p className="font-medium text-slate-200">{part.documentation || '-'}</p>
                 </div>
                 {part.comments && (
                   <div className="col-span-2">
-                    <p className="text-gray-600">{t('quote_form_comments')}</p>
-                    <p className="font-medium">{part.comments}</p>
+                    <p className="text-slate-400">{t('quote_form_comments')}</p>
+                    <p className="font-medium text-slate-200">{part.comments}</p>
                   </div>
                 )}
                 {part.files && part.files.length > 0 && (
                   <div className="col-span-2">
-                    <p className="text-gray-600">{t('quote_form_files')} ({part.files.length}):</p>
+                    <p className="text-slate-400">{t('quote_form_files')} ({part.files.length}):</p>
                     <ul className="list-disc list-inside">
                       {part.files.map((file: any, fileIndex: number) => (
-                        <li key={fileIndex} className="text-gray-800">{file.name}</li>
+                        <li key={fileIndex} className="text-slate-300">{file.name}</li>
                       ))}
                     </ul>
                   </div>
@@ -158,42 +158,42 @@ const StepReviewSubmit: React.FC<StepComponentProps> = ({ formikProps }) => {
           ))}
         </div>
         
-        <div className="bg-gray-50 p-5 rounded-lg">
-          <h4 className="font-medium mb-3">{t('quote_form_delivery_information')}</h4>
+        <div className="bg-slate-800/60 border border-slate-700/50 p-5 rounded-lg">
+          <h4 className="font-medium mb-3 text-slate-200">{t('quote_form_delivery_information')}</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <p className="text-gray-600 text-sm">{t('quote_form_delivery_speed')}</p>
-              <p className="font-medium">{values.delivery?.speed || 'Standard'}</p>
+              <p className="text-slate-400 text-sm">{t('quote_form_delivery_speed')}</p>
+              <p className="font-medium text-slate-200">{values.delivery?.speed || 'Standard'}</p>
             </div>
             {values.delivery?.maxDeliveryDate && (
               <div>
-                <p className="text-gray-600 text-sm">{t('quote_form_delivery_needed_by')}</p>
-                <p className="font-medium">{new Date(values.delivery.maxDeliveryDate).toLocaleDateString()}</p>
+                <p className="text-slate-400 text-sm">{t('quote_form_delivery_needed_by')}</p>
+                <p className="font-medium text-slate-200">{new Date(values.delivery.maxDeliveryDate).toLocaleDateString()}</p>
               </div>
             )}
             {values.delivery?.latestOfferDate && (
               <div>
-                <p className="text-gray-600 text-sm">{t('quote_form_quote_needed_by')}</p>
-                <p className="font-medium">{new Date(values.delivery.latestOfferDate).toLocaleDateString()}</p>
+                <p className="text-slate-400 text-sm">{t('quote_form_quote_needed_by')}</p>
+                <p className="font-medium text-slate-200">{new Date(values.delivery.latestOfferDate).toLocaleDateString()}</p>
               </div>
             )}
           </div>
           {values.generalNotes && (
-            <div className="mt-3 pt-3 border-t border-gray-200">
-              <p className="text-gray-600 text-sm">{t('quote_form_general_notes')}</p>
+            <div className="mt-3 pt-3 border-t border-slate-700">
+              <p className="text-slate-400 text-sm">{t('quote_form_general_notes')}</p>
               <p className="font-medium whitespace-pre-line">{values.generalNotes}</p>
             </div>
           )}
           {values.internalRequestNumber && (
             <div className="mt-3">
-              <p className="text-gray-600 text-sm">{t('quote_form_internal_request_number')}</p>
-              <p className="font-medium">{values.internalRequestNumber}</p>
+              <p className="text-slate-400 text-sm">{t('quote_form_internal_request_number')}</p>
+              <p className="font-medium text-slate-200">{values.internalRequestNumber}</p>
             </div>
           )}
         </div>
       </div>
       
-      <div className="space-y-4 pt-6 border-t border-gray-200">
+      <div className="space-y-4 pt-6 border-t border-slate-700">
         <div className="flex items-start space-x-2">
           <Checkbox 
             id="termsAccepted" 
@@ -204,7 +204,7 @@ const StepReviewSubmit: React.FC<StepComponentProps> = ({ formikProps }) => {
             }}
           />
           <div>
-            <Label htmlFor="termsAccepted" className="text-sm text-gray-900">
+            <Label htmlFor="termsAccepted" className="text-sm text-slate-200">
               {t('quote_form_terms_conditions')} <a href={getLocalizedPath('/terms')} className="text-teal-600 hover:underline">{t('quote_form_terms_conditions_link')}</a> {t('quote_form_and')} <a href={getLocalizedPath('/privacy')} className="text-teal-600 hover:underline">{t('quote_form_privacy_policy')}</a> {t('quote_form_accept_contact')}
             </Label>
             {touched.termsAccepted && errors.termsAccepted && (

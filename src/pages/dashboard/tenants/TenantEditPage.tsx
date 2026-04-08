@@ -17,6 +17,8 @@ import {
   getCapabilitiesRegistry, getTenantCapabilities, updateTenantCapabilities,
   getQuoteFieldsRegistry, getTenantQuoteFields, updateTenantQuoteFields,
 } from '@/utils/tenantApi';
+import { supabase } from '@/integrations/supabase/client';
+import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import type {
   Tenant, TenantInsert, TenantUpdate, CapabilityRegistry,
   TenantCapability, QuoteFieldRegistry, TenantQuoteField,
@@ -47,6 +49,11 @@ export default function TenantEditPage() {
     website: null,
     is_active: true,
   });
+
+  // Tenant admin credentials (only for new tenants)
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
 
   // Capabilities state
   const [capRegistry, setCapRegistry] = useState<CapabilityRegistry[]>([]);
@@ -136,6 +143,48 @@ export default function TenantEditPage() {
           website: form.website,
           is_active: form.is_active,
         });
+
+        // Create admin user for this tenant if credentials provided
+        if (adminEmail && adminPassword) {
+          try {
+            // Create the auth user via Supabase
+            const { data: authData, error: authError } = await supabase.auth.signUp({
+              email: adminEmail,
+              password: adminPassword,
+              options: {
+                data: {
+                  first_name: form.name,
+                  last_name: 'Admin',
+                  company_name: form.name,
+                },
+              },
+            });
+
+            if (authError) throw authError;
+
+            if (authData.user) {
+              // Assign tenant_admin role in user_tenant_roles
+              const { error: roleError } = await supabase
+                .from('user_tenant_roles')
+                .insert({
+                  user_id: authData.user.id,
+                  tenant_id: tenant.id,
+                  role: 'tenant_admin',
+                });
+
+              if (roleError) {
+                console.error('Error assigning tenant admin role:', roleError);
+                toast({ title: 'Warning', description: `Tenant created but admin role assignment failed: ${roleError.message}`, variant: 'destructive' });
+              } else {
+                toast({ title: 'Admin Created', description: `Admin account created for ${adminEmail}` });
+              }
+            }
+          } catch (adminError: any) {
+            console.error('Error creating tenant admin:', adminError);
+            toast({ title: 'Warning', description: `Tenant created but admin account creation failed: ${adminError.message}`, variant: 'destructive' });
+          }
+        }
+
         toast({ title: 'Created', description: `${tenant.name} created successfully` });
         navigate(`/dashboard/tenants/${tenant.id}`);
       } else if (id) {
@@ -357,6 +406,63 @@ export default function TenantEditPage() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Admin Credentials - Only shown for new tenants */}
+              {isNew && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Lock className="h-5 w-5" /> Tenant Admin Account
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Create a login account for the tenant administrator. They will have access to the dashboard
+                      (Management, Operations, System) but not to Lead Monitor or Content sections.
+                    </p>
+                    <div>
+                      <Label>Admin Email</Label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type="email"
+                          value={adminEmail}
+                          onChange={(e) => setAdminEmail(e.target.value)}
+                          placeholder="admin@tenant-company.com"
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Admin Password</Label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          type={showAdminPassword ? 'text' : 'password'}
+                          value={adminPassword}
+                          onChange={(e) => setAdminPassword(e.target.value)}
+                          placeholder="Min. 6 characters"
+                          className="pl-9"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowAdminPassword(!showAdminPassword)}
+                          className="absolute right-3 top-2.5"
+                        >
+                          {showAdminPassword ? (
+                            <EyeOff className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Password must be at least 6 characters
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card>
                 <CardHeader>
