@@ -11,6 +11,8 @@ import ComparisonTable from '../components/home/ComparisonTable';
 import MeetYourEngineer from '../components/home/MeetYourEngineer';
 import TestimonialsSection from '../components/home/TestimonialsSection';
 import IndustriesSection from '../components/home/IndustriesSection';
+import TenantLandingPage from './TenantLandingPage';
+import { useTenant } from '../contexts/TenantContext';
 import {
   heroImage,
   trustedCompanies,
@@ -23,11 +25,16 @@ import {
 
 const Index = () => {
   const { t } = useTranslation();
-  console.log('Index page rendered');
-  
+  const { isTenantSubdomain, isCustomDomain } = useTenant();
+
+  // Render tenant-specific landing page for subdomains and custom domains
+  if (isTenantSubdomain || isCustomDomain) {
+    return <TenantLandingPage />;
+  }
+
   return (
     <div className="min-h-screen">
-      <SEOMeta 
+      <SEOMeta
         title={t('home_title')}
         description={t('home_subtitle')}
         keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
