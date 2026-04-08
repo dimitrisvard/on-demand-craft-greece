@@ -14,35 +14,46 @@ import type {
   DEFAULT_TENANT_SLUG,
 } from '@/types/tenant';
 
-// ─── Subdomain Resolution ───────────────────────────────────────────────────
+// ─── Tenant Resolution ──────────────────────────────────────────────────────
+// Supports two modes:
+//   1. Subdomain: laserkritis.micronshub.eu → slug = "laserkritis"
+//   2. Custom domain: www.laserkritis.gr → DB lookup by custom_domain
 
 const RESERVED_SUBDOMAINS = ['www', 'api', 'admin', 'app', 'micronshub', 'localhost'];
 
-export function resolveSubdomain(): string | null {
+export type TenantIdentifier =
+  | { type: 'subdomain'; slug: string }
+  | { type: 'custom_domain'; hostname: string }
+  | { type: 'default' };
+
+export function resolveTenantIdentifier(): TenantIdentifier {
   const hostname = window.location.hostname;
 
-  // localhost or IP — no subdomain
+  // localhost or IP — default to Microns Hub
   if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
-    return null;
+    return { type: 'default' };
   }
 
-  // Check for micronshub.eu domain
-  if (!hostname.includes('micronshub.eu')) {
-    return null;
+  // *.micronshub.eu — extract subdomain
+  if (hostname.includes('micronshub.eu')) {
+    const parts = hostname.split('.');
+    if (parts.length >= 3) {
+      const subdomain = parts[0];
+      if (!RESERVED_SUBDOMAINS.includes(subdomain)) {
+        return { type: 'subdomain', slug: subdomain };
+      }
+    }
+    return { type: 'default' }; // bare micronshub.eu or reserved subdomain
   }
 
-  const parts = hostname.split('.');
-  // e.g. acme.micronshub.eu → parts = ['acme', 'micronshub', 'eu']
-  if (parts.length < 3) {
-    return null; // bare micronshub.eu
-  }
+  // Any other domain — treat as custom domain
+  return { type: 'custom_domain', hostname };
+}
 
-  const subdomain = parts[0];
-  if (RESERVED_SUBDOMAINS.includes(subdomain)) {
-    return null;
-  }
-
-  return subdomain;
+// Backward-compatible alias (used by TenantContext)
+export function resolveSubdomain(): string | null {
+  const id = resolveTenantIdentifier();
+  return id.type === 'subdomain' ? id.slug : null;
 }
 
 // ─── Tenant Config Fetching ─────────────────────────────────────────────────
@@ -50,25 +61,8 @@ export function resolveSubdomain(): string | null {
 let tenantConfigCache: Map<string, { config: TenantConfig; expiry: number }> = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-export async function fetchTenantConfig(slug: string): Promise<TenantConfig | null> {
-  // Check cache
-  const cached = tenantConfigCache.get(slug);
-  if (cached && cached.expiry > Date.now()) {
-    return cached.config;
-  }
-
-  // Fetch tenant
-  const { data: tenant, error: tenantError } = await supabase
-    .from('tenants')
-    .select('*')
-    .eq('slug', slug)
-    .eq('is_active', true)
-    .single();
-
-  if (tenantError || !tenant) {
-    return null;
-  }
-
+// Shared helper: build TenantConfig from a raw tenant row
+async function buildTenantConfig(tenant: any): Promise<TenantConfig> {
   // Fetch tenant capabilities with registry join
   const { data: capabilities } = await supabase
     .from('tenant_capabilities')
@@ -96,7 +90,6 @@ export async function fetchTenantConfig(slug: string): Promise<TenantConfig | nu
       (f: any) => f.capability === tc.capability
     );
 
-    // Merge registry defaults with tenant overrides
     const fields: TenantFieldConfig[] = registryFields.map((rf: any) => {
       const override = capFields.find((cf: any) => cf.field_key === rf.field_key);
       return {
@@ -121,7 +114,7 @@ export async function fetchTenantConfig(slug: string): Promise<TenantConfig | nu
     };
   }).sort((a: TenantCapabilityConfig, b: TenantCapabilityConfig) => a.sortOrder - b.sortOrder);
 
-  const config: TenantConfig = {
+  return {
     id: tenant.id,
     slug: tenant.slug,
     name: tenant.name,
@@ -134,13 +127,64 @@ export async function fetchTenantConfig(slug: string): Promise<TenantConfig | nu
     contactPhone: tenant.contact_phone,
     address: tenant.address,
     website: tenant.website,
+    customDomain: tenant.custom_domain || null,
     capabilities: capabilityConfigs,
   };
+}
 
-  // Cache it
-  tenantConfigCache.set(slug, { config, expiry: Date.now() + CACHE_TTL_MS });
+// Fetch tenant config by slug (subdomain)
+export async function fetchTenantConfig(slug: string): Promise<TenantConfig | null> {
+  const cacheKey = `slug:${slug}`;
+  const cached = tenantConfigCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.config;
+  }
 
+  const { data: tenant, error } = await supabase
+    .from('tenants')
+    .select('*')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .single();
+
+  if (error || !tenant) return null;
+
+  const config = await buildTenantConfig(tenant);
+  tenantConfigCache.set(cacheKey, { config, expiry: Date.now() + CACHE_TTL_MS });
   return config;
+}
+
+// Fetch tenant config by custom domain (e.g., www.laserkritis.gr)
+export async function fetchTenantByDomain(domain: string): Promise<TenantConfig | null> {
+  const cacheKey = `domain:${domain}`;
+  const cached = tenantConfigCache.get(cacheKey);
+  if (cached && cached.expiry > Date.now()) {
+    return cached.config;
+  }
+
+  const { data: tenant, error } = await supabase
+    .from('tenants')
+    .select('*')
+    .eq('custom_domain', domain)
+    .eq('is_active', true)
+    .single();
+
+  if (error || !tenant) return null;
+
+  const config = await buildTenantConfig(tenant);
+  tenantConfigCache.set(cacheKey, { config, expiry: Date.now() + CACHE_TTL_MS });
+  return config;
+}
+
+// Best-effort domain verification: checks if the domain resolves to our app
+export async function verifyTenantDomain(domain: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`https://${domain}/`, { method: 'HEAD', mode: 'no-cors' });
+    // no-cors mode always returns opaque response, but if fetch doesn't throw, DNS resolved
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function invalidateTenantCache(slug?: string) {

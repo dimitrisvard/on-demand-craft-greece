@@ -1,13 +1,19 @@
 import { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import type { TenantConfig } from '@/types/tenant';
 import { DEFAULT_TENANT_SLUG } from '@/types/tenant';
-import { resolveSubdomain, fetchTenantConfig } from '@/utils/tenantApi';
+import {
+  resolveTenantIdentifier,
+  fetchTenantConfig,
+  fetchTenantByDomain,
+} from '@/utils/tenantApi';
+import type { TenantIdentifier } from '@/utils/tenantApi';
 
 interface TenantContextType {
   tenant: TenantConfig | null;
   loading: boolean;
   error: string | null;
   isTenantSubdomain: boolean;
+  isCustomDomain: boolean;
   tenantSlug: string | null;
 }
 
@@ -16,6 +22,7 @@ const TenantContext = createContext<TenantContextType>({
   loading: true,
   error: null,
   isTenantSubdomain: false,
+  isCustomDomain: false,
   tenantSlug: null,
 });
 
@@ -24,24 +31,39 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const subdomain = useMemo(() => resolveSubdomain(), []);
-  const isTenantSubdomain = subdomain !== null;
+  const identifier = useMemo(() => resolveTenantIdentifier(), []);
+  const isTenantSubdomain = identifier.type === 'subdomain';
+  const isCustomDomain = identifier.type === 'custom_domain';
 
   useEffect(() => {
     async function loadTenant() {
       try {
-        // If on a tenant subdomain, load that tenant; otherwise load Microns Hub default
-        const slug = subdomain || DEFAULT_TENANT_SLUG;
-        const config = await fetchTenantConfig(slug);
+        let config: TenantConfig | null = null;
 
-        if (!config && subdomain) {
-          // Invalid tenant subdomain
-          setError(`Tenant "${subdomain}" not found`);
-        } else if (config) {
+        switch (identifier.type) {
+          case 'subdomain':
+            config = await fetchTenantConfig(identifier.slug);
+            if (!config) {
+              setError(`Tenant "${identifier.slug}" not found`);
+            }
+            break;
+
+          case 'custom_domain':
+            config = await fetchTenantByDomain(identifier.hostname);
+            if (!config) {
+              // Unknown custom domain — fall back to default
+              config = await fetchTenantConfig(DEFAULT_TENANT_SLUG);
+            }
+            break;
+
+          case 'default':
+            config = await fetchTenantConfig(DEFAULT_TENANT_SLUG);
+            break;
+        }
+
+        if (config) {
           setTenant(config);
-          // Apply tenant CSS custom properties
           applyTenantTheme(config);
-          // Update favicon
           applyTenantFavicon(config);
         }
       } catch (err) {
@@ -53,7 +75,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     }
 
     loadTenant();
-  }, [subdomain]);
+  }, [identifier]);
 
   return (
     <TenantContext.Provider value={{
@@ -61,7 +83,8 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       loading,
       error,
       isTenantSubdomain,
-      tenantSlug: subdomain,
+      isCustomDomain,
+      tenantSlug: identifier.type === 'subdomain' ? identifier.slug : tenant?.slug || null,
     }}>
       {children}
     </TenantContext.Provider>
