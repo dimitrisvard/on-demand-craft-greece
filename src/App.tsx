@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePageTracking } from './hooks/usePageTracking';
 import AuthProvider from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
-import { TenantProvider } from './contexts/TenantContext';
+import { TenantProvider, useTenant as useTenantCtx } from './contexts/TenantContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
@@ -14,6 +14,7 @@ import TranslatedRouteMatcher from './components/TranslatedRouteMatcher';
 import SEORedirects from './components/SEORedirects';
 import CustomerPortalLayout from './components/customer-portal/CustomerPortalLayout';
 import PartnerPortalLayout from './components/partner-portal/PartnerPortalLayout';
+import { hasCustomPage } from './pages/tenants/customPageRegistry';
 
 // Lazy load pages to reduce initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -103,11 +104,26 @@ const PageLoader = () => (
 
 const queryClient = new QueryClient();
 
-// Component to conditionally render Footer (exclude dashboard routes)
+// Component to conditionally render Navbar (hide when tenant has custom page)
+function ConditionalNavbar() {
+  const { tenant, isTenantSubdomain, isCustomDomain } = useTenantCtx();
+  if ((isTenantSubdomain || isCustomDomain) && hasCustomPage(tenant?.slug)) {
+    return null;
+  }
+  return <Navbar />;
+}
+
+// Component to conditionally render Footer (exclude dashboard routes + custom tenant pages)
 function ConditionalFooter() {
   const location = useLocation();
   const path = location.pathname;
-  
+  const { tenant, isTenantSubdomain, isCustomDomain } = useTenantCtx();
+
+  // Don't show footer when tenant has a custom page (it ships its own footer)
+  if ((isTenantSubdomain || isCustomDomain) && hasCustomPage(tenant?.slug)) {
+    return null;
+  }
+
   // Don't show footer on dashboard routes
   const isDashboardRoute = path.startsWith('/dashboard') ||
                           path.startsWith('/orders') ||
@@ -119,11 +135,11 @@ function ConditionalFooter() {
                           path.startsWith('/customer') ||
                           path.startsWith('/partner') ||
                           path.startsWith('/dashboard/inventory');
-  
+
   if (isDashboardRoute) {
     return null;
   }
-  
+
   return <Footer />;
 }
 
@@ -138,7 +154,7 @@ function AppContent() {
       <TenantProvider>
       <LanguageProvider>
         <AuthProvider>
-            <Navbar />
+            <ConditionalNavbar />
             <Suspense fallback={<PageLoader />}>
               <Routes>
                 {/* Root redirect - will be handled by LanguageProvider */}
