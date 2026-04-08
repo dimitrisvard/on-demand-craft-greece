@@ -61,6 +61,13 @@ DROP POLICY IF EXISTS "super_admin_manage_roles" ON public.user_tenant_roles;
 CREATE POLICY "super_admin_manage_roles" ON public.user_tenant_roles
   FOR ALL USING (public.is_super_admin());
 
+-- Allow authenticated users to insert their own non-super_admin roles.
+-- Needed because signUp() switches the session to the new user.
+CREATE POLICY "users_insert_own_tenant_roles" ON public.user_tenant_roles
+  FOR INSERT WITH CHECK (
+    user_id = auth.uid() AND role IN ('tenant_admin', 'tenant_user')
+  );
+
 -- ─── 3. FIX tenants POLICIES ──────────────────────────────────────────────
 
 DROP POLICY IF EXISTS "super_admin_manage_tenants" ON public.tenants;

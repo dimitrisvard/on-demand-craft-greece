@@ -154,6 +154,9 @@ export default function TenantEditPage() {
         // Create admin user for this tenant if credentials provided
         if (adminEmail && adminPassword) {
           try {
+            // Save current super_admin session before signUp (which switches session)
+            const { data: currentSession } = await supabase.auth.getSession();
+
             // Create the auth user via Supabase
             const { data: authData, error: authError } = await supabase.auth.signUp({
               email: adminEmail,
@@ -169,8 +172,16 @@ export default function TenantEditPage() {
 
             if (authError) throw authError;
 
+            // Restore the super_admin session so subsequent operations work
+            if (currentSession.session) {
+              await supabase.auth.setSession({
+                access_token: currentSession.session.access_token,
+                refresh_token: currentSession.session.refresh_token,
+              });
+            }
+
             if (authData.user) {
-              // Assign tenant_admin role in user_tenant_roles
+              // Assign tenant_admin role in user_tenant_roles (now running as super_admin again)
               const { error: roleError } = await supabase
                 .from('user_tenant_roles')
                 .insert({
