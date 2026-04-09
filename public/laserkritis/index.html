@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="LaserKritis - Υπερσύγχρονη μονάδα κοπής και διαμόρφωσης μετάλλου με Fiber Laser στο Ηράκλειο Κρήτης. Κοπή Laser, Πλάσμα, Στράντζα, Ψαλίδι, Σχεδιασμός.">
+  <meta name="theme-color" content="#0A0A0A">
+  <meta property="og:title" content="LaserKritis | Κοπή & Επεξεργασία Μετάλλων με Fiber Laser">
+  <meta property="og:description" content="Υπερσύγχρονη μονάδα κοπής & διαμόρφωσης μετάλλου στο Ηράκλειο Κρήτης">
+  <meta property="og:type" content="website">
+  <title>LaserKritis | Κοπή &amp; Επεξεργασία Μετάλλων με Fiber Laser</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+/* ── CSS Variables ── */
+:root {
+  --color-bg-primary: #0A0A0A;
+  --color-bg-secondary: #111111;
+  --color-bg-card: #1A1A1A;
+  --color-gold: #FFCB25;
+  --color-gold-dark: #C7922A;
+  --color-white: #FFFFFF;
+  --color-gray: #A0A0A0;
+  --color-gray-dark: #353535;
+  --color-footer-bg: #080808;
+  --font-heading: 'Bebas Neue', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --transition-speed: 0.4s;
+  --border-radius: 4px;
+}
+
+/* ── Base Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg-primary);
+  color: var(--color-white);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+img { max-width: 100%; height: auto; }
+a { text-decoration: none; color: inherit; }
+h1, h2, h3, h4 {
+  font-family: var(--font-heading);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  margin: 0;
+}
+
+/* ── Scroll Reveal ── */
+.lk-reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease, transform 0.6s ease; }
+.lk-reveal.lk-visible { opacity: 1; transform: translateY(0); }
+.lk-stagger > .lk-reveal:nth-child(1) { transition-delay: 0s; }
+.lk-stagger > .lk-reveal:nth-child(2) { transition-delay: 0.1s; }
+.lk-stagger > .lk-reveal:nth-child(3) { transition-delay: 0.1s; }
+.lk-stagger > .lk-reveal:nth-child(4) { transition-delay: 0.2s; }
+.lk-stagger > .lk-reveal:nth-child(5) { transition-delay: 0.3s; }
+.lk-stagger > .lk-reveal:nth-child(6) { transition-delay: 0.4s; }
+
+/* ── Header ── */
+.lk-header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  padding: 1rem 2rem; display: flex; align-items: center;
+  justify-content: space-between; transition: background var(--transition-speed), box-shadow var(--transition-speed);
+  background: transparent;
+}
+.lk-header.lk-header--scrolled {
+  background: rgba(10,10,10,0.95); backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px); box-shadow: 0 2px 20px rgba(0,0,0,0.5);
+}
+.lk-logo { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.lk-logo-text { font-family: var(--font-heading); font-size: 1.6rem; letter-spacing: 0.08em; line-height: 1; }
+.lk-logo-text span:first-child { color: var(--color-gold); }
+.lk-logo-text span:last-child { color: var(--color-white); }
+.lk-logo-line { width: 60%; height: 2px; background: var(--color-gold); }
+
+.lk-nav { display: flex; align-items: center; gap: 2rem; }
+.lk-nav a {
+  font-family: var(--font-heading); font-size: 1rem; letter-spacing: 0.05em;
+  color: var(--color-white); position: relative; padding-bottom: 4px; transition: color var(--transition-speed);
+}
+.lk-nav a::after {
+  content: ''; position: absolute; bottom: 0; left: 0; width: 0; height: 2px;
+  background: var(--color-gold); transition: width var(--transition-speed);
+}
+.lk-nav a:hover { color: var(--color-gold); }
+.lk-nav a:hover::after { width: 100%; }
+
+.lk-header-actions { display: flex; align-items: center; gap: 0.75rem; }
+.lk-hamburger {
+  display: none; flex-direction: column; gap: 5px; cursor: pointer;
+  background: none; border: none; padding: 4px; z-index: 1001;
+}
+.lk-hamburger span { display: block; width: 28px; height: 2px; background: var(--color-gold); transition: transform 0.3s, opacity 0.3s; }
+.lk-hamburger.lk-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.lk-hamburger.lk-open span:nth-child(2) { opacity: 0; }
+.lk-hamburger.lk-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.lk-mobile-menu {
+  position: fixed; inset: 0; z-index: 999; background: rgba(10,10,10,0.98);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2rem; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+.lk-mobile-menu.lk-open { opacity: 1; pointer-events: auto; }
+.lk-mobile-menu a {
+  font-family: var(--font-heading); font-size: 2rem; color: var(--color-white);
+  letter-spacing: 0.08em; transition: color 0.3s;
+}
+.lk-mobile-menu a:hover { color: var(--color-gold); }
+
+/* ── Buttons ── */
+.lk-btn {
+  display: inline-flex; align-items: center; gap: 0.5rem; font-family: var(--font-body);
+  font-weight: 700; font-size: 0.95rem; padding: 0.8rem 1.8rem; border-radius: var(--border-radius);
+  cursor: pointer; transition: all var(--transition-speed); border: none; text-decoration: none;
+}
+.lk-btn--primary { background: var(--color-gold); color: #0A0A0A; }
+.lk-btn--primary:hover { background: var(--color-gold-dark); transform: translateY(-2px); box-shadow: 0 4px 20px rgba(255,203,37,0.3); }
+.lk-btn--outline { background: transparent; color: var(--color-gold); border: 2px solid var(--color-gold); }
+.lk-btn--outline:hover { background: var(--color-gold); color: #0A0A0A; transform: translateY(-2px); }
+.lk-btn--sm { font-size: 0.8rem; padding: 0.5rem 1.2rem; }
+
+/* ── Hero ── */
+.lk-hero {
+  position: relative; min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; background: var(--color-bg-primary); overflow: hidden;
+}
+.lk-hero-beam { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.lk-hero-beam::before {
+  content: ''; position: absolute; width: 200%; height: 2px;
+  background: linear-gradient(90deg, transparent 0%, var(--color-gold) 30%, var(--color-gold) 70%, transparent 100%);
+  top: 50%; left: -100%; transform: rotate(45deg); opacity: 0.15; animation: lk-beam 8s linear infinite;
+}
+.lk-hero-beam::after {
+  content: ''; position: absolute; width: 200%; height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--color-gold-dark) 40%, var(--color-gold-dark) 60%, transparent 100%);
+  top: 30%; left: -100%; transform: rotate(-30deg); opacity: 0.08; animation: lk-beam 12s linear infinite reverse;
+}
+@keyframes lk-beam {
+  0% { transform: rotate(45deg) translateX(-50%); }
+  100% { transform: rotate(45deg) translateX(50%); }
+}
+.lk-spark {
+  position: absolute; border-radius: 50%; background: var(--color-gold);
+  pointer-events: none; animation: lk-sparkle var(--dur, 3s) ease-in-out infinite; opacity: 0;
+}
+@keyframes lk-sparkle {
+  0%, 100% { opacity: 0; transform: translateY(0) scale(0.5); }
+  50% { opacity: var(--peak, 0.6); transform: translateY(var(--drift, -20px)) scale(1); }
+}
+.lk-hero-content { position: relative; z-index: 2; text-align: center; max-width: 800px; padding: 0 2rem; }
+.lk-hero-content h1 { font-size: clamp(2.5rem, 7vw, 5rem); margin-bottom: 1rem; }
+.lk-hero-content h1 .lk-gold { color: var(--color-gold); }
+.lk-hero-subtitle {
+  font-size: clamp(1rem, 2.5vw, 1.3rem); color: var(--color-gray);
+  margin-bottom: 2.5rem; max-width: 600px; margin-left: auto; margin-right: auto;
+}
+.lk-hero-ctas { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+/* ── Sections ── */
+.lk-section { padding: 6rem 2rem; }
+.lk-section--dark { background: var(--color-bg-primary); }
+.lk-section--darker { background: var(--color-bg-secondary); }
+.lk-container { max-width: 1200px; margin: 0 auto; }
+.lk-section-title { font-size: clamp(2rem, 5vw, 3rem); text-align: center; margin-bottom: 1rem; }
+.lk-section-title .lk-gold { color: var(--color-gold); }
+.lk-section-subtitle { text-align: center; color: var(--color-gray); font-size: 1.1rem; margin-bottom: 3rem; }
+.lk-gold-line { width: 60px; height: 3px; background: var(--color-gold); margin: 1rem auto 2rem; }
+[id] { scroll-margin-top: 80px; }
+
+/* ── About ── */
+.lk-about-grid { display: grid; grid-template-columns: 55% 45%; gap: 3rem; align-items: center; }
+.lk-about-text p { color: var(--color-gray); font-size: 1.05rem; margin-bottom: 2rem; line-height: 1.8; }
+.lk-about-img img { border-radius: 8px; width: 100%; height: auto; object-fit: cover; border: 1px solid var(--color-gray-dark); }
+.lk-stats-inline { display: flex; gap: 2rem; flex-wrap: wrap; }
+.lk-stat-box {
+  text-align: center; padding: 1rem 1.5rem; background: var(--color-bg-card);
+  border-radius: 8px; border: 1px solid var(--color-gray-dark); flex: 1; min-width: 140px;
+}
+.lk-stat-number { font-family: var(--font-heading); font-size: 2.5rem; color: var(--color-gold); line-height: 1; }
+.lk-stat-label { font-size: 0.85rem; color: var(--color-gray); margin-top: 0.25rem; }
+
+/* ── Philosophy ── */
+.lk-philosophy-grid { display: grid; grid-template-columns: 45% 55%; gap: 3rem; align-items: center; }
+.lk-philosophy-img img { border-radius: 8px; width: 100%; object-fit: cover; border: 1px solid var(--color-gray-dark); }
+.lk-philosophy-text p { color: var(--color-gray); font-size: 1.05rem; line-height: 1.8; margin-bottom: 2rem; }
+.lk-highlight-boxes { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.lk-highlight-box {
+  flex: 1; min-width: 200px; background: var(--color-bg-card); border: 1px solid var(--color-gray-dark);
+  border-radius: 8px; padding: 1.5rem; border-left: 3px solid var(--color-gold);
+}
+.lk-highlight-box h4 { font-size: 1.3rem; color: var(--color-gold); margin-bottom: 0.5rem; }
+.lk-highlight-box p { color: var(--color-gray); font-size: 0.95rem; margin: 0; line-height: 1.5; }
+
+/* ── Stats Strip ── */
+.lk-stats-strip { background: var(--color-gold); padding: 2.5rem 2rem; }
+.lk-stats-strip-inner { max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-evenly; flex-wrap: wrap; gap: 2rem; }
+.lk-strip-stat { text-align: center; }
+.lk-strip-stat-number { font-family: var(--font-heading); font-size: clamp(2.5rem, 5vw, 4rem); color: #0A0A0A; line-height: 1; }
+.lk-strip-stat-label { font-family: var(--font-body); font-size: 0.95rem; color: #1A1A1A; font-weight: 500; }
+
+/* ── Projects ── */
+.lk-projects-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; grid-auto-rows: 250px; }
+.lk-project-item { position: relative; overflow: hidden; border-radius: 8px; cursor: pointer; }
+.lk-project-item:nth-child(1),
+.lk-project-item:nth-child(4),
+.lk-project-item:nth-child(8),
+.lk-project-item:nth-child(11) { grid-row: span 2; }
+.lk-project-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
+.lk-project-item:hover img { transform: scale(1.05); }
+.lk-project-overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.6); display: flex;
+  align-items: flex-end; padding: 1.5rem; opacity: 0; transition: opacity var(--transition-speed);
+}
+.lk-project-item:hover .lk-project-overlay { opacity: 1; }
+.lk-project-overlay span { font-family: var(--font-heading); font-size: 1.3rem; color: var(--color-gold); letter-spacing: 0.05em; }
+
+/* ── Services Bento ── */
+.lk-services-bento { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+.lk-service-card:first-child { grid-column: span 2; }
+.lk-service-card {
+  background: var(--color-bg-card); border-radius: 8px; overflow: hidden; position: relative;
+  cursor: pointer; border: 1px solid var(--color-gray-dark); transition: border-color var(--transition-speed);
+}
+.lk-service-card::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 0; height: 3px;
+  background: var(--color-gold); transition: width var(--transition-speed); z-index: 2;
+}
+.lk-service-card:hover::before { width: 100%; }
+.lk-service-card:hover { border-color: var(--color-gold-dark); }
+.lk-service-header { padding: 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+.lk-service-header-left { display: flex; align-items: center; gap: 1rem; }
+.lk-service-icon { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.lk-service-icon svg { width: 36px; height: 36px; fill: none; stroke: var(--color-gold); stroke-width: 1.5; }
+.lk-service-header h3 { font-size: 1.4rem; color: var(--color-white); }
+.lk-service-toggle {
+  background: none; border: none; color: var(--color-gold); cursor: pointer;
+  padding: 4px; display: flex; align-items: center; transition: transform 0.3s;
+}
+.lk-service-toggle.lk-open { transform: rotate(180deg); }
+.lk-service-body { max-height: 0; overflow: hidden; transition: max-height 0.5s ease; }
+.lk-service-body.lk-open { max-height: 800px; }
+.lk-service-body-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; padding: 0 1.5rem 1.5rem; }
+.lk-service-body-inner img { width: 100%; height: 220px; object-fit: cover; border-radius: 6px; }
+.lk-service-body-inner p { color: var(--color-gray); font-size: 0.95rem; line-height: 1.7; margin-bottom: 1rem; }
+.lk-service-bullets { list-style: none; padding: 0; margin: 0; }
+.lk-service-bullets li { position: relative; padding-left: 1.5rem; margin-bottom: 0.5rem; color: var(--color-gray); font-size: 0.9rem; }
+.lk-service-bullets li::before { content: ''; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--color-gold); }
+.lk-service-specs { margin-top: 0.5rem; padding: 0.75rem; background: var(--color-bg-primary); border-radius: 6px; border: 1px solid var(--color-gray-dark); }
+.lk-service-specs p { margin: 0.25rem 0; font-size: 0.85rem; color: var(--color-gray); }
+.lk-service-specs strong { color: var(--color-gold); }
+
+/* ── Footer ── */
+.lk-map-wrapper { border-top: 3px solid var(--color-gold); }
+.lk-map-wrapper iframe { display: block; width: 100%; height: 400px; border: 0; filter: grayscale(0.5) brightness(0.8); }
+.lk-footer { background: var(--color-footer-bg); padding: 3rem 2rem; }
+.lk-footer-grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; }
+.lk-footer-col h4 { font-size: 1.3rem; color: var(--color-gold); margin-bottom: 1rem; }
+.lk-footer-col p, .lk-footer-col a { color: var(--color-gray); font-size: 0.95rem; line-height: 1.8; }
+.lk-footer-col a { display: flex; align-items: center; gap: 0.5rem; transition: color 0.3s; }
+.lk-footer-col a:hover { color: var(--color-gold); }
+.lk-social-links { display: flex; gap: 1rem; }
+.lk-social-link {
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--color-gray-dark);
+  display: flex; align-items: center; justify-content: center; transition: all 0.3s;
+}
+.lk-social-link:hover { border-color: var(--color-gold); background: rgba(255,203,37,0.1); }
+.lk-social-link svg { width: 20px; height: 20px; fill: var(--color-gray); transition: fill 0.3s; }
+.lk-social-link:hover svg { fill: var(--color-gold); }
+.lk-footer-bottom {
+  max-width: 1200px; margin: 2rem auto 0; padding-top: 2rem; border-top: 1px solid var(--color-gray-dark);
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;
+}
+.lk-footer-bottom p { color: var(--color-gray); font-size: 0.85rem; }
+.lk-footer-mini-logo { font-family: var(--font-heading); font-size: 1.1rem; letter-spacing: 0.06em; }
+.lk-footer-mini-logo span:first-child { color: var(--color-gold); }
+.lk-footer-mini-logo span:last-child { color: var(--color-white); }
+
+/* ── Focus States ── */
+.lk-btn:focus-visible, .lk-nav a:focus-visible, .lk-service-card:focus-visible,
+.lk-social-link:focus-visible, .lk-hamburger:focus-visible {
+  outline: 2px solid var(--color-gold); outline-offset: 2px;
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .lk-reveal { transition: none; opacity: 1; transform: none; }
+  .lk-spark { animation: none; }
+  .lk-hero-beam::before, .lk-hero-beam::after { animation: none; }
+}
+
+/* ── Responsive: Tablet ── */
+@media (max-width: 1199px) {
+  .lk-nav { display: none; }
+  .lk-header-actions .lk-btn { display: none; }
+  .lk-hamburger { display: flex; }
+  .lk-about-grid { grid-template-columns: 1fr; }
+  .lk-about-img { order: -1; }
+  .lk-philosophy-grid { grid-template-columns: 1fr; }
+  .lk-philosophy-img { order: -1; }
+  .lk-projects-grid { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 220px; }
+  .lk-services-bento { grid-template-columns: 1fr 1fr; }
+  .lk-service-card:first-child { grid-column: span 2; }
+}
+
+/* ── Responsive: Mobile ── */
+@media (max-width: 767px) {
+  .lk-section { padding: 4rem 1rem; }
+  .lk-header { padding: 0.75rem 1rem; }
+  .lk-hero-content { padding: 0 1rem; }
+  .lk-hero-ctas { flex-direction: column; align-items: center; }
+  .lk-stats-inline { flex-direction: column; gap: 1rem; }
+  .lk-projects-grid { grid-template-columns: 1fr; grid-auto-rows: 220px; }
+  .lk-project-item:nth-child(1),
+  .lk-project-item:nth-child(4),
+  .lk-project-item:nth-child(8),
+  .lk-project-item:nth-child(11) { grid-row: span 1; }
+  .lk-services-bento { grid-template-columns: 1fr; }
+  .lk-service-card:first-child { grid-column: span 1; }
+  .lk-service-body-inner { grid-template-columns: 1fr; }
+  .lk-footer-grid { grid-template-columns: 1fr; }
+  .lk-footer-bottom { flex-direction: column; text-align: center; }
+  .lk-highlight-boxes { flex-direction: column; }
+  .lk-stats-strip-inner { flex-direction: column; gap: 1.5rem; }
+}
+  </style>
+</head>
+<body>
+
+  <!-- ══ HEADER ══ -->
+  <header class="lk-header" id="lk-header-el">
+    <a href="#lk-hero" class="lk-logo" aria-label="LaserKritis - Αρχική">
+      <div class="lk-logo-text"><span>LASER </span><span>KRITIS</span></div>
+      <div class="lk-logo-line"></div>
+    </a>
+    <nav class="lk-nav">
+      <a href="#lk-hero">Αρχική</a>
+      <a href="#lk-about">Η Εταιρεία</a>
+      <a href="#lk-projects">Τα Έργα Μας</a>
+      <a href="#lk-services">Οι Υπηρεσίες Μας</a>
+      <a href="#lk-contact">Επικοινωνία</a>
+    </nav>
+    <div class="lk-header-actions">
+      <a href="mailto:info@laserkritis.gr" class="lk-btn lk-btn--primary lk-btn--sm">Ζητήστε Προσφορά</a>
+      <button class="lk-hamburger" aria-label="Μενού" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══ MOBILE MENU ══ -->
+  <div class="lk-mobile-menu" id="lk-mobile-menu" role="dialog" aria-label="Πλοήγηση">
+    <a href="#lk-hero">Αρχική</a>
+    <a href="#lk-about">Η Εταιρεία</a>
+    <a href="#lk-projects">Τα Έργα Μας</a>
+    <a href="#lk-services">Οι Υπηρεσίες Μας</a>
+    <a href="#lk-contact">Επικοινωνία</a>
+    <a href="mailto:info@laserkritis.gr" class="lk-btn lk-btn--primary">Ζητήστε Προσφορά</a>
+  </div>
+
+  <main>
+
+  <!-- ══ HERO ══ -->
+  <section class="lk-hero" id="lk-hero">
+    <div class="lk-hero-beam"></div>
+    <!-- Spark particles injected by JS -->
+    <div class="lk-hero-content lk-reveal">
+      <h1><span class="lk-gold">Βήματα Μπροστά</span> στην Τεχνολογία</h1>
+      <p class="lk-hero-subtitle">Υπερσύγχρονη μονάδα κοπής &amp; διαμόρφωσης μετάλλου στο Ηράκλειο Κρήτης</p>
+      <div class="lk-hero-ctas">
+        <a href="#lk-services" class="lk-btn lk-btn--primary">Οι Υπηρεσίες Μας &rarr;</a>
+        <a href="#lk-contact" class="lk-btn lk-btn--outline">Επικοινωνήστε Μαζί Μας</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ ABOUT ══ -->
+  <section class="lk-section lk-section--darker" id="lk-about">
+    <div class="lk-container">
+      <h2 class="lk-section-title lk-reveal">Η <span class="lk-gold">Εταιρεία</span> Μας</h2>
+      <div class="lk-gold-line lk-reveal"></div>
+      <div class="lk-about-grid">
+        <div class="lk-about-text lk-reveal">
+          <p>Το LaserKritis αποτελεί μια υπερσύγχρονη μονάδα κοπής και διαμόρφωσης μετάλλου με έδρα το Ηράκλειο Κρήτης. Από το 2020 υπηρετούμε τις ανάγκες των πελατών μας, με γνώμονα την ακρίβεια και τον επαγγελματισμό!</p>
+          <div class="lk-stats-inline">
+            <div class="lk-stat-box">
+              <div class="lk-stat-number">4+</div>
+              <div class="lk-stat-label">Χρόνια Εμπειρίας</div>
+            </div>
+            <div class="lk-stat-box">
+              <div class="lk-stat-number">9</div>
+              <div class="lk-stat-label">Ειδικοί Συνεργάτες</div>
+            </div>
+            <div class="lk-stat-box">
+              <div class="lk-stat-number">1000+</div>
+              <div class="lk-stat-label">Ολοκληρωμένα Έργα</div>
+            </div>
+          </div>
+        </div>
+        <div class="lk-about-img lk-reveal">
+          <img src="https://static.laserkritis.gr/files/company/company.jpg" alt="LaserKritis - Εγκαταστάσεις εταιρείας" loading="lazy">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ PHILOSOPHY ══ -->
+  <section class="lk-section lk-section--dark">
+    <div class="lk-container">
+      <h2 class="lk-section-title lk-reveal">Η <span class="lk-gold">Φιλοσοφία</span> Μας</h2>
+      <div class="lk-gold-line lk-reveal"></div>
+      <div class="lk-philosophy-grid">
+        <div class="lk-philosophy-img lk-reveal">
+          <img src="https://static.laserkritis.gr/files/philosophy/philosophy.jpg" alt="LaserKritis - Φιλοσοφία εταιρείας" loading="lazy">
+        </div>
+        <div class="lk-philosophy-text lk-reveal">
+          <p>Στόχος μας είναι να δημιουργήσουμε σχέση εμπιστοσύνης με τους πελάτες - συνεργάτες μας και αυτό αποδεικνύεται μέσα από τα έργα μας. Όπου τα χαρακτηρίζει η ποιότητα και η ταχύτητα. Συνεχή μας μέριμνα είναι να εξελίσσουμε το εύρος της τεχνολογίας μας μέσα από νέες συνεργασίες και επενδύσεις στον τομέα της κοπής και επεξεργασίας μετάλλων.</p>
+          <div class="lk-highlight-boxes">
+            <div class="lk-highlight-box">
+              <h4>Στόχος Μας</h4>
+              <p>Η εμπιστοσύνη με τους πελάτες &amp; συνεργάτες μας.</p>
+            </div>
+            <div class="lk-highlight-box">
+              <h4>Μέριμνα Μας</h4>
+              <p>Να εξελίσσουμε τη τεχνολογία μας.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ STATS STRIP ══ -->
+  <div class="lk-stats-strip">
+    <div class="lk-stats-strip-inner">
+      <div class="lk-strip-stat lk-reveal">
+        <div class="lk-strip-stat-number">4+</div>
+        <div class="lk-strip-stat-label">Χρόνια Εμπειρίας</div>
+      </div>
+      <div class="lk-strip-stat lk-reveal">
+        <div class="lk-strip-stat-number">9</div>
+        <div class="lk-strip-stat-label">Ειδικοί Συνεργάτες</div>
+      </div>
+      <div class="lk-strip-stat lk-reveal">
+        <div class="lk-strip-stat-number">1000+</div>
+        <div class="lk-strip-stat-label">Ολοκληρωμένα Έργα</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PROJECTS ══ -->
+  <section class="lk-section lk-section--darker" id="lk-projects">
+    <div class="lk-container">
+      <h2 class="lk-section-title lk-reveal">Τα <span class="lk-gold">Έργα</span> Μας</h2>
+      <p class="lk-section-subtitle lk-reveal">Δείγματα κοπής &amp; κατασκευής σε Fiber Laser</p>
+      <div class="lk-gold-line lk-reveal"></div>
+
+      <div class="lk-projects-grid lk-stagger">
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/biomechanika.jpg" alt="Βιομηχανικές Εφαρμογές" loading="lazy">
+          <div class="lk-project-overlay"><span>Βιομηχανικές Εφαρμογές</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/signs.jpg" alt="Επιγραφές" loading="lazy">
+          <div class="lk-project-overlay"><span>Επιγραφές</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/pexels-kelly-l-4320475.jpg" alt="Φωτοβολταϊκά" loading="lazy">
+          <div class="lk-project-overlay"><span>Φωτοβολταϊκά</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/ergalia.jpg" alt="Γεωργικά Μηχανήματα" loading="lazy">
+          <div class="lk-project-overlay"><span>Γεωργικά Μηχανήματα</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/esoterikon-xoron.jpg" alt="Διακόσμηση Εσωτερικών Χώρων" loading="lazy">
+          <div class="lk-project-overlay"><span>Διακόσμηση Εσωτερικών Χώρων</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/skala.png" alt="Σκάλες" loading="lazy">
+          <div class="lk-project-overlay"><span>Σκάλες</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/diafora.jpg" alt="Διάφορα Σχέδια" loading="lazy">
+          <div class="lk-project-overlay"><span>Διάφορα Σχέδια</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/pergola.jpg" alt="Πέργκολες" loading="lazy">
+          <div class="lk-project-overlay"><span>Πέργκολες</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/garazoporta.jpg" alt="Γκαραζόπορτες - Αυλόπορτες" loading="lazy">
+          <div class="lk-project-overlay"><span>Γκαραζόπορτες - Αυλόπορτες</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/diakosmitika.jpg" alt="Διακοσμητικά Είδη" loading="lazy">
+          <div class="lk-project-overlay"><span>Διακοσμητικά Είδη</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/kagela.jpg" alt="Κάγκελα" loading="lazy">
+          <div class="lk-project-overlay"><span>Κάγκελα</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/ezgif.com-gif-maker.jpg" alt="Φωτιστικά" loading="lazy">
+          <div class="lk-project-overlay"><span>Φωτιστικά</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/phrachtes.jpg" alt="Φράχτες" loading="lazy">
+          <div class="lk-project-overlay"><span>Φράχτες</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/exoterikon-xoron.jpg" alt="Διακόσμηση Εξωτερικών Χώρων" loading="lazy">
+          <div class="lk-project-overlay"><span>Διακόσμηση Εξωτερικών Χώρων</span></div>
+        </div>
+        <div class="lk-project-item lk-reveal">
+          <img src="https://static.laserkritis.gr/files/projects/epipla.jpg" alt="Κατασκευή Επίπλων" loading="lazy">
+          <div class="lk-project-overlay"><span>Κατασκευή Επίπλων</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ SERVICES ══ -->
+  <section class="lk-section lk-section--dark" id="lk-services">
+    <div class="lk-container">
+      <h2 class="lk-section-title lk-reveal">Οι <span class="lk-gold">Υπηρεσίες</span> Μας</h2>
+      <div class="lk-gold-line lk-reveal"></div>
+
+      <div class="lk-services-bento lk-stagger">
+
+        <!-- Service 1: Fiber Laser -->
+        <div class="lk-service-card lk-reveal" tabindex="0">
+          <div class="lk-service-header">
+            <div class="lk-service-header-left">
+              <div class="lk-service-icon">
+                <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                  <line x1="4" y1="4" x2="20" y2="20" stroke-linecap="round"/>
+                  <circle cx="24" cy="24" r="3"/>
+                  <line x1="20" y1="28" x2="20" y2="34" stroke-linecap="round"/>
+                  <line x1="28" y1="28" x2="32" y2="32" stroke-linecap="round"/>
+                  <line x1="28" y1="20" x2="34" y2="20" stroke-linecap="round"/>
+                  <path d="M2 10 L10 2" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <h3>Κοπή με Fiber Laser</h3>
+            </div>
+            <button class="lk-service-toggle" aria-label="Άνοιγμα">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+          <div class="lk-service-body">
+            <div class="lk-service-body-inner">
+              <img src="https://static.laserkritis.gr/filemanager/515x450/services/fiber.jpg" alt="Κοπή με Fiber Laser" loading="lazy">
+              <div>
+                <p>Οι νέες πηγές Fiber Laser είναι η τελευταία εξέλιξη τεχνολογίας των μηχανών κοπής laser. Οι μηχανές Fiber Laser έχουν την δυνατότητα κοπής πολύ μικρών οπών και ταυτόχρονα έχουν πολύ μεγαλύτερη ταχύτητα κοπής σε σχέση με τις συμβατικές μηχανές Laser CO2.</p>
+                <ul class="lk-service-bullets">
+                  <li>Καθαρή ποιότητα κοπής (δεν χρειάζεται περαιτέρω επεξεργασία)</li>
+                  <li>Μεγάλη ταχύτητα κοπής</li>
+                  <li>Επαναληψιμότητα στις κοπές (μικρές / μεγάλες ποσότητες)</li>
+                  <li>Χαμηλό κόστος λειτουργίας (οικολογική λειτουργία)</li>
+                  <li>Απόλυτη ακρίβεια στις κοπές (απαιτητικά σχέδια)</li>
+                  <li>Πολύ μικρή θερμική καταπόνηση στα ελάσματα</li>
+                  <li>Υπηρεσία nesting για εξοικονόμηση υλικού</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service 2: Plasma -->
+        <div class="lk-service-card lk-reveal" tabindex="0">
+          <div class="lk-service-header">
+            <div class="lk-service-header-left">
+              <div class="lk-service-icon">
+                <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M18 2 C18 2 10 14 10 22 A8 8 0 0 0 26 22 C26 14 18 2 18 2Z"/>
+                  <path d="M18 12 C18 12 14 18 14 22 A4 4 0 0 0 22 22 C22 18 18 12 18 12Z" stroke-dasharray="2 2"/>
+                </svg>
+              </div>
+              <h3>Κοπή με Πλάσμα</h3>
+            </div>
+            <button class="lk-service-toggle" aria-label="Άνοιγμα">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+          <div class="lk-service-body">
+            <div class="lk-service-body-inner">
+              <img src="https://static.laserkritis.gr/filemanager/515x450/services/plasma.jpg" alt="Κοπή με Πλάσμα" loading="lazy">
+              <div>
+                <p>Η LaserKritis διαθέτει ένα μηχάνημα Plasma High Definition για κοπές μετάλλων μεγάλου πάχους με πολύ καλή ακρίβεια. Εξοπλισμένο με τεχνολογίες TrueHole&reg; και XDefinition&reg; Technology.</p>
+                <div class="lk-service-specs">
+                  <p><strong>Μαύρη Λαμαρίνα:</strong> έως 70mm</p>
+                  <p><strong>Inox:</strong> έως 30mm</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service 3: Strantza -->
+        <div class="lk-service-card lk-reveal" tabindex="0">
+          <div class="lk-service-header">
+            <div class="lk-service-header-left">
+              <div class="lk-service-icon">
+                <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="4" y="2" width="28" height="6" rx="1"/>
+                  <rect x="14" y="8" width="8" height="12" rx="1"/>
+                  <path d="M4 24 L14 20 L22 20 L32 24" stroke-linejoin="round"/>
+                  <line x1="4" y1="24" x2="4" y2="34" stroke-linecap="round"/>
+                  <line x1="32" y1="24" x2="32" y2="34" stroke-linecap="round"/>
+                  <line x1="2" y1="34" x2="34" y2="34" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <h3>Στράντζα</h3>
+            </div>
+            <button class="lk-service-toggle" aria-label="Άνοιγμα">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+          <div class="lk-service-body">
+            <div class="lk-service-body-inner">
+              <img src="https://static.laserkritis.gr/filemanager/515x450/services/strantza2.jpg" alt="Στράντζα" loading="lazy">
+              <div>
+                <p>Η στράντζα χρησιμοποιείται σε μεγάλο βαθμό στη βιομηχανία λόγω της ικανότητας να διαμορφώνει εύκολα μεγάλα ελάσματα και με ακρίβεια. Η LaserKritis διαθέτει σύγχρονο μηχάνημα διαμόρφωσης ελασμάτων με συνεχή ανανέωση καλουπιών.</p>
+                <ul class="lk-service-bullets">
+                  <li>Εξειδικευμένο προσωπικό</li>
+                  <li>Συνεχής ανανέωση καλουπιών</li>
+                  <li>Βέλτιστο τελικό αποτέλεσμα</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service 4: Psalidi -->
+        <div class="lk-service-card lk-reveal" tabindex="0">
+          <div class="lk-service-header">
+            <div class="lk-service-header-left">
+              <div class="lk-service-icon">
+                <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="8" cy="28" r="5"/>
+                  <circle cx="28" cy="28" r="5"/>
+                  <line x1="12" y1="24" x2="28" y2="4" stroke-linecap="round"/>
+                  <line x1="24" y1="24" x2="8" y2="4" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <h3>Ψαλίδι</h3>
+            </div>
+            <button class="lk-service-toggle" aria-label="Άνοιγμα">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+          <div class="lk-service-body">
+            <div class="lk-service-body-inner">
+              <img src="https://static.laserkritis.gr/filemanager/515x450/services/hq720.jpg" alt="Ψαλίδι" loading="lazy">
+              <div>
+                <p>Απαραίτητο εργαλείο σύγχρονων μονάδων επεξεργασίας μεταλλικών ελασμάτων. Στη LaserKritis μπορούμε να αναλάβουμε οποιαδήποτε εργασία διαμόρφωσης αλλά και παραγωγής τελικού προϊόντος.</p>
+                <div class="lk-service-specs">
+                  <p><strong>Μαύρη λαμαρίνα:</strong> 1mm έως 8mm</p>
+                  <p><strong>Ανοξείδωτο:</strong> 1mm έως 4mm</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Service 5: Sxediasmos -->
+        <div class="lk-service-card lk-reveal" tabindex="0">
+          <div class="lk-service-header">
+            <div class="lk-service-header-left">
+              <div class="lk-service-icon">
+                <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M4 32 L28 4" stroke-linecap="round"/>
+                  <polygon points="28,4 34,6 30,10"/>
+                  <line x1="8" y1="28" x2="12" y2="24" stroke-linecap="round"/>
+                  <rect x="20" y="20" width="12" height="12" rx="1" stroke-dasharray="2 2"/>
+                  <line x1="2" y1="34" x2="16" y2="34" stroke-linecap="round"/>
+                  <line x1="2" y1="34" x2="2" y2="20" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <h3>Σχεδιασμός</h3>
+            </div>
+            <button class="lk-service-toggle" aria-label="Άνοιγμα">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </div>
+          <div class="lk-service-body">
+            <div class="lk-service-body-inner">
+              <img src="https://static.laserkritis.gr/filemanager/515x450/services/sxediasmos.jpg" alt="Σχεδιασμός" loading="lazy">
+              <div>
+                <p>Η ομάδα του Laserkritis αποτελείται από έμπειρους σχεδιαστές και μηχανικούς, με άριστη γνώση σχεδιαστικών προγραμμάτων και μεθόδων κατασκευής.</p>
+                <ul class="lk-service-bullets">
+                  <li>Σχεδιασμός ιδεών</li>
+                  <li>Ανάπτυξη πρωτοτύπου</li>
+                  <li>Δημιουργία πρωτοτύπου</li>
+                  <li>Τρισδιάστατη απεικόνιση των σχεδίων</li>
+                  <li>Ταχύτητα, ευελιξία και αποτελεσματικότητα</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /bento -->
+    </div>
+  </section>
+
+  </main>
+
+  <!-- ══ CONTACT / FOOTER ══ -->
+  <div id="lk-contact">
+    <section class="lk-section lk-section--darker" style="padding-bottom:0">
+      <div class="lk-container">
+        <h2 class="lk-section-title lk-reveal"><span class="lk-gold">Επικοινωνία</span></h2>
+        <div class="lk-gold-line lk-reveal"></div>
+      </div>
+    </section>
+
+    <div class="lk-map-wrapper">
+      <iframe
+        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d31870.355272585937!2d25.156813984625806!3d35.34096063322517!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x149a59a76a706211%3A0x60a3f567883094d5!2zTGFzZXJLcml0aXMgzpzOn86lzqHOpM6WzpHOms6XzqMgzprOqc6dzqPOpM6Rzp3OpM6Zzp3On86j!5e0!3m2!1sel!2sgr!4v1775207087618!5m2!1sel!2sgr"
+        title="LaserKritis τοποθεσία στον χάρτη"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+        allowfullscreen>
+      </iframe>
+    </div>
+
+    <footer class="lk-footer">
+      <div class="lk-footer-grid">
+        <!-- Column 1: Address -->
+        <div class="lk-footer-col lk-reveal">
+          <h4>Η Έδρα Μας</h4>
+          <p style="display:flex;align-items:flex-start;gap:0.5rem">
+            <span style="flex-shrink:0;margin-top:4px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/>
+              </svg>
+            </span>
+            Οδός Ρ τετράγωνο 4, ΒΙ.ΠΕ. Ηρακλείου,<br>Τ.Κ.71100, Ηράκλειο Κρήτης
+          </p>
+        </div>
+
+        <!-- Column 2: Contact -->
+        <div class="lk-footer-col lk-reveal">
+          <h4>Επικοινωνία</h4>
+          <a href="tel:+302810380912">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+            </svg>
+            2810 380 912
+          </a>
+          <a href="mailto:info@laserkritis.gr">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/>
+            </svg>
+            info@laserkritis.gr
+          </a>
+        </div>
+
+        <!-- Column 3: Social -->
+        <div class="lk-footer-col lk-reveal">
+          <h4>Social Media</h4>
+          <div class="lk-social-links">
+            <a href="https://www.facebook.com/laserkritis/" target="_blank" rel="noopener noreferrer" class="lk-social-link" aria-label="Facebook">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18 2h-3a5 5 0 00-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 011-1h3z"/></svg>
+            </a>
+            <a href="https://www.instagram.com/laserkritis/" target="_blank" rel="noopener noreferrer" class="lk-social-link" aria-label="Instagram">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <circle cx="17.5" cy="6.5" r="1.2"/>
+              </svg>
+            </a>
+            <a href="https://m.me/laserkritis" target="_blank" rel="noopener noreferrer" class="lk-social-link" aria-label="Messenger">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.432 5.502 3.68 7.2V22l3.364-1.846A11.25 11.25 0 0012 20.486c5.523 0 10-4.145 10-9.243S17.523 2 12 2z"/>
+                <path d="M8 13l3-3 2 2 3-3" fill="none" stroke="#0A0A0A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="lk-footer-bottom">
+        <p>&copy; 2022 - 2026 laserkritis.gr</p>
+        <div class="lk-footer-mini-logo">
+          <span>LASER </span><span>KRITIS</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ══ JAVASCRIPT ══ -->
+  <script>
+  (function() {
+    'use strict';
+
+    // ── Header scroll detection ──
+    var header = document.getElementById('lk-header-el');
+    window.addEventListener('scroll', function() {
+      header.classList.toggle('lk-header--scrolled', window.scrollY > 50);
+    }, { passive: true });
+
+    // ── Hamburger menu ──
+    var hamburger = document.querySelector('.lk-hamburger');
+    var mobileMenu = document.getElementById('lk-mobile-menu');
+
+    function closeMobileMenu() {
+      hamburger.classList.remove('lk-open');
+      mobileMenu.classList.remove('lk-open');
+      hamburger.setAttribute('aria-expanded', 'false');
+      document.body.style.overflow = '';
+    }
+
+    hamburger.addEventListener('click', function() {
+      var isOpen = hamburger.classList.toggle('lk-open');
+      mobileMenu.classList.toggle('lk-open');
+      hamburger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      document.body.style.overflow = isOpen ? 'hidden' : '';
+    });
+
+    // Close menu on link click
+    mobileMenu.querySelectorAll('a').forEach(function(link) {
+      link.addEventListener('click', closeMobileMenu);
+    });
+
+    // ── Smooth scroll for anchor links ──
+    document.querySelectorAll('a[href^="#"]').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        var targetId = this.getAttribute('href').slice(1);
+        var target = document.getElementById(targetId);
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+
+    // ── Scroll reveal (IntersectionObserver) ──
+    var revealObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('lk-visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.lk-reveal').forEach(function(el) {
+      revealObserver.observe(el);
+    });
+
+    // ── Spark particles ──
+    var hero = document.querySelector('.lk-hero');
+    for (var i = 0; i < 18; i++) {
+      var seed = (i * 137 + 42) % 100;
+      var spark = document.createElement('div');
+      spark.className = 'lk-spark';
+      spark.style.left = ((seed * 7 + i * 13) % 100) + '%';
+      spark.style.top = ((seed * 3 + i * 17) % 100) + '%';
+      var size = 2 + (seed % 3);
+      spark.style.width = size + 'px';
+      spark.style.height = size + 'px';
+      spark.style.setProperty('--dur', (2.5 + (seed % 4)) + 's');
+      spark.style.setProperty('--peak', '' + (0.3 + (seed % 5) * 0.1));
+      spark.style.setProperty('--drift', (-15 - (seed % 20)) + 'px');
+      spark.style.animationDelay = ((i * 0.4) % 5) + 's';
+      hero.appendChild(spark);
+    }
+
+    // ── Service card expand/collapse ──
+    var openServiceIndex = null;
+    var serviceCards = document.querySelectorAll('.lk-service-card');
+
+    serviceCards.forEach(function(card, i) {
+      var toggle = card.querySelector('.lk-service-toggle');
+      var body = card.querySelector('.lk-service-body');
+
+      function handleToggle(e) {
+        if (e) e.stopPropagation();
+        // Close previously open card
+        if (openServiceIndex !== null && openServiceIndex !== i) {
+          var prev = serviceCards[openServiceIndex];
+          prev.querySelector('.lk-service-toggle').classList.remove('lk-open');
+          prev.querySelector('.lk-service-body').classList.remove('lk-open');
+        }
+        var isOpen = toggle.classList.toggle('lk-open');
+        body.classList.toggle('lk-open');
+        toggle.setAttribute('aria-label', isOpen ? 'Κλείσιμο' : 'Άνοιγμα');
+        openServiceIndex = isOpen ? i : null;
+      }
+
+      card.addEventListener('click', handleToggle);
+      toggle.addEventListener('click', handleToggle);
+    });
+
+  })();
+  </script>
+
+</body>
+</html>
