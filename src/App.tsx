@@ -58,6 +58,7 @@ const SettingsPage = lazy(() => import('./pages/dashboard/SettingsPage'));
 const QuotesPage = lazy(() => import('./pages/dashboard/QuotesPage'));
 const AutoBlogDashboard = lazy(() => import('./pages/dashboard/AutoBlogDashboard'));
 const LeadMonitorPage = lazy(() => import('./pages/dashboard/LeadMonitorPage'));
+const SeoConsolePage = lazy(() => import('./pages/dashboard/SeoConsolePage'));
 const CompanyScannerPage = lazy(() => import('./pages/dashboard/CompanyScannerPage'));
 const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage'));
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
@@ -267,6 +268,7 @@ function AppContent() {
                 <Route path="/dashboard/notifications" element={<NotificationsPage />} />
                 <Route path="/dashboard/settings" element={<SettingsPage />} />
                 <Route path="/dashboard/leads" element={<LeadMonitorPage />} />
+                <Route path="/dashboard/seo" element={<SeoConsolePage />} />
                 <Route path="/dashboard/company-scanner" element={<CompanyScannerPage />} />
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
                 <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />

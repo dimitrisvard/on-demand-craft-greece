@@ -57,6 +57,27 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 | `manage_keywords` | List/add/remove/toggle monitored keywords |
 | `manage_subreddits` | List/add/remove/toggle monitored subreddits |
 
+### Google Search Console tools
+
+The server also exposes tools for Google Search Console and the Indexing
+API. Credentials are stored in the Supabase `gsc_config` table — see
+[`../docs/gsc-setup.md`](../docs/gsc-setup.md) for one-time setup. No
+extra environment variables are needed; the existing `SUPABASE_SERVICE_KEY`
+unlocks credential access.
+
+| Tool | Description |
+|------|-------------|
+| `gsc_search_analytics` | Raw Search Analytics query (dimensions, filters, row limit) |
+| `gsc_get_top_queries` | Shortcut: top N queries by clicks |
+| `gsc_get_top_pages` | Shortcut: top N pages, optional language filter |
+| `gsc_compare_periods` | Compare totals between two equal-length windows |
+| `gsc_inspect_url` | Run URL Inspection API on a single URL |
+| `gsc_get_unindexed_pages` | List monitored URLs that aren't `PASS` in the cache |
+| `gsc_submit_for_indexing` | Submit URLs to the Indexing API (respects 200/day quota) |
+| `gsc_get_indexing_quota` | How many Indexing submissions have been used today |
+| `gsc_list_sitemaps` | List sitemaps for the property |
+| `gsc_submit_sitemap` | Submit a new sitemap URL |
+
 ## Available Resources
 
 | Resource URI | Description |

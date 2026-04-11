@@ -14,6 +14,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import {
+  searchAnalytics as gscSearchAnalytics,
+  inspectUrl as gscInspectUrl,
+  submitBatchForIndexing as gscSubmitBatch,
+  listSitemaps as gscListSitemaps,
+  submitSitemap as gscSubmitSitemap,
+  getIndexingQuotaUsed as gscGetQuota,
+} from "./gsc-client.js";
 
 // Environment
 const SUPABASE_URL = process.env.DATABASE_URL || process.env.SUPABASE_URL || "";
@@ -1565,6 +1573,354 @@ server.tool(
       return { content: [{ type: "text", text: `❌ Scan failed: ${err.message}` }] };
     }
   }
+);
+
+// ============================================================================
+// Google Search Console tools
+// ============================================================================
+
+function gscDateRange(days: number): { startDate: string; endDate: string } {
+  // GSC data lags ~2 days; shift back 3.
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() - 3);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - days);
+  const fmt = (d: Date) => d.toISOString().split("T")[0];
+  return { startDate: fmt(start), endDate: fmt(end) };
+}
+
+function buildFilterGroups(opts: { page?: string; country?: string; device?: string; query?: string }) {
+  const filters: any[] = [];
+  if (opts.page) filters.push({ dimension: "page", operator: "contains", expression: opts.page });
+  if (opts.country) filters.push({ dimension: "country", operator: "equals", expression: opts.country });
+  if (opts.device) filters.push({ dimension: "device", operator: "equals", expression: opts.device });
+  if (opts.query) filters.push({ dimension: "query", operator: "contains", expression: opts.query });
+  if (filters.length === 0) return undefined;
+  return [{ groupType: "and", filters }];
+}
+
+function fmtGscRow(r: any, dim: string): string {
+  const key = r.keys?.[0] || "—";
+  const clicks = r.clicks ?? 0;
+  const impressions = r.impressions ?? 0;
+  const ctr = ((r.ctr ?? 0) * 100).toFixed(1) + "%";
+  const pos = (r.position ?? 0).toFixed(1);
+  return `  ${dim}: ${key}\n    clicks: ${clicks} | imp: ${impressions} | ctr: ${ctr} | pos: ${pos}`;
+}
+
+// ----- gsc_search_analytics -----
+server.tool(
+  "gsc_search_analytics",
+  "Query Google Search Console Search Analytics. Returns clicks, impressions, CTR, position by dimension.",
+  {
+    days: z.number().optional().default(28).describe("Number of days to look back (ending 3 days ago)"),
+    dimensions: z.array(z.enum(["query", "page", "country", "device", "date", "searchAppearance"])).optional().default(["query"]),
+    page_filter: z.string().optional().describe("Only rows whose page URL contains this string"),
+    country_filter: z.string().optional().describe("3-letter country code (e.g. 'deu')"),
+    device_filter: z.enum(["MOBILE", "DESKTOP", "TABLET"]).optional(),
+    query_filter: z.string().optional(),
+    row_limit: z.number().optional().default(25),
+  },
+  async ({ days, dimensions, page_filter, country_filter, device_filter, query_filter, row_limit }) => {
+    try {
+      const { startDate, endDate } = gscDateRange(days);
+      const data = await gscSearchAnalytics({
+        startDate,
+        endDate,
+        dimensions,
+        dimensionFilterGroups: buildFilterGroups({
+          page: page_filter,
+          country: country_filter,
+          device: device_filter,
+          query: query_filter,
+        }),
+        rowLimit: row_limit,
+      });
+      const rows = data.rows || [];
+      if (rows.length === 0) {
+        return { content: [{ type: "text", text: `No results for ${startDate} → ${endDate}` }] };
+      }
+      const dim = dimensions[0];
+      const formatted = rows.map((r: any) => fmtGscRow(r, dim)).join("\n");
+      return {
+        content: [{
+          type: "text",
+          text: `GSC Search Analytics ${startDate} → ${endDate} (${rows.length} rows)\n\n${formatted}`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_get_top_queries -----
+server.tool(
+  "gsc_get_top_queries",
+  "Shortcut: top search queries by clicks for the site over the last N days.",
+  {
+    days: z.number().optional().default(28),
+    limit: z.number().optional().default(20),
+    page_filter: z.string().optional(),
+    country_filter: z.string().optional(),
+  },
+  async ({ days, limit, page_filter, country_filter }) => {
+    try {
+      const { startDate, endDate } = gscDateRange(days);
+      const data = await gscSearchAnalytics({
+        startDate,
+        endDate,
+        dimensions: ["query"],
+        dimensionFilterGroups: buildFilterGroups({ page: page_filter, country: country_filter }),
+        rowLimit: limit,
+      });
+      const rows = data.rows || [];
+      const text = rows.length
+        ? `Top ${rows.length} queries ${startDate} → ${endDate}:\n\n` +
+          rows.map((r: any) => fmtGscRow(r, "query")).join("\n")
+        : "No queries found.";
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_get_top_pages -----
+server.tool(
+  "gsc_get_top_pages",
+  "Shortcut: top landing pages by clicks for the site over the last N days.",
+  {
+    days: z.number().optional().default(28),
+    limit: z.number().optional().default(20),
+    language: z.string().optional().describe("2-letter language code to filter URL prefix (e.g. 'de')"),
+    country_filter: z.string().optional(),
+  },
+  async ({ days, limit, language, country_filter }) => {
+    try {
+      const { startDate, endDate } = gscDateRange(days);
+      const data = await gscSearchAnalytics({
+        startDate,
+        endDate,
+        dimensions: ["page"],
+        dimensionFilterGroups: buildFilterGroups({
+          page: language ? `/${language}/` : undefined,
+          country: country_filter,
+        }),
+        rowLimit: limit,
+      });
+      const rows = data.rows || [];
+      const text = rows.length
+        ? `Top ${rows.length} pages ${startDate} → ${endDate}:\n\n` +
+          rows.map((r: any) => fmtGscRow(r, "page")).join("\n")
+        : "No pages found.";
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_compare_periods -----
+server.tool(
+  "gsc_compare_periods",
+  "Compare GSC totals (clicks, impressions, CTR, position) between two equal-length periods.",
+  {
+    days: z.number().optional().default(28).describe("Length of each period in days"),
+  },
+  async ({ days }) => {
+    try {
+      const { startDate: curStart, endDate: curEnd } = gscDateRange(days);
+      const prevEnd = new Date(curStart);
+      prevEnd.setUTCDate(prevEnd.getUTCDate() - 1);
+      const prevStart = new Date(prevEnd);
+      prevStart.setUTCDate(prevStart.getUTCDate() - days);
+      const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+      const [cur, prev] = await Promise.all([
+        gscSearchAnalytics({ startDate: curStart, endDate: curEnd, dimensions: [], rowLimit: 1 }),
+        gscSearchAnalytics({ startDate: fmt(prevStart), endDate: fmt(prevEnd), dimensions: [], rowLimit: 1 }),
+      ]);
+      const c = cur.rows?.[0] || { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+      const p = prev.rows?.[0] || { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+      const delta = (a: number, b: number) => (b ? (((a - b) / b) * 100).toFixed(1) + "%" : "—");
+      const text = [
+        `GSC comparison (${days}-day window)`,
+        `Current:  ${curStart} → ${curEnd}`,
+        `Previous: ${fmt(prevStart)} → ${fmt(prevEnd)}`,
+        ``,
+        `Clicks:       ${c.clicks} vs ${p.clicks}  (${delta(c.clicks, p.clicks)})`,
+        `Impressions:  ${c.impressions} vs ${p.impressions}  (${delta(c.impressions, p.impressions)})`,
+        `CTR:          ${(c.ctr * 100).toFixed(2)}% vs ${(p.ctr * 100).toFixed(2)}%`,
+        `Avg position: ${c.position.toFixed(1)} vs ${p.position.toFixed(1)}`,
+      ].join("\n");
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_inspect_url -----
+server.tool(
+  "gsc_inspect_url",
+  "Run URL Inspection API on a single URL. Returns indexing state, coverage, canonical, last crawl.",
+  {
+    url: z.string().describe("Full URL including protocol"),
+    language_code: z.string().optional().default("en-US"),
+  },
+  async ({ url, language_code }) => {
+    try {
+      const result = await gscInspectUrl(url, language_code);
+      const idx = result?.indexStatusResult || {};
+      const text = [
+        `URL: ${url}`,
+        `Verdict: ${idx.verdict || "—"}`,
+        `Coverage: ${idx.coverageState || "—"}`,
+        `Indexing state: ${idx.indexingState || "—"}`,
+        `Page fetch: ${idx.pageFetchState || "—"}`,
+        `Robots.txt: ${idx.robotsTxtState || "—"}`,
+        `Crawled as: ${idx.crawledAs || "—"}`,
+        `Last crawl: ${idx.lastCrawlTime || "—"}`,
+        `User canonical: ${idx.userCanonical || "—"}`,
+        `Google canonical: ${idx.googleCanonical || "—"}`,
+      ].join("\n");
+      return { content: [{ type: "text", text }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_get_unindexed_pages -----
+server.tool(
+  "gsc_get_unindexed_pages",
+  "Return monitored URLs that do NOT have a PASS indexing state in the inspection cache. Useful to find pages to submit for indexing.",
+  {
+    language: z.string().optional().describe("Filter by 2-letter language code"),
+    limit: z.number().optional().default(50),
+  },
+  async ({ language, limit }) => {
+    let q = supabase
+      .from("gsc_monitored_urls")
+      .select("url, label, language, service_type, priority")
+      .order("priority", { ascending: false })
+      .limit(limit);
+    if (language) q = q.eq("language", language);
+    const { data: monitored, error } = await q;
+    if (error) return { content: [{ type: "text", text: `❌ ${error.message}` }] };
+    if (!monitored || monitored.length === 0) {
+      return { content: [{ type: "text", text: "No monitored URLs." }] };
+    }
+    const { data: cache } = await supabase
+      .from("gsc_inspection_cache")
+      .select("url, indexing_state, coverage_state, inspected_at")
+      .in("url", monitored.map((m: any) => m.url));
+    const cacheMap = new Map<string, any>();
+    (cache || []).forEach((c: any) => cacheMap.set(c.url, c));
+
+    const unindexed = monitored.filter((m: any) => {
+      const c = cacheMap.get(m.url);
+      return !c || c.indexing_state !== "PASS";
+    });
+    if (unindexed.length === 0) {
+      return { content: [{ type: "text", text: "✅ All monitored URLs are indexed (PASS)." }] };
+    }
+    const text = [
+      `Found ${unindexed.length} unindexed / unknown URLs:\n`,
+      ...unindexed.map((m: any) => {
+        const c = cacheMap.get(m.url);
+        return `  [${m.language || "—"}] ${m.url}\n    state: ${c?.indexing_state || "not inspected"}  coverage: ${c?.coverage_state || "—"}`;
+      }),
+    ].join("\n");
+    return { content: [{ type: "text", text }] };
+  },
+);
+
+// ----- gsc_submit_for_indexing -----
+server.tool(
+  "gsc_submit_for_indexing",
+  "Submit one or more URLs to the Google Indexing API. Respects the 200/day quota and logs every attempt.",
+  {
+    urls: z.array(z.string()).describe("URLs to submit"),
+    type: z.enum(["URL_UPDATED", "URL_DELETED"]).optional().default("URL_UPDATED"),
+  },
+  async ({ urls, type }) => {
+    try {
+      const { results, quota } = await gscSubmitBatch(urls, type);
+      const ok = results.filter((r) => r.status === "success").length;
+      const skipped = results.filter((r) => r.status === "skipped_quota").length;
+      const errs = results.filter((r) => r.status === "error");
+      const lines = [
+        `Submitted ${ok}/${urls.length} URLs (quota ${quota.used}/${quota.limit})`,
+        skipped ? `⚠️  ${skipped} skipped (daily quota reached)` : "",
+        errs.length ? `❌ ${errs.length} errors:\n${errs.map((e) => `  ${e.url}: ${e.error}`).join("\n")}` : "",
+      ].filter(Boolean).join("\n");
+      return { content: [{ type: "text", text: lines }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_get_indexing_quota -----
+server.tool(
+  "gsc_get_indexing_quota",
+  "Return how many Indexing API submissions were used today (out of 200).",
+  {},
+  async () => {
+    try {
+      const { used, limit } = await gscGetQuota();
+      return {
+        content: [{
+          type: "text",
+          text: `Indexing quota today: ${used} / ${limit}  (${limit - used} remaining)`,
+        }],
+      };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_list_sitemaps -----
+server.tool(
+  "gsc_list_sitemaps",
+  "List all sitemaps submitted to Google Search Console for the site.",
+  {},
+  async () => {
+    try {
+      const sitemaps = await gscListSitemaps();
+      if (sitemaps.length === 0) {
+        return { content: [{ type: "text", text: "No sitemaps submitted." }] };
+      }
+      const text = sitemaps
+        .map((s: any) =>
+          `  ${s.path}\n    type: ${s.type || "sitemap"}  errors: ${s.errors || 0}  warnings: ${s.warnings || 0}  last: ${s.lastSubmitted || "—"}`,
+        )
+        .join("\n");
+      return { content: [{ type: "text", text: `Found ${sitemaps.length} sitemaps:\n\n${text}` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
+);
+
+// ----- gsc_submit_sitemap -----
+server.tool(
+  "gsc_submit_sitemap",
+  "Submit a sitemap URL to Google Search Console.",
+  {
+    feedpath: z.string().describe("Full sitemap URL"),
+  },
+  async ({ feedpath }) => {
+    try {
+      await gscSubmitSitemap(feedpath);
+      return { content: [{ type: "text", text: `✅ Sitemap submitted: ${feedpath}` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `❌ ${err.message}` }] };
+    }
+  },
 );
 
 // ===== Start server =====
