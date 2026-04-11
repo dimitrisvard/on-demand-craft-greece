@@ -153,7 +153,7 @@ function OverviewTab({ preset }: { preset: RangePreset }) {
   const current = useQuery({
     queryKey: ['gsc-overview-current', range],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: range.startDate,
@@ -167,7 +167,7 @@ function OverviewTab({ preset }: { preset: RangePreset }) {
   const totals = useQuery({
     queryKey: ['gsc-overview-totals', range],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: range.startDate,
@@ -181,7 +181,7 @@ function OverviewTab({ preset }: { preset: RangePreset }) {
   const prevTotals = useQuery({
     queryKey: ['gsc-overview-prev-totals', prev],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: prev.startDate,
@@ -329,7 +329,7 @@ function TopQueriesTab({ preset }: { preset: RangePreset }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['gsc-queries', range],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: range.startDate,
@@ -444,7 +444,7 @@ function TopPagesTab({ preset }: { preset: RangePreset }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['gsc-pages', range],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: range.startDate,
@@ -547,7 +547,7 @@ function CountriesTab({ preset }: { preset: RangePreset }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['gsc-countries', range],
     queryFn: () =>
-      apiFetch<{ rows?: GscRow[] }>('/api/gsc/search-analytics', {
+      apiFetch<{ rows?: GscRow[] }>('/api/gsc?action=search-analytics', {
         method: 'POST',
         body: JSON.stringify({
           startDate: range.startDate,
@@ -666,13 +666,13 @@ function IndexStatusTab() {
 
   const quota = useQuery({
     queryKey: ['gsc-quota'],
-    queryFn: () => apiFetch<{ used: number; limit: number }>('/api/gsc/submit-indexing'),
+    queryFn: () => apiFetch<{ used: number; limit: number }>('/api/gsc?action=submit-indexing'),
     refetchInterval: 60_000,
   });
 
   const addUrl = useMutation({
     mutationFn: (payload: Partial<MonitoredUrl>) =>
-      apiFetch('/api/gsc/monitored-urls', {
+      apiFetch('/api/gsc?action=monitored-urls', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
@@ -686,7 +686,7 @@ function IndexStatusTab() {
 
   const deleteUrl = useMutation({
     mutationFn: (id: number) =>
-      apiFetch('/api/gsc/monitored-urls', {
+      apiFetch('/api/gsc?action=monitored-urls', {
         method: 'DELETE',
         body: JSON.stringify({ id }),
       }),
@@ -699,7 +699,7 @@ function IndexStatusTab() {
 
   const inspectOne = useMutation({
     mutationFn: (url: string) =>
-      apiFetch('/api/gsc/inspect-url', { method: 'POST', body: JSON.stringify({ url }) }),
+      apiFetch('/api/gsc?action=inspect-url', { method: 'POST', body: JSON.stringify({ url }) }),
     onSuccess: () => {
       toast.success('Inspected');
       qc.invalidateQueries({ queryKey: ['gsc-inspection-cache'] });
@@ -717,7 +717,7 @@ function IndexStatusTab() {
       // chunk 50
       for (let i = 0; i < urls.length; i += 50) {
         const chunk = urls.slice(i, i + 50);
-        await apiFetch('/api/gsc/bulk-inspect', {
+        await apiFetch('/api/gsc?action=bulk-inspect', {
           method: 'POST',
           body: JSON.stringify({ urls: chunk }),
         });
@@ -734,7 +734,7 @@ function IndexStatusTab() {
 
   const requestIndexing = useMutation({
     mutationFn: (urls: string[]) =>
-      apiFetch('/api/gsc/submit-indexing', {
+      apiFetch('/api/gsc?action=submit-indexing', {
         method: 'POST',
         body: JSON.stringify({ urls, type: 'URL_UPDATED' }),
       }),
@@ -927,12 +927,12 @@ function SitemapsTab() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['gsc-sitemaps'],
-    queryFn: () => apiFetch<{ sitemaps: any[] }>('/api/gsc/sitemaps'),
+    queryFn: () => apiFetch<{ sitemaps: any[] }>('/api/gsc?action=sitemaps'),
   });
 
   const submit = useMutation({
     mutationFn: (fp: string) =>
-      apiFetch('/api/gsc/sitemaps', { method: 'POST', body: JSON.stringify({ feedpath: fp }) }),
+      apiFetch('/api/gsc?action=sitemaps', { method: 'POST', body: JSON.stringify({ feedpath: fp }) }),
     onSuccess: () => {
       toast.success('Sitemap submitted');
       setFeedpath('');
@@ -943,7 +943,7 @@ function SitemapsTab() {
 
   const remove = useMutation({
     mutationFn: (fp: string) =>
-      apiFetch('/api/gsc/sitemaps', { method: 'DELETE', body: JSON.stringify({ feedpath: fp }) }),
+      apiFetch('/api/gsc?action=sitemaps', { method: 'DELETE', body: JSON.stringify({ feedpath: fp }) }),
     onSuccess: () => {
       toast.success('Sitemap removed');
       qc.invalidateQueries({ queryKey: ['gsc-sitemaps'] });

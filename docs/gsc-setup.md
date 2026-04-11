@@ -124,7 +124,7 @@ pages for each of the 14 supported languages).
 With an admin session, call:
 
 ```bash
-curl -X POST https://micronshub.eu/api/gsc/search-analytics \
+curl -X POST "https://micronshub.eu/api/gsc?action=search-analytics" \
   -H "Authorization: Bearer <admin-session-token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -136,6 +136,11 @@ curl -X POST https://micronshub.eu/api/gsc/search-analytics \
 ```
 
 Expect JSON rows with `clicks`, `impressions`, `ctr`, `position`.
+
+All GSC actions go through a single serverless function
+(`/api/gsc?action=<name>`) to stay under Vercel's 12-function Hobby-plan
+limit. Available actions: `search-analytics`, `inspect-url`,
+`bulk-inspect`, `submit-indexing`, `sitemaps`, `monitored-urls`.
 
 ### Dashboard
 
