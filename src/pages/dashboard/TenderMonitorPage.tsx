@@ -273,7 +273,7 @@ export default function TenderMonitorPage() {
     delete (params as any).limit;
     delete (params as any).offset;
     const qs = new URLSearchParams(params).toString();
-    window.open(`/api/tenders-export${qs ? "?" + qs : ""}`, "_blank");
+    window.open(`/api/tenders?export=csv${qs ? "&" + qs : ""}`, "_blank");
   };
 
   const handleFilterChange = (key: keyof TenderFilters, value: string | boolean) => {
