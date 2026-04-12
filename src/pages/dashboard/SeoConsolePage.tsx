@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -140,6 +141,12 @@ interface InspectionCacheRow {
   last_crawl_time: string | null;
   canonical_google: string | null;
   inspected_at: string;
+}
+
+interface SubmissionInfo {
+  url: string;
+  submitted_at: string;
+  submitted_by: string | null;
 }
 
 // ===========================================================================
@@ -636,6 +643,9 @@ function IndexStatusTab() {
   const qc = useQueryClient();
   const [newUrl, setNewUrl] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [submissionFilter, setSubmissionFilter] = useState<'all' | 'submitted' | 'not_submitted'>('all');
+  const [selectNInput, setSelectNInput] = useState('');
 
   // The gsc_* tables are not yet in src/integrations/supabase/types.ts
   // (regenerate those types to remove the `any` cast below).
@@ -659,6 +669,19 @@ function IndexStatusTab() {
         .select('url, indexing_state, coverage_state, last_crawl_time, canonical_google, inspected_at');
       if (error) throw new Error(error.message);
       const map = new Map<string, InspectionCacheRow>();
+      (data || []).forEach((r: any) => map.set(r.url, r));
+      return map;
+    },
+  });
+
+  const submissions = useQuery({
+    queryKey: ['gsc-submissions'],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from('gsc_latest_submissions')
+        .select('url, submitted_at, submitted_by');
+      if (error) throw new Error(error.message);
+      const map = new Map<string, SubmissionInfo>();
       (data || []).forEach((r: any) => map.set(r.url, r));
       return map;
     },
@@ -744,6 +767,7 @@ function IndexStatusTab() {
       toast.success(`Submitted: ${ok} · Skipped (quota): ${skipped}`);
       setSelected(new Set());
       qc.invalidateQueries({ queryKey: ['gsc-quota'] });
+      qc.invalidateQueries({ queryKey: ['gsc-submissions'] });
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -757,9 +781,66 @@ function IndexStatusTab() {
     });
   };
 
+  // Filtered URL list based on search and submission status
+  const filteredUrls = useMemo(() => {
+    let urls = monitored.data || [];
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      urls = urls.filter(
+        (m) =>
+          m.url.toLowerCase().includes(q) ||
+          (m.label && m.label.toLowerCase().includes(q)) ||
+          (m.language && m.language.toLowerCase().includes(q))
+      );
+    }
+
+    if (submissionFilter !== 'all' && submissions.data) {
+      urls = urls.filter((m) => {
+        const isSubmitted = submissions.data!.has(m.url);
+        return submissionFilter === 'submitted' ? isSubmitted : !isSubmitted;
+      });
+    }
+
+    return urls;
+  }, [monitored.data, searchQuery, submissionFilter, submissions.data]);
+
+  // Select-all helpers
+  const allVisibleUrls = filteredUrls.map((m) => m.url);
+  const allSelected = allVisibleUrls.length > 0 && allVisibleUrls.every((u) => selected.has(u));
+  const someSelected = allVisibleUrls.some((u) => selected.has(u));
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelected((s) => {
+        const next = new Set(s);
+        allVisibleUrls.forEach((u) => next.delete(u));
+        return next;
+      });
+    } else {
+      setSelected((s) => {
+        const next = new Set(s);
+        allVisibleUrls.forEach((u) => next.add(u));
+        return next;
+      });
+    }
+  };
+
+  // Select first N unsubmitted URLs
+  const selectFirstN = () => {
+    const n = parseInt(selectNInput, 10);
+    if (isNaN(n) || n <= 0) return;
+
+    const unsubmitted = filteredUrls.filter((m) => !submissions.data?.has(m.url));
+    const toSelect = unsubmitted.slice(0, n).map((m) => m.url);
+
+    setSelected(new Set(toSelect));
+    toast.info(`Selected ${toSelect.length} unsubmitted URL${toSelect.length !== 1 ? 's' : ''}`);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Card>
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground">Indexing quota today</div>
@@ -781,6 +862,14 @@ function IndexStatusTab() {
               {cache.data
                 ? [...cache.data.values()].filter((r) => r.indexing_state === 'PASS').length
                 : 0}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="text-xs text-muted-foreground">Submitted for indexing</div>
+            <div className="text-2xl font-semibold">
+              {submissions.data ? submissions.data.size : 0}
             </div>
           </CardContent>
         </Card>
@@ -836,30 +925,76 @@ function IndexStatusTab() {
               Add
             </Button>
           </div>
+
+          {/* Search, filter, and select-N toolbar */}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Input
+                placeholder="Search URL or language…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-8 pl-7"
+              />
+            </div>
+
+            <Select value={submissionFilter} onValueChange={(v) => setSubmissionFilter(v as any)}>
+              <SelectTrigger className="h-8 w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All URLs</SelectItem>
+                <SelectItem value="submitted">Submitted only</SelectItem>
+                <SelectItem value="not_submitted">Not submitted</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                placeholder="N"
+                value={selectNInput}
+                onChange={(e) => setSelectNInput(e.target.value)}
+                className="h-8 w-20"
+                min={1}
+              />
+              <Button size="sm" variant="outline" onClick={selectFirstN}>
+                Select first {selectNInput || 'N'}
+              </Button>
+            </div>
+          </div>
+
           {monitored.isLoading ? (
             <Skeleton className="h-[300px] w-full" />
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all"
+                    />
+                  </TableHead>
                   <TableHead>URL</TableHead>
                   <TableHead>Lang</TableHead>
                   <TableHead>Index state</TableHead>
+                  <TableHead>Submitted</TableHead>
                   <TableHead>Last crawl</TableHead>
                   <TableHead className="w-[140px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(monitored.data || []).map((m) => {
+                {filteredUrls.map((m) => {
                   const c = cache.data?.get(m.url);
+                  const sub = submissions.data?.get(m.url);
                   return (
                     <TableRow key={m.id}>
                       <TableCell>
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selected.has(m.url)}
-                          onChange={() => toggleSelect(m.url)}
+                          onCheckedChange={() => toggleSelect(m.url)}
                         />
                       </TableCell>
                       <TableCell className="max-w-sm truncate font-mono text-xs" title={m.url}>
@@ -879,6 +1014,15 @@ function IndexStatusTab() {
                           </Badge>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {sub ? (
+                          <span className="text-emerald-600">
+                            {new Date(sub.submitted_at).toLocaleDateString()}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
