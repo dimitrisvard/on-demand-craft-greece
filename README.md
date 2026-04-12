@@ -1,245 +1,235 @@
-## Microns Hub – On‑Demand Manufacturing Platform
+# Microns Hub — European On-Demand Manufacturing Platform
 
-Microns Hub is a full‑stack, AI‑powered **on‑demand manufacturing platform** that connects engineers and product teams with high‑quality CNC machining, sheet metal fabrication, 3D printing, and injection molding partners.
+[![Live Site](https://img.shields.io/badge/Live-micronshub.eu-blue?style=for-the-badge&logo=vercel)](https://www.micronshub.eu)
+[![React](https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-5-646CFF?style=flat-square&logo=vite)](https://vitejs.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3FCF8E?style=flat-square&logo=supabase)](https://supabase.com/)
+[![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-000?style=flat-square&logo=vercel)](https://vercel.com/)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](#license)
 
-It solves a very common manufacturing problem:
-
-- **Slow, manual quoting** for custom parts  
-- **Fragmented communication** between customers and suppliers  
-- **Limited international reach and SEO** for lead generation  
-
-This project automates quoting, content, translations, and distribution so that a small team can operate a modern, multi‑language manufacturing marketplace.
-
----
-
-## Problem the App Solves
-
-- **For customers**:  
-  - Get quotes for complex parts with CAD uploads and detailed manufacturing requirements.  
-  - Track orders and RFQs in a modern web dashboard.  
-
-- **For manufacturing partners**:  
-  - Receive qualified RFQs, manage jobs, and update production status through a dedicated partner dashboard.  
-
-- **For the business**:  
-  - Automatically generate technical blog content, translate it into 10+ languages, update sitemaps, and push new posts to social media – a full SEO and lead‑generation machine on autopilot.
+> A production manufacturing marketplace connecting European engineers with vetted machine shops — competing directly with Xometry, Protolabs, and Sculpteo. **This is a live, revenue-generating business, not a tutorial project.**
 
 ---
 
-## Key Features
+## Overview
 
-- **Multi‑step quote and RFQ flows** with CAD file upload and validation  
-- **Customer dashboard** for orders, RFQs, and status tracking  
-- **Partner dashboard** with role‑based authentication (`partner_seller`)  
-- **Automated content pipeline**:
-  - Daily AI‑generated English articles (Claude)  
-  - Automatic translation into 10+ languages (Gemini)  
-  - Table‑aware translation that preserves complex HTML tables  
-  - Automatic link fixing and sitemap regeneration  
-  - IndexNow ping to search engines  
-- **Multi‑language SEO**:
-  - Language‑prefixed routes (`/{lang}/services`, `/{lang}/blog/{slug}`)  
-  - Hreflang tags, canonical URLs, structured data  
-  - Localized service URLs and blog links  
-- **Email system**:
-  - Transactional emails for quotes and RFQs  
-  - Marketing campaigns with tagging and A/B subject testing  
-- **Social media automation**:
-  - Post blog articles to Facebook and LinkedIn  
-  - AI‑generated hashtags tailored to each article  
+**Microns Hub** is a full-stack manufacturing-as-a-service platform that automates quoting, CAD processing, order management, and multilingual content distribution for on-demand manufacturing across Europe.
+
+- Built from scratch as **solo founder and developer**
+- Serves real customers with CNC machining, sheet metal, 3D printing, and injection molding
+- Handles the full lifecycle: CAD upload → instant quoting → order tracking → delivery
+- 14-language multilingual SEO engine driving organic traffic across Europe
+- Live at **[micronshub.eu](https://www.micronshub.eu)**
 
 ---
 
 ## Tech Stack
 
-### Frontend
-
-- **React 18** + **TypeScript**
-- **Vite** as the build tool
-- **React Router v6** for routing and language‑aware URLs
-- **Tailwind CSS 3** for utility‑first styling
-- **shadcn/ui** built on **Radix UI** primitives for accessible components
-- **React Query (TanStack Query)** for server state and caching
-- **React Hook Form**, **Formik**, **Yup**, **Zod** for forms and validation
-- **i18next** + **react‑i18next** for 10+ language internationalization
-- **React Quill** as a rich‑text / blog editor
-- **Recharts** for analytics and dashboards
-- **Three.js** + **@react‑three/fiber** + **@react‑three/drei** for 3D/CAD visualizations
-
-### Backend / Platform
-
-- **Supabase** (Postgres + Auth + Storage + Edge Functions)
-  - Postgres database with row‑level security
-  - Supabase Auth for users and partners
-  - Supabase Storage for storing attachments and RFQ files
-  - **18+ Edge Functions** (Deno) for serverless backend logic:
-    - Article generation and translation
-    - Sitemap generation and updates
-    - Email sending and marketing campaigns
-    - Partner onboarding and password management
-    - Social media posting
-
-### AI & Automation
-
-- **Anthropic Claude Sonnet 4**  
-  - Automated article generation with silo structure, internal linking, and SEO prompts
-- **Google Gemini 2.0 Flash**  
-  - Multi‑language article translation (10+ languages)  
-  - Custom **continuation loop** for handling max‑token limits  
-  - **Rate‑limit aware** retry with exponential backoff (429 handling)
-- **Automation via Supabase + cron**:
-  - Daily article queue processing
-  - Scheduled translation and link‑fix runs
-  - Periodic sitemap regeneration
-
-### External Services
-
-- **AWS S3** for CAD and heavy file storage (presigned URL uploads/downloads)
-- **Resend** for transactional and marketing email delivery
-- **Facebook Graph API** for Facebook page posting
-- **LinkedIn UGC API** for company feed posts
-- **IndexNow** (Bing and other engines) for instant indexing of new content
+| Layer | Technology |
+|---|---|
+| **Framework** | React 18 with Vite 5 (SPA with prerendered routes for SEO) |
+| **Language** | TypeScript / JavaScript |
+| **Routing** | React Router v6 (language-prefixed routes: `/{lang}/services`, `/{lang}/blog/{slug}`) |
+| **Styling** | Tailwind CSS 3 + shadcn/ui (Radix UI primitives) |
+| **State Management** | TanStack React Query (server state + caching) |
+| **Forms** | React Hook Form + Formik + Zod / Yup validation |
+| **Database** | Supabase (PostgreSQL + Row Level Security) |
+| **Auth** | Supabase Auth (customers + partners with role-based access) |
+| **File Storage** | AWS S3 (presigned URL uploads) + Supabase Storage |
+| **Backend** | 28+ Supabase Edge Functions (Deno) + 12+ Vercel Serverless Functions (Node.js) |
+| **Sheet Metal Service** | FastAPI (Python) microservice with Docker — STEP → DXF/PDF/SVG pipeline |
+| **CAD Processing** | OpenCascade (occt-import-js) for STEP parsing, CadQuery for unfolding |
+| **3D Viewer** | Three.js + React Three Fiber + Drei (STEP → GLB browser rendering) |
+| **2D Nesting** | Custom nesting engine (DXF import → bin-packing → SVG/DXF export with QR tracking) |
+| **i18n** | i18next + react-i18next (14 languages, SSR-rendered for SEO) |
+| **Email** | Resend (transactional + marketing campaigns with A/B testing and tracking) |
+| **AI Content** | Claude (article generation) + Gemini (multi-language translation) |
+| **SEO** | Prerendered routes (210+ URLs), hreflang, structured data, XML sitemaps, IndexNow |
+| **Deployment** | Vercel (frontend + serverless API) + Docker (sheet metal service) |
+| **Monitoring** | Vercel Analytics |
 
 ---
 
-## High‑Level Architecture
+## Key Features
 
-```mermaid
-flowchart LR
-  user[Customer/Partner] --> webApp[React+Vite Frontend]
+### For Customers (B2B Engineers & Procurement)
+- **Instant Quoting Engine** — upload STEP/STL, get automated pricing with DFM analysis
+- **Multi-Service Manufacturing** — CNC milling & turning, sheet metal fabrication, 3D printing (SLS/FDM/SLA), injection molding, surface finishing
+- **3D CAD Viewer** — Three.js browser viewer with STEP → GLB rendering pipeline
+- **Order Tracking Dashboard** — real-time status updates for all orders and RFQs
+- **Pan-European Delivery** — vetted manufacturer network across Europe (4–9 working days)
 
-  webApp --> supabaseApi[Supabase Auth/DB/Storage]
-  webApp --> edgeFns[Supabase Edge Functions]
+### For Manufacturing Partners
+- **Partner Dashboard** — dedicated interface with role-based authentication (`partner_seller`)
+- **RFQ Management** — receive qualified leads, manage jobs, update production status
+- **Credential Management** — partner onboarding and secure password management
 
-  edgeFns --> aiApis[Claude & Gemini APIs]
-  edgeFns --> emailApi[Resend Email API]
-  edgeFns --> socialApis[Facebook & LinkedIn APIs]
-  edgeFns --> indexNow[IndexNow Search APIs]
-  edgeFns --> s3[AWS S3 Storage]
+### Platform Architecture
+- **Multi-Tenant System** — Supabase RLS with `tenant_id`, white-label SaaS ready
+- **Subdomain Routing** — per-tenant branded subdomains with capability toggles and custom landing pages
+- **Multilingual SEO Engine** — 14 languages, prerendered routes, hreflang tags, language-aware sitemaps
+- **Sheet Metal Unfolding Pipeline** — Python FastAPI service using OpenCascade/CadQuery, DXF export, PDF drawing generation
+- **2D Nesting Engine** — bin-packing optimization for sheet metal parts with SVG preview, DXF export, and QR-labeled remnant tracking
 
-  supabaseApi --> db[(Postgres DB)]
-  supabaseApi --> storage[Supabase Storage]
+### Automation & Content
+- **AI Article Generation** — daily SEO-optimized manufacturing articles via Claude, with silo structure and internal linking
+- **Multi-Language Translation** — automated translation into 14 languages via Gemini with continuation loops, length-ratio checks, and table-aware processing
+- **Social Media Distribution** — automated posting to Facebook and LinkedIn with AI-generated hashtags
+- **Email Marketing** — campaigns with spintax personalization, open/click tracking, and unsubscribe management
+- **Lead Generation** — Reddit monitor, EU procurement tender scanner, Europages scraper, Hacker News collector
+
+### Technical Highlights
+- **210+ prerendered routes** with structured data, dynamic meta tags, XML sitemaps, hreflang
+- **Server-side STEP analysis** — geometry extraction and manufacturability checks
+- **Rate-limit aware** AI pipelines with exponential backoff and retry logic
+- **Real-time features** via Supabase Realtime subscriptions
+- **PDF generation** — manufacturing quotes, RFQ confirmations, technical drawings
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Client (Browser)                        │
+│   React 18 + Vite  │  Three.js 3D Viewer  │  Tailwind CSS   │
+│   React Router v6  │  i18next (14 langs)  │  shadcn/ui      │
+└────────────┬───────────────────────────────┬─────────────────┘
+             │                               │
+             ▼                               ▼
+┌────────────────────────┐    ┌────────────────────────────────┐
+│   Vercel Platform      │    │   FastAPI Microservice          │
+│   ┌─ Vite SSG/Prerender│    │   (Python + Docker)             │
+│   ├─ 12+ API Routes    │    │   ┌─ Sheet Metal Unfolder       │
+│   └─ Serverless Fns    │    │   ├─ STEP → DXF/PDF/SVG        │
+│      (Node.js)         │    │   ├─ DFM Analyzer               │
+│                        │    │   └─ Flat Pattern Generator     │
+└────────────┬───────────┘    └──────────────┬─────────────────┘
+             │                               │
+             ▼                               ▼
+┌──────────────────────────────────────────────────────────────┐
+│                        Supabase                              │
+│   PostgreSQL  │  RLS (tenant_id)  │  Auth  │  Storage        │
+│   28+ Edge Functions (Deno):                                 │
+│   ├─ Article Generation (Claude AI)                          │
+│   ├─ Translation Pipeline (Gemini AI)                        │
+│   ├─ Sitemap Generation & IndexNow                           │
+│   ├─ Email (Resend) & Social Media APIs                      │
+│   ├─ Lead Gen (Reddit, Tenders, Europages)                   │
+│   └─ Partner Management & Notifications                      │
+└──────────────────────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    External Services                         │
+│   AWS S3  │  Resend  │  Facebook  │  LinkedIn  │  IndexNow   │
+│   Claude API  │  Gemini API  │  Google Search Console        │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Notable Technical Achievements
+## Manufacturing Services
 
-- **AI‑driven content engine**:
-  - Generates SEO‑optimized manufacturing articles with Claude
-  - Automatically translates them into many languages with Gemini
-  - Preserves complex HTML table structures during translation with a custom
-    table‑extraction and reinsertion pipeline
-
-- **Robust translation pipeline**:
-  - Continuation loop to bypass token limits
-  - Length‑ratio checks to detect truncated output
-  - Retry logic for languages with complex grammar (e.g. Hungarian, Finnish, Polish, Czech)
-  - Table batch translation for performance (translates all tables in one API call)
-
-- **Rate‑limit handling**:
-  - Exponential backoff for Gemini 429 responses in the Edge Function
-  - Additional batch delays and user feedback in the frontend
-
-- **End‑to‑end SEO automation**:
-  - Automatic sitemap generation (full + language‑specific)
-  - IndexNow submission of new URLs
-  - Language‑aware link rewriting in translated content
-
-- **Full partner network feature set** (backed by Supabase Auth and custom roles)
-  - Partner onboarding and credential management
-  - Partner‑only dashboards and restricted access
+| Service | Technologies | File Formats |
+|---|---|---|
+| **CNC Machining** | 3-axis, 4-axis, 5-axis milling; CNC turning | STEP, STP, STL, IGES |
+| **Sheet Metal** | Laser cutting, bending, welding, unfolding | STEP, DXF, PDF drawings |
+| **3D Printing** | SLS, FDM, SLA, MJF | STEP, STL, 3MF |
+| **Injection Molding** | Prototype & production tooling | STEP, STP |
+| **Surface Finishing** | Anodizing, powder coating, plating, polishing | — |
+| **Rapid Prototyping** | Multi-process fast turnaround | STEP, STL |
 
 ---
 
-## Project Structure (High‑Level)
+## Project Structure
 
-Some key directories:
-
-- `src/pages/` – Public pages (landing, services, blog, quote, RFQ) and dashboard routes  
-- `src/components/` – Shared UI components (shadcn/ui, layout, forms, tables)  
-- `src/components/dashboard/` – Admin, customer, and partner dashboards  
-- `supabase/functions/` – Edge Functions (article generation, translation, sitemap, email, social)  
-- `supabase/migrations/` – Database schema and migration scripts  
+```
+├── src/
+│   ├── pages/            # 40+ pages (services, blog, dashboard, quote, RFQ, partner)
+│   ├── components/       # Shared UI (shadcn/ui, forms, 3D viewer, dashboards)
+│   ├── utils/            # Business logic (pricing, materials, email, PDF, storage)
+│   ├── hooks/            # Custom React hooks
+│   ├── contexts/         # Auth, tenant, language contexts
+│   ├── locales/          # 14 language translation files
+│   ├── types/            # TypeScript type definitions
+│   └── i18n.ts           # i18next configuration
+├── api/                  # 12+ Vercel serverless functions (Node.js)
+├── supabase/
+│   ├── functions/        # 28+ Edge Functions (Deno)
+│   └── migrations/       # PostgreSQL schema migrations
+├── sheet-metal-service/  # FastAPI Python microservice (Docker)
+│   ├── core/             # OpenCascade/CadQuery unfolding logic
+│   ├── drawing/          # Technical drawing generation
+│   └── export/           # DXF/PDF/SVG export
+├── lib/
+│   └── nesting/          # 2D nesting engine (DXF parse, bin-pack, SVG/DXF export)
+├── tests/                # Test suites (nesting, E2E, unit)
+├── scripts/              # Utility scripts (FreeCAD, GSC, seeding)
+└── docs/                 # Technical documentation
+```
 
 ---
 
-## Getting Started
+## Quality & Testing
 
-### Prerequisites
+### Automated Test Suites
 
-- Node.js (LTS) and npm  
-- Supabase project (for Postgres, Auth, Storage, Edge Functions)  
-- Accounts/keys for:
-  - Anthropic (Claude)
-  - Google AI Studio (Gemini)
-  - Resend
-  - AWS (S3)
-  - Facebook Developer + LinkedIn Developer (optional, for social posting)
+- **Nesting Engine Integration Tests** (`tests/nest.test.js`) — 11 tests covering DXF parsing, area calculation, hole detection, material grouping, bin-packing, oversized part handling, SVG preview, and DXF export
+- **Playwright E2E Tests** (`tests/e2e/`) — end-to-end tests against the live site covering homepage rendering across 14 languages, service page navigation, SEO meta tags, hreflang validation, and sitemap/robots.txt checks
+- **Unit Tests** (`tests/unit/`) — Jest unit tests for utility functions including material density lookup, weight calculation, spintax parsing, and email template processing
 
-### Installation
+### Manual Testing Practices
 
-```bash
-git clone https://github.com/dimitrisvard/on-demand-craft-greece.git
-cd on-demand-craft-greece
+- Cross-browser testing (Chrome, Firefox, Safari, Edge) for all customer-facing flows
+- Mobile responsiveness validation across breakpoints
+- Multilingual content verification in all 14 languages
+- CAD file upload testing with various STEP/STL/DXF formats and edge cases
+- API endpoint testing for quoting, RFQ submission, and CAD processing pipelines
+- Supabase RLS policy testing for multi-tenant data isolation
+- Partner dashboard role-based access verification
 
-npm install
-```
+### QA Methodology
 
-### Environment Variables
-
-Create a `.env` file in the project root (values are examples, not real keys):
-
-```bash
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-
-GEMINI_API_KEY=your_gemini_api_key
-ANTHROPIC_API_KEY=your_claude_api_key
-
-RESEND_API_KEY=your_resend_api_key
-
-AWS_ACCESS_KEY_ID=your_aws_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret
-AWS_S3_BUCKET=your_s3_bucket
-
-FACEBOOK_PAGE_ID=your_fb_page_id
-FACEBOOK_ACCESS_TOKEN=your_fb_page_token
-
-LINKEDIN_ORG_ID=your_linkedin_org_id
-LINKEDIN_ACCESS_TOKEN=your_linkedin_token
-
-SITE_URL=https://www.micronshub.eu
-INDEXNOW_KEY=your_indexnow_key
-```
-
-### Run the App in Development
-
-```bash
-npm run dev
-```
-
-The frontend will start on the Vite dev server (typically `http://localhost:5173`).
-
-### Build for Production
-
-```bash
-npm run build
-```
-
-This outputs a production build to `dist/`.
+- Error boundary implementation for graceful failure handling
+- Rate-limit aware retry logic with exponential backoff for external API calls
+- File upload validation (format, size, geometry checks) before processing
+- Translation pipeline quality checks (length-ratio, truncation detection, table preservation)
 
 ---
 
-## Why This Project Is Strong for a CV
+## What I Built & What I Learned
 
-- Demonstrates **end‑to‑end product thinking**: from quoting and partner management to marketing and SEO.  
-- Uses a **modern React + TypeScript + Tailwind + shadcn** stack with good architectural separation.  
-- Shows **real‑world AI integration** (Claude + Gemini) with robust error handling and rate‑limit aware design.  
-- Leverages **Supabase** as a backend platform, including Postgres, Auth, Storage, and Edge Functions.  
-- Implements **multi‑language SEO, automation, and social media distribution**, which are rare and highly valued skills.  
+| Domain | Skills Demonstrated |
+|---|---|
+| **Frontend** | React 18, TypeScript, Tailwind CSS, shadcn/ui, React Router, TanStack Query, Three.js 3D rendering, i18next multilingual, responsive design |
+| **Backend** | Node.js serverless functions, Deno edge functions, Python FastAPI, REST API design, file processing pipelines |
+| **Database** | PostgreSQL schema design, Row Level Security policies, migrations, multi-tenant data modeling |
+| **CAD/Manufacturing** | STEP file parsing, sheet metal unfolding, DXF/PDF generation, 2D nesting algorithms, 3D mesh visualization |
+| **AI Integration** | Claude API (content generation), Gemini API (translation), prompt engineering, rate-limit handling, continuation loops |
+| **DevOps** | Vercel deployment, Docker containers, GitHub Actions CI/CD, environment management |
+| **SEO** | Prerendering 210+ routes, hreflang implementation, structured data, XML sitemaps, IndexNow submission |
+| **Business** | Solo founding a B2B SaaS, competitor analysis (Xometry, Protolabs), go-to-market in European manufacturing |
 
-If you are using this repository as part of your portfolio/CV, you can confidently present it as a **production‑ready, AI‑augmented manufacturing platform** with a thoughtful architecture and a rich feature set.
+---
+
+## About the Developer
+
+**Dimitris Vardalachakis** — Full-stack developer and founder based in Heraklion, Crete, Greece.
+
+- Built entire platform solo: frontend, backend, infrastructure, CAD processing, AI pipelines, business operations
+- **Stack**: React, TypeScript, Vite, Node.js, Python, Supabase/PostgreSQL, Vercel, Three.js, FastAPI, Docker
+- **Domain expertise**: Manufacturing technology, CAD/CAM, European B2B marketplaces
+- **Languages**: Greek (native), English (fluent)
+
+Contact: Available on request
+Platform: [micronshub.eu](https://www.micronshub.eu)
+
+---
+
+## License
+
+**Copyright 2024-2026 Dimitris Vardalachakis. All Rights Reserved.**
+
+This source code is viewable for portfolio evaluation and recruitment review only. No copying, modification, distribution, or commercial use is permitted. See [LICENSE](./LICENSE) for full terms.
