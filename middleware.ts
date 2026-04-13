@@ -51,13 +51,12 @@ interface PageMeta {
 // âââ Supabase Helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 function getAnonKey(): string {
-  // Try multiple possible env var names
-  return (
-    (globalThis as any).process?.env?.SUPABASE_ANON_KEY ||
-    (globalThis as any).process?.env?.VITE_SUPABASE_ANON_KEY ||
-    ''
-  );
-}
+  // Edge Runtime exposes process.env directly (not via globalThis)
+  try {
+    return process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
+  } catch {
+    return '';
+  }}
 
 async function fetchArticleMeta(lang: string, slug: string): Promise<ArticleMeta | null> {
   const cacheKey = `${lang}:${slug}`;
@@ -298,7 +297,7 @@ function resolveServiceSlug(slug: string): string | null {
   const map: Record<string, string> = {
     'cnc-machining': 'cnc-machining', 'cnc-bearbeitung': 'cnc-machining', 'usinage-cnc': 'cnc-machining', 'mecanizado-cnc': 'cnc-machining', 'lavorazione-cnc': 'cnc-machining', 'cnc-bewerking': 'cnc-machining', 'obrobka-cnc': 'cnc-machining', 'usinagem-cnc': 'cnc-machining', 'cnc-bearbetning': 'cnc-machining', 'cnc-bearbejdning': 'cnc-machining', 'cnc-tyÃ¶stÃ¶': 'cnc-machining', 'cnc-bearbeiding': 'cnc-machining', 'cnc-megmunkalas': 'cnc-machining', 'cnc-obrabeni': 'cnc-machining',
     'sheet-metal': 'sheet-metal', 'blechbearbeitung': 'sheet-metal', 'tolerie': 'sheet-metal', 'chapa-metalica': 'sheet-metal', 'lavorazione-lamiera': 'sheet-metal', 'plaatbewerking': 'sheet-metal', 'obrobka-bluzy': 'sheet-metal', 'platbearbetning': 'sheet-metal', 'pladearbejde': 'sheet-metal', 'levytyÃ¶stÃ¶': 'sheet-metal', 'platarbeid': 'sheet-metal', 'lemezfeldolgozas': 'sheet-metal', 'obrabeni-plechu': 'sheet-metal',
-    '3d-printing': '3d-printing', '3d-druck': '3d-printing', 'impression-3d': '3d-printing', 'impresion-3d': '3d-printing', 'stampa-3d': '3d-printing', '3d-printen': '3d-printing', 'druk-3d': '3d-printing', 'impressao-3d': '3d-printing', '3d-skrivning': '3d-printing', '3d-printing': '3d-printing', '3d-tulostus': '3d-printing', '3d-nyomtas': '3d-printing', '3d-tisk': '3d-printing',
+    '3d-printing': '3d-printing', '3d-druck': '3d-printing', 'impression-3d': '3d-printing', 'impresion-3d': '3d-printing', 'stampa-3d': '3d-printing', '3d-printen': '3d-printing', 'druk-3d': '3d-printing', 'impressao-3d': '3d-printing', '3d-skrivning': '3d-printing', '3d-udskrivning': '3d-printing', '3d-tulostus': '3d-printing', '3d-nyomtas': '3d-printing', '3d-tisk': '3d-printing',
     'injection-molding': 'injection-molding', 'spritzguss': 'injection-molding', 'injection-plastique': 'injection-molding', 'moldeo-por-inyeccion': 'injection-molding', 'stampaggio-iniezione': 'injection-molding', 'spuitgieten': 'injection-molding', 'wtrysk-tworzywa': 'injection-molding', 'moldagem-injecao': 'injection-molding', 'formsprutning': 'injection-molding', 'sprojtestobning': 'injection-molding', 'ruiskupuristus': 'injection-molding', 'sproytestoping': 'injection-molding', 'frccsnyomas': 'injection-molding', 'vstrekovani': 'injection-molding',
     'surface-finishes': 'surface-finishes', 'oberflaechenveredelung': 'surface-finishes', 'finition-surface': 'surface-finishes', 'acabados-superficie': 'surface-finishes', 'finitura-superficie': 'surface-finishes', 'oppervlakteafwerking': 'surface-finishes', 'wykonczenie-powierzchni': 'surface-finishes', 'acabamento-superficie': 'surface-finishes', 'ytbehandling': 'surface-finishes', 'overfladebehandling': 'surface-finishes', 'pinnan-viimeistely': 'surface-finishes', 'overflatebehandling': 'surface-finishes', 'feluletkezeles': 'surface-finishes', 'uprava-povrchu': 'surface-finishes',
     'rapid-prototyping': 'rapid-prototyping', 'prototypage-rapide': 'rapid-prototyping', 'prototipado-rapido': 'rapid-prototyping', 'prototipazione-rapida': 'rapid-prototyping', 'szybkie-prototypowanie': 'rapid-prototyping', 'prototipagem-rapida': 'rapid-prototyping', 'snabb-prototypering': 'rapid-prototyping', 'hurtig-prototypering': 'rapid-prototyping', 'nopea-prototyyppaus': 'rapid-prototyping', 'rask-prototyping': 'rapid-prototyping', 'gyors-prototipus': 'rapid-prototyping', 'rychle-prototypovani': 'rapid-prototyping',
