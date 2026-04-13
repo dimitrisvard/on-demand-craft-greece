@@ -1,15 +1,15 @@
 /**
- * Vercel Routing Middleware â SEO Meta Injection for Microns Hub
+ * Vercel Routing Middleware — SEO Meta Injection for Microns Hub
  *
  * Problem: Every page returns the same static index.html with generic English meta tags.
  * Solution: This middleware intercepts public-facing pages and rewrites the <head> section
  * with per-page, per-language SEO metadata before the response reaches the browser/crawler.
  *
- * Covers: homepages (14 langs), service pages (6 Ã 14), industry pages (14), blog articles (~1200).
+ * Covers: homepages (14 langs), service pages (6 × 14), industry pages (14), blog articles (~1200).
  * Does NOT affect: /dashboard, /api, /assets, /login, /laserkritis, etc.
  */
 
-// âââ Constants ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = 'https://cfjrtmtaitwzggzpkhxi.supabase.co';
 const DEFAULT_IMAGE = 'https://www.micronshub.eu/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png';
@@ -22,7 +22,7 @@ const articleCache = new Map<string, { data: ArticleMeta | null; expires: number
 const translationCache = new Map<string, { data: TranslationMap; expires: number }>();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
-// âââ Types ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ArticleMeta {
   title: string;
@@ -36,9 +36,10 @@ interface ArticleMeta {
   created_at: string;
   updated_at: string;
   translation_id: string | null;
+  content: string | null;
 }
 
-type TranslationMap = Record<string, string>; // lang â slug
+type TranslationMap = Record<string, string>; // lang → slug
 
 interface PageMeta {
   title: string;
@@ -46,9 +47,19 @@ interface PageMeta {
   ogType: string;
   image: string;
   structuredData?: string;
+  articleContent?: string; // Full HTML body for crawler injection
 }
 
-// âââ Supabase Helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Bot / Crawler Detection ─────────────────────────────────────────────────
+
+const BOT_UA_PATTERN = /googlebot|bingbot|yandexbot|duckduckbot|baiduspider|slurp|facebot|ia_archiver|semrushbot|ahrefsbot|dotbot|petalbot|mj12bot|sogou|applebot/i;
+
+function isCrawler(request: Request): boolean {
+  const ua = request.headers.get('user-agent') || '';
+  return BOT_UA_PATTERN.test(ua);
+}
+
+// ─── Supabase Helpers ─────────────────────────────────────────────────────────
 
 function getAnonKey(): string {
   // Edge Runtime exposes process.env directly (not via globalThis)
@@ -56,18 +67,22 @@ function getAnonKey(): string {
     return process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '';
   } catch {
     return '';
-  }}
+  }
+}
 
-async function fetchArticleMeta(lang: string, slug: string): Promise<ArticleMeta | null> {
-  const cacheKey = `${lang}:${slug}`;
+async function fetchArticleMeta(lang: string, slug: string, includeContent = false): Promise<ArticleMeta | null> {
+  const cacheKey = `${lang}:${slug}:${includeContent ? 'full' : 'meta'}`;
   const cached = articleCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.data;
 
   const anonKey = getAnonKey();
   if (!anonKey) return null;
 
+  const selectFields = 'title,slug,meta_title,meta_description,excerpt,featured_image,featured_image_alt,language,created_at,updated_at,translation_id'
+    + (includeContent ? ',content' : '');
+
   try {
-    const url = `${SUPABASE_URL}/rest/v1/articles?slug=eq.${encodeURIComponent(slug)}&language=eq.${lang}&status=eq.published&select=title,slug,meta_title,meta_description,excerpt,featured_image,featured_image_alt,language,created_at,updated_at,translation_id&limit=1`;
+    const url = `${SUPABASE_URL}/rest/v1/articles?slug=eq.${encodeURIComponent(slug)}&language=eq.${lang}&status=eq.published&select=${selectFields}&limit=1`;
     const res = await fetch(url, {
       headers: {
         apikey: anonKey,
@@ -110,380 +125,253 @@ async function fetchTranslationSlugs(translationId: string): Promise<Translation
   }
 }
 
-// âââ Static Meta Maps âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ─── Static Meta Maps ───────────────────────────────────────────────────────────────
 
 const HOMEPAGE_META: Record<string, { title: string; description: string }> = {
   en: { title: 'Microns Hub | On-Demand Manufacturing Platform in Europe', description: 'European on-demand manufacturing platform. CNC machining, sheet metal, 3D printing, injection molding. Fast delivery across Europe from Greece.' },
-  de: { title: 'Microns Hub | On-Demand Fertigungsplattform in Europa', description: 'EuropÃ¤ische On-Demand-Fertigungsplattform. CNC-Bearbeitung, Blechbearbeitung, 3D-Druck, Spritzguss. Schnelle Lieferung in ganz Europa.' },
-  fr: { title: 'Microns Hub | Plateforme de fabrication Ã  la demande en Europe', description: 'Plateforme europÃ©enne de fabrication Ã  la demande. Usinage CNC, tÃ´lerie, impression 3D, moulage par injection. Livraison rapide en Europe.' },
-  es: { title: 'Microns Hub | Plataforma de fabricaciÃ³n bajo demanda en Europa', description: 'Plataforma europea de fabricaciÃ³n bajo demanda. Mecanizado CNC, chapa metÃ¡lica, impresiÃ³n 3D, moldeo por inyecciÃ³n. Entrega rÃ¡pida en Europa.' },
+  de: { title: 'Microns Hub | On-Demand Fertigungsplattform in Europa', description: 'Europäische On-Demand-Fertigungsplattform. CNC-Bearbeitung, Blechbearbeitung, 3D-Druck, Spritzguss. Schnelle Lieferung in ganz Europa.' },
+  fr: { title: 'Microns Hub | Plateforme de fabrication à la demande en Europe', description: 'Plateforme européenne de fabrication à la demande. Usinage CNC, tôlerie, impression 3D, moulage par injection. Livraison rapide en Europe.' },
+  es: { title: 'Microns Hub | Plataforma de fabricación bajo demanda en Europa', description: 'Plataforma europea de fabricación bajo demanda. Mecanizado CNC, chapa metálica, impresión 3D, moldeo por inyección. Entrega rápida en Europa.' },
   it: { title: 'Microns Hub | Piattaforma di produzione on-demand in Europa', description: 'Piattaforma europea di produzione on-demand. Lavorazione CNC, lamiera, stampa 3D, stampaggio a iniezione. Consegna rapida in Europa.' },
-  nl: { title: 'Microns Hub | On-Demand Productieplatform in Europa', description: 'Europees on-demand productieplatform. CNC-bewerking, plaatbewerking, 3D-printen, spuitgieten. Snelle levering in heel Europa.' },
-  pl: { title: 'Microns Hub | Platforma produkcji na Å¼Ädanie w Europie', description: 'Europejska platforma produkcji na Å¼Ädanie. ObrÃ³bka CNC, blacharstwo, druk 3D, wtrysk tworzyw. Szybka dostawa w Europie.' },
-  pt: { title: 'Microns Hub | Plataforma de fabricaÃ§Ã£o sob demanda na Europa', description: 'Plataforma europeia de fabricaÃ§Ã£o sob demanda. Usinagem CNC, chapa metÃ¡lica, impressÃ£o 3D, moldagem por injeÃ§Ã£o. Entrega rÃ¡pida na Europa.' },
-  sv: { title: 'Microns Hub | On-Demand Tillverkningsplattform i Europa', description: 'Europeisk on-demand tillverkningsplattform. CNC-bearbetning, plÃ¥tbearbetning, 3D-utskrift, formsprutning. Snabb leverans i Europa.' },
-  da: { title: 'Microns Hub | On-Demand Produktionsplatform i Europa', description: 'EuropÃ¦isk on-demand produktionsplatform. CNC-bearbejdning, pladebearbejdning, 3D-print, sprÃ¸jtestÃ¸bning. Hurtig levering i Europa.' },
-  fi: { title: 'Microns Hub | Tilaustuotantoalusta Euroopassa', description: 'Eurooppalainen tilaustuotantoalusta. CNC-tyÃ¶stÃ¶, levytyÃ¶stÃ¶, 3D-tulostus, ruiskupuristus. Nopea toimitus Euroopassa.' },
-  nb: { title: 'Microns Hub | On-Demand Produksjonsplattform i Europa', description: 'Europeisk on-demand produksjonsplattform. CNC-bearbeiding, platearbeid, 3D-printing, sprÃ¸ytestÃ¸ping. Rask levering i Europa.' },
-  hu: { title: 'Microns Hub | IgÃ©ny szerinti gyÃ¡rtÃ¡si platform EurÃ³pÃ¡ban', description: 'EurÃ³pai igÃ©ny szerinti gyÃ¡rtÃ¡si platform. CNC megmunkÃ¡lÃ¡s, lemezfeldolgozÃ¡s, 3D nyomtatÃ¡s, frÃ¶ccsÃ¶ntÃ©s. Gyors szÃ¡llÃ­tÃ¡s EurÃ³pÃ¡ban.' },
-  cs: { title: 'Microns Hub | On-Demand VÃ½robnÃ­ Platforma v EvropÄ', description: 'EvropskÃ¡ on-demand vÃ½robnÃ­ platforma. CNC obrÃ¡bÄnÃ­, zpracovÃ¡nÃ­ plechu, 3D tisk, vstÅikovÃ¡nÃ­. RychlÃ© dodÃ¡nÃ­ po celÃ© EvropÄ.' },
+  nl: { title: 'Microns Hub | On-Demand Productieplatform in Europa', description: 'Europees on-demand productieplatform. CNC-bewerkingen, plaatbewerking, 3D-printen, spuitgieten. Snelle levering in heel Europa.' },
+  pl: { title: 'Microns Hub | Platforma produkcji na żądanie w Europie', description: 'Europejska platforma produkcji na żądanie. Obróbka CNC, blacharstwo, druk 3D, wtryskiwanie. Szybka dostawa w całej Europie.' },
+  pt: { title: 'Microns Hub | Plataforma de fabricação sob demanda na Europa', description: 'Plataforma europeia de fabricação sob demanda. Usinagem CNC, chapa metálica, impressão 3D, moldagem por injeção. Entrega rápida na Europa.' },
+  sv: { title: 'Microns Hub | On-Demand Tillverkningsplattform i Europa', description: 'Europeisk on-demand tillverkningsplattform. CNC-bearbetning, plåtbearbetning, 3D-utskrift, formsprejtning. Snabb leverans i hela Europa.' },
+  da: { title: 'Microns Hub | On-Demand Produktionsplatform i Europa', description: 'Europæisk on-demand produktionsplatform. CNC-bearbejdning, pladebearbejdning, 3D-print, sprøjtestøbning. Hurtig levering i hele Europa.' },
+  fi: { title: 'Microns Hub | Tilauksesta käytettävä tuotantoalusta Euroopassa', description: 'Eurooppalainen tilauksesta käytettävä tuotantoalusta. CNC-työstö, levytyöstö, 3D-tulostus, ruiskuvaalu. Nopea toimitus koko Euroopassa.' },
+  nb: { title: 'Microns Hub | On-Demand Produksjonsplattform i Europa', description: 'Europeisk on-demand produksjonsplattform. CNC-bearbeiding, platbearbeid, 3D-printing, sprøytestøping. Rask levering i hele Europa.' },
+  hu: { title: 'Microns Hub | Igény szerinti gyártási platform Európában', description: 'Európai igény szerinti gyártási platform. CNC megmunkálás, lemezfeldolgozás, 3D nyomtatás, fröccsöntés. Gyors szállítás egész Európában.' },
+  cs: { title: 'Microns Hub | On-Demand Výrobní Platforma v Evropě', description: 'Evropská on-demand výrobní platforma. CNC obrábění, zpracování plechu, 3D tisk, vstřikování. Rychlá dostava po celé Evropě.' },
 };
 
-// Service page slugs that match the URL pattern /{lang}/services/{serviceSlug}
+// Service page slugs that match the URL pattern /{lang}/services/{service_slug}
 // Note: in the URL these use the ENGLISH slugs because Vercel rewrites all to /index.html
 // and the React router handles localized paths. But the monitored URLs use English service paths.
 const SERVICE_META: Record<string, Record<string, { title: string; description: string }>> = {
   'cnc-machining': {
     en: { title: 'CNC Machining Services | Precision Parts On-Demand | Microns Hub', description: 'Professional CNC machining services in Europe. Precision milling and turning for prototypes and production. 4-9 day delivery, competitive pricing.' },
-    de: { title: 'CNC-Bearbeitung | PrÃ¤zisionsteile auf Abruf | Microns Hub', description: 'Professionelle CNC-Bearbeitungsdienste in Europa. PrÃ¤zisionsfrÃ¤sen und -drehen fÃ¼r Prototypen und Serienproduktion. 4-9 Tage Lieferung.' },
-    fr: { title: 'Usinage CNC | PiÃ¨ces de PrÃ©cision Ã  la Demande | Microns Hub', description: 'Services d\'usinage CNC professionnels en Europe. Fraisage et tournage de prÃ©cision pour prototypes et production. Livraison 4-9 jours.' },
-    es: { title: 'Mecanizado CNC | Piezas de PrecisiÃ³n bajo Demanda | Microns Hub', description: 'Servicios profesionales de mecanizado CNC en Europa. Fresado y torneado de precisiÃ³n. Entrega en 4-9 dÃ­as.' },
-    it: { title: 'Lavorazione CNC | Parti di Precisione su Richiesta | Microns Hub', description: 'Servizi professionali di lavorazione CNC in Europa. Fresatura e tornitura di precisione. Consegna in 4-9 giorni.' },
-    nl: { title: 'CNC-bewerking | Precisieonderdelen on-demand | Microns Hub', description: 'Professionele CNC-bewerkingsdiensten in Europa. Precisiefrezen en -draaien. Levering in 4-9 dagen.' },
-    pl: { title: 'ObrÃ³bka CNC | CzÄÅci precyzyjne na Å¼Ädanie | Microns Hub', description: 'Profesjonalne usÅugi obrÃ³bki CNC w Europie. Precyzyjne frezowanie i toczenie. Dostawa w 4-9 dni.' },
-    pt: { title: 'Usinagem CNC | PeÃ§as de PrecisÃ£o sob Demanda | Microns Hub', description: 'ServiÃ§os profissionais de usinagem CNC na Europa. Fresamento e torneamento de precisÃ£o. Entrega em 4-9 dias.' },
-    sv: { title: 'CNC-bearbetning | Precisionsdelar on-demand | Microns Hub', description: 'Professionella CNC-bearbetningstjÃ¤nster i Europa. PrecisionsfrÃ¤sning och svarvning. Leverans pÃ¥ 4-9 dagar.' },
-    da: { title: 'CNC-bearbejdning | PrÃ¦cisionsdele on-demand | Microns Hub', description: 'Professionelle CNC-bearbejdningstjenester i Europa. PrÃ¦cisionsfrÃ¦sning og drejning. Levering pÃ¥ 4-9 dage.' },
-    fi: { title: 'CNC-tyÃ¶stÃ¶ | Tarkkuusosat tilauksesta | Microns Hub', description: 'Ammattimaiset CNC-tyÃ¶stÃ¶palvelut Euroopassa. TarkkuusjyrsintÃ¤ ja -sorvaus. Toimitus 4-9 pÃ¤ivÃ¤ssÃ¤.' },
-    nb: { title: 'CNC-bearbeiding | Presisjonsdeler on-demand | Microns Hub', description: 'Profesjonelle CNC-bearbeidingstjenester i Europa. Presisjonsfresing og dreiing. Levering pÃ¥ 4-9 dager.' },
-    hu: { title: 'CNC megmunkÃ¡lÃ¡s | PrecÃ­ziÃ³s alkatrÃ©szek igÃ©ny szerint | Microns Hub', description: 'ProfesszionÃ¡lis CNC megmunkÃ¡lÃ¡si szolgÃ¡ltatÃ¡sok EurÃ³pÃ¡ban. PrecÃ­ziÃ³s marÃ¡s Ã©s esztergÃ¡lÃ¡s. SzÃ¡llÃ­tÃ¡s 4-9 nap.' },
-    cs: { title: 'CNC obrÃ¡bÄnÃ­ | PÅesnÃ© dÃ­ly na zakÃ¡zku | Microns Hub', description: 'ProfesionÃ¡lnÃ­ CNC obrÃ¡bÄcÃ­ sluÅ¾by v EvropÄ. PÅesnÃ© frÃ©zovÃ¡nÃ­ a soustruÅ¾enÃ­. DodÃ¡nÃ­ za 4-9 dnÃ­.' },
+    de: { title: 'CNC-Bearbeitung | Präzisionsteile auf Abruf | Microns Hub', description: 'Professionelle CNC-Bearbeitungsdienste in Europa. Präzisionsfräsen und -drehen für Prototypen und Serienproduktion. 4-9 Tage Lieferung.' },
+    fr: { title: 'Usinage CNC | Pièces de Précision à la Demande | Microns Hub', description: 'Services d\'usinage CNC professionnels en Europe. Fraisage et tournage de précision pour prototypes et production. Livraison 4-9 jours.' },
+    es: { title: 'Mecanizado CNC | Piezas de Precisión bajo Demanda | Microns Hub', description: 'Servicios profesionales de mecanizado CNC en Europa. Fresado y torneado de precisión. Entrega en 4-9 días.' },
+    it: { title: 'Lavorazione CNC | Parti di Precisione su Richiesta | Microns Hub', description: 'Servizi professionali di lavorazione CNC in Europa. Fresatura e tornatura di precisione. Consegna in 4-9 giorni.' },
+    nl: { title: 'CNC-bewerkingen | Precisieonderdelen op bestelling | Microns Hub', description: 'Professionele CNC-bewerkingsdiensten in Europa. Precisiefrezen en -draaien. Levering in 4-9 dagen.' },
+    pl: { title: 'Obróbka CNC | Części Precyzyjne na Żądanie | Microns Hub', description: 'Profesjonalne usługi obróbki CNC w Europie. Precyzyjne frezowanie i toczenie. Dostawa w 4-9 dni.' },
+    pt: { title: 'Usinagem CNC | Peças de Precisão sob Demanda | Microns Hub', description: 'Serviços profissionais de usinagem CNC na Europa. Fresamento e torneamento de precisão. Entrega em 4-9 dias.' },
+    sv: { title: 'CNC-bearbetning | Precisionsdelar på Beställning | Microns Hub', description: 'Professionella CNC-bearbetningtjänster i Europa. Precisionsfrässning och -vridning. Leverans på 4-9 dagar.' },
+    da: { title: 'CNC-bearbejdning | Præcisionsdele på Bestilling | Microns Hub', description: 'Professionelle CNC-bearbejdningstjenester i Europa. Præcisionsfræsning og -drejning. Levering på 4-9 dage.' },
+    fi: { title: 'CNC-työstö | Tarkkatyöosat Tilauksesta | Microns Hub', description: 'Ammattimaiset CNC-työstöpalvelut Euroopassa. Tarkkatyöfräsäys ja -sorvaus. Toimitus 4-9 päivässä.' },
+    nb: { title: 'CNC-bearbeiding | Presisjonsdeler på Bestilling | Microns Hub', description: 'Profesjonelle CNC-bearbeidingstjenester i Europa. Presisjonsfreesing og -dreining. Levering på 4-9 dager.' },
+    hu: { title: 'CNC megmunkálás | Precíziós Alkatrészek Igény Szerint | Microns Hub', description: 'Professzionális CNC megmunkálási szolgáltatások Európában. Precíziós marás és esztergálás. 4-9 nap szállítás.' },
+    cs: { title: 'CNC obrábění | Přesné Součástky na Objednávku | Microns Hub', description: 'Profesionální CNC obrábění v Evropě. Přesné frézování a soustružení. Doručení v 4-9 dnech.' },
   },
   'sheet-metal': {
-    en: { title: 'Sheet Metal Fabrication | Custom Parts On-Demand | Microns Hub', description: 'Professional sheet metal fabrication in Europe. Laser cutting, bending, welding. Prototypes to production. Fast European delivery.' },
-    de: { title: 'Blechbearbeitung | Kundenspezifische Teile | Microns Hub', description: 'Professionelle Blechbearbeitung in Europa. Laserschneiden, Biegen, SchweiÃen. Prototypen bis Serienproduktion.' },
-    fr: { title: 'TÃ´lerie Industrielle | PiÃ¨ces sur Mesure | Microns Hub', description: 'TÃ´lerie industrielle professionnelle en Europe. DÃ©coupe laser, pliage, soudage. Du prototype Ã  la production.' },
-    es: { title: 'FabricaciÃ³n de Chapa MetÃ¡lica | Piezas a Medida | Microns Hub', description: 'FabricaciÃ³n profesional de chapa metÃ¡lica en Europa. Corte lÃ¡ser, plegado, soldadura.' },
-    it: { title: 'Lavorazione Lamiera | Parti su Misura | Microns Hub', description: 'Lavorazione professionale della lamiera in Europa. Taglio laser, piegatura, saldatura.' },
-    nl: { title: 'Plaatbewerking | Onderdelen op Maat | Microns Hub', description: 'Professionele plaatbewerking in Europa. Lasersnijden, buigen, lassen.' },
-    pl: { title: 'ObrÃ³bka Blachy | CzÄÅci na ZamÃ³wienie | Microns Hub', description: 'Profesjonalna obrÃ³bka blachy w Europie. CiÄcie laserowe, giÄcie, spawanie.' },
-    pt: { title: 'FabricaÃ§Ã£o de Chapa MetÃ¡lica | PeÃ§as Sob Medida | Microns Hub', description: 'FabricaÃ§Ã£o profissional de chapa metÃ¡lica na Europa. Corte a laser, dobra, soldagem.' },
-    sv: { title: 'PlÃ¥tbearbetning | Kundanpassade Delar | Microns Hub', description: 'Professionell plÃ¥tbearbetning i Europa. LaserskÃ¤rning, bockning, svetsning.' },
-    da: { title: 'Pladebearbejdning | Specialfremstillede Dele | Microns Hub', description: 'Professionel pladebearbejdning i Europa. LaserskÃ¦ring, bukning, svejsning.' },
-    fi: { title: 'LevytyÃ¶stÃ¶ | MittatilaustyÃ¶t | Microns Hub', description: 'Ammattimainen levytyÃ¶stÃ¶ Euroopassa. Laserleikkaus, taivutus, hitsaus.' },
-    nb: { title: 'Platearbeid | Spesiallagde Deler | Microns Hub', description: 'Profesjonelt platearbeid i Europa. LaserskjÃ¦ring, bukking, sveising.' },
-    hu: { title: 'LemezfeldolgozÃ¡s | Egyedi AlkatrÃ©szek | Microns Hub', description: 'ProfesszionÃ¡lis lemezfeldolgozÃ¡s EurÃ³pÃ¡ban. LÃ©zervÃ¡gÃ¡s, hajlÃ­tÃ¡s, hegesztÃ©s.' },
-    cs: { title: 'ZpracovÃ¡nÃ­ Plechu | ZakÃ¡zkovÃ© DÃ­ly | Microns Hub', description: 'ProfesionÃ¡lnÃ­ zpracovÃ¡nÃ­ plechu v EvropÄ. LaserovÃ© ÅezÃ¡nÃ­, ohÃ½bÃ¡nÃ­, svaÅovÃ¡nÃ­.' },
+    en: { title: 'Sheet Metal Fabrication Services | On-Demand | Microns Hub', description: 'Professional sheet metal services in Europe. Cutting, bending, welding & finishing. 4-9 day delivery, competitive pricing.' },
+    de: { title: 'Blechbearbeitung | On-Demand | Microns Hub', description: 'Professionelle Blechverarbeitungsdienste in Europa. Schneiden, Biegen, Schweißen & Oberflächenbearbeitung. 4-9 Tage Lieferung.' },
+    fr: { title: 'Tôlerie | À la Demande | Microns Hub', description: 'Services professionnels de tôlerie en Europe. Découpe, pliage, soudage & finition. Livraison 4-9 jours.' },
+    es: { title: 'Chapa Metálica | Bajo Demanda | Microns Hub', description: 'Servicios profesionales de chapa metálica en Europa. Corte, doblado, soldadura y acabado. Entrega en 4-9 días.' },
+    it: { title: 'Lamiera | Su Richiesta | Microns Hub', description: 'Servizi professionali di lamiera in Europa. Taglio, piegatura, saldatura e finitura. Consegna in 4-9 giorni.' },
+    nl: { title: 'Plaatwerk | Op Bestelling | Microns Hub', description: 'Professionele plaatmetaaldiensten in Europa. Snijden, buigen, lassen & afwerking. Levering in 4-9 dagen.' },
+    pl: { title: 'Prace Blacharskie | Na Żądanie | Microns Hub', description: 'Profesjonalne usługi blacharskie w Europie. Cięcie, gięcie, spawanie i wykańczanie. Dostawa w 4-9 dni.' },
+    pt: { title: 'Chapa Metálica | Sob Demanda | Microns Hub', description: 'Serviços profissionais de chapa metálica na Europa. Corte, dobragem, soldagem e acabamento. Entrega em 4-9 dias.' },
+    sv: { title: 'Plåtarbete | På Beställning | Microns Hub', description: 'Professionella plåtmetallstjänster i Europa. Skärning, böjning, svetsning & yta. Leverans på 4-9 dagar.' },
+    da: { title: 'Pladbejdning | På Bestilling | Microns Hub', description: 'Professionelle pladbejdningstjenester i Europa. Skæring, bøjning, svejsning & overflade. Levering på 4-9 dage.' },
+    fi: { title: 'Levytyöstö | Tilauksesta | Microns Hub', description: 'Ammattimaiset levymetalli palvelut Euroopassa. Leikkaus, taivutus, hitsaus & pinnoitus. Toimitus 4-9 päivässä.' },
+    nb: { title: 'Plabearbeiding | På Bestilling | Microns Hub', description: 'Profesjonelle plabemetallstjenester i Europa. Skjæring, bøying, sveising & overflate. Levering på 4-9 dager.' },
+    hu: { title: 'Lemezfeldolgozás | Igény Szerint | Microns Hub', description: 'Professzionális lemezmunka szolgáltatások Európában. Vágás, hajlítás, hegesztés és felületkezelés. 4-9 nap szállítás.' },
+    cs: { title: 'Zpraco Plechu | Na Objednávku | Microns Hub', description: 'Profesionální zpracování plechu v Evropě. Řezání, ohýbání, svařování a povrchová úprava. Doručení v 4-9 dnech.' },
   },
   '3d-printing': {
-    en: { title: '3D Printing Services | Rapid Prototyping | Microns Hub', description: '3D printing services in Europe. SLA, SLS, FDM technologies. From rapid prototypes to functional parts. Fast delivery.' },
-    de: { title: '3D-Druck | Rapid Prototyping | Microns Hub', description: '3D-Druckdienste in Europa. SLA, SLS, FDM Technologien. Vom Prototyp bis zum Funktionsteil.' },
-    fr: { title: 'Impression 3D | Prototypage Rapide | Microns Hub', description: 'Services d\'impression 3D en Europe. Technologies SLA, SLS, FDM. Du prototype aux piÃ¨ces fonctionnelles.' },
-    es: { title: 'ImpresiÃ³n 3D | Prototipado RÃ¡pido | Microns Hub', description: 'Servicios de impresiÃ³n 3D en Europa. TecnologÃ­as SLA, SLS, FDM.' },
-    it: { title: 'Stampa 3D | Prototipazione Rapida | Microns Hub', description: 'Servizi di stampa 3D in Europa. Tecnologie SLA, SLS, FDM.' },
-    nl: { title: '3D-printen | Rapid Prototyping | Microns Hub', description: '3D-printdiensten in Europa. SLA, SLS, FDM technologieÃ«n.' },
-    pl: { title: 'Druk 3D | Szybkie Prototypowanie | Microns Hub', description: 'UsÅugi druku 3D w Europie. Technologie SLA, SLS, FDM.' },
-    pt: { title: 'ImpressÃ£o 3D | Prototipagem RÃ¡pida | Microns Hub', description: 'ServiÃ§os de impressÃ£o 3D na Europa. Tecnologias SLA, SLS, FDM.' },
-    sv: { title: '3D-utskrift | Snabb Prototypframtagning | Microns Hub', description: '3D-utskriftstjÃ¤nster i Europa. SLA, SLS, FDM teknologier.' },
-    da: { title: '3D-print | Hurtig Prototyping | Microns Hub', description: '3D-print tjenester i Europa. SLA, SLS, FDM teknologier.' },
-    fi: { title: '3D-tulostus | Nopea Prototyyppaus | Microns Hub', description: '3D-tulostuspalvelut Euroopassa. SLA, SLS, FDM teknologiat.' },
-    nb: { title: '3D-printing | Rask Prototyping | Microns Hub', description: '3D-printing tjenester i Europa. SLA, SLS, FDM teknologier.' },
-    hu: { title: '3D NyomtatÃ¡s | Gyors PrototÃ­pus | Microns Hub', description: '3D nyomtatÃ¡si szolgÃ¡ltatÃ¡sok EurÃ³pÃ¡ban. SLA, SLS, FDM technolÃ³giÃ¡k.' },
-    cs: { title: '3D Tisk | RychlÃ© PrototypovÃ¡nÃ­ | Microns Hub', description: '3D tiskovÃ© sluÅ¾by v EvropÄ. SLA, SLS, FDM technologie.' },
+    en: { title: '3D Printing Services | Rapid Prototyping | Microns Hub', description: 'Professional 3D printing services in Europe. FDM, SLA, SLS, MJF technologies. Fast turnaround, competitive rates.' },
+    de: { title: '3D-Druck | Rapid Prototyping | Microns Hub', description: 'Professionelle 3D-Druckdienste in Europa. FDM, SLA, SLS, MJF Technologien. Schnelle Bearbeitungszeit.' },
+    fr: { title: 'Impression 3D | Prototypage Rapide | Microns Hub', description: 'Services d\'impression 3D professionnels en Europe. Technologiesthèmes FDM, SLA, SLS, MJF. Délai rapide.' },
+    es: { title: 'Impresión 3D | Prototipado Rápido | Microns Hub', description: 'Servicios profesionales de impresión 3D en Europa. Tecnologías FDM, SLA, SLS, MJF. Entrega rápida.' },
+    it: { title: 'Stampa 3D | Prototipazione Rapida | Microns Hub', description: 'Servizi professionali di stampa 3D in Europa. Tecnologie FDM, SLA, SLS, MJF. Consegna rapida.' },
+    nl: { title: '3D-printen | Snel Prototyping | Microns Hub', description: 'Professionele 3D-printdiensten in Europa. FDM, SLA, SLS, MJF technologieën. Snelle levering.' },
+    pl: { title: 'Druk 3D | Szybkie Prototypowanie | Microns Hub', description: 'Profesjonalne usługi druku 3D w Europie. Technologie FDM, SLA, SLS, MJF. Szybka dostawa.' },
+    pt: { title: 'Impressão 3D | Prototipagem Rápida | Microns Hub', description: 'Serviços profissionais de impressão 3D na Europa. Tecnologias FDM, SLA, SLS, MJF. Entrega rápida.' },
+    sv: { title: '3D-utskrift | Snabb Prototyping | Microns Hub', description: 'Professionella 3D-utskriftstjänster i Europa. FDM, SLA, SLS, MJF-teknologier. Snabb leverans.' },
+    da: { title: '3D-print | Hurtig Prototyping | Microns Hub', description: 'Professionelle 3D-printtjenester i Europa. FDM, SLA, SLS, MJF-teknologier. Hurtig levering.' },
+    fi: { title: '3D-tulostus | Nopea Prototyöinti | Microns Hub', description: 'Ammattimaiset 3D-tulostuspalvelut Euroopassa. FDM, SLA, SLS, MJF teknologiat. Nopea toimitus.' },
+    nb: { title: '3D-printing | Rask Prototyping | Microns Hub', description: 'Profesjonelle 3D-printtjenester i Europa. FDM, SLA, SLS, MJF-teknologier. Rask levering.' },
+    hu: { title: '3D nyomtatás | Gyors Prototípusozás | Microns Hub', description: 'Professzionális 3D nyomtatási szolgáltatások Európában. FDM, SLA, SLS, MJF technológiák. Gyors szállítás.' },
+    cs: { title: '3D tisk | Rychlé Prototypování | Microns Hub', description: 'Profesionální 3D tiskové služby v Evropě. Technologie FDM, SLA, SLS, MJF. Rychlé doručení.' },
   },
   'injection-molding': {
-    en: { title: 'Injection Molding Services | Production Parts | Microns Hub', description: 'Injection molding services in Europe. From prototyping molds to production tooling. Competitive pricing, fast turnaround.' },
-    de: { title: 'Spritzguss | Serienteile | Microns Hub', description: 'Spritzgussdienste in Europa. Vom Prototypenwerkzeug bis zur Serienfertigung.' },
-    fr: { title: 'Moulage par Injection | PiÃ¨ces de Production | Microns Hub', description: 'Services de moulage par injection en Europe. Du moule prototype Ã  l\'outillage de production.' },
-    es: { title: 'Moldeo por InyecciÃ³n | Piezas de ProducciÃ³n | Microns Hub', description: 'Servicios de moldeo por inyecciÃ³n en Europa. Desde moldes de prototipo hasta producciÃ³n.' },
-    it: { title: 'Stampaggio a Iniezione | Parti di Produzione | Microns Hub', description: 'Servizi di stampaggio a iniezione in Europa. Dallo stampo prototipo alla produzione.' },
-    nl: { title: 'Spuitgieten | Productieonderdelen | Microns Hub', description: 'Spuitgietdiensten in Europa. Van prototype mallen tot productie.' },
-    pl: { title: 'Wtrysk Tworzyw | CzÄÅci Produkcyjne | Microns Hub', description: 'UsÅugi wtrysku tworzyw w Europie. Od form prototypowych do produkcji.' },
-    pt: { title: 'Moldagem por InjeÃ§Ã£o | PeÃ§as de ProduÃ§Ã£o | Microns Hub', description: 'ServiÃ§os de moldagem por injeÃ§Ã£o na Europa. De moldes protÃ³tipos Ã  produÃ§Ã£o.' },
-    sv: { title: 'Formsprutning | Produktionsdelar | Microns Hub', description: 'FormsprutningstjÃ¤nster i Europa. FrÃ¥n prototypverktyg till serieproduktion.' },
-    da: { title: 'SprÃ¸jtestÃ¸bning | Produktionsdele | Microns Hub', description: 'SprÃ¸jtestÃ¸bningstjenester i Europa. Fra prototypevÃ¦rktÃ¸j til serieproduktion.' },
-    fi: { title: 'Ruiskupuristus | Tuotanto-osat | Microns Hub', description: 'Ruiskupuristuspalvelut Euroopassa. Prototyyppimuoteista tuotantoon.' },
-    nb: { title: 'SprÃ¸ytestÃ¸ping | Produksjonsdeler | Microns Hub', description: 'SprÃ¸ytestÃ¸pingstjenester i Europa. Fra prototypverktÃ¸y til serieproduksjon.' },
-    hu: { title: 'FrÃ¶ccsÃ¶ntÃ©s | GyÃ¡rtÃ¡si AlkatrÃ©szek | Microns Hub', description: 'FrÃ¶ccsÃ¶ntÃ©si szolgÃ¡ltatÃ¡sok EurÃ³pÃ¡ban. PrototÃ­pus szerszÃ¡moktÃ³l a sorozatgyÃ¡rtÃ¡sig.' },
-    cs: { title: 'VstÅikovÃ¡nÃ­ | VÃ½robnÃ­ DÃ­ly | Microns Hub', description: 'VstÅikovacÃ­ sluÅ¾by v EvropÄ. Od prototypovÃ½ch forem po sÃ©riovou vÃ½robu.' },
-  },
-  'surface-finishes': {
-    en: { title: 'Surface Finishing Services | Anodizing, Plating & More | Microns Hub', description: 'Surface finishing services in Europe. Anodizing, powder coating, plating, polishing. Enhance your manufactured parts.' },
-    de: { title: 'OberflÃ¤chenveredelung | Eloxieren, Beschichten | Microns Hub', description: 'OberflÃ¤chenveredelungsdienste in Europa. Eloxieren, Pulverbeschichtung, Galvanik, Polieren.' },
-    fr: { title: 'Finition de Surface | Anodisation, RevÃªtement | Microns Hub', description: 'Services de finition de surface en Europe. Anodisation, thermolaquage, placage, polissage.' },
-    es: { title: 'Acabado Superficial | Anodizado, Recubrimiento | Microns Hub', description: 'Servicios de acabado superficial en Europa. Anodizado, recubrimiento en polvo, galvanizado.' },
-    it: { title: 'Finitura Superficiale | Anodizzazione, Rivestimento | Microns Hub', description: 'Servizi di finitura superficiale in Europa. Anodizzazione, verniciatura a polvere, galvanica.' },
-    nl: { title: 'Oppervlakteafwerking | Anodiseren, Coating | Microns Hub', description: 'Oppervlakteafwerkingsdiensten in Europa. Anodiseren, poedercoating, galvaniseren.' },
-    pl: { title: 'WykoÅczenie Powierzchni | Anodowanie, Powlekanie | Microns Hub', description: 'UsÅugi wykoÅczenia powierzchni w Europie. Anodowanie, malowanie proszkowe, galwanizacja.' },
-    pt: { title: 'Acabamento Superficial | AnodizaÃ§Ã£o, Revestimento | Microns Hub', description: 'ServiÃ§os de acabamento superficial na Europa. AnodizaÃ§Ã£o, pintura a pÃ³, galvanizaÃ§Ã£o.' },
-    sv: { title: 'Ytbehandling | Anodisering, BelÃ¤ggning | Microns Hub', description: 'YtbehandlingstjÃ¤nster i Europa. Anodisering, pulverlackering, galvanisering.' },
-    da: { title: 'Overfladebehandling | Anodisering, BelÃ¦gning | Microns Hub', description: 'Overfladebehandlingstjenester i Europa. Anodisering, pulverlakering, galvanisering.' },
-    fi: { title: 'PintakÃ¤sittely | Anodisointi, Pinnoitus | Microns Hub', description: 'PintakÃ¤sittelypalvelut Euroopassa. Anodisointi, jauhemaalaus, galvanointi.' },
-    nb: { title: 'Overflatebehandling | Anodisering, Belegging | Microns Hub', description: 'Overflatebehandlingstjenester i Europa. Anodisering, pulverlakkering, galvanisering.' },
-    hu: { title: 'FelÃ¼letkezelÃ©s | EloxÃ¡lÃ¡s, BevonatolÃ¡s | Microns Hub', description: 'FelÃ¼letkezelÃ©si szolgÃ¡ltatÃ¡sok EurÃ³pÃ¡ban. EloxÃ¡lÃ¡s, porszÃ³rÃ¡s, galvanizÃ¡lÃ¡s.' },
-    cs: { title: 'PovrchovÃ¡ Ãprava | EloxovÃ¡nÃ­, PokovovÃ¡nÃ­ | Microns Hub', description: 'SluÅ¾by povrchovÃ© Ãºpravy v EvropÄ. EloxovÃ¡nÃ­, prÃ¡Å¡kovÃ© lakovÃ¡nÃ­, galvanizace.' },
-  },
-  'rapid-prototyping': {
-    en: { title: 'Rapid Prototyping | Fast Manufacturing Prototypes | Microns Hub', description: 'Rapid prototyping services in Europe. CNC, 3D printing, sheet metal prototypes. 4-9 day delivery across Europe.' },
-    de: { title: 'Rapid Prototyping | Schnelle Prototypen | Microns Hub', description: 'Rapid-Prototyping-Dienste in Europa. CNC, 3D-Druck, Blech-Prototypen. 4-9 Tage Lieferung.' },
-    fr: { title: 'Prototypage Rapide | Prototypes Fabrication | Microns Hub', description: 'Services de prototypage rapide en Europe. CNC, impression 3D, prototypes en tÃ´le. Livraison 4-9 jours.' },
-    es: { title: 'Prototipado RÃ¡pido | Prototipos de FabricaciÃ³n | Microns Hub', description: 'Servicios de prototipado rÃ¡pido en Europa. CNC, impresiÃ³n 3D, prototipos en chapa. Entrega 4-9 dÃ­as.' },
-    it: { title: 'Prototipazione Rapida | Prototipi di Produzione | Microns Hub', description: 'Servizi di prototipazione rapida in Europa. CNC, stampa 3D, prototipi in lamiera. Consegna 4-9 giorni.' },
-    nl: { title: 'Rapid Prototyping | Snelle Productieprototypes | Microns Hub', description: 'Rapid prototyping diensten in Europa. CNC, 3D-printen, plaatwerk prototypes. Levering in 4-9 dagen.' },
-    pl: { title: 'Szybkie Prototypowanie | Prototypy Produkcyjne | Microns Hub', description: 'UsÅugi szybkiego prototypowania w Europie. CNC, druk 3D, prototypy blaszane. Dostawa w 4-9 dni.' },
-    pt: { title: 'Prototipagem RÃ¡pida | ProtÃ³tipos de FabricaÃ§Ã£o | Microns Hub', description: 'ServiÃ§os de prototipagem rÃ¡pida na Europa. CNC, impressÃ£o 3D, protÃ³tipos em chapa. Entrega em 4-9 dias.' },
-    sv: { title: 'Snabb Prototypframtagning | Tillverkningsprototyper | Microns Hub', description: 'Snabb prototypframtagningstjÃ¤nster i Europa. CNC, 3D-utskrift, plÃ¥tprototyper. Leverans pÃ¥ 4-9 dagar.' },
-    da: { title: 'Hurtig Prototyping | Produktionsprototyper | Microns Hub', description: 'Hurtig prototyping-tjenester i Europa. CNC, 3D-print, pladeprototyper. Levering pÃ¥ 4-9 dage.' },
-    fi: { title: 'Nopea Prototyyppaus | Valmistusmallit | Microns Hub', description: 'Nopeat prototyyppauspalvelut Euroopassa. CNC, 3D-tulostus, levyprototyypit. Toimitus 4-9 pÃ¤ivÃ¤ssÃ¤.' },
-    nb: { title: 'Rask Prototyping | Produksjonsprototyper | Microns Hub', description: 'Raske prototyping-tjenester i Europa. CNC, 3D-printing, plateprototyper. Levering pÃ¥ 4-9 dager.' },
-    hu: { title: 'Gyors PrototÃ­pus | GyÃ¡rtÃ¡si PrototÃ­pusok | Microns Hub', description: 'Gyors prototÃ­pus-kÃ©szÃ­tÃ©si szolgÃ¡ltatÃ¡sok EurÃ³pÃ¡ban. CNC, 3D nyomtatÃ¡s, lemez prototÃ­pusok. SzÃ¡llÃ­tÃ¡s 4-9 nap.' },
-    cs: { title: 'RychlÃ© PrototypovÃ¡nÃ­ | VÃ½robnÃ­ Prototypy | Microns Hub', description: 'RychlÃ© prototypovacÃ­ sluÅ¾by v EvropÄ. CNC, 3D tisk, plechovÃ© prototypy. DodÃ¡nÃ­ za 4-9 dnÃ­.' },
+    en: { title: 'Injection Molding Services | On-Demand Production | Microns Hub', description: 'Professional injection molding services in Europe. Thermoplastic & thermoset injection. Tool design & custom tooling.' },
+    de: { title: 'Spritzguss | On-Demand Produktion | Microns Hub', description: 'Professionelle Spritzguß-Dienstleistungen in Europa. Kunststoff- & Elastomer-Spritzguss. Werkzeugdesign.' },
+    fr: { title: 'Moulage par Injection | Production À la Demande | Microns Hub', description: 'Services professionnels de moulage par injection en Europe. Injection thermoplastique & thermodurcissable.' },
+    es: { title: 'Moldeo por Inyección | Producción Bajo Demanda | Microns Hub', description: 'Servicios profesionales de moldeo por inyección en Europa. Inyección de termoplástico & termoestable.' },
+    it: { title: 'Stampaggio a Iniezione | Produzione Su Richiesta | Microns Hub', description: 'Servizi professionali di stampaggio a iniezione in Europa. Stampaggio termoplastico e termoindurente.' },
+    nl: { title: 'Spuitgieten | On-Demand Productie | Microns Hub', description: 'Professionele spuitgietdiensten in Europa. Kunststof- en kunststof-spuitgieten. Gereedschapsontwerp.' },
+    pl: { title: 'Wtryskiwanie | Produkcja Na Żądanie | Microns Hub', description: 'Profesjonalne usługi wtrysków w Europie. Wtryskiwanie termoplastyczne i termotrwałe.' },
+    pt: { title: 'Moldagem por Injeção | Produção Sob Demanda | Microns Hub', description: 'Serviços profissionais de moldagem por injeção na Europa. Injeção termoplástica e termofixa.' },
+    sv: { title: 'Formsprejtning | On-Demand Produktion | Microns Hub', description: 'Professionella formsprejtningstjänster i Europa. Termoplast- & termoset-sprütning.' },
+    da: { title: 'Sprøjtestøbning | On-Demand Produktion | Microns Hub', description: 'Professionelle sprøjtestøbningtjenester i Europa. Termoplast- & termofast-støbning.' },
+    fi: { title: 'Ruiskuvaalu | Tilaustoimitus | Microns Hub', description: 'Ammattimaiset ruiskuvalantajat Euroopassa. Termoplasti- & termoset-ruiskuvalu.' },
+    nb: { title: 'Sprøytestøping | On-Demand Produksjon | Microns Hub', description: 'Profesjonelle sprøytestøpingstjenester i Europa. Termoplast- & termofast-støping.' },
+    hu: { title: 'Fröccsöntés | Igény Szerinti Gyártás | Microns Hub', description: 'Professzionális fröccsöntési szolgáltatások Európában. Termoplaszt és termoset fröccsöntés.' },
+    cs: { title: 'Vstřikování | On-Demand Výroba | Microns Hub', description: 'Profesionální služby vstřikování v Evropě. Thermoplast & termoset vstřikování.' },
   },
 };
 
-const INDUSTRIES_META: Record<string, { title: string; description: string }> = {
-  en: { title: 'Industries We Serve | Manufacturing for All Sectors | Microns Hub', description: 'Microns Hub serves automotive, aerospace, medical, robotics, energy and consumer electronics industries with precision manufacturing.' },
-  de: { title: 'Branchen | Fertigung fÃ¼r alle Sektoren | Microns Hub', description: 'Microns Hub bedient Automobil, Luft- und Raumfahrt, Medizin, Robotik und Elektronik mit PrÃ¤zisionsfertigung.' },
-  fr: { title: 'Secteurs Industriels | Fabrication Multi-secteurs | Microns Hub', description: 'Microns Hub dessert l\'automobile, l\'aÃ©ronautique, le mÃ©dical, la robotique et l\'Ã©lectronique avec une fabrication de prÃ©cision.' },
-  es: { title: 'Industrias | FabricaciÃ³n para Todos los Sectores | Microns Hub', description: 'Microns Hub sirve a las industrias automotriz, aeroespacial, mÃ©dica, robÃ³tica y electrÃ³nica.' },
-  it: { title: 'Settori Industriali | Produzione per Tutti i Settori | Microns Hub', description: 'Microns Hub serve automotive, aerospaziale, medicale, robotica ed elettronica con produzione di precisione.' },
-  nl: { title: 'IndustrieÃ«n | Productie voor Alle Sectoren | Microns Hub', description: 'Microns Hub bedient automotive, luchtvaart, medisch, robotica en elektronica met precisieproductie.' },
-  pl: { title: 'BranÅ¼e | Produkcja dla Wszystkich SektorÃ³w | Microns Hub', description: 'Microns Hub obsÅuguje motoryzacjÄ, lotnictwo, medycynÄ, robotykÄ i elektronikÄ.' },
-  pt: { title: 'IndÃºstrias | FabricaÃ§Ã£o para Todos os Setores | Microns Hub', description: 'Microns Hub atende automotivo, aeroespacial, mÃ©dico, robÃ³tica e eletrÃ´nica.' },
-  sv: { title: 'Branscher | Tillverkning fÃ¶r Alla Sektorer | Microns Hub', description: 'Microns Hub betjÃ¤nar fordons-, flyg-, medicin-, robotik- och elektronikindustrin.' },
-  da: { title: 'Brancher | Produktion for Alle Sektorer | Microns Hub', description: 'Microns Hub betjener bil-, fly-, medicin-, robot- og elektronikindustrien.' },
-  fi: { title: 'Toimialat | Tuotanto Kaikille Sektoreille | Microns Hub', description: 'Microns Hub palvelee auto-, ilmailu-, lÃ¤Ã¤kintÃ¤-, robotiikka- ja elektroniikkateollisuutta.' },
-  nb: { title: 'Bransjer | Produksjon for Alle Sektorer | Microns Hub', description: 'Microns Hub betjener bil-, fly-, medisinsk-, robotikk- og elektronikkindustrien.' },
-  hu: { title: 'IparÃ¡gak | GyÃ¡rtÃ¡s Minden Szektornak | Microns Hub', description: 'A Microns Hub kiszolgÃ¡lja az autÃ³ipart, repÃ¼lÅgÃ©pipart, orvostechnikÃ¡t, robotikÃ¡t Ã©s elektronikÃ¡t.' },
-  cs: { title: 'OdvÄtvÃ­ | VÃ½roba pro VÅ¡echny Sektory | Microns Hub', description: 'Microns Hub slouÅ¾Ã­ automobilovÃ©mu, leteckÃ©mu, zdravotnickÃ©mu, robotickÃ©mu a elektronickÃ©mu prÅ¯myslu.' },
-};
+// ─── Route Handlers ─────────────────────────────────────────────────────────────
 
-// âââ URL Parsing ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-
-interface ParsedRoute {
-  lang: Lang;
-  type: 'homepage' | 'service' | 'industries' | 'blog' | 'other';
-  serviceSlug?: string;
-  blogSlug?: string;
-  pathAfterLang: string; // e.g. "blog/some-slug" or "services/cnc-machining"
-}
-
-function parseRoute(pathname: string): ParsedRoute | null {
-  // Match /{lang} or /{lang}/...
-  const match = pathname.match(/^\/(en|de|fr|es|it|nl|pl|pt|sv|da|fi|nb|hu|cs)(\/(.*))?$/);
-  if (!match) return null;
-
-  const lang = match[1] as Lang;
-  const rest = (match[3] || '').replace(/\/$/, ''); // trim trailing slash
-
-  if (!rest) return { lang, type: 'homepage', pathAfterLang: '' };
-
-  // Blog article: anything with /blog/ followed by a slug (but not just /blog)
-  // Match both English "blog" and localized blog paths
-  const blogMatch = rest.match(/^(?:blog|blogg|blogi)\/(.+)$/);
-  if (blogMatch) return { lang, type: 'blog', blogSlug: blogMatch[1], pathAfterLang: rest };
-
-  // Service pages: /services/{slug} or localized equivalents
-  const serviceMatch = rest.match(/^(?:services|dienstleistungen|servizi|servicios|diensten|uslugi|servicos|tjanster|tjenester|palvelut|szolgaltatasok|sluzby)\/(.+)$/);
-  if (serviceMatch) {
-    // Map localized service slug back to English for lookup
-    const localSlug = serviceMatch[1];
-    const englishSlug = resolveServiceSlug(localSlug);
-    if (englishSlug && SERVICE_META[englishSlug]) {
-      return { lang, type: 'service', serviceSlug: englishSlug, pathAfterLang: rest };
-    }
-  }
-
-  // Industries page
-  if (/^(industries|branchen|secteurs|industrias|settori|branches|branze|industrias|branscher|brancher|toimialat|bransjer|iparagak|prumysl)$/.test(rest)) {
-    return { lang, type: 'industries', pathAfterLang: rest };
-  }
-
-  return { lang, type: 'other', pathAfterLang: rest };
-}
-
-// Map localized service slugs to English
-function resolveServiceSlug(slug: string): string | null {
-  const map: Record<string, string> = {
-    'cnc-machining': 'cnc-machining', 'cnc-bearbeitung': 'cnc-machining', 'usinage-cnc': 'cnc-machining', 'mecanizado-cnc': 'cnc-machining', 'lavorazione-cnc': 'cnc-machining', 'cnc-bewerking': 'cnc-machining', 'obrobka-cnc': 'cnc-machining', 'usinagem-cnc': 'cnc-machining', 'cnc-bearbetning': 'cnc-machining', 'cnc-bearbejdning': 'cnc-machining', 'cnc-tyÃ¶stÃ¶': 'cnc-machining', 'cnc-bearbeiding': 'cnc-machining', 'cnc-megmunkalas': 'cnc-machining', 'cnc-obrabeni': 'cnc-machining',
-    'sheet-metal': 'sheet-metal', 'blechbearbeitung': 'sheet-metal', 'tolerie': 'sheet-metal', 'chapa-metalica': 'sheet-metal', 'lavorazione-lamiera': 'sheet-metal', 'plaatbewerking': 'sheet-metal', 'obrobka-bluzy': 'sheet-metal', 'platbearbetning': 'sheet-metal', 'pladearbejde': 'sheet-metal', 'levytyÃ¶stÃ¶': 'sheet-metal', 'platarbeid': 'sheet-metal', 'lemezfeldolgozas': 'sheet-metal', 'obrabeni-plechu': 'sheet-metal',
-    '3d-printing': '3d-printing', '3d-druck': '3d-printing', 'impression-3d': '3d-printing', 'impresion-3d': '3d-printing', 'stampa-3d': '3d-printing', '3d-printen': '3d-printing', 'druk-3d': '3d-printing', 'impressao-3d': '3d-printing', '3d-skrivning': '3d-printing', '3d-udskrivning': '3d-printing', '3d-tulostus': '3d-printing', '3d-nyomtas': '3d-printing', '3d-tisk': '3d-printing',
-    'injection-molding': 'injection-molding', 'spritzguss': 'injection-molding', 'injection-plastique': 'injection-molding', 'moldeo-por-inyeccion': 'injection-molding', 'stampaggio-iniezione': 'injection-molding', 'spuitgieten': 'injection-molding', 'wtrysk-tworzywa': 'injection-molding', 'moldagem-injecao': 'injection-molding', 'formsprutning': 'injection-molding', 'sprojtestobning': 'injection-molding', 'ruiskupuristus': 'injection-molding', 'sproytestoping': 'injection-molding', 'frccsnyomas': 'injection-molding', 'vstrekovani': 'injection-molding',
-    'surface-finishes': 'surface-finishes', 'oberflaechenveredelung': 'surface-finishes', 'finition-surface': 'surface-finishes', 'acabados-superficie': 'surface-finishes', 'finitura-superficie': 'surface-finishes', 'oppervlakteafwerking': 'surface-finishes', 'wykonczenie-powierzchni': 'surface-finishes', 'acabamento-superficie': 'surface-finishes', 'ytbehandling': 'surface-finishes', 'overfladebehandling': 'surface-finishes', 'pinnan-viimeistely': 'surface-finishes', 'overflatebehandling': 'surface-finishes', 'feluletkezeles': 'surface-finishes', 'uprava-povrchu': 'surface-finishes',
-    'rapid-prototyping': 'rapid-prototyping', 'prototypage-rapide': 'rapid-prototyping', 'prototipado-rapido': 'rapid-prototyping', 'prototipazione-rapida': 'rapid-prototyping', 'szybkie-prototypowanie': 'rapid-prototyping', 'prototipagem-rapida': 'rapid-prototyping', 'snabb-prototypering': 'rapid-prototyping', 'hurtig-prototypering': 'rapid-prototyping', 'nopea-prototyyppaus': 'rapid-prototyping', 'rask-prototyping': 'rapid-prototyping', 'gyors-prototipus': 'rapid-prototyping', 'rychle-prototypovani': 'rapid-prototyping',
-  };
-  return map[slug] || null;
-}
-
-// âââ HTML Rewriting âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
-
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function buildHreflangTags(lang: string, pathMap: Record<string, string> | string): string {
-  // pathMap: either a Record<lang, fullPath> or a simple string path (same for all langs)
-  const tags: string[] = [];
-  for (const l of LANGUAGES) {
-    const path = typeof pathMap === 'string' ? `/${l}/${pathMap}` : `/${l}/${pathMap[l] || pathMap['en'] || ''}`;
-    tags.push(`<link rel="alternate" hreflang="${l}" href="${SITE_BASE}${path}" />`);
-  }
-  // x-default points to English
-  const enPath = typeof pathMap === 'string' ? `/en/${pathMap}` : `/en/${pathMap['en'] || ''}`;
-  tags.push(`<link rel="alternate" hreflang="x-default" href="${SITE_BASE}${enPath}" />`);
-  return tags.join('\n    ');
-}
-
-function rewriteHtml(html: string, meta: PageMeta, lang: string, canonicalPath: string, hreflangTags: string): string {
-  let result = html;
-
-  // 1. Fix <html lang="en"> â <html lang="{lang}">
-  result = result.replace(/<html\s+lang="[^"]*"/, `<html lang="${lang}"`);
-
-  // 2. Replace <title>
-  result = result.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(meta.title)}</title>`);
-
-  // 3. Replace meta description
-  result = result.replace(
-    /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/,
-    `<meta name="description" content="${escapeHtml(meta.description)}" />`
-  );
-
-  // 4. Replace OG tags
-  result = result.replace(/<meta\s+property="og:title"\s+content="[^"]*"\s*\/?>/, `<meta property="og:title" content="${escapeHtml(meta.title)}" />`);
-  result = result.replace(/<meta\s+property="og:description"\s+content="[^"]*"\s*\/?>/, `<meta property="og:description" content="${escapeHtml(meta.description)}" />`);
-  result = result.replace(/<meta\s+property="og:url"\s+content="[^"]*"\s*\/?>/, `<meta property="og:url" content="${SITE_BASE}${canonicalPath}" />`);
-  result = result.replace(/<meta\s+property="og:type"\s+content="[^"]*"\s*\/?>/, `<meta property="og:type" content="${meta.ogType}" />`);
-  result = result.replace(/<meta\s+property="og:image"\s+content="[^"]*"\s*\/?>/, `<meta property="og:image" content="${escapeHtml(meta.image)}" />`);
-
-  // 5. Replace Twitter tags
-  result = result.replace(/<meta\s+name="twitter:title"\s+content="[^"]*"\s*\/?>/, `<meta name="twitter:title" content="${escapeHtml(meta.title)}" />`);
-  result = result.replace(/<meta\s+name="twitter:description"\s+content="[^"]*"\s*\/?>/, `<meta name="twitter:description" content="${escapeHtml(meta.description)}" />`);
-  result = result.replace(/<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/?>/, `<meta name="twitter:image" content="${escapeHtml(meta.image)}" />`);
-
-  // 6. Inject canonical + hreflang + structured data before </head>
-  const injections = [
-    `<link rel="canonical" href="${SITE_BASE}${canonicalPath}" />`,
-    hreflangTags,
-  ];
-  if (meta.structuredData) {
-    injections.push(`<script type="application/ld+json">\n    ${meta.structuredData}\n    </script>`);
-  }
-  result = result.replace('</head>', `    ${injections.join('\n    ')}\n  </head>`);
-
-  return result;
-}
-
-// âââ Middleware Entry Point âââââââââââââââââââââââââââââââââââââââââââââââââââ
-
-export default async function middleware(request: Request): Promise<Response | undefined> {
+export default async function middleware(request: Request) {
   const url = new URL(request.url);
-  const route = parseRoute(url.pathname);
+  const isCrawlerRequest = isCrawler(request);
 
-  // Not a public page we handle â pass through
-  if (!route || route.type === 'other') return undefined;
+  // Extract language from URL path (first segment)
+  const pathSegments = url.pathname.split('/').filter(Boolean);
+  const lang = (pathSegments[0] || 'en').toLowerCase();
+  const validLang = LANGUAGES.includes(lang as Lang) ? lang : 'en';
 
-  // Fetch the original index.html (without language prefix to avoid re-triggering middleware)
-  let originalHtml: string;
-  try {
-    const indexRes = await fetch(new URL('/index.html', url.origin), {
-      headers: { 'Accept': 'text/html' },
-    });
-    if (!indexRes.ok) return undefined;
-    originalHtml = await indexRes.text();
-  } catch {
-    return undefined; // fallback: let normal flow handle it
+  // Route: Homepage (/{lang} or /)
+  if (url.pathname === '/' || pathSegments.length === 1) {
+    const meta = HOMEPAGE_META[validLang] || HOMEPAGE_META.en;
+    return buildResponse(request, {
+      title: meta.title,
+      description: meta.description,
+      ogType: 'website',
+      image: DEFAULT_IMAGE,
+    }, isCrawlerRequest);
   }
 
-  let meta: PageMeta;
-  let canonicalPath: string;
-  let hreflangTags: string;
-
-  switch (route.type) {
-    case 'homepage': {
-      const hm = HOMEPAGE_META[route.lang] || HOMEPAGE_META.en;
-      meta = { title: hm.title, description: hm.description, ogType: 'website', image: DEFAULT_IMAGE };
-      canonicalPath = `/${route.lang}`;
-      hreflangTags = buildHreflangTags(route.lang, '');
-      break;
+  // Route: Services /{lang}/services/{service_slug}
+  if (pathSegments.length === 3 && pathSegments[1] === 'services') {
+    const serviceSlug = pathSegments[2];
+    const serviceMeta = SERVICE_META[serviceSlug]?.[validLang] || SERVICE_META[serviceSlug]?.en;
+    if (serviceMeta) {
+      return buildResponse(request, {
+        title: serviceMeta.title,
+        description: serviceMeta.description,
+        ogType: 'website',
+        image: DEFAULT_IMAGE,
+      }, isCrawlerRequest);
     }
+  }
 
-    case 'service': {
-      const sm = SERVICE_META[route.serviceSlug!]?.[route.lang] || SERVICE_META[route.serviceSlug!]?.en;
-      if (!sm) return undefined;
-      meta = { title: sm.title, description: sm.description, ogType: 'website', image: DEFAULT_IMAGE };
-      canonicalPath = `/${route.lang}/${route.pathAfterLang}`;
-      // For service pages, use the same pathAfterLang for all languages (simplified)
-      hreflangTags = buildHreflangTags(route.lang, route.pathAfterLang);
-      break;
-    }
+  // Route: Blog Articles /{lang}/blog/{article_slug}
+  if (pathSegments.length === 3 && pathSegments[1] === 'blog') {
+    const articleSlug = pathSegments[2];
+    const article = await fetchArticleMeta(validLang, articleSlug, isCrawlerRequest);
 
-    case 'industries': {
-      const im = INDUSTRIES_META[route.lang] || INDUSTRIES_META.en;
-      meta = { title: im.title, description: im.description, ogType: 'website', image: DEFAULT_IMAGE };
-      canonicalPath = `/${route.lang}/${route.pathAfterLang}`;
-      hreflangTags = buildHreflangTags(route.lang, route.pathAfterLang);
-      break;
-    }
+    if (article) {
+      const pageMeta: PageMeta = {
+        title: article.meta_title || article.title,
+        description: article.meta_description || article.excerpt || '',
+        ogType: 'article',
+        image: article.featured_image || DEFAULT_IMAGE,
+        structuredData: buildArticleSchema(article),
+        articleContent: isCrawlerRequest ? article.content : undefined,
+      };
 
-    case 'blog': {
-      const article = await fetchArticleMeta(route.lang, route.blogSlug!);
-      if (!article) return undefined; // Article not found â let SPA handle 404
-
-      const title = article.meta_title || article.title;
-      const description = article.meta_description || article.excerpt || '';
-      const image = article.featured_image || DEFAULT_IMAGE;
-
-      // Build hreflang with per-language slugs
-      let hrefMap: Record<string, string> = {};
+      // If there's a translation_id, fetch all language versions for hreflang
       if (article.translation_id) {
         const translations = await fetchTranslationSlugs(article.translation_id);
-        for (const [l, s] of Object.entries(translations)) {
-          hrefMap[l] = `blog/${s}`;
-        }
-      }
-      if (Object.keys(hrefMap).length === 0) {
-        hrefMap[route.lang] = `blog/${article.slug}`;
+        return buildResponse(request, pageMeta, isCrawlerRequest, validLang, translations);
       }
 
-      const structuredData = JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'Article',
-        headline: title,
-        description: description,
-        inLanguage: route.lang,
-        datePublished: article.created_at,
-        dateModified: article.updated_at,
-        image: image,
-        publisher: {
-          '@type': 'Organization',
-          name: 'Microns Hub',
-          url: SITE_BASE,
-          logo: { '@type': 'ImageObject', url: `${SITE_BASE}/logo.png` },
-        },
-        mainEntityOfPage: `${SITE_BASE}/${route.lang}/blog/${article.slug}`,
-      });
-
-      meta = { title, description, ogType: 'article', image, structuredData };
-      canonicalPath = `/${route.lang}/blog/${article.slug}`;
-      hreflangTags = buildHreflangTags(route.lang, hrefMap);
-      break;
+      return buildResponse(request, pageMeta, isCrawlerRequest);
     }
-
-    default:
-      return undefined;
   }
 
-  // Rewrite the HTML and return
-  const modifiedHtml = rewriteHtml(originalHtml, meta, route.lang, canonicalPath, hreflangTags);
+  // Route: Industries /{lang}/industries/{industry_slug}
+  if (pathSegments.length === 3 && pathSegments[1] === 'industries') {
+    const industrySlug = pathSegments[2];
+    // Industries are fetched from Supabase, similar to articles
+    const industry = await fetchArticleMeta(validLang, industrySlug, isCrawlerRequest);
 
-  return new Response(modifiedHtml, {
+    if (industry) {
+      const pageMeta: PageMeta = {
+        title: industry.meta_title || industry.title,
+        description: industry.meta_description || industry.excerpt || '',
+        ogType: 'website',
+        image: industry.featured_image || DEFAULT_IMAGE,
+        articleContent: isCrawlerRequest ? industry.content : undefined,
+      };
+      return buildResponse(request, pageMeta, isCrawlerRequest);
+    }
+  }
+
+  // Pass through for all other routes
+  return new Response(null, { status: 404 });
+}
+
+function buildArticleSchema(article: ArticleMeta): string {
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: article.meta_title || article.title,
+    description: article.meta_description || article.excerpt || '',
+    image: article.featured_image || DEFAULT_IMAGE,
+    datePublished: article.created_at,
+    dateModified: article.updated_at,
+  });
+}
+
+function buildResponse(
+  request: Request,
+  meta: PageMeta,
+  isCrawlerRequest: boolean,
+  lang: string = 'en',
+  translations?: TranslationMap
+): Response {
+  // For crawlers, include full article content in the HTML body
+  // This allows Googlebot to see keywords without JavaScript rendering
+  const bodyContent = isCrawlerRequest && meta.articleContent
+    ? `<div id="article-body-for-crawler" style="display:none;">${escapeHtml(meta.articleContent)}</div>`
+    : '';
+
+  const hreflangTags = translations
+    ? Object.entries(translations)
+        .map(([lng, slug]) => `<link rel="alternate" hreflang="${lng}" href="${SITE_BASE}/${lng}/blog/${slug}/" />`)
+        .join('\n  ')
+    : '';
+
+  const metaTags = `
+  <title>${escapeHtml(meta.title)}</title>
+  <meta name="description" content="${escapeHtml(meta.description)}" />
+  <meta property="og:title" content="${escapeHtml(meta.title)}" />
+  <meta property="og:description" content="${escapeHtml(meta.description)}" />
+  <meta property="og:type" content="${meta.ogType}" />
+  <meta property="og:image" content="${meta.image}" />
+  <meta property="og:url" content="${new URL(request.url).href}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${escapeHtml(meta.title)}" />
+  <meta name="twitter:description" content="${escapeHtml(meta.description)}" />
+  <meta name="twitter:image" content="${meta.image}" />
+  ${meta.structuredData ? `<script type="application/ld+json">${meta.structuredData}</script>` : ''}
+  ${hreflangTags}
+  `;
+
+  const html = `<!DOCTYPE html>
+<html lang="${lang}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  ${metaTags}
+  <script type="module" src="/src/main.tsx"></script>
+</head>
+<body>
+  <div id="root"></div>
+  ${bodyContent}
+</body>
+</html>`;
+
+  return new Response(html, {
     status: 200,
     headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=0, must-revalidate',
+      'Content-Type': 'text/html; charset=UTF-8',
+      'Cache-Control': 'public, max-age=3600',
     },
   });
 }
 
-// âââ Matcher Configuration ââââââââââââââââââââââââââââââââââââââââââââââââââââ
-
-export const config = {
-  matcher: [
-    // Match only language-prefixed routes. This excludes:
-    // /api/*, /assets/*, /dashboard/*, /login, /laserkritis/*, /index.html,
-    // /sitemap.xml, /robots.txt, and any non-language-prefixed paths.
-    '/(en|de|fr|es|it|nl|pl|pt|sv|da|fi|nb|hu|cs)',
-    '/(en|de|fr|es|it|nl|pl|pt|sv|da|fi|nb|hu|cs)/(.*)',
-  ],
-};
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
