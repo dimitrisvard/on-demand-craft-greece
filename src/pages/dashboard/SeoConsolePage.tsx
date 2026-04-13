@@ -970,6 +970,7 @@ function IndexStatusTab() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10 text-xs">#</TableHead>
                   <TableHead className="w-10">
                     <Checkbox
                       checked={allSelected ? true : someSelected ? "indeterminate" : false}
@@ -986,11 +987,12 @@ function IndexStatusTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUrls.map((m) => {
+                {filteredUrls.map((m, idx) => {
                   const c = cache.data?.get(m.url);
                   const sub = submissions.data?.get(m.url);
                   return (
                     <TableRow key={m.id}>
+                      <TableCell className="text-xs text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>
                         <Checkbox
                           checked={selected.has(m.url)}
