@@ -28,8 +28,7 @@ export const initGA = () => {
     };
   }
 
-  // We don't need to load the script here because it's handled by CookieConsentBanner
-  // or index.html based on consent.
+  // Script is loaded directly in index.html to track all visits
   console.log('Analytics utility initialized');
 };
 

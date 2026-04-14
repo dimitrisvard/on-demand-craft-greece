@@ -65,65 +65,10 @@ export const CookieConsentBanner: React.FC = () => {
     }
   }, []);
 
-  const loadGoogleTags = () => {
-    // Initialize dataLayer and gtag function immediately (before script loads)
-    (window as any).dataLayer = (window as any).dataLayer || [];
-    if (!(window as any).gtag) {
-      function gtag(){(window as any).dataLayer.push(arguments);}
-      (window as any).gtag = gtag;
-    }
-    
-    // Check if script is already in the DOM
-    const existingScript = document.querySelector('script[src*="googletagmanager.com/gtag/js"]');
-    
-    if (existingScript) {
-      // Script already exists, configure immediately
-      (window as any).gtag('js', new Date());
-      (window as any).gtag('config', 'AW-17760727501');
-      (window as any).gtag('config', 'G-G6T5PMFLRH', {
-        anonymize_ip: false,
-      });
-      console.log('Google Analytics and Ads configured (script already loaded)');
-      return;
-    }
-
-    // Script doesn't exist, load it
-    const gaScript = document.createElement('script');
-    gaScript.async = true;
-    gaScript.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
-    
-    gaScript.onload = function() {
-      // Configure after script loads
-      (window as any).gtag('js', new Date());
-      (window as any).gtag('config', 'AW-17760727501');
-      (window as any).gtag('config', 'G-G6T5PMFLRH', {
-        anonymize_ip: false,
-      });
-      console.log('Google Analytics and Ads initialized (script loaded)');
-    };
-    
-    gaScript.onerror = function() {
-      console.error('Failed to load Google Analytics script');
-    };
-    
-    document.head.appendChild(gaScript);
-  };
-
   const handleConsent = (choice: 'accepted' | 'declined') => {
     localStorage.setItem(COOKIE_CONSENT_KEY, choice);
     setVisible(false);
-    if (choice === 'accepted') {
-      loadGoogleTags();
-    }
   };
-  
-  // Check if consent was already given and load scripts immediately
-  useEffect(() => {
-    const consent = localStorage.getItem(COOKIE_CONSENT_KEY);
-    if (consent === 'accepted') {
-      loadGoogleTags();
-    }
-  }, []);
 
   if (!visible) return null;
 
