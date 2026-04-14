@@ -63,11 +63,14 @@ interface GeminiResponse {
 // Includes automatic retry with exponential backoff for rate limiting (429)
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
-  timeoutMs: number = 180000,
+  timeoutMs: number = 90000,
   retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
-  const MAX_RETRIES = 3;
-  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+  const MAX_RETRIES = 2;
+  // gemini-2.0-flash was deprecated by Google (scheduled shutdown 2026-06-01) and its
+  // free-tier RPM was collapsed, which is the source of the 429s we were seeing.
+  // gemini-2.5-flash has higher RPM and better quality.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
   
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -77,7 +80,7 @@ async function callGeminiSingle(
       contents,
       generationConfig: { 
         temperature: 0.3, 
-        maxOutputTokens: 32768, // Maximum for Gemini 2.0 Flash
+        maxOutputTokens: 32768, // Maximum for Gemini 2.5 Flash
       },
     };
     
@@ -98,8 +101,10 @@ async function callGeminiSingle(
         throw new Error(`Gemini API rate limited after ${MAX_RETRIES} retries. Please wait a few minutes and try again.`);
       }
       
-      // Exponential backoff: 15s, 30s, 60s
-      const waitTime = Math.min(15000 * Math.pow(2, retryCount), 60000);
+      // Tightened backoff: 20s, 40s (capped). Longer waits inside one invocation
+      // eat the Supabase worker CPU/wall-clock budget and trigger WORKER_LIMIT.
+      // The client retries the whole batch on failure, giving us a fresh worker.
+      const waitTime = Math.min(20000 * Math.pow(2, retryCount), 40000);
       console.warn(`[RATE LIMIT] Gemini API returned 429, waiting ${waitTime/1000}s before retry ${retryCount + 1}/${MAX_RETRIES}...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       
@@ -127,7 +132,7 @@ async function callGeminiSingle(
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === "AbortError") {
-      throw new Error("Gemini API request timeout (180s)");
+      throw new Error(`Gemini API request timeout (${Math.round(timeoutMs / 1000)}s)`);
     }
     throw error;
   }
@@ -137,58 +142,56 @@ async function callGeminiSingle(
 // This handles MAX_TOKENS by sending continuation requests with conversation history
 async function callGemini(prompt: string): Promise<string> {
   const geminiStartTime = Date.now();
-  const MAX_CONTINUATIONS = 3; // Maximum number of continuation attempts
-  
+  // One continuation is enough for realistic articles (~64k output tokens total).
+  // Higher values previously caused unbounded memory growth and Supabase WORKER_LIMIT.
+  const MAX_CONTINUATIONS = 1;
+
   console.log(`[callGemini] Starting translation, prompt length: ${prompt.length}`);
-  
-  // Build conversation history
-  const conversationHistory: Array<{ role: string; parts: Array<{ text: string }> }> = [
-    { role: "user", parts: [{ text: prompt }] }
-  ];
-  
+
+  // Keep only the minimum history needed for the next call. We rebuild this on
+  // continuation instead of appending, so memory stays bounded regardless of
+  // how many continuations happen.
+  const initialUserTurn = { role: "user", parts: [{ text: prompt }] };
+  let conversationHistory: Array<{ role: string; parts: Array<{ text: string }> }> = [initialUserTurn];
+
   let fullResponse = "";
   let continuationCount = 0;
-  
+
   while (continuationCount <= MAX_CONTINUATIONS) {
-    const result = await callGeminiSingle(conversationHistory, 180000);
-    
+    const result = await callGeminiSingle(conversationHistory, 90000);
+
     console.log(`[callGemini] Response ${continuationCount + 1}: ${result.text.length} chars, finishReason: ${result.finishReason}`);
-    
+
     // Append the response
     fullResponse += result.text;
-    
+
     // Check if we're done
     if (result.finishReason === "STOP") {
       console.log(`[callGemini] ✓ Complete! Total response: ${fullResponse.length} chars after ${continuationCount + 1} request(s)`);
       break;
     }
-    
+
     // Check if we hit token limits and need to continue
     if (result.finishReason === "MAX_TOKENS" || result.finishReason === "LENGTH") {
       continuationCount++;
-      
+
       if (continuationCount > MAX_CONTINUATIONS) {
         console.warn(`[callGemini] ⚠️ Max continuations (${MAX_CONTINUATIONS}) reached, returning partial response`);
         break;
       }
-      
+
       console.log(`[callGemini] Token limit hit, sending continuation request ${continuationCount}/${MAX_CONTINUATIONS}...`);
-      
-      // Add the model's partial response to history
-      conversationHistory.push({
-        role: "model",
-        parts: [{ text: result.text }]
-      });
-      
-      // Add continuation prompt
-      conversationHistory.push({
-        role: "user",
-        parts: [{ text: "You stopped due to length limits. Please continue exactly where you left off. Do not repeat the last sentence, just continue from where you stopped." }]
-      });
-      
+
+      // Replace (don't append) so history size stays O(1) across continuations.
+      conversationHistory = [
+        initialUserTurn,
+        { role: "model", parts: [{ text: result.text }] },
+        { role: "user", parts: [{ text: "You stopped due to length limits. Please continue exactly where you left off. Do not repeat the last sentence, just continue from where you stopped." }] },
+      ];
+
       // Small delay before continuation request
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
     } else if (result.finishReason !== "STOP") {
       // Unexpected finish reason
       console.warn(`[callGemini] Unexpected finishReason: ${result.finishReason}, treating as complete`);
@@ -366,71 +369,91 @@ async function translateAllTablesAtOnce(
   }
   
   console.log(`[BATCH TABLE TRANSLATION] Total cells to translate: ${allTextContents.length} across ${tables.length} table(s)`);
-  
-  // Create a single prompt for all table content
-  const textToTranslate = allTextContents.join('\n---CELL---\n');
-  const translationPrompt = `Translate the following table cell contents into ${langName}.
+
+  // Chunk the cells to keep each Gemini call small. Large single prompts (hundreds
+  // of cells) cause long continuations and memory growth that trip WORKER_LIMIT.
+  const CELL_CHUNK_SIZE = 80;
+  const chunks: string[][] = [];
+  for (let i = 0; i < allTextContents.length; i += CELL_CHUNK_SIZE) {
+    chunks.push(allTextContents.slice(i, i + CELL_CHUNK_SIZE));
+  }
+  console.log(`[BATCH TABLE TRANSLATION] Splitting into ${chunks.length} chunk(s) of up to ${CELL_CHUNK_SIZE} cells`);
+
+  const translatedLines: string[] = [];
+
+  try {
+    for (let c = 0; c < chunks.length; c++) {
+      const chunk = chunks[c];
+      const textToTranslate = chunk.join('\n---CELL---\n');
+      const translationPrompt = `Translate the following table cell contents into ${langName}.
 
 RULES:
 - Translate ONLY the text content
 - Keep technical terms, numbers, and measurements as-is when appropriate
 - Each cell is separated by ---CELL---
 - Return ONLY the translated text with ---CELL--- separators
-- Maintain the EXACT same number of cells (${allTextContents.length} cells total)
+- Maintain the EXACT same number of cells (${chunk.length} cells total)
 - Do NOT add any HTML, markdown, or formatting
 
 CELLS TO TRANSLATE:
 ${textToTranslate}`;
 
-  try {
-    const translatedText = await callGemini(translationPrompt);
-    console.log(`[BATCH TABLE TRANSLATION] Received response (${translatedText.length} chars)`);
-    
-    // Parse the response
-    let translatedLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
-    
-    // Handle alternative formats if Gemini changed the separator
-    if (translatedLines.length !== allTextContents.length) {
-      const altSplit = translatedText.split(/---CELL---/gi).map(l => l.trim()).filter(l => l.length > 0);
-      if (altSplit.length === allTextContents.length) {
-        translatedLines = altSplit;
-      } else {
-        const newlineSplit = translatedText.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.match(/^---CELL---$/i));
-        if (newlineSplit.length >= allTextContents.length) {
-          translatedLines = newlineSplit.slice(0, allTextContents.length);
+      const translatedText = await callGemini(translationPrompt);
+      console.log(`[BATCH TABLE TRANSLATION] Chunk ${c + 1}/${chunks.length} response: ${translatedText.length} chars`);
+
+      // Parse the response for this chunk
+      let chunkLines = translatedText.split('\n---CELL---\n').map(l => l.trim());
+
+      // Handle alternative formats if Gemini changed the separator
+      if (chunkLines.length !== chunk.length) {
+        const altSplit = translatedText.split(/---CELL---/gi).map(l => l.trim()).filter(l => l.length > 0);
+        if (altSplit.length === chunk.length) {
+          chunkLines = altSplit;
         } else {
-          translatedLines = [...newlineSplit, ...Array(allTextContents.length - newlineSplit.length).fill('')];
+          const newlineSplit = translatedText.split('\n').map(l => l.trim()).filter(l => l.length > 0 && !l.match(/^---CELL---$/i));
+          if (newlineSplit.length >= chunk.length) {
+            chunkLines = newlineSplit.slice(0, chunk.length);
+          } else {
+            chunkLines = [...newlineSplit, ...Array(chunk.length - newlineSplit.length).fill('')];
+          }
         }
       }
+
+      // Ensure correct count for this chunk
+      if (chunkLines.length < chunk.length) {
+        chunkLines = [...chunkLines, ...Array(chunk.length - chunkLines.length).fill('')];
+      } else if (chunkLines.length > chunk.length) {
+        chunkLines = chunkLines.slice(0, chunk.length);
+      }
+
+      translatedLines.push(...chunkLines);
+
+      // Small spacer between chunk calls to avoid bursty RPM usage.
+      if (c < chunks.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
-    
-    // Ensure correct count
-    if (translatedLines.length < allTextContents.length) {
-      translatedLines = [...translatedLines, ...Array(allTextContents.length - translatedLines.length).fill('')];
-    } else if (translatedLines.length > allTextContents.length) {
-      translatedLines = translatedLines.slice(0, allTextContents.length);
-    }
-    
+
     console.log(`[BATCH TABLE TRANSLATION] Parsed ${translatedLines.length} translated cells`);
-    
-    // Rebuild each table with its translated content
+
+    // Rebuild each table with its translated content (slice indices unchanged)
     const translatedTables: Array<{ html: string; index: number }> = [];
-    
+
     for (const data of tableData) {
       const tableTranslations = translatedLines.slice(
-        data.textStartIndex, 
+        data.textStartIndex,
         data.textStartIndex + data.textContents.length
       );
-      
+
       const translatedHtml = rebuildTableWithTranslations(data.originalHtml, data.cells, tableTranslations);
       translatedTables.push({ html: translatedHtml, index: data.contentIndex });
-      
+
       console.log(`[BATCH TABLE TRANSLATION] ✓ Rebuilt table ${data.tableIndex + 1}/${tables.length}`);
     }
-    
-    console.log(`[BATCH TABLE TRANSLATION] ✓ Successfully translated all ${tables.length} table(s) in one API call`);
+
+    console.log(`[BATCH TABLE TRANSLATION] ✓ Successfully translated all ${tables.length} table(s) across ${chunks.length} chunk(s)`);
     return translatedTables;
-    
+
   } catch (error: any) {
     console.error(`[BATCH TABLE TRANSLATION] Error: ${error.message}`);
     // Return original tables on error
@@ -1345,15 +1368,27 @@ serve(async (req) => {
     const results: Record<string, any> = {};
     const urls: string[] = [`${siteUrl}/en/blog/${master.slug}`];
 
+    // Hard ceiling below the 400s Pro-plan wall clock. If we're close to the
+    // limit, return partial results cleanly so the client can retry the
+    // remaining languages in a fresh invocation instead of being WORKER_LIMIT'd.
+    const WALL_CLOCK_BUDGET_MS = 350000;
+
     for (let i = 0; i < langs.length; i++) {
       const lang = langs[i];
       const elapsed = Date.now() - startTime;
-      
+
       // NOTE: The auto-translate-articles function now calls this function once per language,
       // so each call only processes 1 language. Pro plan has 400s wall clock duration.
-      // All languages get full table translation and 2 retries.
 
-      console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}... (elapsed: ${elapsed}ms)`);
+      console.log(`[${i + 1}/${langs.length}] Translating to ${lang.name}... (elapsed: ${elapsed}ms, budget: ${WALL_CLOCK_BUDGET_MS}ms)`);
+
+      if (elapsed > WALL_CLOCK_BUDGET_MS) {
+        console.warn(`[WALL CLOCK] Elapsed ${elapsed}ms exceeds ${WALL_CLOCK_BUDGET_MS}ms budget. Returning partial results for remaining languages.`);
+        for (let j = i; j < langs.length; j++) {
+          results[langs[j].code] = { success: false, error: "WALL_CLOCK_BUDGET_EXCEEDED", skipped: true };
+        }
+        break;
+      }
 
       try {
         // Check if exists
@@ -1373,9 +1408,10 @@ serve(async (req) => {
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         let translation;
         let retryCount = 0;
-        // Pro plan (400s wall clock): All languages get 2 retries
-        // Gemini timeout is now 180s, plenty of time for complex translations
-        const maxRetries = 2; // All languages get 2 retries
+        // Keep internal retries minimal. The client retries the whole batch in a
+        // fresh edge-function invocation (fresh worker CPU/memory budget), which
+        // is safer than burning this worker's budget on an in-process retry.
+        const maxRetries = 1;
         let translateStartTime = Date.now();
         
         console.log(`[TRANSLATION START] ${lang.name} (${lang.code}) - specialChar=${isSpecialCharLang}, maxRetries=${maxRetries}`);
@@ -1441,11 +1477,12 @@ serve(async (req) => {
         results[lang.code] = { success: false, error: err.message, langCode: lang.code, isSpecialCharLang };
       }
 
-      // Delay between languages to avoid rate limiting
-      // Gemini API has strict rate limits - need at least 5s between major requests
+      // Delay between languages to avoid rate limiting. With gemini-2.5-flash
+      // (~10 RPM free tier) and several API calls per language, 8s keeps us
+      // comfortably under the per-minute ceiling.
       if (i < langs.length - 1) {
-        console.log(`[RATE LIMIT] Waiting 5s before next language to avoid rate limits...`);
-        await new Promise(r => setTimeout(r, 5000));
+        console.log(`[RATE LIMIT] Waiting 8s before next language to avoid rate limits...`);
+        await new Promise(r => setTimeout(r, 8000));
       }
     }
 

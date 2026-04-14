@@ -106,7 +106,8 @@ Generate hashtags that are:
 
     Return only the hashtags, one per line, without # prefix.`;
 
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+    // gemini-2.0-flash is deprecated (shutdown 2026-06-01); migrate to 2.5-flash.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
 
     const response = await fetch(url, {
       method: "POST",

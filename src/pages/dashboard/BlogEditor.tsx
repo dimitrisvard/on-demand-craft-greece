@@ -330,85 +330,138 @@ const BlogEditor = () => {
       let totalSuccessful = 0;
       let totalFailed = 0;
 
+      // Per-batch attempt helper: returns the fetch response parsed into
+      // { ok, status, result } so the caller can inspect WORKER_LIMIT / 429s.
+      const invokeTranslate = async (batch: string[]) => {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              article_id: id,
+              target_languages: batch,
+            }),
+          }
+        );
+        let result: any = {};
+        try {
+          result = await response.json();
+        } catch {
+          result = {};
+        }
+        return { response, result };
+      };
+
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
         const batchLangNames = batch.map(code => LANGUAGES.find(l => l.code === code)?.name || code).join(', ');
-        
+
         toast({
           title: `🔄 Translating batch ${batchIndex + 1}/${batches.length}`,
           description: `Processing: ${batchLangNames}...`,
         });
 
-        try {
-          const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`,
-              },
-              body: JSON.stringify({ 
-                article_id: id,
-                target_languages: batch
-              }),
-            }
-          );
+        // Retry the same batch up to 3 attempts (1 initial + 2 retries) on
+        // recoverable failures (Supabase WORKER_LIMIT or Gemini rate limit).
+        // Each attempt is a fresh edge-function invocation with a fresh worker
+        // CPU/memory budget, which is the key to escaping WORKER_LIMIT.
+        const MAX_BATCH_ATTEMPTS = 3;
+        let attempt = 0;
+        let batchSucceeded = false;
+        let lastErrorMessage = "";
 
-          const result = await response.json();
+        while (attempt < MAX_BATCH_ATTEMPTS && !batchSucceeded) {
+          attempt++;
+          try {
+            const { response, result } = await invokeTranslate(batch);
 
-          if (!response.ok || result.success === false) {
-            // Handle both error formats: result.error or result.message
-            const errorMessage = result.error || result.message || 'Unknown error';
-            console.error(`Batch ${batchIndex + 1} failed:`, errorMessage);
-            console.error(`Full response:`, result);
-            
-            // Check if it's a rate limit error
-            const isRateLimited = errorMessage.toLowerCase().includes('rate') || 
-                                  errorMessage.includes('429') ||
-                                  errorMessage.toLowerCase().includes('too many');
-            
-            // Count actual failures from details if available
-            if (result.details) {
-              const detailsArray = Object.values(result.details);
-              const successCount = detailsArray.filter((d: any) => d.success).length;
-              const failCount = detailsArray.filter((d: any) => !d.success).length;
-              totalSuccessful += successCount;
-              totalFailed += failCount;
-            } else {
-              totalFailed += batch.length;
+            if (!response.ok || result.success === false) {
+              const errorMessage = result.error || result.message || 'Unknown error';
+              lastErrorMessage = errorMessage;
+              console.error(`Batch ${batchIndex + 1} attempt ${attempt}/${MAX_BATCH_ATTEMPTS} failed:`, errorMessage);
+              console.error(`Full response:`, result);
+
+              const isRateLimited = errorMessage.toLowerCase().includes('rate') ||
+                                    errorMessage.includes('429') ||
+                                    errorMessage.toLowerCase().includes('too many');
+              // Supabase returns { code: "WORKER_LIMIT" } (sometimes HTTP 546)
+              // when the edge function runs out of CPU/memory.
+              const isWorkerLimit = result.code === 'WORKER_LIMIT' ||
+                                    response.status === 546 ||
+                                    errorMessage.toLowerCase().includes('worker_limit') ||
+                                    errorMessage.toLowerCase().includes('compute resources');
+              const isRecoverable = isRateLimited || isWorkerLimit;
+
+              if (isRecoverable && attempt < MAX_BATCH_ATTEMPTS) {
+                const waitMs = isWorkerLimit ? 45000 : 60000;
+                toast({
+                  title: `⏳ Retrying batch ${batchIndex + 1} (${attempt + 1}/${MAX_BATCH_ATTEMPTS})`,
+                  description: isWorkerLimit
+                    ? `Supabase worker out of resources. Retrying with a fresh worker in ${Math.round(waitMs / 1000)}s…`
+                    : `Gemini rate limit. Retrying in ${Math.round(waitMs / 1000)}s…`,
+                });
+                await new Promise(resolve => setTimeout(resolve, waitMs));
+                continue; // retry same batch
+              }
+
+              // Non-recoverable or out of attempts: record partial results.
+              if (result.details) {
+                const detailsArray = Object.values(result.details);
+                const successCount = detailsArray.filter((d: any) => d.success).length;
+                const failCount = detailsArray.filter((d: any) => !d.success).length;
+                totalSuccessful += successCount;
+                totalFailed += failCount;
+              } else {
+                totalFailed += batch.length;
+              }
+
+              toast({
+                title: isRecoverable
+                  ? `❌ Batch ${batchIndex + 1} failed after ${MAX_BATCH_ATTEMPTS} attempts`
+                  : `⚠️ Batch ${batchIndex + 1} had issues`,
+                description: errorMessage,
+                variant: "destructive",
+              });
+              break; // stop attempting this batch
             }
-            
-            toast({
-              title: isRateLimited ? `⏳ Rate limited - Batch ${batchIndex + 1}` : `⚠️ Batch ${batchIndex + 1} had issues`,
-              description: isRateLimited 
-                ? "API rate limit reached. Waiting 30s before continuing..."
-                : errorMessage,
-              variant: "destructive"
-            });
-            
-            // Extra wait time if rate limited
-            if (isRateLimited && batchIndex < batches.length - 1) {
-              await new Promise(resolve => setTimeout(resolve, 30000));
-            }
-          } else {
+
+            // Success path
             totalSuccessful += result.translations || 0;
             totalFailed += result.failed_count || 0;
-            console.log(`Batch ${batchIndex + 1} completed: ${result.translations} translations`);
+            console.log(`Batch ${batchIndex + 1} completed on attempt ${attempt}: ${result.translations} translations`);
+            batchSucceeded = true;
+          } catch (batchError: any) {
+            lastErrorMessage = batchError?.message || String(batchError);
+            console.error(`Batch ${batchIndex + 1} attempt ${attempt} error:`, batchError);
+            if (attempt < MAX_BATCH_ATTEMPTS) {
+              toast({
+                title: `⏳ Retrying batch ${batchIndex + 1} (${attempt + 1}/${MAX_BATCH_ATTEMPTS})`,
+                description: `Network or server error. Retrying in 30s…`,
+              });
+              await new Promise(resolve => setTimeout(resolve, 30000));
+              continue;
+            }
+            totalFailed += batch.length;
           }
-        } catch (batchError: any) {
-          console.error(`Batch ${batchIndex + 1} error:`, batchError);
-          totalFailed += batch.length;
         }
 
-        // Wait 20 seconds between batches to be safe with Gemini API rate limits
-        // The API has strict RPM limits, especially with large articles and table translations
+        if (!batchSucceeded && lastErrorMessage) {
+          console.warn(`Batch ${batchIndex + 1} gave up after ${MAX_BATCH_ATTEMPTS} attempts: ${lastErrorMessage}`);
+        }
+
+        // Wait 30 seconds between batches. gemini-2.5-flash free tier is roughly
+        // 10 RPM, and each language makes several API calls, so 30s keeps us
+        // safely under the per-minute ceiling.
         if (batchIndex < batches.length - 1) {
           toast({
             title: `⏳ Rate limit protection`,
-            description: `Waiting 20s before next batch to avoid API limits...`,
+            description: `Waiting 30s before next batch to avoid API limits...`,
           });
-          await new Promise(resolve => setTimeout(resolve, 20000));
+          await new Promise(resolve => setTimeout(resolve, 30000));
         }
       }
 
