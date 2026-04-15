@@ -66,6 +66,16 @@ const BlogEditor = () => {
   // Translation State
   const [availableTranslations, setAvailableTranslations] = useState<Array<{id: string, language: string, title: string}>>([]);
   const [translationIdToLink, setTranslationIdToLink] = useState("");
+
+  // Per-language queue state — populated by realtime subscription to
+  // translation_queue + a 5 s polling fallback (see useEffect below).
+  type TranslationJob = {
+    target_language: string;
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    retry_count: number;
+    error_message: string | null;
+  };
+  const [translationQueueJobs, setTranslationQueueJobs] = useState<TranslationJob[]>([]);
   
   // Track the original HTML loaded from the DB to restore tables safely
   const lastFetchedContentRef = useRef<string>('');
@@ -92,6 +102,72 @@ const BlogEditor = () => {
       setFormData(prev => ({ ...prev, translation_id: crypto.randomUUID() }));
     }
   }, [id]);
+
+  // Subscribe to translation_queue for this article's translation group.
+  // Pattern matches CampaignProgress: realtime first, polling fallback.
+  // Each row is one (article, language) pair; statuses are pending / processing
+  // / completed / failed, driven by process-translation-queue (cron-invoked
+  // worker). See supabase/migrations/20260415_create_translation_queue.sql.
+  useEffect(() => {
+    const translationId = formData.translation_id;
+    if (!translationId) return;
+
+    let cancelled = false;
+
+    const fetchQueue = async () => {
+      const { data } = await supabase
+        .from('translation_queue')
+        .select('target_language, status, retry_count, error_message')
+        .eq('translation_id', translationId);
+      if (!cancelled && data) {
+        setTranslationQueueJobs(data as TranslationJob[]);
+      }
+    };
+    fetchQueue();
+
+    const channel = supabase
+      .channel(`translation-queue-${translationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'translation_queue',
+          filter: `translation_id=eq.${translationId}`,
+        },
+        () => { fetchQueue(); },
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[translation_queue] realtime unavailable, using polling fallback');
+        }
+      });
+
+    // Polling fallback: 5 s cadence. Cheap (one SELECT per tick, filtered).
+    const pollInterval = setInterval(fetchQueue, 5000);
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
+  }, [formData.translation_id]);
+
+  // When any queue job flips to 'completed', refresh the sibling-translations
+  // list so the new article rows appear in the panel without a page reload.
+  const completedLangsKey = translationQueueJobs
+    .filter(j => j.status === 'completed')
+    .map(j => j.target_language)
+    .sort()
+    .join(',');
+  useEffect(() => {
+    if (!formData.translation_id || !id) return;
+    if (!completedLangsKey) return;
+    fetchTranslations(formData.translation_id, id);
+    // Depend on the *set* of completed languages — stable across polls,
+    // triggers only when new languages actually complete.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedLangsKey]);
 
   const fetchArticle = async (articleId: string) => {
     try {
@@ -278,27 +354,27 @@ const BlogEditor = () => {
 
   const handleCreateAllTranslations = async () => {
     if (!id) {
-      toast({ 
-        title: "Save First", 
+      toast({
+        title: "Save First",
         description: "Please save this article before creating translations.",
-        variant: "destructive" 
+        variant: "destructive",
       });
       return;
     }
 
     // Must be an English article to translate from
     if (formData.language !== 'en') {
-      toast({ 
-        title: "English Article Required", 
+      toast({
+        title: "English Article Required",
         description: "Translations can only be created from English articles.",
-        variant: "destructive" 
+        variant: "destructive",
       });
       return;
     }
 
     // Filter languages that don't have a translation yet
-    const languagesToCreate = LANGUAGES.filter(l => 
-      l.code !== 'en' && 
+    const languagesToCreate = LANGUAGES.filter(l =>
+      l.code !== 'en' &&
       !availableTranslations.some(t => t.language === l.code)
     );
 
@@ -307,185 +383,40 @@ const BlogEditor = () => {
       return;
     }
 
-    if (!confirm(`This will translate the article to ${languagesToCreate.length} languages using AI. This may take several minutes as translations are processed in batches. Continue?`)) return;
+    if (!confirm(`This will queue ${languagesToCreate.length} translation job(s). Each language is processed one-per-minute in the background — you can close this tab and come back later. Continue?`)) return;
 
     setGeneratingTranslations(true);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
+      // Fire-and-poll: enqueue-translations inserts one translation_queue row
+      // per language and returns immediately. Actual translation work happens
+      // in process-translation-queue, invoked by pg_cron every minute.
+      // Progress is surfaced via the realtime subscription to translation_queue
+      // set up in the useEffect above.
+      const { data, error } = await supabase.functions.invoke('enqueue-translations', {
+        body: {
+          article_id: id,
+          target_languages: languagesToCreate.map(l => l.code),
+        },
+      });
 
-      if (!token) throw new Error("User not authenticated");
-
-      // Process in batches of 1 language to avoid rate limiting with 2500-word articles
-      // With retry logic and longer articles, batches of 2+ can trigger Gemini API rate limits
-      const BATCH_SIZE = 1;
-      const langCodes = languagesToCreate.map(l => l.code);
-      const batches: string[][] = [];
-      
-      for (let i = 0; i < langCodes.length; i += BATCH_SIZE) {
-        batches.push(langCodes.slice(i, i + BATCH_SIZE));
+      if (error) throw error;
+      if (data?.success === false) {
+        throw new Error(data?.error || 'enqueue-translations returned an error');
       }
 
-      let totalSuccessful = 0;
-      let totalFailed = 0;
+      const queuedCount = data?.queued ?? languagesToCreate.length;
 
-      // Per-batch attempt helper: returns the fetch response parsed into
-      // { ok, status, result } so the caller can inspect WORKER_LIMIT / 429s.
-      const invokeTranslate = async (batch: string[]) => {
-        const response = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              article_id: id,
-              target_languages: batch,
-            }),
-          }
-        );
-        let result: any = {};
-        try {
-          result = await response.json();
-        } catch {
-          result = {};
-        }
-        return { response, result };
-      };
-
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        const batchLangNames = batch.map(code => LANGUAGES.find(l => l.code === code)?.name || code).join(', ');
-
-        toast({
-          title: `🔄 Translating batch ${batchIndex + 1}/${batches.length}`,
-          description: `Processing: ${batchLangNames}...`,
-        });
-
-        // Retry the same batch up to 3 attempts (1 initial + 2 retries) on
-        // recoverable failures (Supabase WORKER_LIMIT or Gemini rate limit).
-        // Each attempt is a fresh edge-function invocation with a fresh worker
-        // CPU/memory budget, which is the key to escaping WORKER_LIMIT.
-        const MAX_BATCH_ATTEMPTS = 3;
-        let attempt = 0;
-        let batchSucceeded = false;
-        let lastErrorMessage = "";
-
-        while (attempt < MAX_BATCH_ATTEMPTS && !batchSucceeded) {
-          attempt++;
-          try {
-            const { response, result } = await invokeTranslate(batch);
-
-            if (!response.ok || result.success === false) {
-              const errorMessage = result.error || result.message || 'Unknown error';
-              lastErrorMessage = errorMessage;
-              console.error(`Batch ${batchIndex + 1} attempt ${attempt}/${MAX_BATCH_ATTEMPTS} failed:`, errorMessage);
-              console.error(`Full response:`, result);
-
-              const isRateLimited = errorMessage.toLowerCase().includes('rate') ||
-                                    errorMessage.includes('429') ||
-                                    errorMessage.toLowerCase().includes('too many');
-              // Supabase returns { code: "WORKER_LIMIT" } (sometimes HTTP 546)
-              // when the edge function runs out of CPU/memory.
-              const isWorkerLimit = result.code === 'WORKER_LIMIT' ||
-                                    response.status === 546 ||
-                                    errorMessage.toLowerCase().includes('worker_limit') ||
-                                    errorMessage.toLowerCase().includes('compute resources');
-              const isRecoverable = isRateLimited || isWorkerLimit;
-
-              if (isRecoverable && attempt < MAX_BATCH_ATTEMPTS) {
-                const waitMs = isWorkerLimit ? 45000 : 60000;
-                toast({
-                  title: `⏳ Retrying batch ${batchIndex + 1} (${attempt + 1}/${MAX_BATCH_ATTEMPTS})`,
-                  description: isWorkerLimit
-                    ? `Supabase worker out of resources. Retrying with a fresh worker in ${Math.round(waitMs / 1000)}s…`
-                    : `Gemini rate limit. Retrying in ${Math.round(waitMs / 1000)}s…`,
-                });
-                await new Promise(resolve => setTimeout(resolve, waitMs));
-                continue; // retry same batch
-              }
-
-              // Non-recoverable or out of attempts: record partial results.
-              if (result.details) {
-                const detailsArray = Object.values(result.details);
-                const successCount = detailsArray.filter((d: any) => d.success).length;
-                const failCount = detailsArray.filter((d: any) => !d.success).length;
-                totalSuccessful += successCount;
-                totalFailed += failCount;
-              } else {
-                totalFailed += batch.length;
-              }
-
-              toast({
-                title: isRecoverable
-                  ? `❌ Batch ${batchIndex + 1} failed after ${MAX_BATCH_ATTEMPTS} attempts`
-                  : `⚠️ Batch ${batchIndex + 1} had issues`,
-                description: errorMessage,
-                variant: "destructive",
-              });
-              break; // stop attempting this batch
-            }
-
-            // Success path
-            totalSuccessful += result.translations || 0;
-            totalFailed += result.failed_count || 0;
-            console.log(`Batch ${batchIndex + 1} completed on attempt ${attempt}: ${result.translations} translations`);
-            batchSucceeded = true;
-          } catch (batchError: any) {
-            lastErrorMessage = batchError?.message || String(batchError);
-            console.error(`Batch ${batchIndex + 1} attempt ${attempt} error:`, batchError);
-            if (attempt < MAX_BATCH_ATTEMPTS) {
-              toast({
-                title: `⏳ Retrying batch ${batchIndex + 1} (${attempt + 1}/${MAX_BATCH_ATTEMPTS})`,
-                description: `Network or server error. Retrying in 30s…`,
-              });
-              await new Promise(resolve => setTimeout(resolve, 30000));
-              continue;
-            }
-            totalFailed += batch.length;
-          }
-        }
-
-        if (!batchSucceeded && lastErrorMessage) {
-          console.warn(`Batch ${batchIndex + 1} gave up after ${MAX_BATCH_ATTEMPTS} attempts: ${lastErrorMessage}`);
-        }
-
-        // Wait 30 seconds between batches. gemini-2.5-flash free tier is roughly
-        // 10 RPM, and each language makes several API calls, so 30s keeps us
-        // safely under the per-minute ceiling.
-        if (batchIndex < batches.length - 1) {
-          toast({
-            title: `⏳ Rate limit protection`,
-            description: `Waiting 30s before next batch to avoid API limits...`,
-          });
-          await new Promise(resolve => setTimeout(resolve, 30000));
-        }
-      }
-
-      if (totalSuccessful > 0) {
-        toast({ 
-          title: "✅ Batch Translation Complete", 
-          description: `Successfully translated to ${totalSuccessful}/${languagesToCreate.length} languages.${totalFailed > 0 ? ` (${totalFailed} failed)` : ''}` 
-        });
-      } else {
-        toast({ 
-          title: "❌ Translation Failed", 
-          description: "All translation batches failed. Please try again.",
-          variant: "destructive" 
-        });
-      }
-      
-      fetchTranslations(formData.translation_id, id);
-
+      toast({
+        title: `✅ Queued ${queuedCount} translation${queuedCount === 1 ? '' : 's'}`,
+        description: `Background worker processes 1 language/minute. Progress updates automatically — you can leave this tab.`,
+      });
     } catch (error: any) {
-      console.error('Batch translation error:', error);
-      toast({ 
-        title: "❌ Translation Failed", 
-        description: error.message || "Batch translation process failed.",
-        variant: "destructive" 
+      console.error('Enqueue translations error:', error);
+      toast({
+        title: "❌ Failed to Queue Translations",
+        description: error?.message || "Could not enqueue translations. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setGeneratingTranslations(false);
@@ -1206,6 +1137,48 @@ const BlogEditor = () => {
                     </div>
                   </div>
                   
+                  {/* Queue progress: shows per-language status pills for jobs
+                      that are still in-flight (pending / processing / failed).
+                      Completed jobs disappear from here and show up in the
+                      sibling-translations list below via fetchTranslations(). */}
+                  {(() => {
+                    const inFlight = translationQueueJobs.filter(
+                      j => j.status === 'pending' || j.status === 'processing' || j.status === 'failed'
+                    );
+                    if (inFlight.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {inFlight.map(job => {
+                          const styles =
+                            job.status === 'processing'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : job.status === 'failed'
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : 'bg-slate-50 text-slate-600 border-slate-200';
+                          const label =
+                            job.status === 'processing'
+                              ? 'translating'
+                              : job.status === 'failed'
+                                ? `failed${job.retry_count >= 3 ? '' : ' · will retry'}`
+                                : 'queued';
+                          return (
+                            <span
+                              key={job.target_language}
+                              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${styles}`}
+                              title={job.error_message || undefined}
+                            >
+                              {job.status === 'processing' && (
+                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                              )}
+                              <span className="font-medium uppercase">{job.target_language}</span>
+                              <span className="opacity-70">{label}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   <div className="text-sm space-y-2 mb-2">
                     {availableTranslations.length > 0 ? (
                       availableTranslations.map(t => (

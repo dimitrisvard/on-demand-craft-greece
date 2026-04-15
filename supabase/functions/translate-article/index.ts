@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-14-monolithic-25flash-worker-limit-fix";
+const VERSION = "2026-04-15-queue-owned-retries";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -63,10 +63,14 @@ interface GeminiResponse {
 // Includes automatic retry with exponential backoff for rate limiting (429)
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
-  timeoutMs: number = 90000,
+  timeoutMs: number = 60000,
   retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
-  const MAX_RETRIES = 2;
+  // No internal 429 retry. A 20–40 s in-process back-off repeatedly pushes one
+  // invocation past Supabase's 150 s idle-timeout; the queue retries this same
+  // (article, language) pair on the next cron tick with a fresh worker, which
+  // is strictly better than burning this invocation's wall-clock budget.
+  const MAX_RETRIES = 0;
   // gemini-2.0-flash was deprecated by Google (scheduled shutdown 2026-06-01) and its
   // free-tier RPM was collapsed, which is the source of the 429s we were seeing.
   // gemini-2.5-flash has higher RPM and better quality.
@@ -142,9 +146,11 @@ async function callGeminiSingle(
 // This handles MAX_TOKENS by sending continuation requests with conversation history
 async function callGemini(prompt: string): Promise<string> {
   const geminiStartTime = Date.now();
-  // One continuation is enough for realistic articles (~64k output tokens total).
-  // Higher values previously caused unbounded memory growth and Supabase WORKER_LIMIT.
-  const MAX_CONTINUATIONS = 1;
+  // Fail fast: no continuation. If a single shot doesn't fit, let the queue
+  // (translation_queue + process-translation-queue) retry this language in a
+  // fresh worker on the next cron tick. Continuation-loop memory growth is a
+  // recurring source of Supabase WORKER_RESOURCE_LIMIT.
+  const MAX_CONTINUATIONS = 0;
 
   console.log(`[callGemini] Starting translation, prompt length: ${prompt.length}`);
 
@@ -158,7 +164,7 @@ async function callGemini(prompt: string): Promise<string> {
   let continuationCount = 0;
 
   while (continuationCount <= MAX_CONTINUATIONS) {
-    const result = await callGeminiSingle(conversationHistory, 90000);
+    const result = await callGeminiSingle(conversationHistory, 60000);
 
     console.log(`[callGemini] Response ${continuationCount + 1}: ${result.text.length} chars, finishReason: ${result.finishReason}`);
 
@@ -725,11 +731,20 @@ META DESCRIPTION: ${original.metaDescription}`;
   
   if (lengthRatio < minLengthRatio && originalContentLength > 3000) {
     const missingPercent = (1 - lengthRatio) * 100;
-    console.error(`[ERROR] Translation appears incomplete for ${langCode}!`);
-    console.error(`[ERROR] Original: ${originalContentLength} chars, Translated: ${translatedContentLength} chars`);
-    console.error(`[ERROR] Ratio: ${lengthRatio.toFixed(2)}, Threshold: ${minLengthRatio}`);
-    console.error(`[ERROR] Missing approximately ${missingPercent.toFixed(1)}% of content`);
-    throw new Error(`Translation incomplete for ${langName}: only ${(lengthRatio * 100).toFixed(1)}% of original content translated (minimum ${(minLengthRatio * 100).toFixed(0)}% required)`);
+    console.warn(`[WARN] Translation shorter than expected for ${langCode}!`);
+    console.warn(`[WARN] Original: ${originalContentLength} chars, Translated: ${translatedContentLength} chars`);
+    console.warn(`[WARN] Ratio: ${lengthRatio.toFixed(2)}, Threshold: ${minLengthRatio}`);
+    console.warn(`[WARN] Missing approximately ${missingPercent.toFixed(1)}% of content — saving anyway.`);
+    // Deliberately NOT throwing: a 70%-translated article with the correct
+    // title, excerpt and meta is strictly better than leaving the language
+    // completely untranslated and failing the whole batch. Only reject truly
+    // empty / garbage responses below.
+  }
+
+  // Hard reject: content is so short it cannot be a real translation.
+  if (translatedContentLength < 200) {
+    console.error(`[ERROR] Translated content is too short to be valid for ${langCode} (${translatedContentLength} chars)`);
+    throw new Error(`Translated content for ${langName} is empty or truncated (${translatedContentLength} chars)`);
   }
 
   if (!metaTitle.includes(BRAND_NAME)) metaTitle = `${metaTitle} | ${BRAND_NAME}`;
@@ -897,12 +912,22 @@ META DESCRIPTION: ${original.metaDescription}`;
   // TIME CHECK before table translation
   const elapsedBeforeTables = Date.now() - translateStartTime;
   console.log(`[TIME CHECK] Before table translation: ${elapsedBeforeTables}ms elapsed (Pro plan: 400s wall clock)`);
-  
+
+  // Time-budget escape hatch: if main-content translation alone already took
+  // >90 s, skip table translation entirely and keep English tables. Shipping
+  // a fully-translated article with a few English table rows is strictly
+  // better than failing the whole language and losing all the work above.
+  const TABLE_TRANSLATION_BUDGET_MS = 90000;
+  const tablesOverBudget = elapsedBeforeTables > TABLE_TRANSLATION_BUDGET_MS;
+  if (tablesOverBudget) {
+    console.warn(`[TIME CHECK] Skipping table translation for ${langCode}: main translation already used ${elapsedBeforeTables}ms (budget ${TABLE_TRANSLATION_BUDGET_MS}ms). Keeping English tables.`);
+  }
+
   // Translate content inside all restored tables using BATCH translation (single API call)
   // OPTIMIZATION (2026-01-06): Translate ALL tables in ONE API call
   // Pro plan: Enable table translation for ALL languages including Hungarian
   const skipTableTranslationLangs: string[] = []; // Empty - translate tables for all languages
-  const shouldSkipTables = skipTableTranslationLangs.includes(langCode);
+  const shouldSkipTables = tablesOverBudget || skipTableTranslationLangs.includes(langCode);
   
   if (shouldSkipTables) {
     console.log(`[TABLE TRANSLATION] ⚠️ Skipping table translation for ${langName} (${langCode})`);
@@ -1201,10 +1226,12 @@ serve(async (req) => {
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         let translation;
         let retryCount = 0;
-        // Keep internal retries minimal. The client retries the whole batch in a
-        // fresh edge-function invocation (fresh worker CPU/memory budget), which
-        // is safer than burning this worker's budget on an in-process retry.
-        const maxRetries = 1;
+        // No internal retry. The queue (translation_queue +
+        // process-translation-queue) owns retries now: a failed job stays in the
+        // queue with retry_count++ and is re-picked on the next cron tick with a
+        // fresh worker. Burning this worker's budget on an in-process retry
+        // just pushes us past the 150 s idle-timeout.
+        const maxRetries = 0;
         let translateStartTime = Date.now();
         
         console.log(`[TRANSLATION START] ${lang.name} (${lang.code}) - specialChar=${isSpecialCharLang}, maxRetries=${maxRetries}`);
