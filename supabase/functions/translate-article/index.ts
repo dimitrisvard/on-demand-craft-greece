@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-15-503-retry-and-fallback";
+const VERSION = "2026-04-15-direct-sequential";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -117,9 +117,10 @@ async function callGeminiSingle(
 
     clearTimeout(timeoutId);
 
-    // 429: rate limit / quota. The queue (translation_queue +
-    // process-translation-queue) retries on the next cron tick with a fresh
-    // worker, so we do NOT retry in-process.
+    // 429: rate limit / quota. The caller (BlogEditor runs one language per
+    // HTTP call, auto-translate-articles the same) can retry this language
+    // from a fresh edge-function invocation; eating the 150 s idle-timeout
+    // budget on in-process sleeps just makes the failure harder to recover.
     if (response.status === 429) {
       const body = await response.text().catch(() => "");
       console.warn(`[GEMINI 429] model=${model} status=429 body=${body.substring(0, 300)}`);
@@ -210,10 +211,10 @@ async function callGeminiWithFallback(
 // This handles MAX_TOKENS by sending continuation requests with conversation history
 async function callGemini(prompt: string): Promise<string> {
   const geminiStartTime = Date.now();
-  // Fail fast: no continuation. If a single shot doesn't fit, let the queue
-  // (translation_queue + process-translation-queue) retry this language in a
-  // fresh worker on the next cron tick. Continuation-loop memory growth is a
-  // recurring source of Supabase WORKER_RESOURCE_LIMIT.
+  // Fail fast: no continuation. If a single shot doesn't fit, let the caller
+  // retry this language in a fresh edge-function invocation. Continuation-loop
+  // conversation-history growth is a recurring source of Supabase
+  // WORKER_RESOURCE_LIMIT, so we never loop.
   const MAX_CONTINUATIONS = 0;
 
   console.log(`[callGemini] Starting translation, prompt length: ${prompt.length}`);
@@ -1298,11 +1299,10 @@ serve(async (req) => {
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
         let translation;
         let retryCount = 0;
-        // No internal retry. The queue (translation_queue +
-        // process-translation-queue) owns retries now: a failed job stays in the
-        // queue with retry_count++ and is re-picked on the next cron tick with a
-        // fresh worker. Burning this worker's budget on an in-process retry
-        // just pushes us past the 150 s idle-timeout.
+        // No internal retry. The caller drives retries: BlogEditor surfaces
+        // a "Retry failed" button and auto-translate-articles re-picks missing
+        // languages on the next cron tick. Burning this invocation's budget on
+        // an in-process retry just pushes us past the 150 s idle-timeout.
         const maxRetries = 0;
         let translateStartTime = Date.now();
         
@@ -1389,10 +1389,11 @@ serve(async (req) => {
           console.warn(`[GEMINI_OVERLOADED] ${lang.code}: all fallback models returned 5xx. consecutive=${consecutiveOverloaded}`);
 
           // If 3 languages in a row hit overload, stop burning budget on the
-          // rest — Gemini is clearly having a bad minute. The queue will
-          // retry remaining languages on the next cron tick.
+          // rest — Gemini is clearly having a bad minute. The caller can re-run
+          // the remaining languages (BlogEditor "Retry failed" / auto-translate
+          // cron) once Gemini recovers.
           if (consecutiveOverloaded >= 3 && i < langs.length - 1) {
-            console.warn(`[GEMINI_OVERLOADED] 3 consecutive overloads, bailing out. Remaining languages will be retried by the queue.`);
+            console.warn(`[GEMINI_OVERLOADED] 3 consecutive overloads, bailing out. Remaining languages marked skipped; caller should retry.`);
             for (let j = i + 1; j < langs.length; j++) {
               results[langs[j].code] = {
                 success: false,

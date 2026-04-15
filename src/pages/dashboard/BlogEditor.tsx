@@ -67,16 +67,16 @@ const BlogEditor = () => {
   const [availableTranslations, setAvailableTranslations] = useState<Array<{id: string, language: string, title: string}>>([]);
   const [translationIdToLink, setTranslationIdToLink] = useState("");
 
-  // Per-language queue state — populated by realtime subscription to
-  // translation_queue + a 5 s polling fallback (see useEffect below).
-  type TranslationJob = {
-    target_language: string;
-    status: 'pending' | 'processing' | 'completed' | 'failed';
-    retry_count: number;
-    error_message: string | null;
-  };
-  const [translationQueueJobs, setTranslationQueueJobs] = useState<TranslationJob[]>([]);
-  
+  // Per-language progress for an in-progress "Translate All" run. Lives only
+  // in client memory while the user watches the editor — translations are
+  // driven by direct, sequential calls to the translate-article edge function
+  // (one language per call, which comfortably fits inside the 150 s edge
+  // function idle-timeout). There is no DB queue.
+  type TranslationLangStatus = 'pending' | 'translating' | 'completed' | 'failed' | 'overloaded';
+  type TranslationProgressEntry = { status: TranslationLangStatus; error?: string };
+  const [translationProgress, setTranslationProgress] = useState<Record<string, TranslationProgressEntry>>({});
+
+
   // Track the original HTML loaded from the DB to restore tables safely
   const lastFetchedContentRef = useRef<string>('');
 
@@ -102,72 +102,6 @@ const BlogEditor = () => {
       setFormData(prev => ({ ...prev, translation_id: crypto.randomUUID() }));
     }
   }, [id]);
-
-  // Subscribe to translation_queue for this article's translation group.
-  // Pattern matches CampaignProgress: realtime first, polling fallback.
-  // Each row is one (article, language) pair; statuses are pending / processing
-  // / completed / failed, driven by process-translation-queue (cron-invoked
-  // worker). See supabase/migrations/20260415_create_translation_queue.sql.
-  useEffect(() => {
-    const translationId = formData.translation_id;
-    if (!translationId) return;
-
-    let cancelled = false;
-
-    const fetchQueue = async () => {
-      const { data } = await supabase
-        .from('translation_queue')
-        .select('target_language, status, retry_count, error_message')
-        .eq('translation_id', translationId);
-      if (!cancelled && data) {
-        setTranslationQueueJobs(data as TranslationJob[]);
-      }
-    };
-    fetchQueue();
-
-    const channel = supabase
-      .channel(`translation-queue-${translationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'translation_queue',
-          filter: `translation_id=eq.${translationId}`,
-        },
-        () => { fetchQueue(); },
-      )
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('[translation_queue] realtime unavailable, using polling fallback');
-        }
-      });
-
-    // Polling fallback: 5 s cadence. Cheap (one SELECT per tick, filtered).
-    const pollInterval = setInterval(fetchQueue, 5000);
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-      clearInterval(pollInterval);
-    };
-  }, [formData.translation_id]);
-
-  // When any queue job flips to 'completed', refresh the sibling-translations
-  // list so the new article rows appear in the panel without a page reload.
-  const completedLangsKey = translationQueueJobs
-    .filter(j => j.status === 'completed')
-    .map(j => j.target_language)
-    .sort()
-    .join(',');
-  useEffect(() => {
-    if (!formData.translation_id || !id) return;
-    if (!completedLangsKey) return;
-    fetchTranslations(formData.translation_id, id);
-    // Depend on the *set* of completed languages — stable across polls,
-    // triggers only when new languages actually complete.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedLangsKey]);
 
   const fetchArticle = async (articleId: string) => {
     try {
@@ -368,6 +302,99 @@ const BlogEditor = () => {
     }
   };
 
+  /**
+   * Core sequential translator. Iterates over `langs` calling translate-article
+   * once per language. Because each call translates exactly one language, it
+   * fits comfortably inside the edge function's 150 s idle timeout / 400 s wall
+   * clock and never triggers WORKER_RESOURCE_LIMIT. Per-language status is
+   * surfaced to the UI via `translationProgress`.
+   *
+   * Returns counts so the caller can show a summary toast.
+   */
+  const runSequentialTranslations = async (
+    langs: Array<{ code: string; name: string }>,
+  ): Promise<{ succeeded: number; overloaded: number; failed: number }> => {
+    if (!id) return { succeeded: 0, overloaded: 0, failed: 0 };
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("User not authenticated");
+
+    // Seed "pending" status for every language we're about to run.
+    setTranslationProgress(prev => {
+      const next = { ...prev };
+      for (const l of langs) next[l.code] = { status: 'pending' };
+      return next;
+    });
+
+    let succeeded = 0;
+    let overloaded = 0;
+    let failed = 0;
+
+    for (let i = 0; i < langs.length; i++) {
+      const lang = langs[i];
+      setTranslationProgress(p => ({ ...p, [lang.code]: { status: 'translating' } }));
+
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-article`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ article_id: id, target_languages: [lang.code] }),
+          },
+        );
+
+        const result = await res.json().catch(() => ({} as any));
+        const detail = result?.details?.[lang.code];
+        const isOverloaded = result?.gemini_overloaded === true ||
+                             detail?.error === 'GEMINI_OVERLOADED';
+        const ok = res.ok && detail?.success === true;
+
+        if (ok) {
+          setTranslationProgress(p => ({ ...p, [lang.code]: { status: 'completed' } }));
+          succeeded += 1;
+        } else if (isOverloaded) {
+          setTranslationProgress(p => ({
+            ...p,
+            [lang.code]: { status: 'overloaded', error: 'Gemini temporarily overloaded' },
+          }));
+          overloaded += 1;
+        } else {
+          const msg = (detail?.error || result?.error || `HTTP ${res.status}`).toString().slice(0, 500);
+          setTranslationProgress(p => ({
+            ...p,
+            [lang.code]: { status: 'failed', error: msg },
+          }));
+          failed += 1;
+        }
+      } catch (err: any) {
+        setTranslationProgress(p => ({
+          ...p,
+          [lang.code]: { status: 'failed', error: err?.message || 'network error' },
+        }));
+        failed += 1;
+      }
+
+      // Refresh the sibling-translations panel so the new article shows up
+      // immediately after each successful language.
+      if (formData.translation_id) {
+        fetchTranslations(formData.translation_id, id);
+      }
+
+      // Small rate-limit gap between languages. gemini-2.5-flash free tier is
+      // ~10 RPM; each language spends a few calls, so 3 s is plenty of headroom.
+      if (i < langs.length - 1) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    return { succeeded, overloaded, failed };
+  };
+
   const handleCreateAllTranslations = async () => {
     if (!id) {
       toast({
@@ -399,40 +426,55 @@ const BlogEditor = () => {
       return;
     }
 
-    if (!confirm(`This will queue ${languagesToCreate.length} translation job(s). Each language is processed one-per-minute in the background — you can close this tab and come back later. Continue?`)) return;
+    if (!confirm(`This will translate ${languagesToCreate.length} language(s), one after the other. Expect roughly ${languagesToCreate.length} minute(s); please keep this tab open until it finishes. Continue?`)) return;
 
     setGeneratingTranslations(true);
-
     try {
-      // Fire-and-poll: enqueue-translations inserts one translation_queue row
-      // per language and returns immediately. Actual translation work happens
-      // in process-translation-queue, invoked by pg_cron every minute.
-      // Progress is surfaced via the realtime subscription to translation_queue
-      // set up in the useEffect above.
-      const { data, error } = await supabase.functions.invoke('enqueue-translations', {
-        body: {
-          article_id: id,
-          target_languages: languagesToCreate.map(l => l.code),
-        },
-      });
+      const { succeeded, overloaded, failed } = await runSequentialTranslations(languagesToCreate);
 
-      if (error) throw error;
-      if (data?.success === false) {
-        throw new Error(data?.error || 'enqueue-translations returned an error');
+      if (failed === 0 && overloaded === 0) {
+        toast({
+          title: `✅ Translated ${succeeded} language${succeeded === 1 ? '' : 's'}`,
+          description: 'All missing languages are now published.',
+        });
+      } else if (succeeded === 0) {
+        toast({
+          title: '❌ Translations failed',
+          description: `${failed} failed${overloaded ? `, ${overloaded} overloaded` : ''}. Use "Retry failed" to try again.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: '⚠️ Partial translation',
+          description: `${succeeded} succeeded, ${failed} failed${overloaded ? `, ${overloaded} overloaded` : ''}. Use "Retry failed" for the rest.`,
+        });
       }
-
-      const queuedCount = data?.queued ?? languagesToCreate.length;
-
-      toast({
-        title: `✅ Queued ${queuedCount} translation${queuedCount === 1 ? '' : 's'}`,
-        description: `Background worker processes 1 language/minute. Progress updates automatically — you can leave this tab.`,
-      });
     } catch (error: any) {
-      console.error('Enqueue translations error:', error);
+      console.error('Translate all error:', error);
       toast({
-        title: "❌ Failed to Queue Translations",
-        description: error?.message || "Could not enqueue translations. Please try again.",
-        variant: "destructive",
+        title: '❌ Translation Run Failed',
+        description: error?.message || 'Could not start translations.',
+        variant: 'destructive',
+      });
+    } finally {
+      setGeneratingTranslations(false);
+    }
+  };
+
+  const handleRetryFailedTranslations = async () => {
+    const codes = Object.entries(translationProgress)
+      .filter(([, entry]) => entry.status === 'failed' || entry.status === 'overloaded')
+      .map(([code]) => code);
+    const retryLangs = LANGUAGES.filter(l => codes.includes(l.code));
+    if (retryLangs.length === 0) return;
+
+    setGeneratingTranslations(true);
+    try {
+      const { succeeded, overloaded, failed } = await runSequentialTranslations(retryLangs);
+      toast({
+        title: failed === 0 && overloaded === 0 ? '✅ Retried successfully' : '⚠️ Retry partial',
+        description: `${succeeded} succeeded, ${failed} failed${overloaded ? `, ${overloaded} overloaded` : ''}.`,
+        variant: failed === 0 && overloaded === 0 ? 'default' : 'destructive',
       });
     } finally {
       setGeneratingTranslations(false);
@@ -1153,53 +1195,66 @@ const BlogEditor = () => {
                     </div>
                   </div>
                   
-                  {/* Queue progress: shows per-language status pills for jobs
-                      that are still in-flight (pending / processing / failed).
-                      Completed jobs disappear from here and show up in the
-                      sibling-translations list below via fetchTranslations(). */}
+                  {/* Per-language progress pills for the current sequential
+                      "Translate All" run. Driven entirely by local state
+                      (translationProgress) — no DB queue, no realtime. */}
                   {(() => {
-                    const inFlight = translationQueueJobs.filter(
-                      j => j.status === 'pending' || j.status === 'processing' || j.status === 'failed'
+                    const entries = Object.entries(translationProgress).filter(
+                      ([, entry]) =>
+                        entry.status === 'pending' ||
+                        entry.status === 'translating' ||
+                        entry.status === 'failed' ||
+                        entry.status === 'overloaded',
                     );
-                    if (inFlight.length === 0) return null;
+                    if (entries.length === 0) return null;
+                    const retryable = entries.filter(
+                      ([, e]) => e.status === 'failed' || e.status === 'overloaded',
+                    );
                     return (
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {inFlight.map(job => {
-                          const isOverloaded = job.error_message === 'GEMINI_OVERLOADED';
-                          const styles =
-                            job.status === 'processing'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : job.status === 'failed'
-                                ? (isOverloaded
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-red-50 text-red-700 border-red-200')
-                                : 'bg-slate-50 text-slate-600 border-slate-200';
-                          const label =
-                            job.status === 'processing'
-                              ? 'translating'
-                              : job.status === 'failed'
-                                ? (isOverloaded
-                                    ? (job.retry_count >= 3 ? 'overloaded' : 'overloaded · will retry')
-                                    : `failed${job.retry_count >= 3 ? '' : ' · will retry'}`)
-                                : 'queued';
-                          return (
-                            <span
-                              key={job.target_language}
-                              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${styles}`}
-                              title={
-                                isOverloaded
-                                  ? 'Gemini is temporarily overloaded. Will retry automatically in the background.'
-                                  : (job.error_message || undefined)
-                              }
-                            >
-                              {job.status === 'processing' && (
-                                <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                              )}
-                              <span className="font-medium uppercase">{job.target_language}</span>
-                              <span className="opacity-70">{label}</span>
-                            </span>
-                          );
-                        })}
+                      <div className="mb-2 space-y-1">
+                        <div className="flex flex-wrap gap-1">
+                          {entries.map(([code, entry]) => {
+                            const styles =
+                              entry.status === 'translating'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : entry.status === 'overloaded'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : entry.status === 'failed'
+                                    ? 'bg-red-50 text-red-700 border-red-200'
+                                    : 'bg-slate-50 text-slate-600 border-slate-200';
+                            const label =
+                              entry.status === 'translating'
+                                ? 'translating'
+                                : entry.status === 'overloaded'
+                                  ? 'overloaded'
+                                  : entry.status === 'failed'
+                                    ? 'failed'
+                                    : 'queued';
+                            return (
+                              <span
+                                key={code}
+                                className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${styles}`}
+                                title={entry.error || undefined}
+                              >
+                                {entry.status === 'translating' && (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                )}
+                                <span className="font-medium uppercase">{code}</span>
+                                <span className="opacity-70">{label}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {retryable.length > 0 && !generatingTranslations && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={handleRetryFailedTranslations}
+                          >
+                            Retry failed ({retryable.length})
+                          </Button>
+                        )}
                       </div>
                     );
                   })()}

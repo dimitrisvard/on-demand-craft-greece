@@ -40,6 +40,3 @@ verify_jwt = false
 
 [functions.extract-flat-pattern]
 verify_jwt = false
-
-[functions.process-translation-queue]
-verify_jwt = false
