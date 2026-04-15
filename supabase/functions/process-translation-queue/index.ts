@@ -161,10 +161,21 @@ serve(async (req) => {
       );
     }
 
-    const errorMsg =
-      translateResult?.error ||
-      translateResult?.message ||
-      `translate-article returned status ${translateResponse.status}`;
+    // Prefer the structured overload signal: translate-article returns
+    // { gemini_overloaded: true, details: { <lang>: { error: "GEMINI_OVERLOADED" } } }
+    // when every fallback model returned 5xx. Preserving this string in
+    // error_message lets the BlogEditor UI show a friendly "Gemini overloaded —
+    // will retry" pill instead of a generic failure toast.
+    const langDetail = translateResult?.details?.[job.target_language];
+    const overloaded =
+      translateResult?.gemini_overloaded === true ||
+      langDetail?.error === "GEMINI_OVERLOADED";
+
+    const errorMsg = overloaded
+      ? "GEMINI_OVERLOADED"
+      : (translateResult?.error ||
+         translateResult?.message ||
+         `translate-article returned status ${translateResponse.status}`);
 
     const { error: failError } = await supabase.rpc("mark_translation_job_failed", {
       p_queue_id: job.queue_id,

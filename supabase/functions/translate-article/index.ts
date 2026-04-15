@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-15-queue-owned-retries";
+const VERSION = "2026-04-15-503-retry-and-fallback";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -59,38 +59,56 @@ interface GeminiResponse {
   error?: { message: string };
 }
 
-// Helper function to make a single Gemini API call with conversation history
-// Includes automatic retry with exponential backoff for rate limiting (429)
+// Model-fallback chain. Gemini 2.5-flash is frequently 503-overloaded at peak
+// hours; 2.5-flash-lite and 2.0-flash-lite are lower-traffic alternatives that
+// still produce acceptable translations. We try them in this order.
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash-lite",
+];
+
+// Sentinel error thrown by callGeminiSingle when all in-process retries for a
+// single model return 5xx/overload. callGemini catches this and moves to the
+// next model in GEMINI_MODELS; if every model is overloaded, the error
+// propagates up and is detected by the language loop.
+class GeminiOverloadedError extends Error {
+  constructor(public readonly model: string, public readonly status: number, msg: string) {
+    super(msg);
+    this.name = "GeminiOverloadedError";
+  }
+}
+
+// Single Gemini API call with model parameter and status-aware retry policy:
+//   - 429 (quota/rate limit): throw immediately. Queue owns the retry.
+//     Long in-process back-offs eat the Supabase 150 s idle-timeout budget.
+//   - 503 / 500 (overload / server error): retry up to 3 times with short
+//     back-off (3s, 6s, 12s). These clear in seconds and are the common
+//     failure mode at peak hours.
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
+  model: string,
   timeoutMs: number = 60000,
   retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
-  // No internal 429 retry. A 20–40 s in-process back-off repeatedly pushes one
-  // invocation past Supabase's 150 s idle-timeout; the queue retries this same
-  // (article, language) pair on the next cron tick with a fresh worker, which
-  // is strictly better than burning this invocation's wall-clock budget.
-  const MAX_RETRIES = 0;
-  // gemini-2.0-flash was deprecated by Google (scheduled shutdown 2026-06-01) and its
-  // free-tier RPM was collapsed, which is the source of the 429s we were seeing.
-  // gemini-2.5-flash has higher RPM and better quality.
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
-  
+  const OVERLOAD_MAX_RETRIES = 3;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const requestBody = {
       contents,
-      generationConfig: { 
-        temperature: 0.3, 
+      generationConfig: {
+        temperature: 0.3,
         maxOutputTokens: 32768, // Maximum for Gemini 2.5 Flash
       },
     };
-    
+
     const response = await fetch(url, {
       method: "POST",
-      headers: { 
+      headers: {
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify(requestBody),
@@ -99,47 +117,93 @@ async function callGeminiSingle(
 
     clearTimeout(timeoutId);
 
-    // Handle rate limiting (429) with exponential backoff
+    // 429: rate limit / quota. The queue (translation_queue +
+    // process-translation-queue) retries on the next cron tick with a fresh
+    // worker, so we do NOT retry in-process.
     if (response.status === 429) {
-      if (retryCount >= MAX_RETRIES) {
-        throw new Error(`Gemini API rate limited after ${MAX_RETRIES} retries. Please wait a few minutes and try again.`);
+      const body = await response.text().catch(() => "");
+      console.warn(`[GEMINI 429] model=${model} status=429 body=${body.substring(0, 300)}`);
+      throw new Error(`Gemini API rate limited (429) on ${model}: ${body.substring(0, 200)}`);
+    }
+
+    // 503 / 500: Google infra overload. Short back-off, retry up to 3 times,
+    // then surface a GeminiOverloadedError so the caller can try the next
+    // model in the fallback chain.
+    if (response.status === 503 || response.status === 500) {
+      const body = await response.text().catch(() => "");
+      console.warn(`[GEMINI ${response.status}] model=${model} retry=${retryCount + 1}/${OVERLOAD_MAX_RETRIES} body=${body.substring(0, 500)}`);
+
+      if (retryCount >= OVERLOAD_MAX_RETRIES - 1) {
+        // Exhausted retries on this model. Caller should fall back.
+        throw new GeminiOverloadedError(
+          model,
+          response.status,
+          `Gemini ${response.status} on ${model} after ${OVERLOAD_MAX_RETRIES} retries: ${body.substring(0, 200)}`,
+        );
       }
-      
-      // Tightened backoff: 20s, 40s (capped). Longer waits inside one invocation
-      // eat the Supabase worker CPU/wall-clock budget and trigger WORKER_LIMIT.
-      // The client retries the whole batch on failure, giving us a fresh worker.
-      const waitTime = Math.min(20000 * Math.pow(2, retryCount), 40000);
-      console.warn(`[RATE LIMIT] Gemini API returned 429, waiting ${waitTime/1000}s before retry ${retryCount + 1}/${MAX_RETRIES}...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      
-      // Recursive retry
-      return callGeminiSingle(contents, timeoutMs, retryCount + 1);
+
+      // 3s, 6s, 12s — fits comfortably inside the 60 s per-call timeout.
+      const waitTime = 3000 * Math.pow(2, retryCount);
+      console.warn(`[GEMINI ${response.status}] waiting ${waitTime / 1000}s before retry…`);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+      return callGeminiSingle(contents, model, timeoutMs, retryCount + 1);
     }
 
     if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Gemini API error: ${response.status} - ${err.substring(0, 200)}`);
+      const err = await response.text().catch(() => "");
+      throw new Error(`Gemini API error (${model}): ${response.status} - ${err.substring(0, 200)}`);
     }
 
     const data: GeminiResponse = await response.json();
-    if (data.error) throw new Error(`Gemini error: ${data.error.message}`);
-    
+    if (data.error) throw new Error(`Gemini error (${model}): ${data.error.message}`);
+
     const candidate = data.candidates?.[0];
     if (!candidate?.content?.parts?.[0]?.text) {
-      throw new Error("Empty Gemini response");
+      throw new Error(`Empty Gemini response (${model})`);
     }
-    
+
     return {
       text: candidate.content.parts[0].text,
-      finishReason: candidate.finishReason || "UNKNOWN"
+      finishReason: candidate.finishReason || "UNKNOWN",
     };
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === "AbortError") {
-      throw new Error(`Gemini API request timeout (${Math.round(timeoutMs / 1000)}s)`);
+      throw new Error(`Gemini API request timeout (${Math.round(timeoutMs / 1000)}s) on ${model}`);
     }
     throw error;
   }
+}
+
+// Try one (contents, model) pair. If the model is overloaded (5xx) even
+// after callGeminiSingle's internal 3-retry backoff, walk the fallback chain
+// (GEMINI_MODELS) to the next lighter model. Propagates GeminiOverloadedError
+// only when every model in the chain is exhausted.
+async function callGeminiWithFallback(
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>,
+  timeoutMs: number,
+): Promise<{ text: string; finishReason: string; modelUsed: string }> {
+  let lastOverload: GeminiOverloadedError | null = null;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const res = await callGeminiSingle(contents, model, timeoutMs);
+      if (model !== GEMINI_MODELS[0]) {
+        console.warn(`[GEMINI FALLBACK] Succeeded on fallback model "${model}" (primary was overloaded)`);
+      }
+      return { ...res, modelUsed: model };
+    } catch (err: any) {
+      if (err instanceof GeminiOverloadedError) {
+        console.warn(`[GEMINI FALLBACK] Model "${model}" overloaded (${err.status}), trying next model…`);
+        lastOverload = err;
+        continue;
+      }
+      // 429 / auth / unknown — don't try fallback models, propagate.
+      throw err;
+    }
+  }
+  // Every model overloaded.
+  throw lastOverload ?? new GeminiOverloadedError("all", 503, "All Gemini fallback models overloaded");
 }
 
 // Main Gemini function with continuation loop for handling token limits
@@ -162,9 +226,11 @@ async function callGemini(prompt: string): Promise<string> {
 
   let fullResponse = "";
   let continuationCount = 0;
+  let lastModelUsed = GEMINI_MODELS[0];
 
   while (continuationCount <= MAX_CONTINUATIONS) {
-    const result = await callGeminiSingle(conversationHistory, 60000);
+    const result = await callGeminiWithFallback(conversationHistory, 60000);
+    lastModelUsed = result.modelUsed;
 
     console.log(`[callGemini] Response ${continuationCount + 1}: ${result.text.length} chars, finishReason: ${result.finishReason}`);
 
@@ -206,7 +272,7 @@ async function callGemini(prompt: string): Promise<string> {
   }
   
   const geminiDuration = Date.now() - geminiStartTime;
-  console.log(`[callGemini] Total duration: ${geminiDuration}ms, continuations: ${continuationCount}`);
+  console.log(`[callGemini] Total duration: ${geminiDuration}ms, continuations: ${continuationCount}, model used: ${lastModelUsed}`);
   
   if (!fullResponse) {
     throw new Error("Empty Gemini response after all attempts");
@@ -1186,6 +1252,12 @@ serve(async (req) => {
     const results: Record<string, any> = {};
     const urls: string[] = [`${siteUrl}/en/blog/${master.slug}`];
 
+    // Track back-to-back GEMINI_OVERLOADED failures. If we hit 3 in a row we
+    // bail out: the remaining languages would just fail the same way, and the
+    // queue will retry them on the next cron tick when Gemini is less busy.
+    let consecutiveOverloaded = 0;
+    let anyGeminiOverloaded = false;
+
     // Hard ceiling below the 400s Pro-plan wall clock. If we're close to the
     // limit, return partial results cleanly so the client can retry the
     // remaining languages in a fresh invocation instead of being WORKER_LIMIT'd.
@@ -1287,14 +1359,54 @@ serve(async (req) => {
           console.log(`✓ ${lang.name} complete`);
         }
 
+        // Reset the overload counter on any non-overloaded outcome (success or
+        // duplicate). Only consecutive overloads should trigger early-break.
+        consecutiveOverloaded = 0;
+
       } catch (err: any) {
         const isSpecialCharLang = lang.code === "hu" || lang.code === "fi" || lang.code === "cs" || lang.code === "pl";
+        const isOverloaded = err instanceof GeminiOverloadedError ||
+          err?.name === "GeminiOverloadedError" ||
+          /Gemini.*(503|500|overloaded|UNAVAILABLE)/i.test(err?.message || "");
+
         console.error(`✗ ${lang.code} failed:`, err.message);
         if (isSpecialCharLang) {
           console.error(`[SPECIAL CHAR LANG ERROR] ${lang.name} (${lang.code}) translation failed. This language uses special characters - check encoding and response parsing.`);
           console.error(`[ERROR DETAILS] Error type: ${err.name}, Message: ${err.message}`);
         }
-        results[lang.code] = { success: false, error: err.message, langCode: lang.code, isSpecialCharLang };
+
+        if (isOverloaded) {
+          anyGeminiOverloaded = true;
+          consecutiveOverloaded += 1;
+          results[lang.code] = {
+            success: false,
+            error: "GEMINI_OVERLOADED",
+            error_detail: err.message,
+            retry_later: true,
+            langCode: lang.code,
+            isSpecialCharLang,
+          };
+          console.warn(`[GEMINI_OVERLOADED] ${lang.code}: all fallback models returned 5xx. consecutive=${consecutiveOverloaded}`);
+
+          // If 3 languages in a row hit overload, stop burning budget on the
+          // rest — Gemini is clearly having a bad minute. The queue will
+          // retry remaining languages on the next cron tick.
+          if (consecutiveOverloaded >= 3 && i < langs.length - 1) {
+            console.warn(`[GEMINI_OVERLOADED] 3 consecutive overloads, bailing out. Remaining languages will be retried by the queue.`);
+            for (let j = i + 1; j < langs.length; j++) {
+              results[langs[j].code] = {
+                success: false,
+                error: "GEMINI_OVERLOADED",
+                retry_later: true,
+                skipped: true,
+              };
+            }
+            break;
+          }
+        } else {
+          consecutiveOverloaded = 0;
+          results[lang.code] = { success: false, error: err.message, langCode: lang.code, isSpecialCharLang };
+        }
       }
 
       // Delay between languages to avoid rate limiting. With gemini-2.5-flash
@@ -1327,6 +1439,7 @@ serve(async (req) => {
         execution_time_ms: totalTime,
         indexing: indexed,
         details: results,
+        gemini_overloaded: anyGeminiOverloaded,
       }),
       { status: successful > 0 ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

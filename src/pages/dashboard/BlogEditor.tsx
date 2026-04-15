@@ -326,26 +326,42 @@ const BlogEditor = () => {
 
       const result = await response.json();
 
+      // Gemini overload is a transient Google infra issue, not a code failure.
+      // Show an informative toast and bail without spamming retries — the user
+      // can re-trigger in a few minutes. (Automatic retries for the "Translate
+      // All" flow are handled by the queue worker, not this button.)
+      const langDetail = result?.details?.[targetLang];
+      const isOverloaded = result?.gemini_overloaded === true ||
+                           langDetail?.error === "GEMINI_OVERLOADED";
+      if (isOverloaded && !langDetail?.success) {
+        toast({
+          title: "⚠️ Gemini temporarily overloaded",
+          description: "Google's translation model is overloaded right now. Please try again in a few minutes.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(result.error || result.message || "Translation failed");
       }
 
       const langName = LANGUAGES.find(l => l.code === targetLang)?.name || targetLang.toUpperCase();
-      
-      toast({ 
-        title: "✅ Translation Created", 
-        description: `Successfully translated to ${langName}.` 
+
+      toast({
+        title: "✅ Translation Created",
+        description: `Successfully translated to ${langName}.`
       });
-      
+
       // Refresh list
       fetchTranslations(formData.translation_id, id);
 
     } catch (error: any) {
       console.error('Error creating translation:', error);
-      toast({ 
-        title: "❌ Translation Failed", 
+      toast({
+        title: "❌ Translation Failed",
         description: error.message || "Failed to create translation.",
-        variant: "destructive" 
+        variant: "destructive"
       });
     } finally {
       setGeneratingTranslations(false);
@@ -1149,23 +1165,32 @@ const BlogEditor = () => {
                     return (
                       <div className="flex flex-wrap gap-1 mb-2">
                         {inFlight.map(job => {
+                          const isOverloaded = job.error_message === 'GEMINI_OVERLOADED';
                           const styles =
                             job.status === 'processing'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'
                               : job.status === 'failed'
-                                ? 'bg-red-50 text-red-700 border-red-200'
+                                ? (isOverloaded
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-red-50 text-red-700 border-red-200')
                                 : 'bg-slate-50 text-slate-600 border-slate-200';
                           const label =
                             job.status === 'processing'
                               ? 'translating'
                               : job.status === 'failed'
-                                ? `failed${job.retry_count >= 3 ? '' : ' · will retry'}`
+                                ? (isOverloaded
+                                    ? (job.retry_count >= 3 ? 'overloaded' : 'overloaded · will retry')
+                                    : `failed${job.retry_count >= 3 ? '' : ' · will retry'}`)
                                 : 'queued';
                           return (
                             <span
                               key={job.target_language}
                               className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${styles}`}
-                              title={job.error_message || undefined}
+                              title={
+                                isOverloaded
+                                  ? 'Gemini is temporarily overloaded. Will retry automatically in the background.'
+                                  : (job.error_message || undefined)
+                              }
                             >
                               {job.status === 'processing' && (
                                 <Loader2 className="h-2.5 w-2.5 animate-spin" />
