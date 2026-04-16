@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-16-free-tier-models";
+const VERSION = "2026-04-16-fix-1.5-flash-404";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -64,13 +64,16 @@ interface GeminiResponse {
 // low for 13 languages × 2+ calls each. The models below all have 15-30 RPM
 // and 1 500 RPD on the free tier, so a full article translation fits easily.
 //
-//   gemini-2.0-flash  — 15 RPM, 1 500 RPD, best quality of the three
-//   gemini-2.0-flash-lite — 30 RPM, 1 500 RPD, fastest
-//   gemini-1.5-flash  — 15 RPM, 1 500 RPD, stable fallback
-const GEMINI_MODELS = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash",
+//   gemini-2.0-flash        — 15 RPM, 1 500 RPD, best quality (v1beta)
+//   gemini-2.0-flash-lite   — 30 RPM, 1 500 RPD, fastest (v1beta)
+//   gemini-1.5-flash-latest — 15 RPM, 1 500 RPD, stable fallback (v1)
+//
+// NOTE: gemini-1.5-flash (without -latest) returns 404 on v1beta.
+// gemini-1.5-* requires the v1 endpoint.
+const GEMINI_MODELS: Array<{ model: string; apiVersion: string }> = [
+  { model: "gemini-2.0-flash",        apiVersion: "v1beta" },
+  { model: "gemini-2.0-flash-lite",   apiVersion: "v1beta" },
+  { model: "gemini-1.5-flash-latest", apiVersion: "v1"     },
 ];
 
 // Sentinel error thrown by callGeminiSingle when all in-process retries for a
@@ -93,11 +96,12 @@ class GeminiOverloadedError extends Error {
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
   model: string,
+  apiVersion: string = "v1beta",
   timeoutMs: number = 90000,
   retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
   const OVERLOAD_MAX_RETRIES = 3;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+  const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${geminiApiKey}`;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -141,7 +145,7 @@ async function callGeminiSingle(
       // Wait 65s for the per-minute quota window to reset.
       console.warn(`[GEMINI 429] Waiting 65s for RPM window to reset on ${model}…`);
       await new Promise((resolve) => setTimeout(resolve, 65000));
-      return callGeminiSingle(contents, model, timeoutMs, retryCount + 1);
+      return callGeminiSingle(contents, model, apiVersion, timeoutMs, retryCount + 1);
     }
 
     // 503 / 500: Google infra overload. Short back-off, retry up to 3 times,
@@ -165,7 +169,7 @@ async function callGeminiSingle(
       console.warn(`[GEMINI ${response.status}] waiting ${waitTime / 1000}s before retry…`);
       await new Promise((resolve) => setTimeout(resolve, waitTime));
 
-      return callGeminiSingle(contents, model, timeoutMs, retryCount + 1);
+      return callGeminiSingle(contents, model, apiVersion, timeoutMs, retryCount + 1);
     }
 
     if (!response.ok) {
@@ -210,20 +214,20 @@ async function callGeminiWithFallback(
   timeoutMs: number,
 ): Promise<{ text: string; finishReason: string; modelUsed: string }> {
   let lastOverload: GeminiOverloadedError | null = null;
-  for (const model of GEMINI_MODELS) {
+  for (const entry of GEMINI_MODELS) {
     try {
-      const res = await callGeminiSingle(contents, model, timeoutMs);
-      if (model !== GEMINI_MODELS[0]) {
-        console.warn(`[GEMINI FALLBACK] Succeeded on fallback model "${model}" (primary was overloaded)`);
+      const res = await callGeminiSingle(contents, entry.model, entry.apiVersion, timeoutMs);
+      if (entry.model !== GEMINI_MODELS[0].model) {
+        console.warn(`[GEMINI FALLBACK] Succeeded on fallback model "${entry.model}" (primary was overloaded)`);
       }
-      return { ...res, modelUsed: model };
+      return { ...res, modelUsed: entry.model };
     } catch (err: any) {
       if (err instanceof GeminiOverloadedError) {
-        console.warn(`[GEMINI FALLBACK] Model "${model}" overloaded (${err.status}), trying next model…`);
+        console.warn(`[GEMINI FALLBACK] Model "${entry.model}" overloaded (${err.status}), trying next model…`);
         lastOverload = err;
         continue;
       }
-      // 429 / auth / unknown — don't try fallback models, propagate.
+      // auth / unknown — don't try fallback models, propagate.
       throw err;
     }
   }
@@ -251,7 +255,7 @@ async function callGemini(prompt: string): Promise<string> {
 
   let fullResponse = "";
   let continuationCount = 0;
-  let lastModelUsed = GEMINI_MODELS[0];
+  let lastModelUsed = GEMINI_MODELS[0].model;
 
   while (continuationCount <= MAX_CONTINUATIONS) {
     const result = await callGeminiWithFallback(conversationHistory, 90000);
