@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-16-timeout-fallback";
+const VERSION = "2026-04-16-free-tier-models";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -59,13 +59,18 @@ interface GeminiResponse {
   error?: { message: string };
 }
 
-// Model-fallback chain. Gemini 2.5-flash is frequently 503-overloaded at peak
-// hours; 2.5-flash-lite and 2.0-flash-lite are lower-traffic alternatives that
-// still produce acceptable translations. We try them in this order.
+// Model-fallback chain prioritising free-tier quota headroom.
+// gemini-2.5-flash has only 5 RPM / 20 RPD on the free plan, which is far too
+// low for 13 languages × 2+ calls each. The models below all have 15-30 RPM
+// and 1 500 RPD on the free tier, so a full article translation fits easily.
+//
+//   gemini-2.0-flash  — 15 RPM, 1 500 RPD, best quality of the three
+//   gemini-2.0-flash-lite — 30 RPM, 1 500 RPD, fastest
+//   gemini-1.5-flash  — 15 RPM, 1 500 RPD, stable fallback
 const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
 ];
 
 // Sentinel error thrown by callGeminiSingle when all in-process retries for a
@@ -80,8 +85,8 @@ class GeminiOverloadedError extends Error {
 }
 
 // Single Gemini API call with model parameter and status-aware retry policy:
-//   - 429 (quota/rate limit): throw immediately. Queue owns the retry.
-//     Long in-process back-offs eat the Supabase 150 s idle-timeout budget.
+//   - 429 (quota/rate limit): wait 65s (RPM window reset) then retry once,
+//     then fall back to the next model via GeminiOverloadedError.
 //   - 503 / 500 (overload / server error): retry up to 3 times with short
 //     back-off (3s, 6s, 12s). These clear in seconds and are the common
 //     failure mode at peak hours.
@@ -102,7 +107,7 @@ async function callGeminiSingle(
       contents,
       generationConfig: {
         temperature: 0.3,
-        maxOutputTokens: 32768, // Maximum for Gemini 2.5 Flash
+        maxOutputTokens: 8192,
       },
     };
 
@@ -117,14 +122,26 @@ async function callGeminiSingle(
 
     clearTimeout(timeoutId);
 
-    // 429: rate limit / quota. The caller (BlogEditor runs one language per
-    // HTTP call, auto-translate-articles the same) can retry this language
-    // from a fresh edge-function invocation; eating the 150 s idle-timeout
-    // budget on in-process sleeps just makes the failure harder to recover.
+    // 429: rate limit / quota. Wait for the RPM window to reset (65s) then
+    // retry once on this model. If the second attempt also 429s, throw
+    // GeminiOverloadedError so callGeminiWithFallback tries the next model.
     if (response.status === 429) {
       const body = await response.text().catch(() => "");
-      console.warn(`[GEMINI 429] model=${model} status=429 body=${body.substring(0, 300)}`);
-      throw new Error(`Gemini API rate limited (429) on ${model}: ${body.substring(0, 200)}`);
+      console.warn(`[GEMINI 429] model=${model} retry=${retryCount + 1}/${OVERLOAD_MAX_RETRIES} body=${body.substring(0, 300)}`);
+
+      if (retryCount >= 1) {
+        // Already retried once on this model — fall back to next model.
+        throw new GeminiOverloadedError(
+          model,
+          429,
+          `Gemini 429 on ${model} after ${retryCount + 1} attempts: ${body.substring(0, 200)}`,
+        );
+      }
+
+      // Wait 65s for the per-minute quota window to reset.
+      console.warn(`[GEMINI 429] Waiting 65s for RPM window to reset on ${model}…`);
+      await new Promise((resolve) => setTimeout(resolve, 65000));
+      return callGeminiSingle(contents, model, timeoutMs, retryCount + 1);
     }
 
     // 503 / 500: Google infra overload. Short back-off, retry up to 3 times,
@@ -143,7 +160,7 @@ async function callGeminiSingle(
         );
       }
 
-      // 3s, 6s, 12s — fits comfortably inside the 60 s per-call timeout.
+      // 3s, 6s, 12s
       const waitTime = 3000 * Math.pow(2, retryCount);
       console.warn(`[GEMINI ${response.status}] waiting ${waitTime / 1000}s before retry…`);
       await new Promise((resolve) => setTimeout(resolve, waitTime));
@@ -1417,12 +1434,12 @@ serve(async (req) => {
         }
       }
 
-      // Delay between languages to avoid rate limiting. With gemini-2.5-flash
-      // (~10 RPM free tier) and several API calls per language, 8s keeps us
-      // comfortably under the per-minute ceiling.
+      // Delay between languages to stay under the 15 RPM free-tier ceiling
+      // for gemini-2.0-flash. Each language makes ~2 API calls, so 10s keeps
+      // us well within limits even with table translation calls.
       if (i < langs.length - 1) {
-        console.log(`[RATE LIMIT] Waiting 8s before next language to avoid rate limits...`);
-        await new Promise(r => setTimeout(r, 8000));
+        console.log(`[RATE LIMIT] Waiting 10s before next language to avoid rate limits...`);
+        await new Promise(r => setTimeout(r, 10000));
       }
     }
 
