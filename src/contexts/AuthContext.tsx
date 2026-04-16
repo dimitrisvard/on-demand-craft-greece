@@ -70,6 +70,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         tenantRole: tenantRoleData.tenantRole,
         tenantId: tenantRoleData.tenantId,
       });
+      setLoading(false);
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -80,9 +81,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
           loadUserWithRoles(session.user);
         } else {
           setUser(null);
+          setLoading(false);
         }
-
-        setLoading(false);
       }
     );
 
@@ -93,9 +93,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         loadUserWithRoles(session.user);
       } else {
         setUser(null);
+        setLoading(false);
       }
-
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
