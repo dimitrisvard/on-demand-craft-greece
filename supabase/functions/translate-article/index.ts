@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-15-direct-sequential";
+const VERSION = "2026-04-16-timeout-fallback";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -88,7 +88,7 @@ class GeminiOverloadedError extends Error {
 async function callGeminiSingle(
   contents: Array<{ role: string; parts: Array<{ text: string }> }>,
   model: string,
-  timeoutMs: number = 60000,
+  timeoutMs: number = 90000,
   retryCount: number = 0
 ): Promise<{ text: string; finishReason: string }> {
   const OVERLOAD_MAX_RETRIES = 3;
@@ -171,7 +171,14 @@ async function callGeminiSingle(
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === "AbortError") {
-      throw new Error(`Gemini API request timeout (${Math.round(timeoutMs / 1000)}s) on ${model}`);
+      // Treat timeouts the same as 503 overload so the fallback chain kicks in.
+      // A hanging request usually means Google is overloaded but didn't send a
+      // 503 — the next model in the chain is likely to respond faster.
+      throw new GeminiOverloadedError(
+        model,
+        408,
+        `Gemini API request timeout (${Math.round(timeoutMs / 1000)}s) on ${model}`,
+      );
     }
     throw error;
   }
@@ -230,7 +237,7 @@ async function callGemini(prompt: string): Promise<string> {
   let lastModelUsed = GEMINI_MODELS[0];
 
   while (continuationCount <= MAX_CONTINUATIONS) {
-    const result = await callGeminiWithFallback(conversationHistory, 60000);
+    const result = await callGeminiWithFallback(conversationHistory, 90000);
     lastModelUsed = result.modelUsed;
 
     console.log(`[callGemini] Response ${continuationCount + 1}: ${result.text.length} chars, finishReason: ${result.finishReason}`);
