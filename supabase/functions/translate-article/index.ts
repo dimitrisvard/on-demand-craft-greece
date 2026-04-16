@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-16-fix-1.5-flash-404";
+const VERSION = "2026-04-16-no-429-wait";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -126,26 +126,18 @@ async function callGeminiSingle(
 
     clearTimeout(timeoutId);
 
-    // 429: rate limit / quota. Wait for the RPM window to reset (65s) then
-    // retry once on this model. If the second attempt also 429s, throw
-    // GeminiOverloadedError so callGeminiWithFallback tries the next model.
+    // 429: rate limit / quota. Fall back to the next model immediately.
+    // Each model has its own RPM/RPD quota, so the next one may work.
+    // Do NOT wait 65s — sleeping burns the Supabase 150s idle timeout
+    // and the function gets killed silently ("shutdown" in logs).
     if (response.status === 429) {
       const body = await response.text().catch(() => "");
-      console.warn(`[GEMINI 429] model=${model} retry=${retryCount + 1}/${OVERLOAD_MAX_RETRIES} body=${body.substring(0, 300)}`);
-
-      if (retryCount >= 1) {
-        // Already retried once on this model — fall back to next model.
-        throw new GeminiOverloadedError(
-          model,
-          429,
-          `Gemini 429 on ${model} after ${retryCount + 1} attempts: ${body.substring(0, 200)}`,
-        );
-      }
-
-      // Wait 65s for the per-minute quota window to reset.
-      console.warn(`[GEMINI 429] Waiting 65s for RPM window to reset on ${model}…`);
-      await new Promise((resolve) => setTimeout(resolve, 65000));
-      return callGeminiSingle(contents, model, apiVersion, timeoutMs, retryCount + 1);
+      console.warn(`[GEMINI 429] model=${model} — falling back to next model immediately. body=${body.substring(0, 300)}`);
+      throw new GeminiOverloadedError(
+        model,
+        429,
+        `Gemini 429 on ${model}: ${body.substring(0, 200)}`,
+      );
     }
 
     // 503 / 500: Google infra overload. Short back-off, retry up to 3 times,
