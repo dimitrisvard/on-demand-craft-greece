@@ -22,7 +22,7 @@ from OCP.gp import gp_Trsf, gp_Vec, gp_Pnt, gp_Dir, gp_Ax1, gp_Ax3, gp_Pln
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.TopExp import TopExp_Explorer
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_WIRE
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_WIRE, TopAbs_VERTEX
 from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Edge
 from OCP.BRep import BRep_Tool
 from OCP.BRepGProp import BRepGProp
@@ -37,6 +37,16 @@ from core.face_classifier import ClassifiedFace, FaceType
 from core.bend_detector import BendInfo
 from core.bend_graph import BendGraph
 from core.kfactor import compute_bend, BendCalc
+
+try:
+    import pyclipper  # 2D polygon union for real flange outlines
+    _HAS_PYCLIPPER = True
+except Exception:
+    _HAS_PYCLIPPER = False
+
+# Scale used to convert mm → int when feeding polygons to pyclipper. 1e4
+# gives us 0.1 µm resolution, well below anything sheet-metal cares about.
+_CLIPPER_SCALE = 10_000
 
 
 @dataclass
@@ -167,21 +177,54 @@ def unfold(
     fp.height = round(pattern_height, 2)
 
     # ── Build the outer contour ─────────────────────────────────────────────
-    fp.outer_edges = _build_rectangular_outline(total_width, pattern_height)
+    # Try to compose the real outline by projecting each flange's true face
+    # shape and unioning the pieces along the accumulated X strip. Falls back
+    # to a rectangular outline if projection/union fails for any reason —
+    # callers still get a usable flat pattern + warning.
+    outline_poly, composed_holes = _compose_multi_flange_outline(
+        topo, cf_map, segments, pattern_height
+    )
+    if outline_poly:
+        fp.outer_edges = _edges_from_polyline(outline_poly)
+        for hp in composed_holes:
+            fp.holes.append(Hole2D(edges=_edges_from_polyline(hp)))
+        # Refresh width/height from the actual composed outline.
+        xs = [p[0] for p in outline_poly]
+        ys = [p[1] for p in outline_poly]
+        fp.width = round(max(xs) - min(xs), 2)
+        fp.height = round(max(ys) - min(ys), 2)
+    else:
+        fp.outer_edges = _build_rectangular_outline(total_width, pattern_height)
+        if not _HAS_PYCLIPPER:
+            fp.warnings.append(
+                "pyclipper not installed — outline approximated as bounding "
+                "rectangle. Install pyclipper to recover true flange shape."
+            )
+        else:
+            fp.warnings.append(
+                "Flange projection failed — outline approximated as bounding "
+                "rectangle."
+            )
 
     # ── Place bend lines ────────────────────────────────────────────────────
     for bp in bend_positions:
         bend_center_x = bp["x"] + bp["ba"] / 2.0
+        y_lo, y_hi = _outline_y_range_at_x(fp.outer_edges, bend_center_x)
+        if y_hi <= y_lo:
+            y_lo, y_hi = 0.0, pattern_height
         bl = BendLine2D(
-            start=(round(bend_center_x, 4), 0.0),
-            end=(round(bend_center_x, 4), round(pattern_height, 4)),
+            start=(round(bend_center_x, 4), round(y_lo, 4)),
+            end=(round(bend_center_x, 4), round(y_hi, 4)),
             bend_info=bp["bend_info"],
             bend_calc=bp["bend_calc"],
         )
         fp.bend_lines.append(bl)
 
     # ── Extract holes from flanges ──────────────────────────────────────────
-    _extract_holes(topo, classified, fp, segments, pattern_height)
+    # If _compose_multi_flange_outline already placed holes, skip the legacy
+    # per-flange circle detector — the projection path is more accurate.
+    if not fp.holes:
+        _extract_holes(topo, classified, fp, segments, pattern_height)
 
     # ── Warnings ────────────────────────────────────────────────────────────
     _check_warnings(fp, bends, thickness)
@@ -489,6 +532,198 @@ def _sample_edge(edge, to_uv, add) -> None:
             add(to_uv(curve.Value(t)))
         except Exception:
             continue
+
+
+def _compose_multi_flange_outline(
+    topo: Topology,
+    cf_map: Dict[int, "ClassifiedFace"],
+    segments: List[dict],
+    pattern_height: float,
+) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+    """
+    Build the true outer contour for a multi-flange unfolding by laying each
+    flange's actual projected outline side-by-side along X, separated by the
+    bend-allowance gaps already recorded in *segments*, then unioning the
+    pieces with pyclipper.
+
+    Returns (outer_polyline, holes) where:
+      - outer_polyline is a closed list of (x, y) points, CCW, or [] on failure
+      - holes is a list of closed polylines in the same coordinate system.
+
+    Returns ([], []) if pyclipper is unavailable, if any flange fails to
+    project, or if the union produces zero / multiple disjoint outers —
+    caller falls back to the rectangular outline in that case.
+    """
+    if not _HAS_PYCLIPPER:
+        return [], []
+
+    # Walk segments, collecting (x_start, face_idx) tuples for each flange.
+    # X positions are measured along the flat pattern. Bend segments contribute
+    # only to the accumulated X offset — their face is not projected directly.
+    x_cursor = 0.0
+    flange_placements: List[Tuple[float, int]] = []
+    for seg in segments:
+        if seg["type"] == "flange":
+            fi = seg.get("face_idx", -1)
+            if fi >= 0:
+                flange_placements.append((x_cursor, fi))
+        x_cursor += max(0.0, float(seg.get("width", 0.0)))
+
+    if not flange_placements:
+        return [], []
+
+    try:
+        flange_polys: List[List[Tuple[float, float]]] = []
+        flange_holes: List[List[Tuple[float, float]]] = []
+
+        for x_start, face_idx in flange_placements:
+            face_info = topo.faces[face_idx]
+            outer_pts, hole_pts_list = _project_face_to_2d(face_info.face)
+            if not outer_pts:
+                return [], []
+
+            outer_aligned = _align_flange_to_strip(
+                outer_pts, hole_pts_list, x_start, pattern_height
+            )
+            if not outer_aligned:
+                return [], []
+            flange_polys.append(outer_aligned[0])
+            flange_holes.extend(outer_aligned[1])
+
+        # Union the flanges — pyclipper expects ints.
+        subj = [
+            [(int(round(x * _CLIPPER_SCALE)), int(round(y * _CLIPPER_SCALE)))
+             for (x, y) in poly]
+            for poly in flange_polys
+        ]
+
+        pc = pyclipper.Pyclipper()
+        pc.AddPaths(subj, pyclipper.PT_SUBJECT, True)
+        solution = pc.Execute(
+            pyclipper.CT_UNION,
+            pyclipper.PFT_NONZERO,
+            pyclipper.PFT_NONZERO,
+        )
+
+        if not solution:
+            return [], []
+
+        # Expect exactly one outer ring (positively-oriented); any inner rings
+        # returned are implicit holes produced by the union (rare for strips).
+        outers = []
+        inners = []
+        for ring in solution:
+            if pyclipper.Orientation(ring):
+                outers.append(ring)
+            else:
+                inners.append(ring)
+
+        if len(outers) != 1:
+            return [], []
+
+        outer_mm = [
+            (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE) for (x, y) in outers[0]
+        ]
+
+        holes_mm: List[List[Tuple[float, float]]] = []
+        for ring in inners:
+            holes_mm.append(
+                [(x / _CLIPPER_SCALE, y / _CLIPPER_SCALE) for (x, y) in ring]
+            )
+        # Append any flange-local holes (they're already in strip coordinates).
+        holes_mm.extend(flange_holes)
+
+        return outer_mm, holes_mm
+    except Exception:
+        return [], []
+
+
+def _align_flange_to_strip(
+    outer_pts: List[Tuple[float, float]],
+    hole_pts_list: List[List[Tuple[float, float]]],
+    x_start: float,
+    pattern_height: float,
+) -> Optional[Tuple[List[List[Tuple[float, float]]], List[List[Tuple[float, float]]]]]:
+    """
+    Position a flange's projected outline into the flat-pattern strip so that
+    its shortest axis becomes the bending direction (X) and its longest axis
+    becomes the transverse direction (Y).
+
+    _project_face_to_2d normalises the outline to have its bounding-box min at
+    the origin. We rotate (if needed) so the Y span matches pattern_height,
+    centre vertically on pattern_height/2, then translate so the flange's
+    left edge sits at x_start.
+
+    Returns ([outer_aligned], holes_aligned) or None on failure.
+    """
+    if not outer_pts:
+        return None
+
+    xs = [p[0] for p in outer_pts]
+    ys = [p[1] for p in outer_pts]
+    w = max(xs) - min(xs)
+    h = max(ys) - min(ys)
+
+    # If the projection is oriented with its "long" axis along X but the
+    # flat-pattern strip's height is along Y, rotate 90° so the longer axis
+    # becomes Y. We pick the axis whose span is closer to pattern_height as Y.
+    def _swap(poly):
+        return [(p[1], p[0]) for p in poly]
+
+    diff_no_swap = abs(h - pattern_height)
+    diff_swap = abs(w - pattern_height)
+    if diff_swap < diff_no_swap:
+        outer_pts = _swap(outer_pts)
+        hole_pts_list = [_swap(h) for h in hole_pts_list]
+        xs = [p[0] for p in outer_pts]
+        ys = [p[1] for p in outer_pts]
+        w = max(xs) - min(xs)
+        h = max(ys) - min(ys)
+
+    # Re-normalise to (0, 0) then centre vertically about pattern_height / 2.
+    minx = min(xs)
+    miny = min(ys)
+    y_offset = (pattern_height - h) / 2.0
+
+    def _place(poly):
+        return [(p[0] - minx + x_start, p[1] - miny + y_offset) for p in poly]
+
+    outer_aligned = _place(outer_pts)
+    holes_aligned = [_place(h) for h in hole_pts_list]
+
+    return [outer_aligned], holes_aligned
+
+
+def _outline_y_range_at_x(
+    edges: List[Edge2D], x: float
+) -> Tuple[float, float]:
+    """
+    Return the (y_min, y_max) range of the outline's coverage at the given x.
+    Used to clamp bend lines to the actual outline height at the bend
+    position. Falls back to the global bbox if the outline doesn't span x.
+    """
+    ys: List[float] = []
+    for e in edges:
+        x1, y1 = e.start
+        x2, y2 = e.end
+        lo_x, hi_x = min(x1, x2), max(x1, x2)
+        if lo_x - 1e-6 <= x <= hi_x + 1e-6:
+            if abs(x2 - x1) < 1e-9:
+                ys.append(y1)
+                ys.append(y2)
+            else:
+                t = (x - x1) / (x2 - x1)
+                ys.append(y1 + t * (y2 - y1))
+    if len(ys) >= 2:
+        return min(ys), max(ys)
+    # Fall back to the overall Y range
+    all_ys: List[float] = []
+    for e in edges:
+        all_ys.append(e.start[1])
+        all_ys.append(e.end[1])
+    if all_ys:
+        return min(all_ys), max(all_ys)
+    return 0.0, 0.0
 
 
 def _extract_holes(

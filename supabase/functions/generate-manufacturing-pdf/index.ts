@@ -42,8 +42,10 @@ function getFileType(name: string): "stl" | "step" | "dxf" | "obj" | null {
 }
 
 /**
- * Call the FreeCAD unfold service for STEP files.
- * Returns unfold data with real bend positions or null if unavailable.
+ * Call the sheet-metal-service unfold endpoint for STEP files.
+ * Returns unfold data with real bend positions or null if unavailable. When
+ * we return null, the caller falls back to mesh-only analysis, but the
+ * reason is logged so the PDF response can surface a hint to the user.
  */
 async function callUnfoldService(
   fileUrl: string,
@@ -52,14 +54,12 @@ async function callUnfoldService(
 ): Promise<UnfoldData | null> {
   const serviceUrl = Deno.env.get("UNFOLD_SERVICE_URL");
   if (!serviceUrl) {
-    console.log("UNFOLD_SERVICE_URL not configured — skipping FreeCAD unfold");
+    console.error("UNFOLD_SERVICE_URL not configured — no STEP unfold possible");
     return null;
   }
 
   try {
-    console.log(`Calling FreeCAD service at ${serviceUrl}/flat-pattern for ${fileName}`);
-    // Try the new FastAPI /unfold endpoint first (returns JSON metadata)
-    // We call /flat-pattern for backward compat with the Flask service
+    console.log(`Calling sheet-metal-service at ${serviceUrl}/flat-pattern for ${fileName}`);
     const resp = await fetch(`${serviceUrl}/flat-pattern`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -76,7 +76,7 @@ async function callUnfoldService(
 
     if (!resp.ok) {
       const errorBody = await resp.text().catch(() => "");
-      console.log(`FreeCAD service returned ${resp.status}: ${errorBody.slice(0, 200)}`);
+      console.error(`Unfold service returned ${resp.status}: ${errorBody.slice(0, 200)}`);
       return null;
     }
 
@@ -114,7 +114,7 @@ async function callUnfoldService(
 
     return null;
   } catch (err) {
-    console.log(`FreeCAD service call failed: ${err}. Service URL: ${serviceUrl}`);
+    console.error(`Unfold service call failed: ${err}. Service URL: ${serviceUrl}`);
     return null;
   }
 }

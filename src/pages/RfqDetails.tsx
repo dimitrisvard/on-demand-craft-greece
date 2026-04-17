@@ -66,7 +66,9 @@ import html2canvas from 'html2canvas';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { generateAndSendRFQPDF } from '@/utils/rfqPdfEmailService';
 import { type PartInfo } from '@/utils/technicalDrawingPdf';
-import { generateManufacturingPdfWithFallback } from '@/utils/serverManufacturingPdf';
+import { generateManufacturingPdfWithFallback, extractFlatPattern, type FlatPatternResponse } from '@/utils/serverManufacturingPdf';
+import { TechnicalDrawingViewer } from '@/components/sheetmetal/TechnicalDrawingViewer';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -110,6 +112,13 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const [rfqNumber, setRfqNumber] = useState<string>("");
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFile, setViewerFile] = useState<any>(null);
+  const [drawingViewer, setDrawingViewer] = useState<{
+    open: boolean;
+    file?: QuoteFile;
+    item?: any;
+    data: FlatPatternResponse | null;
+    loading: boolean;
+  }>({ open: false, data: null, loading: false });
   const [isCheckingReferences, setIsCheckingReferences] = useState(false);
   const [newOrderTitle, setNewOrderTitle] = useState('');
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
@@ -1531,6 +1540,46 @@ const RfqDetails = (props: RfqDetailsProps) => {
     }
   };
 
+  const handleViewDrawing = async (file: QuoteFile, item: any) => {
+    setDrawingViewer({ open: true, file, item, data: null, loading: true });
+    try {
+      const url = await getSignedUrl(file.file_path);
+      if (!url) {
+        setDrawingViewer((s) => ({
+          ...s,
+          loading: false,
+          data: { status: 'error', source: 'client', error: 'Could not get file URL' } as FlatPatternResponse,
+        }));
+        return;
+      }
+      const data = await extractFlatPattern(url, file.file_name);
+      setDrawingViewer((s) => ({ ...s, loading: false, data }));
+    } catch (error: any) {
+      setDrawingViewer((s) => ({
+        ...s,
+        loading: false,
+        data: {
+          status: 'error',
+          source: 'client',
+          error: error?.message || 'Failed to fetch flat pattern',
+        } as FlatPatternResponse,
+      }));
+    }
+  };
+
+  const downloadDxfFromBase64 = (base64: string, fileName: string) => {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'application/dxf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const parseSpecsFromDescription = (description: string) => {
     const specs: Record<string, string | boolean> = {};
     if (!description) return specs;
@@ -1946,22 +1995,33 @@ const RfqDetails = (props: RfqDetailsProps) => {
                               showActions
                               onPriceChange={(unitPrice) => handlePriceChange(item.id, unitPrice)}
                             />
-                            {/* Manufacturing Drawing button for 3D files */}
+                            {/* Manufacturing Drawing buttons for 3D files */}
                             {itemPartFiles.filter(f => is3DFile(f.file_name)).length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {itemPartFiles.filter(f => is3DFile(f.file_name)).map(file => (
-                                  <Button
-                                    key={file.id}
-                                    variant="outline"
-                                    size="sm"
-                                    className="gap-1.5 text-xs"
-                                    disabled={drawingLoading === file.id}
-                                    onClick={() => handleManufacturingDrawing(file, item)}
-                                    title="Generate manufacturing drawing PDF with isometric view and flat pattern"
-                                  >
-                                    <FileOutput className="h-3.5 w-3.5" />
-                                    {drawingLoading === file.id ? 'Generating...' : 'Manufacturing Drawing'}
-                                  </Button>
+                                  <div key={file.id} className="flex flex-wrap gap-1.5">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1.5 text-xs"
+                                      onClick={() => handleViewDrawing(file, item)}
+                                      title="View the flat pattern, bend schedule and parameters"
+                                    >
+                                      <FileOutput className="h-3.5 w-3.5" />
+                                      View drawing
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="gap-1.5 text-xs"
+                                      disabled={drawingLoading === file.id}
+                                      onClick={() => handleManufacturingDrawing(file, item)}
+                                      title="Generate manufacturing drawing PDF with isometric view and flat pattern"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                      {drawingLoading === file.id ? 'Generating...' : 'Download PDF'}
+                                    </Button>
+                                  </div>
                                 ))}
                               </div>
                             )}
@@ -2602,8 +2662,9 @@ const RfqDetails = (props: RfqDetailsProps) => {
                     <p className="text-xs text-amber-600 font-medium">Utilization</p>
                   </div>
                   <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-purple-800">{nestingResult.summary?.totalWeightKg || 0} kg</p>
-                    <p className="text-xs text-purple-600 font-medium">Total Weight</p>
+                    <p className="text-2xl font-bold text-purple-800">{nestingResult.summary?.totalSheetsWeightKg ?? nestingResult.summary?.totalWeightKg ?? 0} kg</p>
+                    <p className="text-xs text-purple-600 font-medium">Material to buy</p>
+                    <p className="text-[10px] text-purple-500 mt-0.5">Finished: {nestingResult.summary?.totalPartsWeightKg ?? '—'} kg</p>
                   </div>
                 </div>
 
@@ -2627,8 +2688,12 @@ const RfqDetails = (props: RfqDetailsProps) => {
                           Total area: {group.totalMaterialDimensions?.totalAreaM2 || '—'} m²
                         </span>
                         <span className="bg-orange-100 text-orange-800 px-2 py-0.5 rounded font-medium">
-                          Weight: {group.weightKg || '—'} kg ({group.densityKgM3 || '—'} kg/m³)
+                          Material to buy: {group.sheetsWeightKg ?? group.weightKg ?? '—'} kg
                         </span>
+                        <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-medium">
+                          Finished parts: {group.partsWeightKg ?? '—'} kg
+                        </span>
+                        <span className="text-slate-500">({group.densityKgM3 || '—'} kg/m³)</span>
                       </div>
                     </div>
 
@@ -2675,7 +2740,10 @@ const RfqDetails = (props: RfqDetailsProps) => {
                                   Part fill: {sheet.usedUtilization || 0}% of used area
                                 </span>
                                 <span className="bg-orange-50 text-orange-800 border border-orange-200 px-2 py-0.5 rounded">
-                                  Material needed: {sheet.usedBbox.w} x {sheet.usedBbox.h} mm = {sheet.usedWeightKg || 0} kg
+                                  Finished parts: {sheet.partsWeightKg ?? sheet.usedWeightKg ?? 0} kg
+                                </span>
+                                <span className="bg-purple-50 text-purple-800 border border-purple-200 px-2 py-0.5 rounded">
+                                  Raw sheet: {sheet.sheetWeightKg ?? '—'} kg
                                 </span>
                               </div>
                             )}
@@ -2701,13 +2769,14 @@ const RfqDetails = (props: RfqDetailsProps) => {
                         <div key={gi} className="bg-white rounded border p-2">
                           <p className="text-xs text-muted-foreground">{group.material} {group.thickness}mm</p>
                           <p className="font-medium">{group.totalSheets} x {group.sheetSize?.w}x{group.sheetSize?.h}mm</p>
-                          <p className="text-xs text-muted-foreground">{group.totalMaterialDimensions?.totalAreaM2 || '—'} m² &middot; {group.weightKg || '—'} kg</p>
+                          <p className="text-xs text-muted-foreground">{group.totalMaterialDimensions?.totalAreaM2 || '—'} m² &middot; raw {group.sheetsWeightKg ?? group.weightKg ?? '—'} kg / parts {group.partsWeightKg ?? '—'} kg</p>
                         </div>
                       ))}
                     </div>
                     <div className="mt-2 pt-2 border-t flex items-center gap-6 text-sm font-medium">
                       <span>Total Sheets: {nestingResult.summary?.totalSheets || 0}</span>
-                      <span>Total Weight: {nestingResult.summary?.totalWeightKg || 0} kg</span>
+                      <span>Material to buy: {nestingResult.summary?.totalSheetsWeightKg ?? nestingResult.summary?.totalWeightKg ?? 0} kg</span>
+                      <span>Finished parts: {nestingResult.summary?.totalPartsWeightKg ?? '—'} kg</span>
                       <span>Overall Utilization: {nestingResult.summary?.overallUtilization || 0}%</span>
                     </div>
                   </div>
@@ -2750,6 +2819,58 @@ const RfqDetails = (props: RfqDetailsProps) => {
           fileName={viewerFile.name}
         />
       )}
+
+      {/* Technical Drawing Viewer */}
+      <Dialog
+        open={drawingViewer.open}
+        onOpenChange={(open) =>
+          setDrawingViewer((s) => ({ ...s, open }))
+        }
+      >
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Technical drawing — {drawingViewer.file?.file_name || 'Part'}
+            </DialogTitle>
+          </DialogHeader>
+          {drawingViewer.loading ? (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              Generating flat pattern…
+            </div>
+          ) : (
+            <TechnicalDrawingViewer
+              flatPattern={drawingViewer.data}
+              partName={
+                drawingViewer.file?.file_name?.replace(/\.[^.]+$/, '') || 'Part'
+              }
+              material={
+                drawingViewer.item
+                  ? buildPartInfo(drawingViewer.file as QuoteFile, drawingViewer.item).material
+                  : undefined
+              }
+              onDownloadPdf={
+                drawingViewer.file && drawingViewer.item
+                  ? () =>
+                      handleManufacturingDrawing(
+                        drawingViewer.file as QuoteFile,
+                        drawingViewer.item,
+                      )
+                  : undefined
+              }
+              onDownloadDxf={
+                drawingViewer.data?.dxf_base64
+                  ? () =>
+                      downloadDxfFromBase64(
+                        drawingViewer.data!.dxf_base64!,
+                        (drawingViewer.file?.file_name?.replace(/\.[^.]+$/, '') ||
+                          'part') + '_flat.dxf',
+                      )
+                  : undefined
+              }
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </ErrorBoundary>
   );
 };

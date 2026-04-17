@@ -134,14 +134,20 @@ function analyzeSTL(triangles: Triangle[]): {
 }
 
 /**
- * Call FreeCAD service for STEP file unfolding
+ * Call the unfold service for STEP files. Returns either the parsed body
+ * or an error object with a diagnostic string so the caller can surface it
+ * to the frontend instead of silently pretending no flat pattern exists.
  */
 async function callFreeCADService(
   fileUrl: string,
   fileName: string,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown> | { error: string; detail?: string }> {
   const serviceUrl = Deno.env.get("UNFOLD_SERVICE_URL");
-  if (!serviceUrl) return null;
+  if (!serviceUrl) {
+    return {
+      error: "UNFOLD_SERVICE_URL is not configured in Supabase secrets",
+    };
+  }
 
   try {
     const resp = await fetch(`${serviceUrl}/flat-pattern`, {
@@ -150,10 +156,21 @@ async function callFreeCADService(
       body: JSON.stringify({ file_url: fileUrl, file_name: fileName }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      const bodyText = await resp.text().catch(() => "");
+      console.error(
+        `Unfold service ${resp.status} for ${fileName}: ${bodyText.slice(0, 500)}`,
+      );
+      return {
+        error: `Unfold service returned HTTP ${resp.status}`,
+        detail: bodyText.slice(0, 500),
+      };
+    }
     return await resp.json();
-  } catch {
-    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Unfold service call threw for ${fileName}: ${msg}`);
+    return { error: "Unfold service unreachable", detail: msg };
   }
 }
 
@@ -174,13 +191,14 @@ serve(async (req) => {
 
     console.log("Flat pattern extraction:", { file_name, order_id, rfq_id });
 
-    // ── STEP files: delegate to FreeCAD ─────────────────
+    // ── STEP files: delegate to the unfold service ──────
     if (isSTEP(file_name)) {
       const result = await callFreeCADService(file_url, file_name);
-      if (result) {
+      const hasError = result && typeof result === "object" && "error" in result;
+      if (result && !hasError) {
         return new Response(JSON.stringify({
           status: "completed",
-          source: "freecad",
+          source: "sheet-metal-service",
           file_name,
           order_id,
           rfq_id,
@@ -190,9 +208,12 @@ serve(async (req) => {
         });
       }
 
+      const errObj = (result as { error?: string; detail?: string }) || {};
       return new Response(JSON.stringify({
         status: "unavailable",
-        error: "STEP file unfolding requires the FreeCAD service. Deploy scripts/freecad-unfold/ and set UNFOLD_SERVICE_URL.",
+        error: errObj.error ||
+          "STEP unfold service unavailable. Set UNFOLD_SERVICE_URL in Supabase secrets and deploy sheet-metal-service/.",
+        detail: errObj.detail,
         file_name,
         order_id,
         rfq_id,

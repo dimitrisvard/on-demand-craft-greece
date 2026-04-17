@@ -377,6 +377,7 @@ async def flat_pattern_compat(request: Request):
         )
 
         part_name = os.path.splitext(file_name)[0]
+        extra_warnings: list[str] = []
 
         # Export DXF for base64 embedding
         dxf_base64 = None
@@ -386,8 +387,20 @@ async def flat_pattern_compat(request: Request):
             export_dxf(flat, dxf_path, part_name)
             with open(dxf_path, "rb") as f:
                 dxf_base64 = base64.b64encode(f.read()).decode()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception("DXF export failed")
+            extra_warnings.append(f"DXF export failed: {e}")
+
+        # Always render an SVG so the frontend has at least a preview even
+        # when DXF export fails.
+        svg_base64 = None
+        try:
+            from export.svg_exporter import export_svg
+            svg_str = export_svg(flat, part_name)
+            svg_base64 = base64.b64encode(svg_str.encode("utf-8")).decode()
+        except Exception as e:
+            logger.exception("SVG export failed")
+            extra_warnings.append(f"SVG export failed: {e}")
 
         from core.kfactor import compute_bend
 
@@ -456,11 +469,13 @@ async def flat_pattern_compat(request: Request):
                 for b in bends
             ],
             "analysis": {"dimensions": bbox_3d},
-            "warnings": flat.warnings,
+            "warnings": list(flat.warnings) + extra_warnings,
         }
 
         if dxf_base64:
             response["dxf_base64"] = dxf_base64
+        if svg_base64:
+            response["svg_base64"] = svg_base64
 
         return JSONResponse(response)
 

@@ -25,13 +25,33 @@ interface ServerPdfResponse {
   };
 }
 
-interface FlatPatternResponse {
+export interface FlatPatternBend {
+  id?: string;
+  index?: number;
+  angle?: number;
+  angle_deg?: number;
+  radius?: number;
+  inner_radius_mm?: number;
+  direction?: 'UP' | 'DOWN' | string;
+  length?: number;
+  length_mm?: number;
+  k_factor?: number;
+  bend_allowance_mm?: number;
+  bend_deduction_mm?: number;
+  bend_line_on_flat?: { start: [number, number]; end: [number, number] };
+  distance_from_left_edge_mm?: number;
+}
+
+export interface FlatPatternResponse {
   status: string;
   source: string;
+  part_name?: string;
+  thickness_mm?: number;
   flat_pattern?: {
     dimensions: { width: number; height: number; thickness: number };
-    bends: Array<{ id: string; angle: number; length: number }>;
+    bends: FlatPatternBend[];
     bend_count: number;
+    outline_edges?: Array<{ start: [number, number]; end: [number, number] }>;
   };
   analysis?: {
     dimensions: { x: number; y: number; z: number };
@@ -40,7 +60,10 @@ interface FlatPatternResponse {
     triangle_count: number;
   };
   dxf_base64?: string;
+  svg_base64?: string;
+  warnings?: string[];
   error?: string;
+  detail?: string;
 }
 
 /**
