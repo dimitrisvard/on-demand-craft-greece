@@ -1405,19 +1405,45 @@ const RfqDetails = (props: RfqDetailsProps) => {
       if (stepItemsWithoutDxf.length > 0) {
         toast({ title: 'Extracting flat patterns', description: `Converting ${stepItemsWithoutDxf.length} CAD file(s) to DXF...` });
         const { extractFlatPattern } = await import('@/utils/serverManufacturingPdf');
+        const { uploadFileToS3 } = await import('@/utils/awsS3Storage');
         for (const { file, item } of stepItemsWithoutDxf) {
           try {
-            const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
+            // Always mint a fresh presigned URL — cached ones in signedUrls
+            // expire after 3600s and the unfold service then gets 403 Forbidden.
+            const url = await getSignedUrl(file.file_path);
             if (!url) continue;
             const result = await extractFlatPattern(url, file.file_name, undefined, id);
             if (result?.dxf_base64) {
               // Decode base64 DXF and add to entries
               const dxfContent = atob(result.dxf_base64);
+              const dxfName = file.file_name.replace(/\.[^.]+$/, '.dxf');
               dxfEntries.push({
-                file: { ...file, file_name: file.file_name.replace(/\.[^.]+$/, '.dxf') },
+                file: { ...file, file_name: dxfName },
                 item,
                 _dxfContent: dxfContent,
               } as any);
+
+              // Persist the DXF back to S3 + rfq_files so the next nesting click
+              // finds it directly without re-extracting.
+              try {
+                const stepDir = (file.file_path || '').split('/').slice(0, -1).join('/');
+                const bytes = new Uint8Array(dxfContent.length);
+                for (let i = 0; i < dxfContent.length; i++) bytes[i] = dxfContent.charCodeAt(i) & 0xff;
+                const dxfFile = new File([bytes], dxfName, { type: 'application/dxf' });
+                const dxfPath = await uploadFileToS3(dxfFile, stepDir);
+                if (dxfPath && id) {
+                  await supabase.from('rfq_files').insert({
+                    rfq_id: id,
+                    part_id: file.part_id || null,
+                    file_name: dxfName,
+                    file_path: dxfPath,
+                    file_type: 'application/dxf',
+                    file_size: bytes.length,
+                  });
+                }
+              } catch (persistErr) {
+                console.warn(`Could not persist extracted DXF for ${file.file_name}:`, persistErr);
+              }
             }
           } catch (err) {
             console.warn(`Failed to extract flat pattern from ${file.file_name}:`, err);
@@ -1442,7 +1468,8 @@ const RfqDetails = (props: RfqDetailsProps) => {
         if (entry._dxfContent) {
           dxfContents.push(entry._dxfContent);
         } else {
-          const url = signedUrls[file.id] || await getSignedUrl(file.file_path);
+          // Mint a fresh presigned URL — cached ones expire after 3600s.
+          const url = await getSignedUrl(file.file_path);
           if (!url) {
             toast({ title: 'Warning', description: `Could not get URL for ${file.file_name}`, variant: 'destructive' });
             continue;
