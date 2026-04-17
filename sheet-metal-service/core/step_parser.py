@@ -110,7 +110,7 @@ def build_topology(solid: TopoDS_Solid) -> Topology:
     # Build a map from TopoDS_Face hash → index for fast lookup
     face_hash_to_idx: Dict[int, int] = {}
     for i, f in enumerate(faces_list):
-        face_hash_to_idx[f.HashCode(2_147_483_647)] = i
+        face_hash_to_idx[hash(f)] = i
 
     for i, face in enumerate(faces_list):
         topo.faces.append(_analyse_face(i, face))
@@ -124,9 +124,9 @@ def build_topology(solid: TopoDS_Solid) -> Topology:
         face_list_occ = edge_face_occ_map.FindFromIndex(edge_idx)
 
         adjacent_face_indices: List[int] = []
-        for fi in range(1, face_list_occ.Extent() + 1):
-            adj_face = TopoDS.Face_s(face_list_occ.Value(fi))
-            h = adj_face.HashCode(2_147_483_647)
+        for shape in face_list_occ:
+            adj_face = TopoDS.Face_s(shape)
+            h = hash(adj_face)
             if h in face_hash_to_idx:
                 adjacent_face_indices.append(face_hash_to_idx[h])
 
