@@ -79,12 +79,15 @@ def export_dxf(
         layer = "BEND_UP" if direction == "UP" else "BEND_DOWN"
         linetype = "DASHED" if direction == "UP" else "DASHDOT"
 
-        # Extend bend line 3mm beyond part edges for visibility
+        # Use the bend-line endpoints as computed in unfolder (already clamped
+        # to the outline's Y-range at this X). Extend 3mm beyond for visibility.
         overshoot = 3.0
         x = bl.start[0]
+        y_lo = min(bl.start[1], bl.end[1])
+        y_hi = max(bl.start[1], bl.end[1])
         msp.add_line(
-            pt(x, -overshoot),
-            pt(x, flat.height + overshoot),
+            pt(x, y_lo - overshoot),
+            pt(x, y_hi + overshoot),
             dxfattribs={"layer": layer, "linetype": linetype},
         )
 
@@ -94,7 +97,7 @@ def export_dxf(
             f"B{bl.bend_info.bend_id} {arrow}{bl.bend_info.angle_deg:.0f}° "
             f"R{bl.bend_info.inner_radius:.1f}"
         )
-        text_y = flat.height + overshoot + 2
+        text_y = y_hi + overshoot + 2
         msp.add_text(
             label,
             dxfattribs={
@@ -105,7 +108,7 @@ def export_dxf(
         )
 
         # Small direction triangle on the bend line
-        _add_direction_arrow(msp, pt, x, flat.height / 2, direction)
+        _add_direction_arrow(msp, pt, x, (y_lo + y_hi) / 2, direction)
 
     # ── Holes ──────────────────────────────────────────────────────────────
     for hole in flat.holes:
