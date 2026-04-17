@@ -131,7 +131,84 @@ def detect_bends(
             orientation=orientation,
         ))
 
-    return bends
+    return _refine_bend_list(bends, thickness)
+
+
+def _refine_bend_list(bends: List[BendInfo], thickness: float) -> List[BendInfo]:
+    """
+    Post-process raw bend candidates:
+
+      1. Drop candidates whose flange normals are nearly parallel (angle close
+         to 180°) — these are usually false positives from internal fillets
+         where both adjacent "flanges" are the same physical plane.
+      2. Drop candidates whose inner radius is implausibly large for the
+         detected sheet thickness (> 10 × thickness) — these are usually
+         rolled features or large fillets, not sheet-metal bends.
+      3. Drop candidates with negligible bend length (< 0.5 × thickness).
+      4. Deduplicate: the inner and outer cylindrical faces of a single
+         physical bend both get classified as BEND candidates. Collapse them
+         by axis direction + projected axis location on the bend axis so that
+         one physical bend yields one BendInfo (prefer the inner face).
+    """
+    if not bends:
+        return bends
+
+    MAX_BEND_ANGLE_DEG = 170.0      # 180 - 10° minimum bending
+    MIN_BEND_ANGLE_DEG = 10.0
+    MAX_INNER_RADIUS = max(thickness * 10.0, 0.5)  # absolute cap
+    MIN_BEND_LENGTH = max(thickness * 0.5, 0.1)
+
+    filtered: List[BendInfo] = []
+    for b in bends:
+        if not (MIN_BEND_ANGLE_DEG <= b.angle_deg <= MAX_BEND_ANGLE_DEG):
+            continue
+        if b.inner_radius > MAX_INNER_RADIUS:
+            continue
+        if b.length < MIN_BEND_LENGTH:
+            continue
+        filtered.append(b)
+
+    # Deduplicate by axis key. Two cylindrical faces forming the inner and
+    # outer of the same bend share the same axis direction AND the same point
+    # on that axis. We bucket by a quantised key and keep the candidate with
+    # the smaller inner_radius (that is the "inner" face of the bend).
+    def _axis_key(b: BendInfo) -> tuple:
+        ax = b.axis
+        # Normalise direction sign so that (ax) and (-ax) hash the same.
+        if (ax[0], ax[1], ax[2]) < (-ax[0], -ax[1], -ax[2]):
+            ax = (-ax[0], -ax[1], -ax[2])
+        loc = b.axis_location
+        return (
+            round(ax[0], 3), round(ax[1], 3), round(ax[2], 3),
+            round(loc[0], 1), round(loc[1], 1), round(loc[2], 1),
+        )
+
+    dedup: dict[tuple, BendInfo] = {}
+    for b in filtered:
+        k = _axis_key(b)
+        if k not in dedup or b.inner_radius < dedup[k].inner_radius:
+            dedup[k] = b
+
+    refined = sorted(dedup.values(), key=lambda b: b.bend_id)
+    # Re-number bend_ids to be 1..N after filtering
+    renumbered: List[BendInfo] = []
+    for idx, b in enumerate(refined, start=1):
+        renumbered.append(BendInfo(
+            bend_id=idx,
+            face_index=b.face_index,
+            inner_radius=b.inner_radius,
+            outer_radius=b.outer_radius,
+            angle_deg=b.angle_deg,
+            angular_span=b.angular_span,
+            direction=b.direction,
+            axis=b.axis,
+            axis_location=b.axis_location,
+            adjacent_flanges=b.adjacent_flanges,
+            length=b.length,
+            is_inner=b.is_inner,
+            orientation=b.orientation,
+        ))
+    return renumbered
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────

@@ -57,11 +57,31 @@ def build_bend_graph(
     if G.number_of_nodes() == 0:
         return bg
 
-    # Find the base (largest) flange
-    bg.base_flange = max(G.nodes, key=lambda n: G.nodes[n].get("area", 0))
+    # Work with the largest connected component: a sheet-metal part should
+    # be one solid, but face classification + adjacency detection sometimes
+    # leaves isolated flanges (duplicate faces, features not connected via
+    # THICKNESS walls, etc.). Picking the globally-largest flange can land on
+    # an isolated node, leaving unfolding_order empty. Restrict to the biggest
+    # connected subgraph that actually carries bend edges.
+    components = [c for c in nx.connected_components(G) if len(c) > 1]
+    if components:
+        biggest = max(components, key=len)
+        work_subgraph = G.subgraph(biggest).copy()
+    else:
+        work_subgraph = G
 
-    # Check for cycles
-    bg.has_cycles = not nx.is_tree(G) and nx.number_of_edges(G) >= nx.number_of_nodes(G)
+    # Find the base (largest) flange within the connected subgraph
+    bg.base_flange = max(work_subgraph.nodes,
+                         key=lambda n: work_subgraph.nodes[n].get("area", 0))
+
+    # Check for cycles on the connected subgraph
+    bg.has_cycles = (
+        not nx.is_tree(work_subgraph)
+        and nx.number_of_edges(work_subgraph) >= nx.number_of_nodes(work_subgraph)
+    )
+
+    # From here on we unfold across the connected subgraph
+    G = work_subgraph
 
     if bg.has_cycles:
         # Break cycles by removing the edge with the smallest flange on either side

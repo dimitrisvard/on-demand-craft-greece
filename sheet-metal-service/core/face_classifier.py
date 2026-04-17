@@ -93,25 +93,32 @@ def _classify_cylinder(fi: FaceInfo, thickness: float) -> tuple[FaceType, Option
 
 
 def _classify_plane(fi: FaceInfo, thickness: float) -> FaceType:
-    """Planar → FLANGE or THICKNESS based on bounding-box narrowness."""
+    """Planar → FLANGE or THICKNESS based on bounding-box narrowness.
+
+    A planar face is 2D, so its axis-aligned world bounding box has one
+    dimension ≈ 0 (its normal direction). We therefore look at the smallest
+    in-plane dimension (the 2nd smallest of the 3 bbox extents).
+    """
     face = fi.face
     bbox = Bnd_Box()
     BRepBndLib.Add_s(face, bbox)
     xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
 
     dims = sorted([xmax - xmin, ymax - ymin, zmax - zmin])
-    min_dim = dims[0]
+    # dims[0] is the out-of-plane extent (~0 for any planar face).
+    # The narrowest in-plane extent is dims[1].
+    in_plane_min = dims[1]
+    in_plane_max = dims[2]
 
-    # A thickness face has its narrowest dimension very close to the sheet
-    # thickness. Tolerance ±50 % accounts for fillets / rounding.
-    if min_dim < 1e-3:
-        # Essentially zero-width (degenerate face) → OTHER
+    if in_plane_max < 1e-3:
+        # Degenerate / zero-area face
         return FaceType.OTHER
 
-    if abs(min_dim - thickness) < thickness * 0.50:
-        # Second dimension should also be small (it's thickness-like)
-        # But some thickness faces are long strips — the key is that one dim ≈ thickness
+    # A thickness face has its narrowest in-plane dimension ≈ the sheet
+    # thickness (±50 %). The other in-plane dimension is the edge length
+    # (arbitrary).
+    if abs(in_plane_min - thickness) < thickness * 0.50:
         return FaceType.THICKNESS
 
-    # Large face → FLANGE
+    # Anything wider than ~thickness in both in-plane directions → FLANGE
     return FaceType.FLANGE
