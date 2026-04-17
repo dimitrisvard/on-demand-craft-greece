@@ -120,6 +120,15 @@ def export_svg(
                 start=(c[0], c[1] - ext), end=(c[0], c[1] + ext),
                 stroke="#F39C12", stroke_width=0.5, stroke_dasharray="4,2",
             ))
+        elif hole.edges:
+            # Non-circular hole — render its polyline.
+            for edge in hole.edges:
+                p1 = pt(edge.start[0], edge.start[1])
+                p2 = pt(edge.end[0], edge.end[1])
+                dwg.add(dwg.line(
+                    start=p1, end=p2,
+                    stroke="#27AE60", stroke_width=1.2, fill="none",
+                ))
 
     # ── Dimensions ─────────────────────────────────────────────────────────
     # Overall width

@@ -209,6 +209,25 @@ def _unfold_no_bends(
         return fp
 
     largest = max(flanges, key=lambda cf: cf.info.area)
+
+    # Project the actual face outline onto 2D (in the face's own plane). This
+    # gives us the true outer/inner contours rather than an axis-aligned
+    # bounding rectangle — important for non-rectangular plates (notches, slots,
+    # radiused corners) and for downstream nesting / drawing accuracy.
+    outer, holes = _project_face_to_2d(largest.info.face)
+
+    if outer:
+        fp.outer_edges = _edges_from_polyline(outer)
+        xs = [p[0] for p in outer]
+        ys = [p[1] for p in outer]
+        fp.width = round(max(xs) - min(xs), 2)
+        fp.height = round(max(ys) - min(ys), 2)
+        # Attach hole polylines (each is a closed contour in face-plane coords).
+        for hole_pts in holes:
+            fp.holes.append(Hole2D(edges=_edges_from_polyline(hole_pts)))
+        return fp
+
+    # Fallback: bounding-box-derived rectangle if projection failed.
     bbox = Bnd_Box()
     BRepBndLib.Add_s(largest.info.face, bbox)
     xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
@@ -306,6 +325,170 @@ def _build_rectangular_outline(width: float, height: float) -> List[Edge2D]:
         Edge2D(start=(w, h), end=(0, h)),
         Edge2D(start=(0, h), end=(0, 0)),
     ]
+
+
+def _edges_from_polyline(pts: List[Tuple[float, float]]) -> List[Edge2D]:
+    """Convert a closed polyline of points into a list of Edge2D segments."""
+    edges: List[Edge2D] = []
+    if len(pts) < 2:
+        return edges
+    for i in range(len(pts)):
+        a = pts[i]
+        b = pts[(i + 1) % len(pts)]
+        if abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9:
+            continue
+        edges.append(Edge2D(
+            start=(round(a[0], 4), round(a[1], 4)),
+            end=(round(b[0], 4), round(b[1], 4)),
+        ))
+    return edges
+
+
+def _project_face_to_2d(face: TopoDS_Face) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+    """
+    Project a planar face's outer and inner wires into the face's own 2D plane.
+
+    Returns (outer_points, [hole_points, ...]). Coordinates are normalised so
+    the outer contour starts at (0, 0) — i.e. its bounding-box min is the
+    origin. Points are ordered along each wire using the parametric range of
+    its edges, with curves discretised at ~1° steps.
+
+    Returns empty lists on any failure (non-planar surface, OCC exceptions, …).
+    """
+    try:
+        adaptor = BRepAdaptor_Surface(face)
+        from OCP.GeomAbs import GeomAbs_Plane as _GeomAbs_Plane
+        if adaptor.GetType() != _GeomAbs_Plane:
+            return [], []
+        plane = adaptor.Plane()
+        origin = plane.Location()
+        ax_x = plane.XAxis().Direction()
+        ax_y = plane.YAxis().Direction()
+
+        def to_uv(pnt: gp_Pnt) -> Tuple[float, float]:
+            dx = pnt.X() - origin.X()
+            dy = pnt.Y() - origin.Y()
+            dz = pnt.Z() - origin.Z()
+            u = dx * ax_x.X() + dy * ax_x.Y() + dz * ax_x.Z()
+            v = dx * ax_y.X() + dy * ax_y.Y() + dz * ax_y.Z()
+            return (u, v)
+
+        from OCP.ShapeAnalysis import ShapeAnalysis
+        outer_wire = ShapeAnalysis.OuterWire_s(face)
+        if outer_wire is None or outer_wire.IsNull():
+            return [], []
+
+        outer_points = _wire_to_polyline(outer_wire, to_uv)
+        if len(outer_points) < 3:
+            return [], []
+
+        # Extract holes = all wires other than the outer one.
+        hole_polylines: List[List[Tuple[float, float]]] = []
+        wire_explorer = TopExp_Explorer(face, TopAbs_WIRE)
+        while wire_explorer.More():
+            wire = TopoDS.Wire_s(wire_explorer.Current())
+            if not wire.IsSame(outer_wire):
+                pts = _wire_to_polyline(wire, to_uv)
+                if len(pts) >= 3:
+                    hole_polylines.append(pts)
+            wire_explorer.Next()
+
+        # Translate so the outer contour's bounding box starts at (0, 0).
+        xs = [p[0] for p in outer_points]
+        ys = [p[1] for p in outer_points]
+        minx, miny = min(xs), min(ys)
+        outer_points = [(x - minx, y - miny) for (x, y) in outer_points]
+        hole_polylines = [
+            [(x - minx, y - miny) for (x, y) in h] for h in hole_polylines
+        ]
+        return outer_points, hole_polylines
+    except Exception:
+        return [], []
+
+
+def _wire_to_polyline(wire, to_uv) -> List[Tuple[float, float]]:
+    """
+    Walk a wire's edges and return a list of 2D points sampled along each
+    edge. Straight edges contribute their endpoints; curves are discretised
+    into ~1° steps (or a minimum of 8 steps per edge).
+    """
+    try:
+        from OCP.BRepTools import BRepTools_WireExplorer
+    except Exception:
+        BRepTools_WireExplorer = None  # type: ignore
+
+    pts: List[Tuple[float, float]] = []
+
+    def add(p: Tuple[float, float]) -> None:
+        if not pts:
+            pts.append(p)
+            return
+        last = pts[-1]
+        if abs(last[0] - p[0]) < 1e-4 and abs(last[1] - p[1]) < 1e-4:
+            return
+        pts.append(p)
+
+    try:
+        if BRepTools_WireExplorer is not None:
+            exp = BRepTools_WireExplorer(wire)
+            while exp.More():
+                edge = TopoDS.Edge_s(exp.Current())
+                _sample_edge(edge, to_uv, add)
+                exp.Next()
+        else:
+            exp = TopExp_Explorer(wire, TopAbs_EDGE)
+            while exp.More():
+                edge = TopoDS.Edge_s(exp.Current())
+                _sample_edge(edge, to_uv, add)
+                exp.Next()
+    except Exception:
+        return []
+
+    # Drop the closing duplicate so the polyline is an open list of unique pts.
+    if len(pts) > 2:
+        first = pts[0]
+        last = pts[-1]
+        if abs(first[0] - last[0]) < 1e-3 and abs(first[1] - last[1]) < 1e-3:
+            pts.pop()
+    return pts
+
+
+def _sample_edge(edge, to_uv, add) -> None:
+    """Discretise a single edge and feed its 2D points to the accumulator."""
+    try:
+        curve = BRepAdaptor_Curve(edge)
+    except Exception:
+        return
+
+    try:
+        u0 = curve.FirstParameter()
+        u1 = curve.LastParameter()
+    except Exception:
+        return
+
+    # Straight edges: just the two endpoints.
+    ctype = curve.GetType()
+    if ctype == GeomAbs_Line:
+        add(to_uv(curve.Value(u0)))
+        add(to_uv(curve.Value(u1)))
+        return
+
+    # Curved edges: sample adaptively — ~1° steps for circles, fixed 24 for
+    # everything else (splines, ellipses, etc.).
+    steps = 24
+    if ctype == GeomAbs_Circle:
+        try:
+            sweep_deg = abs(math.degrees(u1 - u0))
+        except Exception:
+            sweep_deg = 360.0
+        steps = max(8, int(math.ceil(sweep_deg)))
+
+    for i in range(steps + 1):
+        t = u0 + (u1 - u0) * (i / steps)
+        try:
+            add(to_uv(curve.Value(t)))
+        except Exception:
+            continue
 
 
 def _extract_holes(

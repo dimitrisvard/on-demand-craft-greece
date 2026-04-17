@@ -61,10 +61,15 @@ def export_dxf(
         return (x + ox, y + oy)
 
     # ── Outline ────────────────────────────────────────────────────────────
-    for edge in flat.outer_edges:
-        msp.add_line(
-            pt(edge.start[0], edge.start[1]),
-            pt(edge.end[0], edge.end[1]),
+    # Emit as a closed LWPOLYLINE so downstream DXF readers (e.g. the nesting
+    # import pipeline) reliably detect a single closed contour rather than
+    # having to re-chain loose LINE entities.
+    if flat.outer_edges:
+        outline_vertices = [
+            pt(edge.start[0], edge.start[1]) for edge in flat.outer_edges
+        ]
+        msp.add_lwpolyline(
+            outline_vertices, close=True,
             dxfattribs={"layer": "OUTLINE"},
         )
 
@@ -121,6 +126,17 @@ def export_dxf(
                 pt(cx, cy - ext), pt(cx, cy + ext),
                 dxfattribs={"layer": "CENTER", "linetype": "CENTER"},
             )
+        elif hole.edges:
+            # Non-circular cutout — emit a closed LWPOLYLINE so downstream
+            # DXF readers (e.g. the nesting import) can detect the contour.
+            vertices = []
+            for edge in hole.edges:
+                vertices.append(pt(edge.start[0], edge.start[1]))
+            if vertices:
+                msp.add_lwpolyline(
+                    vertices, close=True,
+                    dxfattribs={"layer": "HOLES"},
+                )
 
     # ── Overall dimensions ─────────────────────────────────────────────────
     dim_offset = 12.0

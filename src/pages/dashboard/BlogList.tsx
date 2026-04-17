@@ -127,13 +127,23 @@ const BlogList = () => {
   const fetchArticles = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('articles')
-        .select('*, posted_to_facebook, posted_to_linkedin, facebook_post_id, linkedin_post_id, social_posted_at')
+      // Select only the columns needed to render the list. Avoid fetching
+      // `content` (full article HTML — often multiple KB per row), `excerpt`,
+      // `meta_*`, and `featured_image_alt`, which are only needed in the
+      // preview / edit dialogs and are loaded lazily there.
+      // `posted_to_facebook`, `posted_to_linkedin`, and the social tracking
+      // columns are appended via the raw-column escape hatch because they
+      // aren't present in the generated Supabase types.
+      const columns =
+        'id, title, slug, language, status, created_at, author_id, translation_id, ' +
+        'posted_to_facebook, posted_to_linkedin, facebook_post_id, linkedin_post_id, social_posted_at';
+      const { data, error } = await (supabase
+        .from('articles') as any)
+        .select(columns)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setArticles(data || []);
+      setArticles((data as Article[]) || []);
     } catch (error: any) {
       console.error('Error fetching articles:', error);
       toast({
