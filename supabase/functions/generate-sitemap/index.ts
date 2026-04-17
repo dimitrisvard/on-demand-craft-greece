@@ -177,21 +177,10 @@ function formatDate(dateString: string): string {
 }
 
 /**
- * Generate the complete sitemap XML with full hreflang support
+ * Fetch all published articles, paginating past Supabase's 1000-row default.
  */
-async function generateSitemap(): Promise<string> {
-  const today = new Date().toISOString().split('T')[0];
-
-  // 1. Generate static page entries: 14 languages × 15 pages = 210 entries
-  const staticEntries: string[] = [];
-  for (const page of STATIC_PAGES) {
-    for (const lang of LANGUAGES) {
-      staticEntries.push(buildStaticUrlEntry(lang, page, today));
-    }
-  }
-
-  // 2. Fetch all published articles (paginate to bypass Supabase 1000-row default limit)
-  const allArticles: Article[] = [];
+async function fetchAllPublishedArticles(): Promise<Article[]> {
+  const all: Article[] = [];
   const PAGE_SIZE = 1000;
   let page = 0;
   while (true) {
@@ -209,11 +198,69 @@ async function generateSitemap(): Promise<string> {
     }
 
     if (!batch || batch.length === 0) break;
-    allArticles.push(...batch);
+    all.push(...batch);
     if (batch.length < PAGE_SIZE) break;
     page++;
   }
-  const articles = allArticles;
+  return all;
+}
+
+/**
+ * Upsert every article URL into gsc_monitored_urls so the Index Status tab
+ * and the Indexing API workflow can see all articles. Existing rows are
+ * preserved (upsert on `url`), so historical GSC submissions are untouched.
+ */
+async function syncArticlesToMonitoredUrls(articles: Article[]): Promise<{ upserted: number; skipped: number }> {
+  const rows = articles
+    .map((article) => {
+      const lang = (article.language || '').trim().toLowerCase();
+      if (!LANGUAGES.includes(lang)) return null;
+      const blogSlug = SLUGS[lang]?.blog || 'blog';
+      const url = encodeSitemapUrl(`${siteUrl}/${lang}/${blogSlug}/${article.slug}`);
+      return {
+        url,
+        label: `${lang.toUpperCase()} — ${article.slug}`.slice(0, 200),
+        language: lang,
+        service_type: 'blog_article',
+        priority: 5,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  const skipped = articles.length - rows.length;
+  let upserted = 0;
+
+  // Upsert in chunks of 500 to stay well under payload limits.
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await supabase
+      .from('gsc_monitored_urls')
+      .upsert(chunk, { onConflict: 'url', ignoreDuplicates: false });
+    if (error) {
+      console.error(`Monitored URL upsert chunk ${i / 500} failed:`, error.message);
+      throw new Error(`Failed to sync monitored URLs: ${error.message}`);
+    }
+    upserted += chunk.length;
+  }
+
+  console.log(`Synced ${upserted} article URLs to gsc_monitored_urls (${skipped} skipped for invalid language)`);
+  return { upserted, skipped };
+}
+
+/**
+ * Generate the complete sitemap XML with full hreflang support.
+ * Accepts pre-fetched articles so the caller can reuse them.
+ */
+async function generateSitemap(articles: Article[]): Promise<string> {
+  const today = new Date().toISOString().split('T')[0];
+
+  // 1. Generate static page entries: 14 languages × 15 pages = 210 entries
+  const staticEntries: string[] = [];
+  for (const page of STATIC_PAGES) {
+    for (const lang of LANGUAGES) {
+      staticEntries.push(buildStaticUrlEntry(lang, page, today));
+    }
+  }
 
   console.log(`Found ${articles.length} published articles for sitemap`);
 
@@ -323,32 +370,30 @@ serve(async (req) => {
     const url = new URL(req.url);
     const type = url.searchParams.get("type") || "complete";
 
-    let sitemap: string;
-    let stats = { type: "", urls: 0, languages: 0, articles: 0 };
     const uploadResults: Array<{ filename: string; publicUrl: string | null; success: boolean }> = [];
 
-    // Always generate the full sitemap with hreflang
-    sitemap = await generateSitemap();
+    // Fetch articles once and reuse for both sitemap XML and monitored-URL sync.
+    const articles = await fetchAllPublishedArticles();
+
+    const sitemap = await generateSitemap(articles);
     const urlCount = (sitemap.match(/<url>/g) || []).length;
 
-    // Count articles
-    const { count } = await supabase
-      .from("articles")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "published");
+    // Sync every article URL into gsc_monitored_urls for the Index Status tab.
+    const syncResult = await syncArticlesToMonitoredUrls(articles);
 
-    stats = {
+    const stats = {
       type: "complete",
       urls: urlCount,
       languages: LANGUAGES.length,
-      articles: count || 0
+      articles: articles.length,
+      monitoredUrlsSynced: syncResult.upserted,
     };
 
     // Save to storage
     const result = await uploadSitemapToStorage("sitemap-complete.xml", sitemap);
     uploadResults.push({ filename: "sitemap-complete.xml", ...result });
 
-    console.log(`Generated sitemap with ${stats.urls} URLs (${stats.articles} articles across ${stats.languages} languages)`);
+    console.log(`Generated sitemap with ${stats.urls} URLs (${stats.articles} articles across ${stats.languages} languages); synced ${stats.monitoredUrlsSynced} monitored URLs`);
 
     const storageBaseUrl = `${supabaseUrl}/storage/v1/object/public/sitemaps`;
 

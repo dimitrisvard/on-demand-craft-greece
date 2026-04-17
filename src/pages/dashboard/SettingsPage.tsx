@@ -55,6 +55,7 @@ interface SitemapResult {
     urls: number;
     languages: number;
     articles: number;
+    monitoredUrlsSynced?: number;
   };
   storage: {
     uploaded: Array<{
@@ -492,7 +493,7 @@ const SettingsPage = () => {
                         <span className="font-medium">Last Generation Result</span>
                       </div>
                       
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                         <div>
                           <p className="text-muted-foreground">Total URLs</p>
                           <p className="text-lg font-semibold">{sitemapResult.stats.urls}</p>
@@ -504,6 +505,10 @@ const SettingsPage = () => {
                         <div>
                           <p className="text-muted-foreground">Articles</p>
                           <p className="text-lg font-semibold">{sitemapResult.stats.articles}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Monitored Synced</p>
+                          <p className="text-lg font-semibold">{sitemapResult.stats.monitoredUrlsSynced ?? 0}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Files Generated</p>
