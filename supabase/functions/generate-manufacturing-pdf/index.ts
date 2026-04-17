@@ -218,6 +218,21 @@ serve(async (req) => {
         if (unfoldData.thickness_mm && unfoldData.thickness_mm > 0) {
           analysis.dimensions.y = unfoldData.thickness_mm;
         }
+
+        // The volume derived from raw STEP triangulation is often wildly
+        // wrong (overlapping / non-manifold surfaces). For sheet metal we
+        // have a much better estimate: flat_area × thickness. Use it to
+        // compute a realistic weight.
+        const thkForVol = unfoldData.thickness_mm && unfoldData.thickness_mm > 0
+          ? unfoldData.thickness_mm
+          : analysis.dimensions.y;
+        if (unfoldData.flat_pattern && unfoldData.flat_pattern.width_mm > 0
+            && unfoldData.flat_pattern.height_mm > 0
+            && thkForVol > 0) {
+          analysis.volume = unfoldData.flat_pattern.width_mm
+                           * unfoldData.flat_pattern.height_mm
+                           * thkForVol;
+        }
       } else {
         console.log("FreeCAD unfold not available or failed, using STEP text parsing only");
         // Surface unfold status in the response for debugging
