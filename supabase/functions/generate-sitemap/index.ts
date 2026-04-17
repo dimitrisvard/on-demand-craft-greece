@@ -190,20 +190,32 @@ async function generateSitemap(): Promise<string> {
     }
   }
 
-  // 2. Fetch all published articles
-  const { data: articles, error } = await supabase
-    .from("articles")
-    .select("slug, language, updated_at, created_at, translation_id")
-    .eq("status", "published")
-    .order("language", { ascending: true })
-    .order("updated_at", { ascending: false });
+  // 2. Fetch all published articles (paginate to bypass Supabase 1000-row default limit)
+  const allArticles: Article[] = [];
+  const PAGE_SIZE = 1000;
+  let page = 0;
+  while (true) {
+    const { data: batch, error } = await supabase
+      .from("articles")
+      .select("slug, language, updated_at, created_at, translation_id")
+      .eq("status", "published")
+      .order("language", { ascending: true })
+      .order("updated_at", { ascending: false })
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-  if (error) {
-    console.error("Error fetching articles:", error);
-    throw new Error(`Failed to fetch articles: ${error.message}`);
+    if (error) {
+      console.error("Error fetching articles:", error);
+      throw new Error(`Failed to fetch articles: ${error.message}`);
+    }
+
+    if (!batch || batch.length === 0) break;
+    allArticles.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    page++;
   }
+  const articles = allArticles;
 
-  console.log(`Found ${articles?.length || 0} published articles for sitemap`);
+  console.log(`Found ${articles.length} published articles for sitemap`);
 
   // Log language distribution
   if (articles && articles.length > 0) {
