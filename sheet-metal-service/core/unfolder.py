@@ -29,7 +29,7 @@ from OCP.BRepGProp import BRepGProp
 from OCP.GProp import GProp_GProps
 from OCP.Bnd import Bnd_Box
 from OCP.BRepBndLib import BRepBndLib
-from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle
+from OCP.GeomAbs import GeomAbs_Line, GeomAbs_Circle, GeomAbs_Plane
 from OCP.BRepAdaptor import BRepAdaptor_Curve
 
 from core.step_parser import Topology
@@ -81,6 +81,11 @@ class Hole2D:
 class FlatPattern:
     """Complete 2D flat pattern result."""
     outer_edges: List[Edge2D] = field(default_factory=list)
+    # Additional disjoint outer contours (e.g. detached flanges that share
+    # the base plane but aren't connected to the main chain). The DXF
+    # exporter emits each as its own closed LWPOLYLINE on the OUTLINE
+    # layer. Empty for simple single-region parts.
+    extra_outlines: List[List[Edge2D]] = field(default_factory=list)
     bend_lines: List[BendLine2D] = field(default_factory=list)
     holes: List[Hole2D] = field(default_factory=list)
     width: float = 0.0   # mm
@@ -121,6 +126,25 @@ def unfold(
 
     # Map face index → ClassifiedFace
     cf_map: Dict[int, ClassifiedFace] = {cf.info.index: cf for cf in classified}
+
+    # ── Try true 3D unfolding first ────────────────────────────────────────
+    # Compose an accumulated gp_Trsf per flange by BFS-walking the bend
+    # graph, applying rotations around each bend axis. When it succeeds we
+    # also try to fold in orphan flanges (those with no bend-graph
+    # connection — e.g. hem features that were filtered out) by matching
+    # their plane to a chain flange with parallel normal + close origin.
+    result_3d = _unfold_via_3d_transforms(
+        topo, classified, bends, bend_graph, thickness, k_factor, bend_map, cf_map,
+    )
+    if result_3d is not None:
+        fp = result_3d
+        # Place bend lines at the projected bend axis positions
+        _place_bend_lines_3d(
+            fp, bends, bend_graph, bend_map, cf_map, topo,
+            thickness, k_factor,
+        )
+        _check_warnings(fp, bends, thickness)
+        return fp
 
     # ── Compute the pattern height ──────────────────────────────────────────
     # Pattern height = the bend line length = the dimension perpendicular
@@ -893,3 +917,722 @@ def _check_warnings(fp: FlatPattern, bends: List[BendInfo], thickness: float) ->
                     f"{hole.center[1]:.1f}) is {dx:.1f}mm from bend B{bl.bend_info.bend_id} "
                     f"(min recommended: {min_dist:.1f}mm)"
                 )
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# True 3D unfolding via accumulated gp_Trsf transforms
+# ════════════════════════════════════════════════════════════════════════════
+#
+# The 1D-strip approach (above) handles only single-axis bend chains. Real
+# parts often have:
+#   - Multi-axis bends (one bend around X, the next around Y) — flanges
+#     don't lay out into a straight strip.
+#   - Hem features (very tight radius bends folding the flange back on
+#     itself) — these are filtered out of the bend graph by the angle filter.
+#   - Disconnected bend-graph components — face-classification gaps leave
+#     some flanges without bend connections; their holes/outline get lost.
+#
+# The 3D approach: for every flange, compute an accumulated gp_Trsf that
+# maps that flange's geometry from its folded 3D position to the flat
+# pattern (Z = 0 plane in some chosen "base" coord system). Then project
+# each transformed face's outline + holes by dropping Z, and union the
+# outlines with pyclipper.
+#
+# Algorithm:
+#   1. Pick a base flange (largest area in the main connected component).
+#   2. Compute T_base = transform mapping base plane → world XY plane.
+#   3. BFS through the bend graph. For each bend (parent → child):
+#        axis_current = T_parent applied to (axis_location, axis_direction)
+#        For sign in {+1, -1}: try R_bend = rotation(axis_current, sign·angle)
+#                              T_child_candidate = R_bend ∘ T_parent
+#                              Pick sign that makes child normal align +Z best.
+#        T_child = best T_child_candidate.
+#   4. Repeat for additional connected components, offsetting them in 2D.
+#   5. For "orphan" flanges (no bend graph connection at all), match them
+#      to the chain flange whose plane is parallel and closest in space,
+#      then apply that flange's transform. (Captures hem-flange holes.)
+#   6. Project all transformed face outlines + holes by dropping Z, union
+#      with pyclipper.
+
+
+def _unfold_via_3d_transforms(
+    topo: "Topology",
+    classified: List["ClassifiedFace"],
+    bends: List[BendInfo],
+    bend_graph: "BendGraph",
+    thickness: float,
+    k_factor: float,
+    bend_map: Dict[int, BendInfo],
+    cf_map: Dict[int, "ClassifiedFace"],
+) -> Optional[FlatPattern]:
+    """
+    Run the 3D-transform unfolding pipeline. Returns a FlatPattern on
+    success, or None on any failure (caller falls back to strip layout).
+    """
+    base_idx = bend_graph.base_flange
+    if base_idx is None:
+        return None
+
+    base_cf = cf_map.get(base_idx)
+    if base_cf is None:
+        return None
+
+    # ── 1. Transform that maps base plane → world XY ─────────────────────
+    T_base = _world_to_base_plane_trsf(base_cf.info.face)
+    if T_base is None:
+        return None
+
+    # ── 2. BFS walk of the main bend chain, computing T per flange ───────
+    transforms: Dict[int, gp_Trsf] = {base_idx: T_base}
+    _bfs_compose_transforms(
+        bend_graph.unfolding_order, bend_map, cf_map, transforms,
+    )
+
+    # ── 3. Process additional MULTI-NODE connected components ──────────
+    # For each multi-node component not in the main chain, try to anchor
+    # it to a chain flange via parallel-plane matching: if any member of
+    # the component is coplanar (or near-parallel and close) with some
+    # chain flange, treat that chain flange's transform as the anchor,
+    # then BFS the component starting from the matched member (not by
+    # picking a "local base" plane). This means hem-fold pairs like
+    # {59, 69} get folded back onto their parent chain flange in 2D
+    # rather than being scattered as separate islands.
+    component_member_set: set = set()
+    try:
+        import networkx as nx  # type: ignore
+        full_graph = bend_graph.graph
+        all_components = [c for c in nx.connected_components(full_graph)]
+
+        # Pre-collect chain flanges' planes for matching.
+        chain_planes_for_match: List[Tuple[int, gp_Trsf, gp_Pnt, gp_Dir]] = []
+        for cidx in transforms:
+            cf_c = cf_map.get(cidx)
+            if cf_c is None:
+                continue
+            pdata = _face_plane_origin_normal(cf_c.info.face)
+            if pdata is None:
+                continue
+            chain_planes_for_match.append(
+                (cidx, transforms[cidx], pdata[0], pdata[1])
+            )
+
+        ANCHOR_PERP_DIST = max(thickness * 4.0, 3.0)
+
+        for comp in all_components:
+            if any(n in transforms for n in comp):
+                continue
+            if len(comp) < 2:
+                # Singleton — handled later via orphan-matching pass.
+                continue
+
+            # Find the component member with smallest perpendicular distance
+            # to any chain flange's plane (and whose normal is parallel).
+            anchor_idx: Optional[int] = None
+            anchor_T: Optional[gp_Trsf] = None
+            best_perp = float("inf")
+            for n in comp:
+                cf_n = cf_map.get(n)
+                if cf_n is None:
+                    continue
+                pdata = _face_plane_origin_normal(cf_n.info.face)
+                if pdata is None:
+                    continue
+                n_origin, n_normal = pdata
+                for chain_idx, T_chain, p_o, p_n in chain_planes_for_match:
+                    dot = (
+                        n_normal.X() * p_n.X()
+                        + n_normal.Y() * p_n.Y()
+                        + n_normal.Z() * p_n.Z()
+                    )
+                    if abs(abs(dot) - 1.0) > 0.05:
+                        continue
+                    ox = n_origin.X() - p_o.X()
+                    oy = n_origin.Y() - p_o.Y()
+                    oz = n_origin.Z() - p_o.Z()
+                    perp = abs(
+                        ox * p_n.X() + oy * p_n.Y() + oz * p_n.Z()
+                    )
+                    if perp < best_perp:
+                        best_perp = perp
+                        anchor_idx = n
+                        anchor_T = T_chain
+            if anchor_T is None or best_perp > ANCHOR_PERP_DIST:
+                # No coplanar chain flange — the component is unrelated
+                # geometry. Skip it (don't scatter it across the flat
+                # pattern).
+                continue
+
+            # BFS from the anchor flange, composing transforms via the
+            # component's own bend edges. The anchor's transform IS the
+            # chain flange's transform (we treat the anchor flange as
+            # coplanar with that chain flange).
+            sub = full_graph.subgraph(comp)
+            local_t: Dict[int, gp_Trsf] = {anchor_idx: anchor_T}
+            local_order: List[Tuple[int, int, int]] = []
+            seen = {anchor_idx}
+            queue = [anchor_idx]
+            while queue:
+                cur = queue.pop(0)
+                for nbr in sub.neighbors(cur):
+                    if nbr in seen:
+                        continue
+                    seen.add(nbr)
+                    edge_data = sub.edges[cur, nbr]
+                    bid = edge_data.get("bend_id", 0)
+                    local_order.append((cur, bid, nbr))
+                    queue.append(nbr)
+            _bfs_compose_transforms(local_order, bend_map, cf_map, local_t)
+            # Merge into transforms map (we treat these as part of main flat).
+            for face_idx, T in local_t.items():
+                if face_idx not in transforms:
+                    transforms[face_idx] = T
+            component_member_set.update(local_t.keys())
+    except Exception:
+        pass
+
+    # Empty out the legacy island list (we no longer use islands).
+    component_local_transforms: List[Dict[int, gp_Trsf]] = []
+
+    # ── 4. Project chain flanges + holes ─────────────────────────────────
+    flange_polys: List[List[Tuple[float, float]]] = []
+    hole_polys: List[List[Tuple[float, float]]] = []
+    flange_normals_2d: Dict[int, Tuple[float, float, float]] = {}
+
+    for face_idx, T in transforms.items():
+        cf = cf_map.get(face_idx)
+        if cf is None:
+            continue
+        outer_pts, hole_pts_list = _flatten_face_via_trsf(cf.info.face, T)
+        if outer_pts:
+            flange_polys.append(outer_pts)
+        hole_polys.extend(hole_pts_list)
+        # Record the flange's transformed normal direction (used to skip
+        # mismatched orphan-flange matches later).
+        n3 = _face_normal_after_trsf(cf.info.face, T)
+        if n3 is not None:
+            flange_normals_2d[face_idx] = n3
+
+    # ── 5. Process orphan flanges (no bend graph connection) ─────────────
+    # Find flanges with parallel plane to a chain flange; copy that
+    # chain flange's transform. This captures hem-feature flanges.
+    chain_flange_planes: Dict[int, Tuple[gp_Trsf, gp_Pnt, gp_Dir]] = {}
+    for face_idx, T in transforms.items():
+        cf = cf_map.get(face_idx)
+        if cf is None:
+            continue
+        plane_data = _face_plane_origin_normal(cf.info.face)
+        if plane_data is None:
+            continue
+        chain_flange_planes[face_idx] = (T, plane_data[0], plane_data[1])
+
+    # Orphan flange filter — accept only flanges whose plane is:
+    #   (a) parallel to a chain flange's plane (dot ≈ ±1), AND
+    #   (b) within ~few thicknesses perpendicular distance of that plane.
+    # Condition (a)+(b) characterises duplicates (back side of the same
+    # sheet) and hem-side flanges (folded back onto the parent flange).
+    # Random unrelated parallel faces further away are rejected.
+    ORPHAN_MAX_PLANE_DIST = max(thickness * 4.0, 3.0)
+
+    orphan_holes_added = 0
+    for cf in classified:
+        if cf.face_type != FaceType.FLANGE:
+            continue
+        face_idx = cf.info.index
+        if face_idx in transforms:
+            continue
+        if face_idx in component_member_set:
+            continue
+        # Match to closest parallel chain flange (via perpendicular distance
+        # to that plane, not origin-origin distance — same-plane faces can
+        # have their origin points far from each other yet be coplanar).
+        plane_data = _face_plane_origin_normal(cf.info.face)
+        if plane_data is None:
+            continue
+        my_origin, my_normal = plane_data
+        best_T: Optional[gp_Trsf] = None
+        best_perp_dist = float("inf")
+        for chain_idx, (T_chain, p_o, p_n) in chain_flange_planes.items():
+            dot = (
+                my_normal.X() * p_n.X()
+                + my_normal.Y() * p_n.Y()
+                + my_normal.Z() * p_n.Z()
+            )
+            if abs(abs(dot) - 1.0) > 0.05:
+                continue
+            # Perpendicular distance from orphan's origin to chain's plane
+            ox = my_origin.X() - p_o.X()
+            oy = my_origin.Y() - p_o.Y()
+            oz = my_origin.Z() - p_o.Z()
+            perp = abs(ox * p_n.X() + oy * p_n.Y() + oz * p_n.Z())
+            if perp < best_perp_dist:
+                best_perp_dist = perp
+                best_T = T_chain
+        if best_T is None:
+            continue
+        if best_perp_dist > ORPHAN_MAX_PLANE_DIST:
+            # Too far from any chain plane — probably unrelated geometry.
+            continue
+        # Project this orphan flange using the chain flange's transform.
+        # Keep its outline AND holes (so hem holes appear).
+        outer_pts, hole_pts_list = _flatten_face_via_trsf(cf.info.face, best_T)
+        if outer_pts:
+            flange_polys.append(outer_pts)
+        if hole_pts_list:
+            hole_polys.extend(hole_pts_list)
+            orphan_holes_added += len(hole_pts_list)
+
+    # ── 6. Project additional components into separate islands ──────────
+    # Compute the bbox of the main result so we know where to offset
+    # additional components.
+    if not flange_polys and not component_local_transforms:
+        return None
+
+    main_bbox = _polys_bbox(flange_polys + hole_polys)
+    island_offset_x = (main_bbox[2] - main_bbox[0] + 10.0) if main_bbox else 0.0
+
+    for ct in component_local_transforms:
+        local_polys: List[List[Tuple[float, float]]] = []
+        local_holes: List[List[Tuple[float, float]]] = []
+        for face_idx, T in ct.items():
+            cf = cf_map.get(face_idx)
+            if cf is None:
+                continue
+            outer_pts, hole_pts_list = _flatten_face_via_trsf(cf.info.face, T)
+            if outer_pts:
+                local_polys.append(outer_pts)
+            local_holes.extend(hole_pts_list)
+        if not local_polys and not local_holes:
+            continue
+        # Translate to (island_offset_x, 0) of the local bbox
+        local_bbox = _polys_bbox(local_polys + local_holes)
+        if local_bbox is None:
+            continue
+        dx = island_offset_x - local_bbox[0]
+        dy = -local_bbox[1]
+        local_polys = [
+            [(p[0] + dx, p[1] + dy) for p in poly] for poly in local_polys
+        ]
+        local_holes = [
+            [(p[0] + dx, p[1] + dy) for p in poly] for poly in local_holes
+        ]
+        flange_polys.extend(local_polys)
+        hole_polys.extend(local_holes)
+        island_offset_x += (local_bbox[2] - local_bbox[0]) + 10.0
+
+    if not flange_polys:
+        return None
+
+    # ── 7. Union all flange outlines via pyclipper ─────────────────────
+    outer_mm: List[Tuple[float, float]] = []
+    extra_outer_rings: List[List[Tuple[float, float]]] = []
+    extra_holes_from_union: List[List[Tuple[float, float]]] = []
+    if _HAS_PYCLIPPER:
+        try:
+            subj = []
+            for poly in flange_polys:
+                if len(poly) < 3:
+                    continue
+                path = [
+                    (int(round(x * _CLIPPER_SCALE)), int(round(y * _CLIPPER_SCALE)))
+                    for (x, y) in poly
+                ]
+                # Force CCW orientation so pyclipper treats them as fills
+                if not pyclipper.Orientation(path):
+                    path.reverse()
+                subj.append(path)
+            if subj:
+                pc = pyclipper.Pyclipper()
+                pc.AddPaths(subj, pyclipper.PT_SUBJECT, True)
+                solution = pc.Execute(
+                    pyclipper.CT_UNION,
+                    pyclipper.PFT_NONZERO,
+                    pyclipper.PFT_NONZERO,
+                )
+                if solution:
+                    outers = [r for r in solution if pyclipper.Orientation(r)]
+                    inners = [r for r in solution if not pyclipper.Orientation(r)]
+                    if outers:
+                        def _area_int(ring):
+                            n = len(ring)
+                            a = 0
+                            for i in range(n):
+                                x1, y1 = ring[i]
+                                x2, y2 = ring[(i + 1) % n]
+                                a += x1 * y2 - x2 * y1
+                            return abs(a) / 2
+                        outers_sorted = sorted(outers, key=_area_int, reverse=True)
+                        outer_mm = [
+                            (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE)
+                            for (x, y) in outers_sorted[0]
+                        ]
+                        # Smaller disjoint outer rings → extra outlines
+                        # (additional flange regions that don't touch the
+                        # main outline). Filter out tiny fragments (area
+                        # below 5×thickness²) which are typically clipper
+                        # numerical noise from near-overlapping inputs.
+                        min_area_int = (5.0 * thickness * thickness) * (
+                            _CLIPPER_SCALE * _CLIPPER_SCALE
+                        )
+                        for ring in outers_sorted[1:]:
+                            if len(ring) < 4:
+                                continue
+                            if _area_int(ring) < min_area_int:
+                                continue
+                            extra_outer_rings.append([
+                                (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE)
+                                for (x, y) in ring
+                            ])
+                        # Holes inside the unioned outer region (from clipper)
+                        for ring in inners:
+                            extra_holes_from_union.append([
+                                (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE)
+                                for (x, y) in ring
+                            ])
+        except Exception:
+            outer_mm = []
+
+    # If pyclipper failed, fall back to using the largest individual flange
+    if not outer_mm and flange_polys:
+        def _area_f(poly):
+            n = len(poly)
+            a = 0.0
+            for i in range(n):
+                x1, y1 = poly[i]
+                x2, y2 = poly[(i + 1) % n]
+                a += x1 * y2 - x2 * y1
+            return abs(a) / 2
+        outer_mm = max(flange_polys, key=_area_f)
+
+    if not outer_mm:
+        return None
+
+    # ── 8. Translate everything so combined bbox starts at (0, 0) ───────
+    # Use the bbox of EVERYTHING (main outline + extra rings + holes) so
+    # disjoint outline pieces and orphan holes don't end up at negative
+    # coords or with the main outline shoved off centre.
+    all_xs: List[float] = [p[0] for p in outer_mm]
+    all_ys: List[float] = [p[1] for p in outer_mm]
+    for r in extra_outer_rings:
+        for (x, y) in r:
+            all_xs.append(x); all_ys.append(y)
+    for r in hole_polys + extra_holes_from_union:
+        for (x, y) in r:
+            all_xs.append(x); all_ys.append(y)
+    minx, miny = min(all_xs), min(all_ys)
+    outer_mm = [(x - minx, y - miny) for (x, y) in outer_mm]
+    hole_polys = [
+        [(x - minx, y - miny) for (x, y) in h] for h in hole_polys
+    ]
+    extra_holes_from_union = [
+        [(x - minx, y - miny) for (x, y) in h] for h in extra_holes_from_union
+    ]
+    extra_outer_rings = [
+        [(x - minx, y - miny) for (x, y) in h] for h in extra_outer_rings
+    ]
+
+    # ── 9. Build FlatPattern result ─────────────────────────────────────
+    fp = FlatPattern()
+    fp.outer_edges = _edges_from_polyline(outer_mm)
+    for ring in extra_outer_rings:
+        fp.extra_outlines.append(_edges_from_polyline(ring))
+    # Width/height = bbox of the WHOLE pattern (main outline + extras).
+    bbox_xs = [p[0] for p in outer_mm]
+    bbox_ys = [p[1] for p in outer_mm]
+    for ring in extra_outer_rings:
+        for (x, y) in ring:
+            bbox_xs.append(x); bbox_ys.append(y)
+    fp.width = round((max(bbox_xs) - min(bbox_xs)) if bbox_xs else 0.0, 2)
+    fp.height = round((max(bbox_ys) - min(bbox_ys)) if bbox_ys else 0.0, 2)
+
+    # Deduplicate holes by approximate centre+size (chain processing can
+    # surface the same hole twice — once from each face of a thin sheet,
+    # plus once from each anchored hem flange).
+    seen_holes: List[Tuple[float, float, float]] = []
+    for hp in hole_polys + extra_holes_from_union:
+        h2d = _hole_from_polyline(hp)
+        if h2d.center and h2d.diameter:
+            key = (round(h2d.center[0], 1), round(h2d.center[1], 1),
+                   round(h2d.diameter, 1))
+            if any(
+                abs(k[0] - key[0]) < 1.0 and abs(k[1] - key[1]) < 1.0
+                and abs(k[2] - key[2]) < 0.5
+                for k in seen_holes
+            ):
+                continue
+            seen_holes.append(key)
+            fp.holes.append(h2d)
+        else:
+            # Polyline holes — dedup by approximate bounding box centre + size
+            xs = [p[0] for p in hp]; ys = [p[1] for p in hp]
+            if not xs:
+                continue
+            cx = (min(xs) + max(xs)) / 2
+            cy = (min(ys) + max(ys)) / 2
+            sz = max(max(xs) - min(xs), max(ys) - min(ys))
+            key = (round(cx, 1), round(cy, 1), round(sz, 1))
+            if any(
+                abs(k[0] - key[0]) < 1.0 and abs(k[1] - key[1]) < 1.0
+                and abs(k[2] - key[2]) < 1.0
+                for k in seen_holes
+            ):
+                continue
+            seen_holes.append(key)
+            fp.holes.append(h2d)
+
+    # Store for bend-line placement
+    fp.flange_widths = []
+    fp._3d_transforms = transforms  # type: ignore[attr-defined]
+    fp._3d_origin_offset = (minx, miny)  # type: ignore[attr-defined]
+    return fp
+
+
+def _bfs_compose_transforms(
+    unfolding_order: List[Tuple[int, int, int]],
+    bend_map: Dict[int, BendInfo],
+    cf_map: Dict[int, "ClassifiedFace"],
+    transforms: Dict[int, gp_Trsf],
+) -> None:
+    """
+    Walk the unfolding order, composing per-flange transforms via
+    rotation around each bend's axis.
+    """
+    for from_idx, bend_id, to_idx in unfolding_order:
+        T_parent = transforms.get(from_idx)
+        bend = bend_map.get(bend_id)
+        if T_parent is None or bend is None:
+            continue
+        if bend.axis is None or bend.axis_location is None:
+            continue
+
+        try:
+            ax_loc_world = gp_Pnt(*bend.axis_location)
+            ax_dir_world = gp_Dir(*bend.axis)
+
+            # Apply T_parent to get axis location & direction in the
+            # currently-flattened parent frame.
+            ax_loc_current = ax_loc_world.Transformed(T_parent)
+            ax_dir_current = ax_dir_world.Transformed(T_parent)
+            axis_current = gp_Ax1(ax_loc_current, ax_dir_current)
+        except Exception:
+            continue
+
+        child_cf = cf_map.get(to_idx)
+        if child_cf is None:
+            continue
+        child_normal_world = _face_plane_normal(child_cf.info.face)
+        if child_normal_world is None:
+            continue
+
+        angle_rad = math.radians(bend.angle_deg)
+
+        best_T_child: Optional[gp_Trsf] = None
+        best_align = -2.0
+        for sign in (+1, -1):
+            try:
+                R = gp_Trsf()
+                R.SetRotation(axis_current, sign * angle_rad)
+                T_candidate = gp_Trsf()
+                T_candidate.Multiply(R)
+                # OCC: Multiply(other) sets self = self * other. We want
+                # T_candidate = R * T_parent, so start with R and multiply
+                # by T_parent on the right (R operates LAST so it must be
+                # applied after T_parent → we want a point P transformed
+                # as: P' = R(T_parent(P)) which in matrix terms is M_R · M_Tparent
+                # · P. gp_Trsf's Multiplied(other) returns self · other,
+                # treating points as column vectors, meaning self is
+                # applied AFTER other. So R.Multiplied(T_parent) means
+                # T_parent first then R — exactly what we want.
+                T_combined = R.Multiplied(T_parent)
+                # Test alignment of child normal after the candidate.
+                n_after = child_normal_world.Transformed(T_combined)
+                align = n_after.Z()
+                if align > best_align:
+                    best_align = align
+                    best_T_child = T_combined
+            except Exception:
+                continue
+        if best_T_child is not None:
+            transforms[to_idx] = best_T_child
+
+
+def _world_to_base_plane_trsf(face: TopoDS_Face) -> Optional[gp_Trsf]:
+    """
+    Build a gp_Trsf that maps points expressed in world coords to the
+    coordinate system of the base plane. Result: a point on the base
+    plane has Z=0 in the new frame, and the plane's local X/Y axes are
+    the new X/Y axes.
+    """
+    try:
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() != GeomAbs_Plane:
+            return None
+        plane = adaptor.Plane()
+        T = gp_Trsf()
+        T.SetTransformation(plane.Position())
+        return T
+    except Exception:
+        return None
+
+
+def _face_plane_normal(face: TopoDS_Face) -> Optional[gp_Dir]:
+    """Return the planar face's normal as a gp_Dir, or None."""
+    try:
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() != GeomAbs_Plane:
+            return None
+        plane = adaptor.Plane()
+        return plane.Axis().Direction()
+    except Exception:
+        return None
+
+
+def _face_plane_origin_normal(
+    face: TopoDS_Face,
+) -> Optional[Tuple[gp_Pnt, gp_Dir]]:
+    """Return (origin_point, normal) for a planar face, or None."""
+    try:
+        adaptor = BRepAdaptor_Surface(face)
+        if adaptor.GetType() != GeomAbs_Plane:
+            return None
+        plane = adaptor.Plane()
+        return plane.Location(), plane.Axis().Direction()
+    except Exception:
+        return None
+
+
+def _face_normal_after_trsf(
+    face: TopoDS_Face, T: gp_Trsf,
+) -> Optional[Tuple[float, float, float]]:
+    """Return the face normal after applying T, as a (x, y, z) tuple."""
+    n = _face_plane_normal(face)
+    if n is None:
+        return None
+    try:
+        n_after = n.Transformed(T)
+        return (n_after.X(), n_after.Y(), n_after.Z())
+    except Exception:
+        return None
+
+
+def _flatten_face_via_trsf(
+    face: TopoDS_Face, T: gp_Trsf,
+) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+    """
+    Apply transform T to all wire points of *face* and project to 2D by
+    dropping the Z coordinate.
+
+    Returns (outer_pts, [hole_pts, ...]) — both as (x, y) tuples.
+    """
+    try:
+        from OCP.ShapeAnalysis import ShapeAnalysis
+        outer_wire = ShapeAnalysis.OuterWire_s(face)
+        if outer_wire is None or outer_wire.IsNull():
+            return [], []
+
+        def to_xy(pnt: gp_Pnt) -> Tuple[float, float]:
+            transformed = pnt.Transformed(T)
+            return (transformed.X(), transformed.Y())
+
+        outer_pts = _wire_to_polyline(outer_wire, to_xy)
+        if len(outer_pts) < 3:
+            return [], []
+
+        hole_polylines: List[List[Tuple[float, float]]] = []
+        wire_explorer = TopExp_Explorer(face, TopAbs_WIRE)
+        while wire_explorer.More():
+            wire = TopoDS.Wire_s(wire_explorer.Current())
+            if not wire.IsSame(outer_wire):
+                pts = _wire_to_polyline(wire, to_xy)
+                if len(pts) >= 3:
+                    hole_polylines.append(pts)
+            wire_explorer.Next()
+
+        return outer_pts, hole_polylines
+    except Exception:
+        return [], []
+
+
+def _polys_bbox(
+    polys: List[List[Tuple[float, float]]],
+) -> Optional[Tuple[float, float, float, float]]:
+    """Return (xmin, ymin, xmax, ymax) of all points in all polys, or None."""
+    xs: List[float] = []
+    ys: List[float] = []
+    for p in polys:
+        for (x, y) in p:
+            xs.append(x)
+            ys.append(y)
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _place_bend_lines_3d(
+    fp: FlatPattern,
+    bends: List[BendInfo],
+    bend_graph: "BendGraph",
+    bend_map: Dict[int, BendInfo],
+    cf_map: Dict[int, "ClassifiedFace"],
+    topo: "Topology",
+    thickness: float = 1.0,
+    k_factor: float = 0.4,
+) -> None:
+    """
+    Place bend lines at the actual 2D position of each bend axis after
+    applying the parent's accumulated transform.
+    """
+    transforms: Dict[int, gp_Trsf] = getattr(fp, "_3d_transforms", {})
+    origin_offset = getattr(fp, "_3d_origin_offset", (0.0, 0.0))
+    if not transforms:
+        return
+
+    minx, miny = origin_offset
+
+    for from_idx, bend_id, to_idx in bend_graph.unfolding_order:
+        T_parent = transforms.get(from_idx)
+        bend = bend_map.get(bend_id)
+        if T_parent is None or bend is None:
+            continue
+        if bend.axis is None or bend.axis_location is None:
+            continue
+
+        try:
+            ax_loc_world = gp_Pnt(*bend.axis_location)
+            ax_dir_world = gp_Dir(*bend.axis)
+            ax_loc_current = ax_loc_world.Transformed(T_parent)
+            ax_dir_current = ax_dir_world.Transformed(T_parent)
+        except Exception:
+            continue
+
+        # Bend line direction in 2D = projection of ax_dir to XY plane.
+        dx = ax_dir_current.X()
+        dy = ax_dir_current.Y()
+        mag = math.hypot(dx, dy)
+        if mag < 1e-6:
+            continue
+        ux, uy = dx / mag, dy / mag
+
+        # Bend line midpoint = projection of axis location.
+        cx = ax_loc_current.X() - minx
+        cy = ax_loc_current.Y() - miny
+
+        # Use bend.length (3D) as the visual length of the bend line.
+        L = bend.length if bend.length and bend.length > 0 else 50.0
+        x0 = cx - ux * (L / 2)
+        y0 = cy - uy * (L / 2)
+        x1 = cx + ux * (L / 2)
+        y1 = cy + uy * (L / 2)
+
+        try:
+            bc = compute_bend(bend.angle_deg, bend.inner_radius, thickness, k_factor)
+        except Exception:
+            # Last resort fallback so BendLine2D can still be created.
+            bc = compute_bend(90.0, 1.0, 1.0, 0.4)
+
+        bl = BendLine2D(
+            start=(round(x0, 4), round(y0, 4)),
+            end=(round(x1, 4), round(y1, 4)),
+            bend_info=bend,
+            bend_calc=bc,
+        )
+        fp.bend_lines.append(bl)

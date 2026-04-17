@@ -153,7 +153,12 @@ def _refine_bend_list(bends: List[BendInfo], thickness: float) -> List[BendInfo]
     if not bends:
         return bends
 
-    MAX_BEND_ANGLE_DEG = 170.0      # 180 - 10° minimum bending
+    # Note: hem features fold the flange back on itself ⇒ ~180° bend angle
+    # with a very tight radius. We accept up to 179.5° to keep them in the
+    # bend graph (so hem flanges get proper transforms during unfolding).
+    # False positives from coplanar internal fillets are still filtered by
+    # the inner-radius cap and the bend-length floor.
+    MAX_BEND_ANGLE_DEG = 179.5
     MIN_BEND_ANGLE_DEG = 10.0
     MAX_INNER_RADIUS = max(thickness * 10.0, 0.5)  # absolute cap
     MIN_BEND_LENGTH = max(thickness * 0.5, 0.1)

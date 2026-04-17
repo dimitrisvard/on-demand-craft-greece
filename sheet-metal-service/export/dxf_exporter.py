@@ -61,8 +61,8 @@ def export_dxf(
         return (x + ox, y + oy)
 
     # ── Outline ────────────────────────────────────────────────────────────
-    # Emit as a closed LWPOLYLINE so downstream DXF readers (e.g. the nesting
-    # import pipeline) reliably detect a single closed contour rather than
+    # Emit as closed LWPOLYLINE(s) so downstream DXF readers (e.g. the
+    # nesting import pipeline) reliably detect closed contours rather than
     # having to re-chain loose LINE entities.
     if flat.outer_edges:
         outline_vertices = [
@@ -70,6 +70,16 @@ def export_dxf(
         ]
         msp.add_lwpolyline(
             outline_vertices, close=True,
+            dxfattribs={"layer": "OUTLINE"},
+        )
+    # Additional disjoint outer contours (detached flanges etc.) go on the
+    # same OUTLINE layer as separate closed polylines.
+    for edges in getattr(flat, "extra_outlines", []) or []:
+        if not edges:
+            continue
+        verts = [pt(e.start[0], e.start[1]) for e in edges]
+        msp.add_lwpolyline(
+            verts, close=True,
             dxfattribs={"layer": "OUTLINE"},
         )
 
