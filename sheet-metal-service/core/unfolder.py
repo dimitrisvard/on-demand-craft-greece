@@ -124,7 +124,8 @@ def unfold(
 
     # ── Compute the pattern height ──────────────────────────────────────────
     # Pattern height = the bend line length = the dimension perpendicular
-    # to the bending direction.  Use the median bend length.
+    # to the bending direction. Use the median bend length (robust against
+    # outliers like small fillet-generated bends).
     bend_lengths = [b.length for b in bends if b.length > 0]
     if bend_lengths:
         bend_lengths.sort()
@@ -181,13 +182,19 @@ def unfold(
     # shape and unioning the pieces along the accumulated X strip. Falls back
     # to a rectangular outline if projection/union fails for any reason —
     # callers still get a usable flat pattern + warning.
+    #
+    # Regardless of outline success, we always collect each flange's inner
+    # wires (holes) and map them into flat-pattern coords so holes appear in
+    # the DXF even when the outline falls back to a rectangle.
     outline_poly, composed_holes = _compose_multi_flange_outline(
-        topo, cf_map, segments, pattern_height
+        topo, cf_map, segments, pattern_height, bend_map
     )
+    # Append per-flange holes unconditionally (they're in strip coords).
+    for hp in composed_holes:
+        fp.holes.append(_hole_from_polyline(hp))
+
     if outline_poly:
         fp.outer_edges = _edges_from_polyline(outline_poly)
-        for hp in composed_holes:
-            fp.holes.append(Hole2D(edges=_edges_from_polyline(hp)))
         # Refresh width/height from the actual composed outline.
         xs = [p[0] for p in outline_poly]
         ys = [p[1] for p in outline_poly]
@@ -221,10 +228,12 @@ def unfold(
         fp.bend_lines.append(bl)
 
     # ── Extract holes from flanges ──────────────────────────────────────────
-    # If _compose_multi_flange_outline already placed holes, skip the legacy
-    # per-flange circle detector — the projection path is more accurate.
+    # Fallback path: if we got no holes at all from the composition step,
+    # try the legacy per-flange wire extractor directly. This catches cases
+    # where _project_face_to_2d returned no outer points (e.g. non-planar
+    # "flange" face) so _compose_multi_flange_outline never ran per-flange.
     if not fp.holes:
-        _extract_holes(topo, classified, fp, segments, pattern_height)
+        _extract_holes(topo, classified, fp, segments, pattern_height, bend_map)
 
     # ── Warnings ────────────────────────────────────────────────────────────
     _check_warnings(fp, bends, thickness)
@@ -539,6 +548,7 @@ def _compose_multi_flange_outline(
     cf_map: Dict[int, "ClassifiedFace"],
     segments: List[dict],
     pattern_height: float,
+    bend_map: Optional[Dict[int, BendInfo]] = None,
 ) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
     """
     Build the true outer contour for a multi-flange unfolding by laying each
@@ -550,92 +560,91 @@ def _compose_multi_flange_outline(
       - outer_polyline is a closed list of (x, y) points, CCW, or [] on failure
       - holes is a list of closed polylines in the same coordinate system.
 
-    Returns ([], []) if pyclipper is unavailable, if any flange fails to
-    project, or if the union produces zero / multiple disjoint outers —
-    caller falls back to the rectangular outline in that case.
+    *holes is always returned even if the outer-polyline union fails* — that
+    way callers can still render hole data on top of the rectangular fallback.
     """
-    if not _HAS_PYCLIPPER:
-        return [], []
-
-    # Walk segments, collecting (x_start, face_idx) tuples for each flange.
-    # X positions are measured along the flat pattern. Bend segments contribute
-    # only to the accumulated X offset — their face is not projected directly.
+    # Walk segments, collecting (x_start, bend_before, face_idx) tuples for
+    # each flange. X positions are measured along the flat pattern. Bend
+    # segments contribute only to the accumulated X offset — their face is
+    # not projected directly. `bend_before` is the BendInfo of the bend that
+    # precedes this flange in the unfolding order (None for the base flange).
     x_cursor = 0.0
-    flange_placements: List[Tuple[float, int]] = []
+    flange_placements: List[Tuple[float, int, Optional[BendInfo]]] = []
+    pending_bend: Optional[BendInfo] = None
     for seg in segments:
         if seg["type"] == "flange":
             fi = seg.get("face_idx", -1)
             if fi >= 0:
-                flange_placements.append((x_cursor, fi))
+                flange_placements.append((x_cursor, fi, pending_bend))
+            pending_bend = None
+        elif seg["type"] == "bend":
+            # A bend segment carries BendInfo on the next flange placement.
+            pending_bend = seg.get("bend_info")
         x_cursor += max(0.0, float(seg.get("width", 0.0)))
 
     if not flange_placements:
         return [], []
 
-    try:
-        flange_polys: List[List[Tuple[float, float]]] = []
-        flange_holes: List[List[Tuple[float, float]]] = []
+    flange_polys: List[List[Tuple[float, float]]] = []
+    flange_holes: List[List[Tuple[float, float]]] = []
+    projection_ok = True
 
-        for x_start, face_idx in flange_placements:
+    for x_start, face_idx, bend_before in flange_placements:
+        try:
             face_info = topo.faces[face_idx]
             outer_pts, hole_pts_list = _project_face_to_2d(face_info.face)
             if not outer_pts:
-                return [], []
+                projection_ok = False
+                continue
 
-            outer_aligned = _align_flange_to_strip(
-                outer_pts, hole_pts_list, x_start, pattern_height
+            aligned = _align_flange_to_strip(
+                outer_pts, hole_pts_list, x_start, pattern_height,
+                face_info.face, bend_before,
             )
-            if not outer_aligned:
-                return [], []
-            flange_polys.append(outer_aligned[0])
-            flange_holes.extend(outer_aligned[1])
+            if aligned is None:
+                projection_ok = False
+                continue
+            flange_polys.append(aligned[0][0])
+            flange_holes.extend(aligned[1])
+        except Exception:
+            projection_ok = False
+            continue
 
-        # Union the flanges — pyclipper expects ints.
-        subj = [
-            [(int(round(x * _CLIPPER_SCALE)), int(round(y * _CLIPPER_SCALE)))
-             for (x, y) in poly]
-            for poly in flange_polys
-        ]
-
-        pc = pyclipper.Pyclipper()
-        pc.AddPaths(subj, pyclipper.PT_SUBJECT, True)
-        solution = pc.Execute(
-            pyclipper.CT_UNION,
-            pyclipper.PFT_NONZERO,
-            pyclipper.PFT_NONZERO,
-        )
-
-        if not solution:
-            return [], []
-
-        # Expect exactly one outer ring (positively-oriented); any inner rings
-        # returned are implicit holes produced by the union (rare for strips).
-        outers = []
-        inners = []
-        for ring in solution:
-            if pyclipper.Orientation(ring):
-                outers.append(ring)
-            else:
-                inners.append(ring)
-
-        if len(outers) != 1:
-            return [], []
-
-        outer_mm = [
-            (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE) for (x, y) in outers[0]
-        ]
-
-        holes_mm: List[List[Tuple[float, float]]] = []
-        for ring in inners:
-            holes_mm.append(
-                [(x / _CLIPPER_SCALE, y / _CLIPPER_SCALE) for (x, y) in ring]
+    # Outline union: only attempted if pyclipper is installed AND we have
+    # at least one successfully-projected flange outline.
+    outer_mm: List[Tuple[float, float]] = []
+    if _HAS_PYCLIPPER and flange_polys:
+        try:
+            subj = [
+                [(int(round(x * _CLIPPER_SCALE)), int(round(y * _CLIPPER_SCALE)))
+                 for (x, y) in poly]
+                for poly in flange_polys
+            ]
+            pc = pyclipper.Pyclipper()
+            pc.AddPaths(subj, pyclipper.PT_SUBJECT, True)
+            solution = pc.Execute(
+                pyclipper.CT_UNION,
+                pyclipper.PFT_NONZERO,
+                pyclipper.PFT_NONZERO,
             )
-        # Append any flange-local holes (they're already in strip coordinates).
-        holes_mm.extend(flange_holes)
+            if solution:
+                outers = [r for r in solution if pyclipper.Orientation(r)]
+                inners = [r for r in solution if not pyclipper.Orientation(r)]
+                if len(outers) == 1:
+                    outer_mm = [
+                        (x / _CLIPPER_SCALE, y / _CLIPPER_SCALE)
+                        for (x, y) in outers[0]
+                    ]
+                    # Inner rings from the union become additional holes.
+                    for ring in inners:
+                        flange_holes.append(
+                            [(x / _CLIPPER_SCALE, y / _CLIPPER_SCALE)
+                             for (x, y) in ring]
+                        )
+        except Exception:
+            outer_mm = []
 
-        return outer_mm, holes_mm
-    except Exception:
-        return [], []
+    return outer_mm, flange_holes
 
 
 def _align_flange_to_strip(
@@ -643,44 +652,70 @@ def _align_flange_to_strip(
     hole_pts_list: List[List[Tuple[float, float]]],
     x_start: float,
     pattern_height: float,
+    face: Optional[TopoDS_Face] = None,
+    bend_before: Optional[BendInfo] = None,
 ) -> Optional[Tuple[List[List[Tuple[float, float]]], List[List[Tuple[float, float]]]]]:
     """
-    Position a flange's projected outline into the flat-pattern strip so that
-    its shortest axis becomes the bending direction (X) and its longest axis
-    becomes the transverse direction (Y).
+    Position a flange's projected outline into the flat-pattern strip.
+
+    The flat pattern uses Y as the bend-line-parallel direction (pattern_height)
+    and X as the bending direction. To place a flange correctly we need to
+    rotate its projected outline so that the bend axis — which is shared
+    between the two flanges meeting at the bend — ends up parallel to +Y.
+
+    Strategy:
+      1. If we know the bend axis 3D direction AND the face plane, project
+         the 3D bend axis into the face's local (u, v) coords and rotate
+         the outline so that projected direction becomes +Y.
+      2. Otherwise fall back to the span-matching heuristic (longer axis → Y).
 
     _project_face_to_2d normalises the outline to have its bounding-box min at
-    the origin. We rotate (if needed) so the Y span matches pattern_height,
-    centre vertically on pattern_height/2, then translate so the flange's
-    left edge sits at x_start.
+    the origin. After rotation we re-normalise, centre vertically on
+    pattern_height/2, then translate so the flange's left edge sits at x_start.
 
     Returns ([outer_aligned], holes_aligned) or None on failure.
     """
     if not outer_pts:
         return None
 
+    # ── 1. Compute desired rotation angle ────────────────────────────────
+    angle = None
+    if face is not None and bend_before is not None:
+        angle = _bend_axis_angle_in_face(face, bend_before)
+
+    if angle is not None:
+        # Rotate so the bend axis points along +Y in face coords (angle=90°).
+        target = math.pi / 2.0
+        theta = target - angle
+        cos_t = math.cos(theta)
+        sin_t = math.sin(theta)
+
+        def _rot(poly):
+            return [
+                (p[0] * cos_t - p[1] * sin_t, p[0] * sin_t + p[1] * cos_t)
+                for p in poly
+            ]
+        outer_pts = _rot(outer_pts)
+        hole_pts_list = [_rot(h) for h in hole_pts_list]
+    else:
+        # Heuristic fallback: rotate 90° if swapping axes makes h closer to
+        # pattern_height. This isn't exact for non-axis-aligned faces but is
+        # the best we can do without bend-axis info.
+        xs0 = [p[0] for p in outer_pts]
+        ys0 = [p[1] for p in outer_pts]
+        w0 = max(xs0) - min(xs0)
+        h0 = max(ys0) - min(ys0)
+        if abs(w0 - pattern_height) < abs(h0 - pattern_height):
+            def _swap(poly):
+                return [(p[1], p[0]) for p in poly]
+            outer_pts = _swap(outer_pts)
+            hole_pts_list = [_swap(h) for h in hole_pts_list]
+
+    # ── 2. Re-normalise & place into strip ───────────────────────────────
     xs = [p[0] for p in outer_pts]
     ys = [p[1] for p in outer_pts]
     w = max(xs) - min(xs)
     h = max(ys) - min(ys)
-
-    # If the projection is oriented with its "long" axis along X but the
-    # flat-pattern strip's height is along Y, rotate 90° so the longer axis
-    # becomes Y. We pick the axis whose span is closer to pattern_height as Y.
-    def _swap(poly):
-        return [(p[1], p[0]) for p in poly]
-
-    diff_no_swap = abs(h - pattern_height)
-    diff_swap = abs(w - pattern_height)
-    if diff_swap < diff_no_swap:
-        outer_pts = _swap(outer_pts)
-        hole_pts_list = [_swap(h) for h in hole_pts_list]
-        xs = [p[0] for p in outer_pts]
-        ys = [p[1] for p in outer_pts]
-        w = max(xs) - min(xs)
-        h = max(ys) - min(ys)
-
-    # Re-normalise to (0, 0) then centre vertically about pattern_height / 2.
     minx = min(xs)
     miny = min(ys)
     y_offset = (pattern_height - h) / 2.0
@@ -692,6 +727,41 @@ def _align_flange_to_strip(
     holes_aligned = [_place(h) for h in hole_pts_list]
 
     return [outer_aligned], holes_aligned
+
+
+def _bend_axis_angle_in_face(
+    face: TopoDS_Face,
+    bend: BendInfo,
+) -> Optional[float]:
+    """
+    Project the 3D bend axis direction onto the face's local (u, v) plane
+    coords and return the angle (radians) of that projected direction.
+
+    Returns None if the face isn't planar or the axis is perpendicular to
+    the plane (ambiguous projection).
+    """
+    try:
+        adaptor = BRepAdaptor_Surface(face)
+        from OCP.GeomAbs import GeomAbs_Plane as _GeomAbs_Plane
+        if adaptor.GetType() != _GeomAbs_Plane:
+            return None
+        plane = adaptor.Plane()
+        ax_x = plane.XAxis().Direction()
+        ax_y = plane.YAxis().Direction()
+
+        # Bend axis 3D direction from BendInfo.axis tuple.
+        ax = bend.axis
+        if ax is None:
+            return None
+        # Project onto face X/Y axes.
+        u = ax[0] * ax_x.X() + ax[1] * ax_x.Y() + ax[2] * ax_x.Z()
+        v = ax[0] * ax_y.X() + ax[1] * ax_y.Y() + ax[2] * ax_y.Z()
+        mag = math.hypot(u, v)
+        if mag < 1e-6:
+            return None
+        return math.atan2(v, u)
+    except Exception:
+        return None
 
 
 def _outline_y_range_at_x(
@@ -732,85 +802,80 @@ def _extract_holes(
     fp: FlatPattern,
     segments: List[dict],
     pattern_height: float,
+    bend_map: Optional[Dict[int, BendInfo]] = None,
 ) -> None:
     """
-    Extract circular holes from flanges and place them in the flat pattern.
+    Fallback hole extractor: walks each flange's inner wires and projects
+    them into flat-pattern coords.
 
-    For each flange, find internal wires (holes), transform their positions
-    to the flat pattern coordinate system based on the flange's position in
-    the unfolding sequence.
+    Unlike the old circle-only implementation this handles ANY hole shape
+    — circles, slots, rectangular cutouts, arbitrary wires — by calling
+    the same face-plane projection + strip alignment pipeline used by the
+    main outline composition. Used when _compose_multi_flange_outline
+    collected nothing (e.g. all flange projections failed).
     """
-    # Build a map: face_idx → x_offset in the flat pattern
+    # Build a map: face_idx → (x_offset, bend_before_this_flange)
     x_offset = 0.0
-    flange_offsets: Dict[int, float] = {}
+    flange_offsets: Dict[int, Tuple[float, Optional[BendInfo]]] = {}
+    pending_bend: Optional[BendInfo] = None
     for seg in segments:
         if seg["type"] == "flange":
-            flange_offsets[seg.get("face_idx", -1)] = x_offset
+            flange_offsets[seg.get("face_idx", -1)] = (x_offset, pending_bend)
+            pending_bend = None
+        elif seg["type"] == "bend":
+            pending_bend = seg.get("bend_info")
         x_offset += seg["width"]
 
-    for cf in classified:
-        if cf.face_type != FaceType.FLANGE:
-            continue
-        if cf.info.index not in flange_offsets:
+    cf_map = {cf.info.index: cf for cf in classified}
+
+    for face_idx, (offset_x, bend_before) in flange_offsets.items():
+        cf = cf_map.get(face_idx)
+        if cf is None or cf.face_type != FaceType.FLANGE:
             continue
 
         face = cf.info.face
-        offset_x = flange_offsets[cf.info.index]
+        outer_pts, hole_pts_list = _project_face_to_2d(face)
+        if not hole_pts_list:
+            # No inner wires — nothing to extract for this flange.
+            continue
 
-        # Look for circular edges (holes)
-        explorer = TopExp_Explorer(face, TopAbs_EDGE)
-        while explorer.More():
-            edge = TopoDS.Edge_s(explorer.Current())
-            curve = BRepAdaptor_Curve(edge)
-            if curve.GetType() == GeomAbs_Circle:
-                circle = curve.Circle()
-                center = circle.Location()
-                radius = circle.Radius()
+        aligned = _align_flange_to_strip(
+            outer_pts, hole_pts_list, offset_x, pattern_height,
+            face, bend_before,
+        )
+        if aligned is None:
+            continue
+        _outer, holes_aligned = aligned
+        for hole_pts in holes_aligned:
+            fp.holes.append(_hole_from_polyline(hole_pts))
 
-                # Map hole center to flat pattern coordinates
-                # This is simplified — we place relative to the flange bbox
-                face_bbox = Bnd_Box()
-                BRepBndLib.Add_s(face, face_bbox)
-                fxmin, fymin, fzmin, fxmax, fymax, fzmax = face_bbox.Get()
 
-                # Relative position within flange
-                cx = center.X()
-                cy = center.Y()
-                cz = center.Z()
+def _hole_from_polyline(pts: List[Tuple[float, float]]) -> Hole2D:
+    """
+    Build a Hole2D from a closed polyline. If the polyline is well
+    approximated by a circle (all points roughly equidistant from the
+    centroid), emit it as center+diameter so the DXF exporter can write a
+    CIRCLE entity; otherwise emit as a polyline of edges (LWPOLYLINE).
+    """
+    if len(pts) < 3:
+        return Hole2D(edges=_edges_from_polyline(pts))
 
-                # Determine which axes map to the flat pattern X and Y
-                dims = {
-                    "x": fxmax - fxmin,
-                    "y": fymax - fymin,
-                    "z": fzmax - fzmin,
-                }
-                sorted_axes = sorted(dims.items(), key=lambda kv: kv[1], reverse=True)
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    rs = [math.hypot(p[0] - cx, p[1] - cy) for p in pts]
+    r_mean = sum(rs) / len(rs)
+    if r_mean < 1e-6:
+        return Hole2D(edges=_edges_from_polyline(pts))
 
-                # Map to 2D: largest dim → along pattern, second → height
-                if sorted_axes[0][0] == "x":
-                    hx = offset_x + (cx - fxmin)
-                elif sorted_axes[0][0] == "y":
-                    hx = offset_x + (cy - fymin)
-                else:
-                    hx = offset_x + (cz - fzmin)
-
-                if sorted_axes[1][0] == "x":
-                    hy = cx - fxmin
-                elif sorted_axes[1][0] == "y":
-                    hy = cy - fymin
-                else:
-                    hy = cz - fzmin
-
-                # Clamp to pattern bounds
-                hx = max(0, min(hx, fp.width))
-                hy = max(0, min(hy, fp.height))
-
-                fp.holes.append(Hole2D(
-                    center=(round(hx, 2), round(hy, 2)),
-                    diameter=round(radius * 2, 2),
-                ))
-
-            explorer.Next()
+    max_dev = max(abs(r - r_mean) for r in rs)
+    # Treat as circle if max radial deviation is <2% of mean radius
+    # AND radius is at least 0.1 mm (avoid degenerate tiny holes).
+    if max_dev / r_mean < 0.02 and r_mean > 0.1:
+        return Hole2D(
+            center=(round(cx, 2), round(cy, 2)),
+            diameter=round(r_mean * 2, 2),
+        )
+    return Hole2D(edges=_edges_from_polyline(pts))
 
 
 def _check_warnings(fp: FlatPattern, bends: List[BendInfo], thickness: float) -> None:
