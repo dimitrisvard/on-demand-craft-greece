@@ -84,82 +84,93 @@ const assert = (cond, msg) => {
   }
 };
 
+const ALL_LANGS = ['en','de','fr','es','it','nl','pl','pt','sv','da','fi','nb','hu','cs'];
 const pageTypes = ['homepage','services-index','service-detail','industries','blog-index','about','contact','quote','our-work'];
+const serviceIds = ['cnc-machining','sheet-metal','3d-printing','injection-molding','surface-finishes','rapid-prototyping'];
+const bodyLen = (s) => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+const noMojibake = (s) => !/Ã[£§¡©¶¼ŸÂ¨]/.test(s);
 
-console.log('=== slugs.localizedPath roundtrip ===');
-for (const lang of ['en','de','fr','pt','sv','fi']) {
-  const pathStr = slugs.localizedPath(lang, 'service-detail', 'sheet-metal');
-  assert(pathStr.startsWith(`/${lang}/`), `${lang} service-detail path starts with /${lang}/`);
-  assert(pathStr.length > 10, `${lang} service-detail path non-empty: ${pathStr}`);
+console.log('=== slugs.localizedPath roundtrip (all 14 langs) ===');
+for (const lang of ALL_LANGS) {
+  for (const sid of serviceIds) {
+    const pathStr = slugs.localizedPath(lang, 'service-detail', sid);
+    assert(pathStr.startsWith(`/${lang}/`), `${lang}/${sid} path starts with /${lang}/ -> ${pathStr}`);
+    assert(pathStr.length > 10, `${lang}/${sid} path non-empty: ${pathStr}`);
+  }
 }
 
-console.log('\n=== meta.getMeta ===');
-for (const lang of ['en','de','pt','fr']) {
+console.log('\n=== meta.getMeta (all 14 langs x 9 page types) ===');
+for (const lang of ALL_LANGS) {
   for (const type of pageTypes) {
     const route = { lang, type, pathAfterLang: '', serviceId: type === 'service-detail' ? 'sheet-metal' : undefined };
     const m = meta.getMeta(route);
     assert(typeof m.title === 'string' && m.title.length > 5, `${lang}/${type} has title: "${m.title.slice(0,60)}"`);
     assert(typeof m.description === 'string' && m.description.length > 10, `${lang}/${type} has description`);
-    // UTF-8 regression — should never contain mojibake trigrams
-    assert(!/Ã[£§¡©¶¼ŸÂ]/.test(m.title + m.description), `${lang}/${type} meta is clean UTF-8`);
+    assert(noMojibake(m.title + m.description), `${lang}/${type} meta is clean UTF-8`);
   }
 }
 
-console.log('\n=== renderHomepage ===');
-for (const lang of ['en','de','pt','fr','it']) {
+console.log('\n=== renderHomepage (all 14 langs) ===');
+for (const lang of ALL_LANGS) {
   const r = home.renderHomepage(lang);
-  const len = r.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
-  assert(len >= 800, `${lang} homepage body text length ${len} >= 800`);
+  const len = bodyLen(r.bodyHtml);
+  assert(len >= 800, `${lang} homepage body length ${len} >= 800`);
   assert(r.bodyHtml.includes('<h1>'), `${lang} homepage has h1`);
   assert(r.bodyHtml.includes('<h2>'), `${lang} homepage has h2`);
   assert(r.jsonLd.length >= 2, `${lang} homepage has >=2 JSON-LD blocks`);
-  for (const js of r.jsonLd) JSON.parse(js); // must be valid JSON
-}
-
-console.log('\n=== renderServicesIndex ===');
-for (const lang of ['en','de','pt','fr']) {
-  const r = svcIdx.renderServicesIndex(lang);
-  const len = r.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
-  assert(len >= 500, `${lang} services-index body length ${len} >= 500`);
-  assert(r.bodyHtml.includes(slugs.localizedPath(lang, 'service-detail', 'cnc-machining')), `${lang} services-index links to cnc detail`);
+  assert(noMojibake(r.bodyHtml), `${lang} homepage body is clean UTF-8`);
   for (const js of r.jsonLd) JSON.parse(js);
 }
 
-console.log('\n=== renderServiceDetail ===');
-const serviceIds = ['cnc-machining','sheet-metal','3d-printing','injection-molding','surface-finishes','rapid-prototyping'];
-for (const lang of ['en','de','pt','fr']) {
+console.log('\n=== renderServicesIndex (all 14 langs) ===');
+for (const lang of ALL_LANGS) {
+  const r = svcIdx.renderServicesIndex(lang);
+  const len = bodyLen(r.bodyHtml);
+  assert(len >= 500, `${lang} services-index body length ${len} >= 500`);
+  assert(r.bodyHtml.includes(slugs.localizedPath(lang, 'service-detail', 'cnc-machining')),
+    `${lang} services-index links to cnc detail`);
+  assert(noMojibake(r.bodyHtml), `${lang} services-index body is clean UTF-8`);
+  for (const js of r.jsonLd) JSON.parse(js);
+}
+
+console.log('\n=== renderServiceDetail (all 14 langs x 6 services = 84) ===');
+for (const lang of ALL_LANGS) {
   for (const sid of serviceIds) {
     const r = svcDet.renderServiceDetail(lang, sid);
-    const len = r.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+    const len = bodyLen(r.bodyHtml);
     assert(len >= 800, `${lang}/${sid} detail body length ${len} >= 800`);
     assert(r.bodyHtml.includes('<h1>'), `${lang}/${sid} has h1`);
     assert(r.bodyHtml.includes(`aria-label="breadcrumb"`), `${lang}/${sid} has breadcrumbs`);
+    assert(noMojibake(r.bodyHtml), `${lang}/${sid} body is clean UTF-8`);
     for (const js of r.jsonLd) JSON.parse(js);
   }
 }
 
-console.log('\n=== renderIndustries ===');
-for (const lang of ['en','de','pt']) {
+console.log('\n=== renderIndustries (all 14 langs) ===');
+for (const lang of ALL_LANGS) {
   const r = ind.renderIndustries(lang);
-  const len = r.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+  const len = bodyLen(r.bodyHtml);
   assert(len >= 500, `${lang} industries body length ${len} >= 500`);
+  assert(noMojibake(r.bodyHtml), `${lang} industries body is clean UTF-8`);
   for (const js of r.jsonLd) JSON.parse(js);
 }
 
-console.log('\n=== renderSimplePage ===');
-for (const lang of ['en','de']) {
+console.log('\n=== renderSimplePage (all 14 langs x 4 types = 56) ===');
+for (const lang of ALL_LANGS) {
   for (const type of ['about','contact','quote','our-work']) {
     const r = simple.renderSimplePage(lang, type);
-    const len = r.bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length;
+    const len = bodyLen(r.bodyHtml);
     assert(len >= 300, `${lang}/${type} simple body length ${len} >= 300`);
+    assert(noMojibake(r.bodyHtml), `${lang}/${type} simple body is clean UTF-8`);
     for (const js of r.jsonLd) JSON.parse(js);
   }
 }
 
-console.log('\n=== renderBlogIndex (no Supabase) ===');
-for (const lang of ['en','de','pt']) {
+console.log('\n=== renderBlogIndex (all 14 langs) ===');
+for (const lang of ALL_LANGS) {
   const r = await blog.renderBlogIndex(lang, async () => []);
   assert(r.bodyHtml.includes('<h1>'), `${lang} blog-index has h1`);
+  assert(noMojibake(r.bodyHtml), `${lang} blog-index body is clean UTF-8`);
   for (const js of r.jsonLd) JSON.parse(js);
 }
 

@@ -37,7 +37,7 @@ export const SLUGS: Record<Lang, {
   da: { services: 'tjenester', about: 'om-os', contact: 'kontakt', quote: 'tilbud', industries: 'brancher', ourWork: 'vores-arbejde', blog: 'blog',
     serviceDetail: { 'cnc-machining': 'cnc-bearbejdning', 'sheet-metal': 'pladearbejde', '3d-printing': '3d-printing', 'injection-molding': 'sprojtestobning', 'surface-finishes': 'overfladebehandling', 'rapid-prototyping': 'hurtig-prototypering' } },
   fi: { services: 'palvelut', about: 'meista', contact: 'yhteys', quote: 'tarjous', industries: 'toimialat', ourWork: 'tyomme', blog: 'blogi',
-    serviceDetail: { 'cnc-machining': 'cnc-tyostо', 'sheet-metal': 'levytyosto', '3d-printing': '3d-tulostus', 'injection-molding': 'ruiskupuristus', 'surface-finishes': 'pinnan-viimeistely', 'rapid-prototyping': 'nopea-prototyyppaus' } },
+    serviceDetail: { 'cnc-machining': 'cnc-työstö', 'sheet-metal': 'levytyöstö', '3d-printing': '3d-tulostus', 'injection-molding': 'ruiskupuristus', 'surface-finishes': 'pinnan-viimeistely', 'rapid-prototyping': 'nopea-prototyyppaus' } },
   nb: { services: 'tjenester', about: 'om-oss', contact: 'kontakt', quote: 'tilbud', industries: 'bransjer', ourWork: 'vart-arbeid', blog: 'blogg',
     serviceDetail: { 'cnc-machining': 'cnc-bearbeiding', 'sheet-metal': 'platarbeid', '3d-printing': '3d-printing', 'injection-molding': 'sproytestoping', 'surface-finishes': 'overflatebehandling', 'rapid-prototyping': 'rask-prototyping' } },
   hu: { services: 'szolgaltatasok', about: 'rolunk', contact: 'kapcsolat', quote: 'ajanlat', industries: 'iparagak', ourWork: 'munkaink', blog: 'blog',

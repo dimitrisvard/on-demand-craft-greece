@@ -171,7 +171,11 @@ function parseRoute(pathname: string): ParsedRoute | null {
   const lang = match[1] as Lang;
   const rest = (match[3] || '').replace(/\/$/, '');
   if (!rest) return { lang, type: 'homepage', pathAfterLang: '' };
-  const segs = rest.split('/').filter(Boolean);
+  // Decode each segment so that non-ASCII slugs (e.g. /fi/palvelut/cnc-työstö
+  // arriving as /fi/palvelut/cnc-ty%C3%B6st%C3%B6) match the reverse slug map.
+  const segs = rest.split('/').filter(Boolean).map((s) => {
+    try { return decodeURIComponent(s); } catch { return s; }
+  });
   return resolvePageType(lang, segs);
 }
 
