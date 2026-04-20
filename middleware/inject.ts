@@ -22,8 +22,8 @@ export interface RewriteInput {
   lang: Lang;
   canonicalPath: string;
   hreflangTags: string;
-  jsonLdBlocks?: string[]; // each is raw JSON text (already stringified)
-  bodyHtml?: string;        // crawler-only SEO body block content
+  jsonLdBlocks?: string[];
+  bodyHtml?: string;
 }
 
 export function rewriteHtml(html: string, input: RewriteInput): string {
@@ -64,10 +64,31 @@ export function rewriteHtml(html: string, input: RewriteInput): string {
   result = result.replace('</head>', `    ${injections.join('\n    ')}\n  </head>`);
 
   if (bodyHtml) {
+    // Pattern B: SSR content sits OUTSIDE <div id="root">.
+    // IMPORTANT: Do NOT use the "hidden" HTML attribute here. The hidden attr
+    // tells crawlers (including Googlebot first-pass) to ignore the element,
+    // which defeats the entire purpose of SSR body injection. Instead we use
+    // a MutationObserver to hide the block via CSS once React renders into #root.
+    // For crawlers that don't execute JS, the SSR block remains fully visible
+    // and indexable.
     const block = `
-    <article id="seo-content" lang="${lang}" hidden aria-hidden="true">
+    <article id="seo-content" lang="${lang}">
       ${bodyHtml}
-    </article>`;
+    </article>
+    <script>
+    (function(){
+      var r=document.getElementById('root');
+      if(!r)return;
+      var o=new MutationObserver(function(){
+        if(r.children.length>0){
+          var s=document.getElementById('seo-content');
+          if(s)s.style.display='none';
+          o.disconnect();
+        }
+      });
+      o.observe(r,{childList:true});
+    })();
+    </script>`;
     result = result.replace(/(<body[^>]*>)/, `$1${block}`);
   }
 
