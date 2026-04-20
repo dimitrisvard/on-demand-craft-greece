@@ -67,11 +67,33 @@ interface ArticleListItem {
 
 type TranslationMap = Record<string, string>;
 
+export interface ServicePageRow {
+  slug: string;
+  language: string;
+  localized_slug: string | null;
+  title: string;
+  meta_description: string;
+  h1: string;
+  tagline: string;
+  lead_paragraph: string;
+  capabilities: Array<{ label: string; detail: string }>;
+  applications: Array<{ name: string; description: string }>;
+  materials: Array<{ material: string; grade: string; properties: string; uses: string }>;
+  tolerances: Array<{ spec: string; value: string; notes?: string }>;
+  process_steps: Array<{ step: number; title: string; description: string }>;
+  lead_times: Array<{ tier: string; quantity_range: string; working_days: string }>;
+  faq: Array<{ question: string; answer: string }>;
+  differentiators: Array<{ title: string; description: string }>;
+  cross_links: Array<{ slug: string; label: string; description: string }>;
+}
+
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
 const articleCache = new Map<string, { data: ArticleMeta | null; expires: number }>();
 const translationCache = new Map<string, { data: TranslationMap; expires: number }>();
 const listCache = new Map<string, { data: ArticleListItem[]; expires: number }>();
+const servicePageCache = new Map<string, { data: ServicePageRow | null; expires: number }>();
+const servicePageListCache = new Map<string, { data: ServicePageRow[]; expires: number }>();
 
 // ─── Bot / Crawler Detection ──────────────────────────────────────────────────
 
@@ -163,6 +185,81 @@ async function fetchRecentArticles(lang: string): Promise<ArticleListItem[]> {
   }
 }
 
+const SERVICE_PAGE_SELECT = [
+  'slug', 'language', 'localized_slug',
+  'title', 'meta_description', 'h1', 'tagline', 'lead_paragraph',
+  'capabilities', 'applications', 'materials', 'tolerances',
+  'process_steps', 'lead_times', 'faq', 'differentiators', 'cross_links',
+].join(',');
+
+async function fetchServicePageRaw(lang: string, slug: string): Promise<ServicePageRow | null> {
+  const anonKey = getAnonKey();
+  if (!anonKey) return null;
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/service_pages`
+      + `?slug=eq.${encodeURIComponent(slug)}`
+      + `&language=eq.${lang}`
+      + `&status=eq.published`
+      + `&select=${SERVICE_PAGE_SELECT}&limit=1`;
+    const res = await fetch(url, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch one service_pages row for the requested language only. Returns null
+ * on miss — callers fall back to the existing i18n-based renderer so non-EN
+ * languages without a DB row keep their translated SSR body instead of being
+ * switched to raw EN content.
+ */
+export async function fetchServicePage(lang: string, slug: string): Promise<ServicePageRow | null> {
+  const cacheKey = `sp:${lang}:${slug}`;
+  const cached = servicePageCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.data;
+
+  const timeout = new Promise<ServicePageRow | null>((resolve) => setTimeout(() => resolve(null), 500));
+  const row = await Promise.race([fetchServicePageRaw(lang, slug), timeout]);
+  servicePageCache.set(cacheKey, { data: row, expires: Date.now() + CACHE_TTL });
+  return row;
+}
+
+export async function fetchServicePageList(lang: string): Promise<ServicePageRow[]> {
+  const cacheKey = `splist:${lang}`;
+  const cached = servicePageListCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.data;
+
+  const anonKey = getAnonKey();
+  if (!anonKey) return [];
+
+  const fetchForLang = async (): Promise<ServicePageRow[]> => {
+    try {
+      const url = `${SUPABASE_URL}/rest/v1/service_pages`
+        + `?language=eq.${lang}`
+        + `&status=eq.published`
+        + `&slug=neq.index`
+        + `&select=${SERVICE_PAGE_SELECT}&order=slug`;
+      const res = await fetch(url, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      });
+      if (!res.ok) return [];
+      return (await res.json()) as ServicePageRow[];
+    } catch {
+      return [];
+    }
+  };
+
+  const timeout = new Promise<ServicePageRow[]>((resolve) => setTimeout(() => resolve([]), 500));
+  const rows = await Promise.race([fetchForLang(), timeout]);
+  servicePageListCache.set(cacheKey, { data: rows, expires: Date.now() + CACHE_TTL });
+  return rows;
+}
+
 // ─── URL Parsing ──────────────────────────────────────────────────────────────
 
 function parseRoute(pathname: string): ParsedRoute | null {
@@ -227,11 +324,15 @@ export default async function middleware(request: Request): Promise<Response | u
     }
 
     case 'services-index': {
-      meta = getMeta(route);
+      const [indexRow, list] = await Promise.all([
+        fetchServicePage(route.lang, 'index'),
+        fetchServicePageList(route.lang),
+      ]);
+      meta = getMeta(route, indexRow);
       canonicalPath = localizedPath(route.lang, 'services-index');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'services-index'));
       if (crawlerRequest) {
-        const rendered = renderServicesIndex(route.lang);
+        const rendered = renderServicesIndex(route.lang, indexRow, list);
         bodyHtml = rendered.bodyHtml;
         jsonLdBlocks = rendered.jsonLd;
       }
@@ -239,11 +340,12 @@ export default async function middleware(request: Request): Promise<Response | u
     }
 
     case 'service-detail': {
-      meta = getMeta(route);
+      const row = await fetchServicePage(route.lang, route.serviceId!);
+      meta = getMeta(route, row);
       canonicalPath = localizedPath(route.lang, 'service-detail', route.serviceId);
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'service-detail', route.serviceId));
       if (crawlerRequest) {
-        const rendered = renderServiceDetail(route.lang, route.serviceId!);
+        const rendered = renderServiceDetail(route.lang, route.serviceId!, row);
         bodyHtml = rendered.bodyHtml;
         jsonLdBlocks = rendered.jsonLd;
       }

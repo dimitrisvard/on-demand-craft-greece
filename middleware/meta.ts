@@ -8,13 +8,32 @@ function withBrand(title: string): string {
   return title.includes(BRAND) ? title : `${title} | ${BRAND}`;
 }
 
+interface ServicePageMetaOverride {
+  title: string;
+  meta_description: string;
+}
+
 /**
  * Builds localized <head> metadata for a parsed route. All strings are pulled
  * from src/locales/<lang>/translation.json (clean UTF-8), replacing the old
  * hardcoded mojibake maps that lived in middleware.ts.
+ *
+ * For services-index and service-detail, a Supabase service_pages row may be
+ * passed as a second argument; its title / meta_description take precedence
+ * over the i18n keys. Callers that don't have the row pass undefined and the
+ * original i18n-based behavior applies.
  */
-export function getMeta(route: ParsedRoute): PageMeta {
+export function getMeta(route: ParsedRoute, servicePage?: ServicePageMetaOverride | null): PageMeta {
   const { lang, type } = route;
+
+  if (servicePage && (type === 'services-index' || type === 'service-detail')) {
+    return {
+      title: withBrand(servicePage.title),
+      description: servicePage.meta_description,
+      ogType: 'website',
+      image: DEFAULT_IMAGE,
+    };
+  }
 
   switch (type) {
     case 'homepage':

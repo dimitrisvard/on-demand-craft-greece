@@ -79,6 +79,48 @@ export function serviceSchema(lang: Lang, serviceId: ServiceId): string {
   });
 }
 
+interface ServicePageRowLite {
+  h1: string;
+  meta_description: string;
+  faq?: Array<{ question: string; answer: string }>;
+}
+
+export function serviceSchemaFromRow(row: ServicePageRowLite, canonicalUrl: string, lang: Lang): string {
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'Service',
+    name: row.h1,
+    serviceType: row.h1,
+    description: row.meta_description,
+    provider: PROVIDER,
+    areaServed: [
+      { '@type': 'Place', name: 'European Union' },
+      { '@type': 'Country', name: 'Greece' },
+    ],
+    url: canonicalUrl,
+    inLanguage: lang,
+    offers: {
+      '@type': 'Offer',
+      availability: 'https://schema.org/InStock',
+      priceCurrency: 'EUR',
+      url: canonicalUrl,
+    },
+  });
+}
+
+export function faqPageSchemaFromRow(faq: Array<{ question: string; answer: string }> | undefined): string | null {
+  if (!faq || faq.length === 0) return null;
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faq.map((item) => ({
+      '@type': 'Question',
+      name: item.question,
+      acceptedAnswer: { '@type': 'Answer', text: item.answer },
+    })),
+  });
+}
+
 export function articleSchema(params: {
   lang: Lang; title: string; description: string;
   createdAt: string; updatedAt: string; image: string; url: string;
