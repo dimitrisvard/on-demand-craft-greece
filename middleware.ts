@@ -192,6 +192,13 @@ const SERVICE_PAGE_SELECT = [
   'process_steps', 'lead_times', 'faq', 'differentiators', 'cross_links',
 ].join(',');
 
+// Negative-cache window for misses. We do NOT bake null into the 1-hour
+// successful-fetch cache, because a single cold-start timeout would then
+// poison that slug on the isolate for an hour. Instead, a miss is eligible
+// for retry after NEGATIVE_CACHE_TTL so the row can recover.
+const NEGATIVE_CACHE_TTL = 30 * 1000;
+const SERVICE_FETCH_TIMEOUT_MS = 2500;
+
 async function fetchServicePageRaw(lang: string, slug: string): Promise<ServicePageRow | null> {
   const anonKey = getAnonKey();
   if (!anonKey) return null;
@@ -223,9 +230,14 @@ export async function fetchServicePage(lang: string, slug: string): Promise<Serv
   const cached = servicePageCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.data;
 
-  const timeout = new Promise<ServicePageRow | null>((resolve) => setTimeout(() => resolve(null), 500));
+  const timeout = new Promise<ServicePageRow | null>(
+    (resolve) => setTimeout(() => resolve(null), SERVICE_FETCH_TIMEOUT_MS),
+  );
   const row = await Promise.race([fetchServicePageRaw(lang, slug), timeout]);
-  servicePageCache.set(cacheKey, { data: row, expires: Date.now() + CACHE_TTL });
+  // Successful fetches cache for the full TTL; misses only briefly, so a
+  // transient network blip cannot poison the slug for an hour.
+  const expiresIn = row ? CACHE_TTL : NEGATIVE_CACHE_TTL;
+  servicePageCache.set(cacheKey, { data: row, expires: Date.now() + expiresIn });
   return row;
 }
 
@@ -254,9 +266,12 @@ export async function fetchServicePageList(lang: string): Promise<ServicePageRow
     }
   };
 
-  const timeout = new Promise<ServicePageRow[]>((resolve) => setTimeout(() => resolve([]), 500));
+  const timeout = new Promise<ServicePageRow[]>(
+    (resolve) => setTimeout(() => resolve([]), SERVICE_FETCH_TIMEOUT_MS),
+  );
   const rows = await Promise.race([fetchForLang(), timeout]);
-  servicePageListCache.set(cacheKey, { data: rows, expires: Date.now() + CACHE_TTL });
+  const expiresIn = rows.length ? CACHE_TTL : NEGATIVE_CACHE_TTL;
+  servicePageListCache.set(cacheKey, { data: rows, expires: Date.now() + expiresIn });
   return rows;
 }
 
@@ -309,6 +324,9 @@ export default async function middleware(request: Request): Promise<Response | u
   let hreflangTags: string;
   let jsonLdBlocks: string[] = [];
   let bodyHtml: string | undefined;
+  // Diagnostic: 'db' when the body/meta came from Supabase, 'i18n' when the
+  // renderer fell back, 'none' for routes that don't source from service_pages.
+  let seoSource: 'db' | 'i18n' | 'none' = 'none';
 
   switch (route.type) {
     case 'homepage': {
@@ -331,6 +349,7 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route, indexRow);
       canonicalPath = localizedPath(route.lang, 'services-index');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'services-index'));
+      seoSource = indexRow ? 'db' : 'i18n';
       if (crawlerRequest) {
         const rendered = renderServicesIndex(route.lang, indexRow, list);
         bodyHtml = rendered.bodyHtml;
@@ -344,6 +363,7 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route, row);
       canonicalPath = localizedPath(route.lang, 'service-detail', route.serviceId);
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'service-detail', route.serviceId));
+      seoSource = row ? 'db' : 'i18n';
       if (crawlerRequest) {
         const rendered = renderServiceDetail(route.lang, route.serviceId!, row);
         bodyHtml = rendered.bodyHtml;
@@ -438,6 +458,7 @@ export default async function middleware(request: Request): Promise<Response | u
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=0, must-revalidate',
       'Vary': 'User-Agent',
+      'X-Seo-Source': seoSource,
     },
   });
 }
