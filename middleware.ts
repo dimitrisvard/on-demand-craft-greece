@@ -35,6 +35,7 @@ import { renderServiceDetail } from './middleware/renderers/serviceDetail';
 import { renderIndustries } from './middleware/renderers/industries';
 import { renderSimplePage } from './middleware/renderers/simplePage';
 import { renderBlogIndex } from './middleware/renderers/blogIndex';
+import { renderArticleFromRow } from './middleware/renderers/blogArticle';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,15 +96,6 @@ const listCache = new Map<string, { data: ArticleListItem[]; expires: number }>(
 const servicePageCache = new Map<string, { data: ServicePageRow | null; expires: number }>();
 const servicePageListCache = new Map<string, { data: ServicePageRow[]; expires: number }>();
 
-// ─── Bot / Crawler Detection ──────────────────────────────────────────────────
-
-const BOT_UA_PATTERN = /googlebot|bingbot|yandexbot|duckduckbot|baiduspider|slurp|facebot|ia_archiver|semrushbot|ahrefsbot|dotbot|petalbot|mj12bot|sogou|applebot/i;
-
-function isCrawler(request: Request): boolean {
-  const ua = request.headers.get('user-agent') || '';
-  return BOT_UA_PATTERN.test(ua);
-}
-
 // ─── Supabase Helpers ─────────────────────────────────────────────────────────
 
 function getAnonKey(): string {
@@ -114,16 +106,15 @@ function getAnonKey(): string {
   }
 }
 
-async function fetchArticleMeta(lang: string, slug: string, includeContent = false): Promise<ArticleMeta | null> {
-  const cacheKey = `${lang}:${slug}:${includeContent ? 'full' : 'meta'}`;
+async function fetchArticleMeta(lang: string, slug: string): Promise<ArticleMeta | null> {
+  const cacheKey = `${lang}:${slug}`;
   const cached = articleCache.get(cacheKey);
   if (cached && cached.expires > Date.now()) return cached.data;
 
   const anonKey = getAnonKey();
   if (!anonKey) return null;
 
-  const selectFields = 'title,slug,meta_title,meta_description,excerpt,featured_image,featured_image_alt,language,created_at,updated_at,translation_id'
-    + (includeContent ? ',content' : '');
+  const selectFields = 'title,slug,meta_title,meta_description,excerpt,featured_image,featured_image_alt,language,created_at,updated_at,translation_id,content';
 
   try {
     const url = `${SUPABASE_URL}/rest/v1/articles?slug=eq.${encodeURIComponent(slug)}&language=eq.${lang}&status=eq.published&select=${selectFields}&limit=1`;
@@ -133,7 +124,8 @@ async function fetchArticleMeta(lang: string, slug: string, includeContent = fal
     if (!res.ok) return null;
     const data = await res.json();
     const article = data?.[0] ?? null;
-    articleCache.set(cacheKey, { data: article, expires: Date.now() + CACHE_TTL });
+    const expiresIn = article ? CACHE_TTL : NEGATIVE_CACHE_TTL;
+    articleCache.set(cacheKey, { data: article, expires: Date.now() + expiresIn });
     return article;
   } catch {
     return null;
@@ -305,7 +297,12 @@ export default async function middleware(request: Request): Promise<Response | u
 
   if (!route || route.type === 'other') return undefined;
 
-  const crawlerRequest = isCrawler(request);
+  // Every request gets the full SSR body injected into a hidden
+  // <article id="seo-content"> sibling of <div id="root">. React hydrates into
+  // #root untouched; crawlers, SEO tools, and link-preview bots see the full
+  // content in view-source. We intentionally do NOT sniff UAs — Google warns
+  // against content that varies by UA and the extra bytes for humans are tiny
+  // compared to the rest of the bundle.
 
   // Fetch the base shell (without language prefix so the matcher doesn't loop).
   let originalHtml: string;
@@ -333,11 +330,9 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route);
       canonicalPath = localizedPath(route.lang, 'homepage');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'homepage'));
-      if (crawlerRequest) {
-        const rendered = renderHomepage(route.lang);
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = renderHomepage(route.lang);
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
@@ -350,11 +345,9 @@ export default async function middleware(request: Request): Promise<Response | u
       canonicalPath = localizedPath(route.lang, 'services-index');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'services-index'));
       seoSource = indexRow ? 'db' : 'i18n';
-      if (crawlerRequest) {
-        const rendered = renderServicesIndex(route.lang, indexRow, list);
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = renderServicesIndex(route.lang, indexRow, list);
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
@@ -364,11 +357,9 @@ export default async function middleware(request: Request): Promise<Response | u
       canonicalPath = localizedPath(route.lang, 'service-detail', route.serviceId);
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'service-detail', route.serviceId));
       seoSource = row ? 'db' : 'i18n';
-      if (crawlerRequest) {
-        const rendered = renderServiceDetail(route.lang, route.serviceId!, row);
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = renderServiceDetail(route.lang, route.serviceId!, row);
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
@@ -376,11 +367,9 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route);
       canonicalPath = localizedPath(route.lang, 'industries');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'industries'));
-      if (crawlerRequest) {
-        const rendered = renderIndustries(route.lang);
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = renderIndustries(route.lang);
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
@@ -388,11 +377,9 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route);
       canonicalPath = localizedPath(route.lang, 'blog-index');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'blog-index'));
-      if (crawlerRequest) {
-        const rendered = await renderBlogIndex(route.lang, () => fetchRecentArticles(route.lang));
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = await renderBlogIndex(route.lang, () => fetchRecentArticles(route.lang));
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
@@ -403,16 +390,14 @@ export default async function middleware(request: Request): Promise<Response | u
       meta = getMeta(route);
       canonicalPath = localizedPath(route.lang, route.type);
       hreflangTags = staticHreflangs((l) => localizedPath(l, route.type));
-      if (crawlerRequest) {
-        const rendered = renderSimplePage(route.lang, route.type);
-        bodyHtml = rendered.bodyHtml;
-        jsonLdBlocks = rendered.jsonLd;
-      }
+      const rendered = renderSimplePage(route.lang, route.type);
+      bodyHtml = rendered.bodyHtml;
+      jsonLdBlocks = rendered.jsonLd;
       break;
     }
 
     case 'blog-article': {
-      const article = await fetchArticleMeta(route.lang, route.blogSlug!, crawlerRequest);
+      const article = await fetchArticleMeta(route.lang, route.blogSlug!);
       if (!article) return undefined;
 
       const title = article.meta_title || article.title;
@@ -439,8 +424,17 @@ export default async function middleware(request: Request): Promise<Response | u
         image, url: canonicalUrl,
       })];
       meta = { title, description, ogType: 'article', image };
-      // Blog article body is raw article.content (existing behavior).
-      if (crawlerRequest && article.content) bodyHtml = article.content;
+      bodyHtml = renderArticleFromRow({
+        lang: route.lang,
+        title: article.title,
+        content: article.content,
+        featuredImage: article.featured_image,
+        featuredImageAlt: article.featured_image_alt,
+        createdAt: article.created_at,
+        updatedAt: article.updated_at,
+        blogIndexPath: localizedPath(route.lang, 'blog-index'),
+      });
+      seoSource = 'db';
       break;
     }
 
@@ -457,7 +451,6 @@ export default async function middleware(request: Request): Promise<Response | u
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=0, must-revalidate',
-      'Vary': 'User-Agent',
       'X-Seo-Source': seoSource,
     },
   });

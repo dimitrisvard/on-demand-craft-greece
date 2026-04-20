@@ -2,9 +2,10 @@
 # scripts/verify-ssr.sh
 #
 # Verify that SEO server-side rendering is working for every route type the
-# middleware is responsible for. Crawls each sampled URL with a Googlebot
-# User-Agent and asserts that the response body contains real localized
-# content (not just the SPA shell).
+# middleware is responsible for. The middleware now injects the SSR body for
+# every request regardless of user-agent, so the script uses a plain curl UA
+# to catch regressions that would affect third-party SEO tools (Seobility,
+# LinkedIn, WhatsApp) that aren't in any crawler whitelist.
 #
 # Usage:
 #   ./scripts/verify-ssr.sh                         # runs against production
@@ -17,7 +18,7 @@
 
 set -euo pipefail
 
-UA="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+UA="Mozilla/5.0 (compatible; micronshub-verify-ssr/1.0)"
 HOST="${HOST:-https://www.micronshub.eu}"
 FAIL=0
 
