@@ -32,18 +32,13 @@ const Industries = lazy(() => import('./pages/Industries'));
 const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const OurWork = lazy(() => import('./pages/OurWork'));
-const SurfaceFinishes = lazy(() => import('./pages/SurfaceFinishes'));
-const SheetMetalFabrication = lazy(() => import('./pages/SheetMetalFabrication'));
-const InjectionMolding = lazy(() => import('./pages/InjectionMolding'));
-const CncMachining = lazy(() => import('./pages/CncMachining'));
-const ThreeDPrinting = lazy(() => import('./pages/3DPrinting'));
+const ServicePage = lazy(() => import('./pages/ServicePage'));
 const OrdersPage = lazy(() => import('./pages/dashboard/OrdersPage'));
 const RfqDetails = lazy(() => import('./pages/RfqDetails'));
 const RfqManagement = lazy(() => import('./pages/RfqManagement'));
 const ProductsPage = lazy(() => import('./pages/ProductsPage'));
 const QuoteSuccess = lazy(() => import('./pages/QuoteSuccess'));
 const ContactSuccess = lazy(() => import('./pages/ContactSuccess'));
-const RapidPrototyping = lazy(() => import('./pages/RapidPrototyping'));
 const CookiePolicy = lazy(() => import('./pages/CookiePolicy'));
 const ImpressumPage = lazy(() => import('./pages/ImpressumPage'));
 const AnalyticsPage = lazy(() => import('./pages/dashboard/AnalyticsPage'));
@@ -192,12 +187,12 @@ function AppContent() {
                 <Route path="/:lang/contact/success" element={<ContactSuccess />} />
                 <Route path="/:lang/education" element={<Education />} />
                 
-                <Route path="/:lang/services/surface-finishes" element={<SurfaceFinishes />} />
-                <Route path="/:lang/services/sheet-metal" element={<SheetMetalFabrication />} />
-                <Route path="/:lang/services/cnc-machining" element={<CncMachining />} />
-                <Route path="/:lang/services/3d-printing" element={<ThreeDPrinting />} />
-                <Route path="/:lang/services/injection-molding" element={<InjectionMolding />} />
-                <Route path="/:lang/services/rapid-prototyping" element={<RapidPrototyping />} />
+                <Route path="/:lang/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
+                <Route path="/:lang/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />
+                <Route path="/:lang/services/cnc-machining" element={<ServicePage slug="cnc-machining" />} />
+                <Route path="/:lang/services/3d-printing" element={<ServicePage slug="3d-printing" />} />
+                <Route path="/:lang/services/injection-molding" element={<ServicePage slug="injection-molding" />} />
+                <Route path="/:lang/services/rapid-prototyping" element={<ServicePage slug="rapid-prototyping" />} />
                 
                 {/* Catch-all routes for translated URLs - placed AFTER specific English routes */}
                 {/* These will match translated slugs like /de/dienstleistungen and reverse-translate them */}
@@ -217,12 +212,12 @@ function AppContent() {
                 <Route path="/contact/success" element={<ContactSuccess />} />
                 <Route path="/education" element={<Education />} />
                 
-                <Route path="/services/surface-finishes" element={<SurfaceFinishes />} />
-                <Route path="/services/sheet-metal" element={<SheetMetalFabrication />} />
-                <Route path="/services/cnc-machining" element={<CncMachining />} />
-                <Route path="/services/3d-printing" element={<ThreeDPrinting />} />
-                <Route path="/services/injection-molding" element={<InjectionMolding />} />
-                <Route path="/services/rapid-prototyping" element={<RapidPrototyping />} />
+                <Route path="/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
+                <Route path="/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />
+                <Route path="/services/cnc-machining" element={<ServicePage slug="cnc-machining" />} />
+                <Route path="/services/3d-printing" element={<ServicePage slug="3d-printing" />} />
+                <Route path="/services/injection-molding" element={<ServicePage slug="injection-molding" />} />
+                <Route path="/services/rapid-prototyping" element={<ServicePage slug="rapid-prototyping" />} />
 
                 {/* Customer Portal routes */}
                 <Route path="/customer/dashboard" element={<CustomerPortalLayout><CustomerDashboard /></CustomerPortalLayout>} />

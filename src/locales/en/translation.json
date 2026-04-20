@@ -655,6 +655,7 @@
   "seo_about_description": "Learn about Microns Hub, Greece's premier on-demand manufacturing platform. Our story, mission, values, and state-of-the-art facilities.",
   "seo_contact_title": "Contact Us",
   "seo_contact_description": "Get in touch with Microns Hub. Contact our team for manufacturing inquiries, quotes, and support. We're here to help with your manufacturing needs.",
+  "_services_deprecated": "Service page long-form content (seo_cnc_*, seo_sheet_metal_*, seo_3d_printing_*, seo_injection_molding_*, seo_rapid_prototyping_*, seo_surface_finishes_*, seo_services_*, and all service_<slug>_* keys) is superseded by the service_pages Supabase table as of 2026-04-20. Keys retained for now; remove in a follow-up cleanup commit after EN pages ship.",
   "seo_cnc_title": "CNC Machining Services",
   "seo_cnc_description": "Precision CNC machining services for complex parts. Our modern 3-, 4-, and 5-axis CNC machining centers deliver tight tolerances and excellent surface finishes.",
   "seo_3d_printing_title": "3D Printing Services",

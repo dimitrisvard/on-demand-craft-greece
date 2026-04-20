@@ -21,16 +21,19 @@ const Quote = lazy(() => import('../pages/Quote'));
 const QuoteSuccess = lazy(() => import('../pages/QuoteSuccess'));
 const QuoteRequestForm = lazy(() => import('../pages/QuoteRequestForm'));
 const ContactSuccess = lazy(() => import('../pages/ContactSuccess'));
-const SurfaceFinishes = lazy(() => import('../pages/SurfaceFinishes'));
-const SheetMetalFabrication = lazy(() => import('../pages/SheetMetalFabrication'));
-const CncMachining = lazy(() => import('../pages/CncMachining'));
-const ThreeDPrinting = lazy(() => import('../pages/3DPrinting'));
-const InjectionMolding = lazy(() => import('../pages/InjectionMolding'));
-const RapidPrototyping = lazy(() => import('../pages/RapidPrototyping'));
+const ServicePage = lazy(() => import('../pages/ServicePage'));
 const ImpressumPage = lazy(() => import('../pages/ImpressumPage'));
 
+// Wrapper components that lock in the service slug at the route level.
+const SurfaceFinishesRoute = () => <ServicePage slug="surface-finishes" />;
+const SheetMetalRoute = () => <ServicePage slug="sheet-metal" />;
+const CncMachiningRoute = () => <ServicePage slug="cnc-machining" />;
+const ThreeDPrintingRoute = () => <ServicePage slug="3d-printing" />;
+const InjectionMoldingRoute = () => <ServicePage slug="injection-molding" />;
+const RapidPrototypingRoute = () => <ServicePage slug="rapid-prototyping" />;
+
 // Route mapping: English path -> Component
-const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<any>>> = {
+const ROUTE_MAP: Record<string, React.ComponentType<any>> = {
   '/services': Services,
   '/industries': Industries,
   '/our-work': OurWork,
@@ -40,12 +43,12 @@ const ROUTE_MAP: Record<string, React.LazyExoticComponent<React.ComponentType<an
   '/quote/success': QuoteSuccess,
   '/quote-request': QuoteRequestForm,
   '/contact/success': ContactSuccess,
-  '/services/surface-finishes': SurfaceFinishes,
-  '/services/sheet-metal': SheetMetalFabrication,
-  '/services/cnc-machining': CncMachining,
-  '/services/3d-printing': ThreeDPrinting,
-  '/services/injection-molding': InjectionMolding,
-  '/services/rapid-prototyping': RapidPrototyping,
+  '/services/surface-finishes': SurfaceFinishesRoute,
+  '/services/sheet-metal': SheetMetalRoute,
+  '/services/cnc-machining': CncMachiningRoute,
+  '/services/3d-printing': ThreeDPrintingRoute,
+  '/services/injection-molding': InjectionMoldingRoute,
+  '/services/rapid-prototyping': RapidPrototypingRoute,
   '/legal-notice': ImpressumPage,
   // '/impressum' is handled as a legacy route in App.tsx
 };
