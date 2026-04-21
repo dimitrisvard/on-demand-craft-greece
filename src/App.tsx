@@ -33,6 +33,7 @@ const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const OurWork = lazy(() => import('./pages/OurWork'));
 const ServicePage = lazy(() => import('./pages/ServicePage'));
+const ContentPage = lazy(() => import('./pages/ContentPage'));
 const OrdersPage = lazy(() => import('./pages/dashboard/OrdersPage'));
 const RfqDetails = lazy(() => import('./pages/RfqDetails'));
 const RfqManagement = lazy(() => import('./pages/RfqManagement'));
@@ -180,12 +181,14 @@ function AppContent() {
                 
                 {/* Keep English routes FIRST for exact matching (better performance and SEO) */}
                 <Route path="/:lang/services" element={<Services />} />
-                <Route path="/:lang/industries" element={<Industries />} />
-                <Route path="/:lang/our-work" element={<OurWork />} />
-                <Route path="/:lang/about" element={<About />} />
-                <Route path="/:lang/contact" element={<Contact />} />
+                <Route path="/:lang/industries" element={<ContentPage slug="industries" />} />
+                <Route path="/:lang/our-work" element={<ContentPage slug="our-work" />} />
+                <Route path="/:lang/about" element={<ContentPage slug="about" />} />
+                <Route path="/:lang/contact" element={<ContentPage slug="contact" />} />
                 <Route path="/:lang/contact/success" element={<ContactSuccess />} />
-                <Route path="/:lang/education" element={<Education />} />
+                <Route path="/:lang/education" element={<ContentPage slug="education" />} />
+                <Route path="/:lang/legal-notice" element={<ContentPage slug="legal-notice" />} />
+                <Route path="/:lang/privacy-policy" element={<ContentPage slug="privacy-policy" />} />
                 
                 <Route path="/:lang/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
                 <Route path="/:lang/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />
@@ -205,12 +208,14 @@ function AppContent() {
                 <Route path="/quote/success" element={<QuoteSuccess />} />
                 <Route path="/quote-request" element={<QuoteRequestForm />} />
                 <Route path="/services" element={<Services />} />
-                <Route path="/industries" element={<Industries />} />
-                <Route path="/our-work" element={<OurWork />} />
-                <Route path="/about" element={<About />} />
-                <Route path="/contact" element={<Contact />} />
+                <Route path="/industries" element={<ContentPage slug="industries" />} />
+                <Route path="/our-work" element={<ContentPage slug="our-work" />} />
+                <Route path="/about" element={<ContentPage slug="about" />} />
+                <Route path="/contact" element={<ContentPage slug="contact" />} />
                 <Route path="/contact/success" element={<ContactSuccess />} />
-                <Route path="/education" element={<Education />} />
+                <Route path="/education" element={<ContentPage slug="education" />} />
+                <Route path="/legal-notice" element={<ContentPage slug="legal-notice" />} />
+                <Route path="/privacy-policy" element={<ContentPage slug="privacy-policy" />} />
                 
                 <Route path="/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
                 <Route path="/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />
