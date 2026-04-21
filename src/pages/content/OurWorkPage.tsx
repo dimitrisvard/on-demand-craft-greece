@@ -4,6 +4,7 @@ import ContentHero from '@/components/content/ContentHero';
 import SectionRenderer from '@/components/content/SectionRenderer';
 import FaqAccordion from '@/components/content/FaqAccordion';
 import ContentSkeleton from '@/components/content/ContentSkeleton';
+import PortfolioGallery from '@/components/our-work/PortfolioGallery';
 import { useContentPage } from '@/hooks/useContentPage';
 
 const SITE = 'https://www.micronshub.eu';
@@ -140,6 +141,8 @@ const OurWorkPage: React.FC = () => {
       ))}
 
       <FaqAccordion items={data?.faq ?? []} />
+
+      <PortfolioGallery />
     </div>
   );
 };
