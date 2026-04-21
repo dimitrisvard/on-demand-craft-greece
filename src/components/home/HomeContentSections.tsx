@@ -12,6 +12,30 @@ import {
 import SectionRenderer from '@/components/content/SectionRenderer';
 import type { ContentPageSection } from '@/hooks/useContentPage';
 
+// Overrides DB image_url for service cards with the locally-uploaded images
+// that are visually distinct from the industry images.
+const SERVICE_IMAGES: Record<string, string> = {
+  'cnc-machining':     '/lovable-uploads/200d9297-1d4c-4f58-a7d0-492ec78f506b.png',
+  'sheet-metal':       '/lovable-uploads/f6ea9e7f-263a-4ab2-a37b-8b5f4f41a537.png',
+  '3d-printing':       '/lovable-uploads/59f13e48-0a66-4e3a-a3c3-e9db4fa53d08.png',
+  'injection-molding': '/lovable-uploads/b31d113f-4829-4150-b985-c71d1f99dd5f.png',
+  'surface-finishes':  '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
+  'surface-finishing': '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
+  'rapid-prototyping': '/lovable-uploads/solidworks-rapid-prototyping.png',
+};
+
+function patchServiceCards(s: ContentPageSection): ContentPageSection {
+  if (!s.cards?.length) return s;
+  return {
+    ...s,
+    cards: s.cards.map((card) => {
+      const slug = card.href?.split('/services/')?.[1]?.split('/')?.[0];
+      const img = slug ? SERVICE_IMAGES[slug] : undefined;
+      return img ? { ...card, image_url: img } : card;
+    }),
+  };
+}
+
 /**
  * Home page uses position-aware rendering: some DB sections look better with a
  * custom layout than the generic SectionRenderer. The order in the home
@@ -97,7 +121,7 @@ const DifferentiatorsGrid: React.FC<{ s: ContentPageSection }> = ({ s }) => {
   const items = s.items ?? [];
   if (!items.length) return null;
   return (
-    <section className="section bg-white">
+    <section className="section bg-brand-light">
       <div className="container-custom">
         <div className="max-w-3xl mx-auto text-center mb-12">
           {s.h2 && (
@@ -174,7 +198,7 @@ const DeliverablesGrid: React.FC<{ s: ContentPageSection }> = ({ s }) => {
   const items = s.items ?? [];
   if (!items.length) return null;
   return (
-    <section className="section bg-white">
+    <section className="section bg-brand-light">
       <div className="container-custom">
         <div className="max-w-3xl mx-auto text-center mb-12">
           {s.h2 && (
@@ -235,9 +259,10 @@ const HomeContentSections: React.FC<HomeContentSectionsProps> = ({ sections }) =
   return (
     <>
       {sections.map((section, i) => {
+        const s = i === 0 ? patchServiceCards(section) : section;
         const Custom = CUSTOM_INDICES[i];
-        if (Custom) return <React.Fragment key={i}>{Custom(section)}</React.Fragment>;
-        return <SectionRenderer key={i} section={section} index={i} />;
+        if (Custom) return <React.Fragment key={i}>{Custom(s)}</React.Fragment>;
+        return <SectionRenderer key={i} section={s} index={i} />;
       })}
     </>
   );

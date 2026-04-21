@@ -26,6 +26,15 @@ import {
 
 const SITE_BASE_URL = 'https://www.micronshub.eu';
 
+const SERVICE_HERO_IMAGES: Record<string, string> = {
+  'cnc-machining':     '/lovable-uploads/200d9297-1d4c-4f58-a7d0-492ec78f506b.png',
+  'sheet-metal':       '/lovable-uploads/f6ea9e7f-263a-4ab2-a37b-8b5f4f41a537.png',
+  '3d-printing':       '/lovable-uploads/59f13e48-0a66-4e3a-a3c3-e9db4fa53d08.png',
+  'injection-molding': '/lovable-uploads/b31d113f-4829-4150-b985-c71d1f99dd5f.png',
+  'surface-finishes':  '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
+  'rapid-prototyping': '/lovable-uploads/solidworks-rapid-prototyping.png',
+};
+
 interface ServicePageProps {
   slug: string;
 }
@@ -158,35 +167,50 @@ const CrossLinksBlock: React.FC<{ items: CrossLink[]; lang: string }> = ({ items
   );
 };
 
-const Hero: React.FC<{ content: ServicePageContent }> = ({ content }) => {
+const Hero: React.FC<{ content: ServicePageContent; slug: string }> = ({ content, slug }) => {
   const { getLocalizedPath } = useLanguage();
+  const heroImg = SERVICE_HERO_IMAGES[slug];
   return (
     <section className="relative bg-brand-dark text-white py-20 md:py-28">
       <div className="container-custom">
-        <div className="max-w-3xl">
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">{content.h1}</h1>
-          {content.tagline && (
-            <p className="text-xl md:text-2xl text-white/90 mb-8">{content.tagline}</p>
-          )}
-          {content.lead_paragraph && (
-            <p className="text-lg text-white/80 leading-relaxed mb-8">
-              {content.lead_paragraph}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-4">
-            <Link
-              to={getLocalizedPath('/quote')}
-              className="btn-secondary inline-flex items-center"
-            >
-              Get a Quote <ArrowRight size={18} className="ml-2" />
-            </Link>
-            <Link
-              to={getLocalizedPath('/contact')}
-              className="btn-secondary bg-transparent border-white text-white hover:bg-white/10"
-            >
-              Contact Sales
-            </Link>
+        <div className={`flex flex-col gap-10 ${heroImg ? 'md:flex-row md:items-center md:gap-14' : ''}`}>
+          <div className="flex-1 max-w-2xl">
+            <h1 className="text-4xl md:text-5xl font-bold mb-4">{content.h1}</h1>
+            {content.tagline && (
+              <p className="text-xl md:text-2xl text-white/90 mb-6">{content.tagline}</p>
+            )}
+            {content.lead_paragraph && (
+              <p className="text-lg text-white/80 leading-relaxed mb-8">
+                {content.lead_paragraph}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-4">
+              <Link
+                to={getLocalizedPath('/quote')}
+                className="btn-secondary inline-flex items-center"
+              >
+                Get a Quote <ArrowRight size={18} className="ml-2" />
+              </Link>
+              <Link
+                to={getLocalizedPath('/contact')}
+                className="btn-secondary bg-transparent border-white text-white hover:bg-white/10"
+              >
+                Contact Sales
+              </Link>
+            </div>
           </div>
+          {heroImg && (
+            <div className="flex-shrink-0 md:w-80 lg:w-96">
+              <div className="rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+                <img
+                  src={heroImg}
+                  alt={content.h1}
+                  loading="eager"
+                  className="w-full h-64 md:h-80 object-cover"
+                />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -249,7 +273,7 @@ const ServicePage: React.FC<ServicePageProps> = ({ slug }) => {
         )}
       </Helmet>
 
-      <Hero content={content} />
+      <Hero content={content} slug={slug} />
       <CapabilitiesBlock items={content.capabilities} />
       <MaterialsTable materials={content.materials} heading="Materials" />
       <TolerancesBlock items={content.tolerances} />
