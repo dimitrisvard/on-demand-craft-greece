@@ -11,18 +11,7 @@ import {
 } from 'lucide-react';
 import SectionRenderer from '@/components/content/SectionRenderer';
 import type { ContentPageSection } from '@/hooks/useContentPage';
-
-// Overrides DB image_url for service cards with the locally-uploaded images
-// that are visually distinct from the industry images.
-const SERVICE_IMAGES: Record<string, string> = {
-  'cnc-machining':     '/lovable-uploads/200d9297-1d4c-4f58-a7d0-492ec78f506b.png',
-  'sheet-metal':       '/lovable-uploads/f6ea9e7f-263a-4ab2-a37b-8b5f4f41a537.png',
-  '3d-printing':       '/lovable-uploads/59f13e48-0a66-4e3a-a3c3-e9db4fa53d08.png',
-  'injection-molding': '/lovable-uploads/b31d113f-4829-4150-b985-c71d1f99dd5f.png',
-  'surface-finishes':  '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
-  'surface-finishing': '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
-  'rapid-prototyping': '/lovable-uploads/solidworks-rapid-prototyping.png',
-};
+import { SERVICE_IMAGES } from '@/lib/service-images';
 
 function patchServiceCards(s: ContentPageSection): ContentPageSection {
   if (!s.cards?.length) return s;
@@ -162,6 +151,16 @@ const DifferentiatorsGrid: React.FC<{ s: ContentPageSection }> = ({ s }) => {
   );
 };
 
+const statsGridCols = (n: number): string => {
+  if (n <= 1) return 'grid-cols-1';
+  if (n === 2) return 'grid-cols-1 sm:grid-cols-2';
+  if (n === 3) return 'grid-cols-1 sm:grid-cols-3';
+  if (n === 4) return 'grid-cols-2 md:grid-cols-4';
+  if (n === 5) return 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5';
+  if (n === 6) return 'grid-cols-2 md:grid-cols-3';
+  return 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4';
+};
+
 const StatsGrid: React.FC<{ s: ContentPageSection }> = ({ s }) => {
   const cards = s.cards ?? [];
   if (!cards.length) return null;
@@ -178,14 +177,17 @@ const StatsGrid: React.FC<{ s: ContentPageSection }> = ({ s }) => {
             <p className="text-white/80 leading-relaxed text-lg">{s.intro}</p>
           )}
         </div>
-        <div className={`grid gap-8 ${cards.length >= 4 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-1 md:grid-cols-3'}`}>
+        <div className={`grid gap-6 ${statsGridCols(cards.length)}`}>
           {cards.map((c, i) => (
-            <div key={i} className="text-center">
-              <div className="text-5xl md:text-6xl font-extrabold text-brand-accent mb-2">
+            <div
+              key={i}
+              className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 text-center border border-white/15 hover:bg-white/15 transition-colors flex flex-col"
+            >
+              <div className="text-4xl md:text-5xl lg:text-6xl font-extrabold text-brand-accent mb-3 leading-none">
                 {c.title}
               </div>
-              <p className="text-white/90 leading-relaxed">{c.description}</p>
-              {c.meta && <p className="mt-2 text-sm text-white/60">{c.meta}</p>}
+              <p className="text-white/90 leading-snug font-medium">{c.description}</p>
+              {c.meta && <p className="mt-auto pt-3 text-sm text-white/60">{c.meta}</p>}
             </div>
           ))}
         </div>

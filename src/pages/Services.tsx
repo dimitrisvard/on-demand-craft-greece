@@ -15,6 +15,7 @@ import {
   generateFAQPageSchema,
   generateServiceItemListSchema,
 } from '@/lib/schema';
+import { SERVICE_IMAGES } from '@/lib/service-images';
 
 const SITE_BASE_URL = 'https://www.micronshub.eu';
 
@@ -83,29 +84,44 @@ const Services = () => {
           <h2 className="text-3xl md:text-4xl font-bold text-brand-dark mb-10">
             Our Services
           </h2>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {(services ?? []).map((s) => (
-              <Link
-                key={s.slug}
-                to={`/${currentLanguage}/services/${s.localized_slug ?? s.slug}`}
-                className="group border border-brand-dark/10 rounded-lg bg-white p-6 hover:border-brand-primary transition-colors flex flex-col"
-              >
-                <h3 className="text-xl font-semibold text-brand-dark mb-3">{s.h1}</h3>
-                {s.tagline && (
-                  <p className="text-brand-dark/70 mb-4">{s.tagline}</p>
-                )}
-                <p className="text-sm text-brand-dark/70 leading-relaxed flex-1">
-                  {s.meta_description}
-                </p>
-                <span className="mt-4 inline-flex items-center text-brand-primary font-medium">
-                  Learn more
-                  <ArrowRight
-                    size={16}
-                    className="ml-2 transition-transform group-hover:translate-x-1"
-                  />
-                </span>
-              </Link>
-            ))}
+          <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+            {(services ?? []).map((s) => {
+              const img = SERVICE_IMAGES[s.slug];
+              return (
+                <Link
+                  key={s.slug}
+                  to={`/${currentLanguage}/services/${s.localized_slug ?? s.slug}`}
+                  className="group bg-white rounded-xl border border-brand-dark/10 shadow-sm hover:shadow-xl hover:border-brand-primary transition-all overflow-hidden flex flex-col"
+                >
+                  {img && (
+                    <div className="aspect-[16/10] overflow-hidden bg-brand-light">
+                      <img
+                        src={img}
+                        alt={s.h1}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      />
+                    </div>
+                  )}
+                  <div className="p-6 flex flex-col flex-1">
+                    <h3 className="text-xl font-semibold text-brand-dark mb-3">{s.h1}</h3>
+                    {s.tagline && (
+                      <p className="text-brand-dark/70 mb-4">{s.tagline}</p>
+                    )}
+                    <p className="text-sm text-brand-dark/70 leading-relaxed flex-1">
+                      {s.meta_description}
+                    </p>
+                    <span className="mt-4 inline-flex items-center text-brand-primary font-medium">
+                      Learn more
+                      <ArrowRight
+                        size={16}
+                        className="ml-2 transition-transform group-hover:translate-x-1"
+                      />
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>

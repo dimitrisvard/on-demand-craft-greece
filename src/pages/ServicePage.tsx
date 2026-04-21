@@ -23,17 +23,9 @@ import {
   generateServiceSchema,
   generateFAQPageSchema,
 } from '@/lib/schema';
+import { SERVICE_IMAGES } from '@/lib/service-images';
 
 const SITE_BASE_URL = 'https://www.micronshub.eu';
-
-const SERVICE_HERO_IMAGES: Record<string, string> = {
-  'cnc-machining':     '/lovable-uploads/200d9297-1d4c-4f58-a7d0-492ec78f506b.png',
-  'sheet-metal':       '/lovable-uploads/f6ea9e7f-263a-4ab2-a37b-8b5f4f41a537.png',
-  '3d-printing':       '/lovable-uploads/59f13e48-0a66-4e3a-a3c3-e9db4fa53d08.png',
-  'injection-molding': '/lovable-uploads/b31d113f-4829-4150-b985-c71d1f99dd5f.png',
-  'surface-finishes':  '/lovable-uploads/e4960d66-a6c4-46ae-ab67-f061530c38cb.png',
-  'rapid-prototyping': '/lovable-uploads/solidworks-rapid-prototyping.png',
-};
 
 interface ServicePageProps {
   slug: string;
@@ -169,13 +161,13 @@ const CrossLinksBlock: React.FC<{ items: CrossLink[]; lang: string }> = ({ items
 
 const Hero: React.FC<{ content: ServicePageContent; slug: string }> = ({ content, slug }) => {
   const { getLocalizedPath } = useLanguage();
-  const heroImg = SERVICE_HERO_IMAGES[slug];
+  const heroImg = SERVICE_IMAGES[slug];
   return (
-    <section className="relative bg-brand-dark text-white py-20 md:py-28">
+    <section className="relative bg-brand-dark text-white py-16 md:py-24">
       <div className="container-custom">
-        <div className={`flex flex-col gap-10 ${heroImg ? 'md:flex-row md:items-center md:gap-14' : ''}`}>
-          <div className="flex-1 max-w-2xl">
-            <h1 className="text-4xl md:text-5xl font-bold mb-4">{content.h1}</h1>
+        <div className={`flex flex-col gap-10 ${heroImg ? 'md:flex-row md:items-center md:gap-12 lg:gap-16' : ''}`}>
+          <div className={`flex-1 ${heroImg ? 'md:max-w-xl' : 'max-w-3xl'}`}>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4">{content.h1}</h1>
             {content.tagline && (
               <p className="text-xl md:text-2xl text-white/90 mb-6">{content.tagline}</p>
             )}
@@ -200,13 +192,13 @@ const Hero: React.FC<{ content: ServicePageContent; slug: string }> = ({ content
             </div>
           </div>
           {heroImg && (
-            <div className="flex-shrink-0 md:w-80 lg:w-96">
-              <div className="rounded-2xl overflow-hidden shadow-2xl border border-white/10">
+            <div className="md:flex-1 w-full">
+              <div className="rounded-2xl overflow-hidden shadow-2xl border border-white/10 bg-white/5">
                 <img
                   src={heroImg}
                   alt={content.h1}
                   loading="eager"
-                  className="w-full h-64 md:h-80 object-cover"
+                  className="w-full h-72 sm:h-96 md:h-[28rem] lg:h-[32rem] object-cover"
                 />
               </div>
             </div>
