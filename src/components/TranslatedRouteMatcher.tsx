@@ -13,12 +13,17 @@ import NotFound from '../pages/NotFound';
 
 // Lazy load page components (code-splitting)
 const Services = lazy(() => import('../pages/Services'));
+const Industries = lazy(() => import('../pages/Industries'));
+const OurWork = lazy(() => import('../pages/OurWork'));
+const About = lazy(() => import('../pages/About'));
+const Contact = lazy(() => import('../pages/Contact'));
+const Education = lazy(() => import('../pages/Education'));
 const Quote = lazy(() => import('../pages/Quote'));
 const QuoteSuccess = lazy(() => import('../pages/QuoteSuccess'));
 const QuoteRequestForm = lazy(() => import('../pages/QuoteRequestForm'));
 const ContactSuccess = lazy(() => import('../pages/ContactSuccess'));
 const ServicePage = lazy(() => import('../pages/ServicePage'));
-const ContentPage = lazy(() => import('../pages/ContentPage'));
+const ImpressumPage = lazy(() => import('../pages/ImpressumPage'));
 
 // Wrapper components that lock in the service slug at the route level.
 const SurfaceFinishesRoute = () => <ServicePage slug="surface-finishes" />;
@@ -28,23 +33,17 @@ const ThreeDPrintingRoute = () => <ServicePage slug="3d-printing" />;
 const InjectionMoldingRoute = () => <ServicePage slug="injection-molding" />;
 const RapidPrototypingRoute = () => <ServicePage slug="rapid-prototyping" />;
 
-// content_pages slugs — each routes to the generic DB-driven ContentPage.
-const IndustriesContentRoute = () => <ContentPage slug="industries" />;
-const OurWorkContentRoute = () => <ContentPage slug="our-work" />;
-const AboutContentRoute = () => <ContentPage slug="about" />;
-const ContactContentRoute = () => <ContentPage slug="contact" />;
-const EducationContentRoute = () => <ContentPage slug="education" />;
-const LegalNoticeContentRoute = () => <ContentPage slug="legal-notice" />;
-const PrivacyPolicyContentRoute = () => <ContentPage slug="privacy-policy" />;
-
-// Route mapping: English path -> Component
+// Route mapping: English path -> Component. Non-English URLs reverse-translate
+// into one of these keys before dispatching. The 7 content-pages slugs here
+// resolve to the OLD legacy components for non-EN visitors — EN users never
+// reach this matcher because App.tsx declares explicit /en routes first.
 const ROUTE_MAP: Record<string, React.ComponentType<any>> = {
   '/services': Services,
-  '/industries': IndustriesContentRoute,
-  '/our-work': OurWorkContentRoute,
-  '/about': AboutContentRoute,
-  '/contact': ContactContentRoute,
-  '/education': EducationContentRoute,
+  '/industries': Industries,
+  '/our-work': OurWork,
+  '/about': About,
+  '/contact': Contact,
+  '/education': Education,
   '/quote': Quote,
   '/quote/success': QuoteSuccess,
   '/quote-request': QuoteRequestForm,
@@ -55,9 +54,8 @@ const ROUTE_MAP: Record<string, React.ComponentType<any>> = {
   '/services/3d-printing': ThreeDPrintingRoute,
   '/services/injection-molding': InjectionMoldingRoute,
   '/services/rapid-prototyping': RapidPrototypingRoute,
-  '/legal-notice': LegalNoticeContentRoute,
-  '/privacy-policy': PrivacyPolicyContentRoute,
-  // '/impressum' is handled as a legacy route in App.tsx (uses ImpressumPage).
+  '/legal-notice': ImpressumPage,
+  // '/impressum' is handled as a legacy route in App.tsx.
 };
 
 // 301 Redirect map for old/bad slugs that need redirecting to correct URLs

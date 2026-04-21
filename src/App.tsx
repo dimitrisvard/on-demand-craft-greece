@@ -33,7 +33,15 @@ const About = lazy(() => import('./pages/About'));
 const Contact = lazy(() => import('./pages/Contact'));
 const OurWork = lazy(() => import('./pages/OurWork'));
 const ServicePage = lazy(() => import('./pages/ServicePage'));
-const ContentPage = lazy(() => import('./pages/ContentPage'));
+// Content-pages-backed pages (EN only). Non-EN paths keep the legacy
+// i18n-driven components via the TranslatedRouteMatcher catch-all.
+const ContactPageDB = lazy(() => import('./pages/content/ContactPage'));
+const OurWorkPageDB = lazy(() => import('./pages/content/OurWorkPage'));
+const EducationPageDB = lazy(() => import('./pages/content/EducationPage'));
+const IndustriesPageDB = lazy(() => import('./pages/content/IndustriesPage'));
+const AboutPageDB = lazy(() => import('./pages/content/AboutPage'));
+const LegalNoticePageDB = lazy(() => import('./pages/content/LegalNoticePage'));
+const PrivacyPolicyPageDB = lazy(() => import('./pages/content/PrivacyPolicyPage'));
 const OrdersPage = lazy(() => import('./pages/dashboard/OrdersPage'));
 const RfqDetails = lazy(() => import('./pages/RfqDetails'));
 const RfqManagement = lazy(() => import('./pages/RfqManagement'));
@@ -179,16 +187,25 @@ function AppContent() {
                 <Route path="/:lang/quote/success" element={<QuoteSuccess />} />
                 <Route path="/:lang/quote-request" element={<QuoteRequestForm />} />
                 
-                {/* Keep English routes FIRST for exact matching (better performance and SEO) */}
+                {/* Explicit /en routes — DB-backed ContentPage-style components.
+                    Declared before /:lang/ so React Router matches them first. */}
+                <Route path="/en/industries" element={<IndustriesPageDB />} />
+                <Route path="/en/our-work" element={<OurWorkPageDB />} />
+                <Route path="/en/about" element={<AboutPageDB />} />
+                <Route path="/en/contact" element={<ContactPageDB />} />
+                <Route path="/en/contact/success" element={<ContactSuccess />} />
+                <Route path="/en/education" element={<EducationPageDB />} />
+                <Route path="/en/legal-notice" element={<LegalNoticePageDB />} />
+                <Route path="/en/privacy-policy" element={<PrivacyPolicyPageDB />} />
+
+                {/* /:lang/ routes — legacy i18n-driven components for non-EN users. */}
                 <Route path="/:lang/services" element={<Services />} />
-                <Route path="/:lang/industries" element={<ContentPage slug="industries" />} />
-                <Route path="/:lang/our-work" element={<ContentPage slug="our-work" />} />
-                <Route path="/:lang/about" element={<ContentPage slug="about" />} />
-                <Route path="/:lang/contact" element={<ContentPage slug="contact" />} />
+                <Route path="/:lang/industries" element={<Industries />} />
+                <Route path="/:lang/our-work" element={<OurWork />} />
+                <Route path="/:lang/about" element={<About />} />
+                <Route path="/:lang/contact" element={<Contact />} />
                 <Route path="/:lang/contact/success" element={<ContactSuccess />} />
-                <Route path="/:lang/education" element={<ContentPage slug="education" />} />
-                <Route path="/:lang/legal-notice" element={<ContentPage slug="legal-notice" />} />
-                <Route path="/:lang/privacy-policy" element={<ContentPage slug="privacy-policy" />} />
+                <Route path="/:lang/education" element={<Education />} />
                 
                 <Route path="/:lang/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
                 <Route path="/:lang/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />
@@ -208,14 +225,14 @@ function AppContent() {
                 <Route path="/quote/success" element={<QuoteSuccess />} />
                 <Route path="/quote-request" element={<QuoteRequestForm />} />
                 <Route path="/services" element={<Services />} />
-                <Route path="/industries" element={<ContentPage slug="industries" />} />
-                <Route path="/our-work" element={<ContentPage slug="our-work" />} />
-                <Route path="/about" element={<ContentPage slug="about" />} />
-                <Route path="/contact" element={<ContentPage slug="contact" />} />
+                <Route path="/industries" element={<IndustriesPageDB />} />
+                <Route path="/our-work" element={<OurWorkPageDB />} />
+                <Route path="/about" element={<AboutPageDB />} />
+                <Route path="/contact" element={<ContactPageDB />} />
                 <Route path="/contact/success" element={<ContactSuccess />} />
-                <Route path="/education" element={<ContentPage slug="education" />} />
-                <Route path="/legal-notice" element={<ContentPage slug="legal-notice" />} />
-                <Route path="/privacy-policy" element={<ContentPage slug="privacy-policy" />} />
+                <Route path="/education" element={<EducationPageDB />} />
+                <Route path="/legal-notice" element={<LegalNoticePageDB />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicyPageDB />} />
                 
                 <Route path="/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
                 <Route path="/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />

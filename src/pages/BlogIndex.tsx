@@ -6,6 +6,10 @@ import { Calendar, Clock, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { translateUrlSlug } from "@/utils/urlSlugTranslator";
 import SEOMeta from "@/components/SEOMeta";
+import ContentHero from "@/components/content/ContentHero";
+import SectionRenderer from "@/components/content/SectionRenderer";
+import FaqAccordion from "@/components/content/FaqAccordion";
+import { useContentPage } from "@/hooks/useContentPage";
 
 interface Article {
   id: string;
@@ -25,6 +29,10 @@ const BlogIndex = () => {
   const [loading, setLoading] = useState(true);
   const currentLang = lang || i18n.language || 'en';
   const blogSlug = translateUrlSlug('blog', currentLang, t);
+  // content_pages row for 'blog' drives the hero + intro/category sections.
+  // Only populated in EN today — non-EN visitors fall back to the simple hero.
+  const { data: contentRow } = useContentPage('blog');
+  const showContentHero = currentLang === 'en' && !!contentRow;
 
   useEffect(() => {
     fetchArticles();
@@ -58,16 +66,38 @@ const BlogIndex = () => {
         ogType="website"
       />
       
-      <div className="pt-24 pb-16">
+      {showContentHero ? (
+        <>
+          <ContentHero
+            h1={contentRow!.h1}
+            tagline={contentRow!.tagline}
+            lead={contentRow!.lead_paragraph}
+          />
+          {(contentRow!.sections ?? []).map((s, i) => (
+            <SectionRenderer key={i} section={s} index={i} />
+          ))}
+        </>
+      ) : null}
+
+      <div className={showContentHero ? 'pt-16 pb-16 bg-white' : 'pt-24 pb-16'}>
         <div className="container-custom mx-auto px-4">
-          <div className="text-center mb-16">
-            <h1 className="text-4xl font-bold tracking-tight mb-4">
-              {t('blog_title', 'Latest Updates')}
-            </h1>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              {t('blog_subtitle', 'Insights, news, and technical articles about manufacturing and engineering.')}
-            </p>
-          </div>
+          {!showContentHero && (
+            <div className="text-center mb-16">
+              <h1 className="text-4xl font-bold tracking-tight mb-4">
+                {t('blog_title', 'Latest Updates')}
+              </h1>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                {t('blog_subtitle', 'Insights, news, and technical articles about manufacturing and engineering.')}
+              </p>
+            </div>
+          )}
+          {showContentHero && (
+            <div className="text-center mb-12">
+              <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-brand-dark mb-4">
+                {t('blog_latest_articles', 'Latest articles')}
+              </h2>
+            </div>
+          )}
 
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -126,6 +156,8 @@ const BlogIndex = () => {
           )}
         </div>
       </div>
+
+      {showContentHero && <FaqAccordion items={contentRow!.faq ?? []} />}
     </div>
   );
 };
