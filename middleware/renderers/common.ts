@@ -18,7 +18,11 @@ export function renderFooterLinks(lang: Lang): string {
     { label: t(lang, 'seo_quote_title', 'Get a Quote'), href: localizedPath(lang, 'quote') },
   ];
   const lis = items.map((i) => `      <li><a href="${i.href}">${escapeHtml(i.label)}</a></li>`).join('\n');
-  return `  <nav aria-label="site">\n    <ul>\n${lis}\n    </ul>\n  </nav>`;
+  // Legal-entity line surfaces company identity to plain-curl / link-preview
+  // bots that don't execute the React Footer. Greek Ε.Ε. passes through
+  // escapeHtml unchanged — those codepoints are outside the replace set.
+  const legal = `  <p class="legal">MICRONS HUB DV Ε.Ε. · VAT: EL803129638 · GEMI: 190254227000 · Industrial Area, Street B, Number 4, 71601 Heraklion, Crete, Greece</p>`;
+  return `  <nav aria-label="site">\n    <ul>\n${lis}\n    </ul>\n  </nav>\n${legal}`;
 }
 
 /** Render a compact list of service links, used on homepage + services index. */

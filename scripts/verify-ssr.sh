@@ -211,6 +211,88 @@ check "/hu/rolunk"            500 "microns|rólunk|rolunk"
 check "/cs/o-nas"             500 "microns|o nás|o nas"
 
 echo ""
+echo "=== Content pages (EN, DB-backed) ==="
+# Minimum body-text size after HTML stripping. content_pages rows are large
+# enough that 22kB raw / ~3kB text is a conservative floor; legal pages have
+# less prose so we use a slightly lower min.
+check "/en/industries"        3000 "aerospace|automotive|aerospace|industri"
+check "/en/our-work"          1500 "portfolio|case|project|work"
+check "/en/education"         1500 "education|formula student|student|NET30|DFM"
+check "/en/about"             2000 "heraklion|dimitrios|microns|founded|supplier"
+check "/en/contact"           1500 "heraklion|info@micronshub|contact"
+check "/en/legal-notice"      1500 "MICRONS HUB DV|803129638|190254227000|heraklion"
+check "/en/privacy-policy"    1500 "GDPR|regulation|2016/679|data subject|personal data"
+
+# Regression guards specific to content_pages:
+# 1. Raw body ≥ 22kB (≥ 20kB for legal pages). The generic check() above only
+#    measures text-extracted length; this enforces the raw HTML floor too.
+# 2. <article id="seo-content"> must NOT carry hidden / aria-hidden — that was
+#    yesterday's bug and would hide the whole SEO block from crawlers.
+# 3. x-seo-source: db header must be present so we know the row was fetched.
+for page in industries our-work education about contact legal-notice privacy-policy; do
+  url="$HOST/en/$page"
+  html=$(curl -sL --max-time 30 -A "$UA" "$url")
+  size=${#html}
+  if [ "$page" = "legal-notice" ] || [ "$page" = "privacy-policy" ]; then
+    MIN_SIZE=20000
+  else
+    MIN_SIZE=22000
+  fi
+  if [ "$size" -lt "$MIN_SIZE" ]; then
+    echo "  [FAIL] /en/$page raw=$size < min=$MIN_SIZE"
+    FAIL=1
+  else
+    echo "  [ok]   /en/$page raw=$size ≥ $MIN_SIZE"
+  fi
+  if echo "$html" | grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)'; then
+    echo "  [FAIL] /en/$page #seo-content has hidden/aria-hidden (yesterday-bug regression)"
+    FAIL=1
+  fi
+  h2_count=$(printf '%s' "$html" | grep -oE '<h2[[:space:]>]' | wc -l | tr -d ' ')
+  if [ "$h2_count" -lt 3 ]; then
+    echo "  [FAIL] /en/$page only $h2_count H2s (expected ≥ 3)"
+    FAIL=1
+  fi
+  ld_count=$(printf '%s' "$html" | grep -oE 'application/ld\+json' | wc -l | tr -d ' ')
+  if [ "$page" = "legal-notice" ] || [ "$page" = "privacy-policy" ]; then
+    MIN_LD=2
+  else
+    MIN_LD=3
+  fi
+  if [ "$ld_count" -lt "$MIN_LD" ]; then
+    echo "  [FAIL] /en/$page only $ld_count JSON-LD blocks (expected ≥ $MIN_LD)"
+    FAIL=1
+  fi
+  src=$(curl -sI --max-time 30 -A "$UA" "$url" | grep -i '^x-seo-source:' | tr -d '\r\n' | awk -F': ' '{print $2}')
+  if [ "$src" != "db" ]; then
+    echo "  [FAIL] /en/$page x-seo-source='$src' (expected 'db')"
+    FAIL=1
+  fi
+done
+
+echo ""
+echo "=== Footer VAT / legal-entity SSR regression ==="
+home=$(curl -sL --max-time 30 -A "$UA" "$HOST/en")
+if echo "$home" | grep -q "EL803129638"; then
+  echo "  [ok]   /en contains VAT EL803129638 in SSR body"
+else
+  echo "  [FAIL] /en missing EL803129638 in SSR body"
+  FAIL=1
+fi
+if echo "$home" | grep -q "MICRONS HUB DV"; then
+  echo "  [ok]   /en contains legal entity MICRONS HUB DV in SSR body"
+else
+  echo "  [FAIL] /en missing MICRONS HUB DV in SSR body"
+  FAIL=1
+fi
+if echo "$home" | grep -q "190254227000"; then
+  echo "  [ok]   /en contains GEMI 190254227000 in SSR body"
+else
+  echo "  [FAIL] /en missing GEMI 190254227000 in SSR body"
+  FAIL=1
+fi
+
+echo ""
 echo "=== UTF-8 encoding regression guard (pt/de/fr/es/it/sv/fi/hu/cs) ==="
 check_encoding "/pt/servicos/chapa-metalica"
 check_encoding "/de/dienstleistungen/blechbearbeitung"

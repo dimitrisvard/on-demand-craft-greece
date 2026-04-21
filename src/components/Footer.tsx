@@ -60,7 +60,7 @@ const Footer = () => {
             <ul className="space-y-3">
               <li className="flex items-start">
                 <MapPin size={18} className="mr-2 text-brand-accent shrink-0 mt-1" />
-                <span className="text-gray-600">{tenant?.address || t('footer_address', 'Kosti Fragkouli 3, Heraklion Greece 71414')}</span>
+                <span className="text-gray-600">{tenant?.address || t('footer_address', 'Industrial Area, Street B, Number 4, 71601 Heraklion, Crete, Greece')}</span>
               </li>
               <li className="flex items-center">
                 <Phone size={18} className="mr-2 text-brand-accent" />

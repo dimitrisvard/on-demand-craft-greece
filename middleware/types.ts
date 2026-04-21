@@ -15,13 +15,21 @@ export type PageType =
   | 'contact'
   | 'quote'
   | 'our-work'
+  | 'content-page'
   | 'other';
+
+export const CONTENT_PAGE_SLUGS = [
+  'industries', 'our-work', 'education',
+  'about', 'contact', 'legal-notice', 'privacy-policy',
+] as const;
+export type ContentPageSlug = typeof CONTENT_PAGE_SLUGS[number];
 
 export interface ParsedRoute {
   lang: Lang;
   type: PageType;
   serviceId?: ServiceId;
   blogSlug?: string;
+  contentSlug?: ContentPageSlug;
   pathAfterLang: string;
 }
 

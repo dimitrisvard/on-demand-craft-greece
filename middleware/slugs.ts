@@ -1,4 +1,8 @@
-import { Lang, LANGUAGES, ServiceId, SERVICE_IDS, ParsedRoute, PageType } from './types';
+import { Lang, LANGUAGES, ServiceId, SERVICE_IDS, ParsedRoute, PageType, CONTENT_PAGE_SLUGS, ContentPageSlug } from './types';
+
+// Slugs we render from content_pages when language === 'en'. Other languages
+// keep their existing i18n-based renderers until the DB is populated.
+const CONTENT_SLUG_SET = new Set<string>(CONTENT_PAGE_SLUGS);
 
 // Localized URL slugs per language. Mirrors vite.config.ts SLUGS map and the
 // url_slug_* keys in src/locales/<lang>/translation.json. Kept inline here to
@@ -100,6 +104,16 @@ export function resolvePageType(lang: Lang, segs: string[]): ParsedRoute | null 
     return { lang, type: 'blog-article', blogSlug: segs.slice(1).join('/'), pathAfterLang: segs.join('/') };
   }
 
+  // content_pages: EN-only for now. Matches the 7 English slugs (industries,
+  // our-work, education, about, contact, legal-notice, privacy-policy) so the
+  // middleware fetches from content_pages and renders via renderContentPage.
+  // Other languages keep existing i18n-based routing (industries, about,
+  // contact, our-work) so we don't regress non-EN pages while the DB is
+  // populated only in English.
+  if (lang === 'en' && segs.length === 1 && CONTENT_SLUG_SET.has(first)) {
+    return { lang, type: 'content-page', contentSlug: first as ContentPageSlug, pathAfterLang: first };
+  }
+
   if (firstType) {
     return { lang, type: firstType, pathAfterLang: segs.join('/') };
   }
@@ -123,6 +137,7 @@ export function localizedPath(lang: Lang, type: PageType, extra?: string): strin
     case 'contact': return `/${lang}/${s.contact}`;
     case 'quote': return `/${lang}/${s.quote}`;
     case 'our-work': return `/${lang}/${s.ourWork}`;
+    case 'content-page': return `/${lang}/${extra || ''}`;
     default: return `/${lang}`;
   }
 }

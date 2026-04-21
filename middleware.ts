@@ -36,6 +36,7 @@ import { renderIndustries } from './middleware/renderers/industries';
 import { renderSimplePage } from './middleware/renderers/simplePage';
 import { renderBlogIndex } from './middleware/renderers/blogIndex';
 import { renderArticleFromRow } from './middleware/renderers/blogArticle';
+import { renderContentFromRow, ContentPageRow } from './middleware/renderers/contentPage';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ const translationCache = new Map<string, { data: TranslationMap; expires: number
 const listCache = new Map<string, { data: ArticleListItem[]; expires: number }>();
 const servicePageCache = new Map<string, { data: ServicePageRow | null; expires: number }>();
 const servicePageListCache = new Map<string, { data: ServicePageRow[]; expires: number }>();
+const contentPageCache = new Map<string, { data: ContentPageRow | null; expires: number }>();
 
 // ─── Supabase Helpers ─────────────────────────────────────────────────────────
 
@@ -267,6 +269,62 @@ export async function fetchServicePageList(lang: string): Promise<ServicePageRow
   return rows;
 }
 
+const CONTENT_PAGE_SELECT = [
+  'slug', 'language', 'localized_slug',
+  'title', 'meta_description', 'h1', 'tagline', 'lead_paragraph',
+  'sections', 'faq', 'cross_links', 'internal_links',
+  'schema_type', 'structured_data',
+].join(',');
+
+async function fetchContentPageRaw(lang: string, slug: string): Promise<ContentPageRow | null> {
+  const anonKey = getAnonKey();
+  if (!anonKey) return null;
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/content_pages`
+      + `?slug=eq.${encodeURIComponent(slug)}`
+      + `&language=eq.${lang}`
+      + `&status=eq.published`
+      + `&select=${CONTENT_PAGE_SELECT}&limit=1`;
+    const res = await fetch(url, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const row = data?.[0] ?? null;
+    if (!row) return null;
+    // Normalize content_pages.faq ({q, a}) to the {question, answer} shape used
+    // by the existing faqPageSchemaFromRow helper and the renderer.
+    if (Array.isArray(row.faq)) {
+      row.faq = row.faq.map((f: { q?: string; a?: string; question?: string; answer?: string }) => ({
+        question: f.question ?? f.q ?? '',
+        answer: f.answer ?? f.a ?? '',
+      }));
+    } else {
+      row.faq = [];
+    }
+    row.cross_links = Array.isArray(row.cross_links) ? row.cross_links : [];
+    row.internal_links = Array.isArray(row.internal_links) ? row.internal_links : [];
+    row.sections = Array.isArray(row.sections) ? row.sections : [];
+    return row as ContentPageRow;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchContentPage(lang: string, slug: string): Promise<ContentPageRow | null> {
+  const cacheKey = `cp:${lang}:${slug}`;
+  const cached = contentPageCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.data;
+
+  const timeout = new Promise<ContentPageRow | null>(
+    (resolve) => setTimeout(() => resolve(null), SERVICE_FETCH_TIMEOUT_MS),
+  );
+  const row = await Promise.race([fetchContentPageRaw(lang, slug), timeout]);
+  const expiresIn = row ? CACHE_TTL : NEGATIVE_CACHE_TTL;
+  contentPageCache.set(cacheKey, { data: row, expires: Date.now() + expiresIn });
+  return row;
+}
+
 // ─── URL Parsing ──────────────────────────────────────────────────────────────
 
 function parseRoute(pathname: string): ParsedRoute | null {
@@ -287,6 +345,18 @@ function parseRoute(pathname: string): ParsedRoute | null {
 
 function staticHreflangs(pathFor: (lang: Lang) => string): string {
   return buildHreflangTags(pathFor);
+}
+
+/**
+ * content_pages currently only has English rows. Emit a self-referencing
+ * hreflang=en plus x-default. When DE/FR/ES/... rows are added later, swap
+ * to staticHreflangs() so the full 14-language set is emitted.
+ */
+function enOnlyHreflang(canonicalPath: string): string {
+  return [
+    `<link rel="alternate" hreflang="en" href="${SITE_BASE}${canonicalPath}" />`,
+    `<link rel="alternate" hreflang="x-default" href="${SITE_BASE}${canonicalPath}" />`,
+  ].join('\n    ');
 }
 
 // ─── Middleware Entry Point ──────────────────────────────────────────────────
@@ -393,6 +463,45 @@ export default async function middleware(request: Request): Promise<Response | u
       const rendered = renderSimplePage(route.lang, route.type);
       bodyHtml = rendered.bodyHtml;
       jsonLdBlocks = rendered.jsonLd;
+      break;
+    }
+
+    case 'content-page': {
+      const slug = route.contentSlug!;
+      const row = await fetchContentPage(route.lang, slug);
+      canonicalPath = `/${route.lang}/${slug}`;
+      if (row) {
+        meta = {
+          title: row.title.includes('Microns Hub') ? row.title : `${row.title} | Microns Hub`,
+          description: row.meta_description,
+          ogType: 'website',
+          image: DEFAULT_IMAGE,
+        };
+        hreflangTags = enOnlyHreflang(canonicalPath);
+        seoSource = 'db';
+        const rendered = renderContentFromRow(route.lang, row, slug);
+        bodyHtml = rendered.bodyHtml;
+        jsonLdBlocks = rendered.jsonLd;
+      } else {
+        // Row missing — fall back so we never regress the 4 existing legacy
+        // slugs. The 3 new slugs (education / legal-notice / privacy-policy)
+        // have no legacy renderer; returning undefined lets React handle it.
+        if (slug === 'industries') {
+          meta = getMeta({ ...route, type: 'industries' });
+          hreflangTags = staticHreflangs((l) => localizedPath(l, 'industries'));
+          const rendered = renderIndustries(route.lang);
+          bodyHtml = rendered.bodyHtml;
+          jsonLdBlocks = rendered.jsonLd;
+        } else if (slug === 'about' || slug === 'contact' || slug === 'our-work') {
+          meta = getMeta({ ...route, type: slug });
+          hreflangTags = staticHreflangs((l) => localizedPath(l, slug));
+          const rendered = renderSimplePage(route.lang, slug);
+          bodyHtml = rendered.bodyHtml;
+          jsonLdBlocks = rendered.jsonLd;
+        } else {
+          return undefined;
+        }
+      }
       break;
     }
 

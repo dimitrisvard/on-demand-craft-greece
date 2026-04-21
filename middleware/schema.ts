@@ -121,6 +121,49 @@ export function faqPageSchemaFromRow(faq: Array<{ question: string; answer: stri
   });
 }
 
+interface ContentPageRowLite {
+  language: string;
+  title: string;
+  meta_description: string;
+  schema_type?: string | null;
+  structured_data?: {
+    contactPoints?: Array<Record<string, unknown>>;
+    organization?: Record<string, unknown>;
+  } | null;
+}
+
+export function contentPageSchemaFromRow(row: ContentPageRowLite, canonicalUrl: string): string {
+  const base: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': row.schema_type || 'WebPage',
+    name: row.title,
+    description: row.meta_description,
+    url: canonicalUrl,
+    inLanguage: row.language,
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Microns Hub',
+      url: SITE_BASE,
+    },
+  };
+
+  if (row.schema_type === 'ContactPage' && row.structured_data?.contactPoints?.length) {
+    base.contactPoint = row.structured_data.contactPoints.map((cp) => ({
+      '@type': 'ContactPoint',
+      ...cp,
+    }));
+  }
+
+  if (row.schema_type === 'AboutPage' && row.structured_data?.organization) {
+    base.mainEntity = {
+      '@type': 'Organization',
+      ...row.structured_data.organization,
+    };
+  }
+
+  return JSON.stringify(base);
+}
+
 export function articleSchema(params: {
   lang: Lang; title: string; description: string;
   createdAt: string; updatedAt: string; image: string; url: string;
