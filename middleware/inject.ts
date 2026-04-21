@@ -71,22 +71,39 @@ export function rewriteHtml(html: string, input: RewriteInput): string {
     // a MutationObserver to hide the block via CSS once React renders into #root.
     // For crawlers that don't execute JS, the SSR block remains fully visible
     // and indexable.
+    // The observer script runs right after <body> opens, BEFORE the browser
+    // has parsed <div id="root"> further down in the body. An older version
+    // of this block looked up #root immediately and bailed with `if(!r)return;`
+    // because #root didn't exist yet — which meant the observer never attached
+    // and #seo-content stayed visible to real users forever. Defer attach()
+    // to DOMContentLoaded (or run immediately if parse is already done) so
+    // #root is guaranteed to exist when we reach for it. Handle the race
+    // where React mounted before the listener fires by checking
+    // r.children.length on first attempt and hiding immediately.
     const block = `
     <article id="seo-content" lang="${lang}">
       ${bodyHtml}
     </article>
     <script>
     (function(){
-      var r=document.getElementById('root');
-      if(!r)return;
-      var o=new MutationObserver(function(){
-        if(r.children.length>0){
-          var s=document.getElementById('seo-content');
-          if(s)s.style.display='none';
-          o.disconnect();
-        }
-      });
-      o.observe(r,{childList:true});
+      function hide(){
+        var s=document.getElementById('seo-content');
+        if(s)s.style.display='none';
+      }
+      function attach(){
+        var r=document.getElementById('root');
+        if(!r)return;
+        if(r.children.length>0){hide();return;}
+        var o=new MutationObserver(function(){
+          if(r.children.length>0){hide();o.disconnect();}
+        });
+        o.observe(r,{childList:true});
+      }
+      if(document.readyState==='loading'){
+        document.addEventListener('DOMContentLoaded',attach);
+      }else{
+        attach();
+      }
     })();
     </script>`;
     result = result.replace(/(<body[^>]*>)/, `$1${block}`);
