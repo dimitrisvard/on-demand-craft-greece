@@ -6,6 +6,8 @@ interface ProseSection {
   type: 'prose';
   h2: string;
   paragraphs: string[];
+  image_url?: string;
+  image_alt?: string;
 }
 
 interface ListSectionItem {
@@ -31,6 +33,9 @@ interface GridSectionCard {
   title: string;
   description: string;
   meta?: string;
+  image_url?: string;
+  image_alt?: string;
+  href?: string;
 }
 interface GridSection {
   type: 'grid' | 'cards';
@@ -71,9 +76,15 @@ export interface ContentPageRow {
 
 function renderProse(s: ProseSection): string {
   const ps = s.paragraphs.map((p) => `    <p>${escapeHtml(p)}</p>`).join('\n');
+  // Emit the image as a semantic <figure> so screen readers and crawlers can
+  // associate it with the surrounding prose. Alt falls back to the section's
+  // h2 when image_alt is absent so we never ship empty alt text.
+  const figure = s.image_url
+    ? `    <figure><img src="${escapeHtml(s.image_url)}" alt="${escapeHtml(s.image_alt || s.h2 || '')}" loading="lazy" /></figure>\n`
+    : '';
   return `  <section>
     <h2>${escapeHtml(s.h2)}</h2>
-${ps}
+${figure}${ps}
   </section>`;
 }
 
@@ -110,9 +121,15 @@ ${tbody}
 
 function renderGrid(s: GridSection): string {
   const cards = s.cards.map((c) => {
+    const img = c.image_url
+      ? `        <img src="${escapeHtml(c.image_url)}" alt="${escapeHtml(c.image_alt || c.title)}" loading="lazy" />\n`
+      : '';
+    const heading = c.href
+      ? `<a href="${escapeHtml(c.href)}">${escapeHtml(c.title)}</a>`
+      : escapeHtml(c.title);
     const meta = c.meta ? `        <p><small>${escapeHtml(c.meta)}</small></p>\n` : '';
     return `      <article>
-        <h3>${escapeHtml(c.title)}</h3>
+${img}        <h3>${heading}</h3>
         <p>${escapeHtml(c.description)}</p>
 ${meta}      </article>`;
   }).join('\n');

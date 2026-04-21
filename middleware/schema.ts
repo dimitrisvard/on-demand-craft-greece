@@ -129,6 +129,7 @@ interface ContentPageRowLite {
   structured_data?: {
     contactPoints?: Array<Record<string, unknown>>;
     organization?: Record<string, unknown>;
+    website?: Record<string, unknown>;
   } | null;
 }
 
@@ -161,6 +162,30 @@ export function contentPageSchemaFromRow(row: ContentPageRowLite, canonicalUrl: 
     };
   }
 
+  return JSON.stringify(base);
+}
+
+/**
+ * WebSite + SearchAction JSON-LD. Google uses this to surface a sitelinks
+ * search box on the homepage SERP result. Only emit on the /en home route.
+ * Reads overrides from content_pages.home.structured_data.website when
+ * present, otherwise falls back to the site default.
+ */
+export function websiteSchemaFromRow(row: ContentPageRowLite | null): string {
+  const override = row?.structured_data?.website || {};
+  const base = {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Microns Hub',
+    url: SITE_BASE,
+    inLanguage: row?.language || 'en',
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: `${SITE_BASE}/en/search?q={search_term_string}`,
+      'query-input': 'required name=search_term_string',
+    },
+    ...override,
+  };
   return JSON.stringify(base);
 }
 

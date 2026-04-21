@@ -28,7 +28,7 @@ import { LANGUAGES, Lang, PageMeta, ParsedRoute, SITE_BASE, DEFAULT_IMAGE } from
 import { resolvePageType, localizedPath } from './middleware/slugs';
 import { getMeta } from './middleware/meta';
 import { buildHreflangTags, rewriteHtml } from './middleware/inject';
-import { articleSchema } from './middleware/schema';
+import { articleSchema, contentPageSchemaFromRow, breadcrumbSchema, faqPageSchemaFromRow, websiteSchemaFromRow, organizationSchema } from './middleware/schema';
 import { renderHomepage } from './middleware/renderers/homepage';
 import { renderServicesIndex } from './middleware/renderers/servicesIndex';
 import { renderServiceDetail } from './middleware/renderers/serviceDetail';
@@ -348,15 +348,20 @@ function staticHreflangs(pathFor: (lang: Lang) => string): string {
 }
 
 /**
- * content_pages currently only has English rows. Emit a self-referencing
- * hreflang=en plus x-default. When DE/FR/ES/... rows are added later, swap
- * to staticHreflangs() so the full 14-language set is emitted.
+ * content_pages currently only has English rows, but hreflang needs to list
+ * every supported language so Google understands this URL is the canonical
+ * for the English content and knows which alternates exist. Since the EN
+ * slug is valid in every language URL today (non-EN pages fall back to the
+ * same slug), we emit all 14 languages pointing at the same path plus
+ * x-default. When translated rows are seeded, swap to localized slugs.
  */
-function enOnlyHreflang(canonicalPath: string): string {
-  return [
-    `<link rel="alternate" hreflang="en" href="${SITE_BASE}${canonicalPath}" />`,
-    `<link rel="alternate" hreflang="x-default" href="${SITE_BASE}${canonicalPath}" />`,
-  ].join('\n    ');
+function contentPageHreflang(slug: string): string {
+  const tags: string[] = [];
+  for (const l of LANGUAGES) {
+    tags.push(`<link rel="alternate" hreflang="${l}" href="${SITE_BASE}/${l}/${slug}" />`);
+  }
+  tags.push(`<link rel="alternate" hreflang="x-default" href="${SITE_BASE}/en/${slug}" />`);
+  return tags.join('\n    ');
 }
 
 // ─── Middleware Entry Point ──────────────────────────────────────────────────
@@ -397,12 +402,35 @@ export default async function middleware(request: Request): Promise<Response | u
 
   switch (route.type) {
     case 'homepage': {
-      meta = getMeta(route);
       canonicalPath = localizedPath(route.lang, 'homepage');
       hreflangTags = staticHreflangs((l) => localizedPath(l, 'homepage'));
-      const rendered = renderHomepage(route.lang);
-      bodyHtml = rendered.bodyHtml;
-      jsonLdBlocks = rendered.jsonLd;
+      // Prefer the DB-driven home row. Falls back to the i18n-based renderer
+      // for non-EN languages until their rows are seeded.
+      const homeRow = await fetchContentPage(route.lang, 'home');
+      if (homeRow) {
+        meta = {
+          title: homeRow.title.includes('Microns Hub') ? homeRow.title : `${homeRow.title} | Microns Hub`,
+          description: homeRow.meta_description,
+          ogType: 'website',
+          image: DEFAULT_IMAGE,
+        };
+        seoSource = 'db';
+        const rendered = renderContentFromRow(route.lang, homeRow, 'home');
+        bodyHtml = rendered.bodyHtml;
+        // Strip the self-referential breadcrumb that renderContentFromRow emits —
+        // Google flags single-item BreadcrumbList schemas on the home URL. Also
+        // swap in WebSite+SearchAction and Organization for the home route.
+        jsonLdBlocks = [
+          organizationSchema(),
+          websiteSchemaFromRow(homeRow),
+          ...rendered.jsonLd.filter((b) => !b.includes('"BreadcrumbList"')),
+        ];
+      } else {
+        meta = getMeta(route);
+        const rendered = renderHomepage(route.lang);
+        bodyHtml = rendered.bodyHtml;
+        jsonLdBlocks = [...rendered.jsonLd, websiteSchemaFromRow(null)];
+      }
       break;
     }
 
@@ -477,7 +505,7 @@ export default async function middleware(request: Request): Promise<Response | u
           ogType: 'website',
           image: DEFAULT_IMAGE,
         };
-        hreflangTags = enOnlyHreflang(canonicalPath);
+        hreflangTags = contentPageHreflang(slug);
         seoSource = 'db';
         const rendered = renderContentFromRow(route.lang, row, slug);
         bodyHtml = rendered.bodyHtml;

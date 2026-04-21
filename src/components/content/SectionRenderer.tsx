@@ -21,6 +21,16 @@ const ProseSection: React.FC<{ s: ContentPageSection; alt: boolean }> = ({
             {s.h2}
           </h2>
         )}
+        {s.image_url && (
+          <figure className="mb-8 rounded-lg overflow-hidden shadow-lg border border-gray-100 bg-gray-100">
+            <img
+              src={s.image_url}
+              alt={s.image_alt || s.h2 || ''}
+              loading="lazy"
+              className="w-full h-auto object-cover"
+            />
+          </figure>
+        )}
         <div className="space-y-4 text-brand-dark/80 leading-relaxed text-lg">
           {(s.paragraphs ?? []).map((p, i) => (
             <p key={i}>{p}</p>
@@ -173,25 +183,48 @@ const GridSection: React.FC<{ s: ContentPageSection; alt: boolean }> = ({
           </p>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {cards.map((c, i) => (
-            <article
-              key={i}
-              className="bg-white p-6 rounded-lg shadow-lg border border-gray-100 hover:shadow-xl transition-all opacity-0 animate-fade-in flex flex-col"
-              style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'forwards' }}
-            >
-              <h3 className="text-xl font-bold mb-3 text-brand-dark">
-                {c.title}
-              </h3>
-              <p className="text-brand-dark/80 leading-relaxed flex-1">
-                {c.description}
-              </p>
-              {c.meta && (
-                <p className="mt-4 pt-4 border-t border-gray-100 text-sm text-brand-muted">
-                  {c.meta}
-                </p>
-              )}
-            </article>
-          ))}
+          {cards.map((c, i) => {
+            return (
+              <article
+                key={i}
+                className="bg-white rounded-lg shadow-lg border border-gray-100 hover:shadow-xl transition-all opacity-0 animate-fade-in flex flex-col overflow-hidden"
+                style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'forwards' }}
+              >
+                {c.image_url && (
+                  <div className="aspect-[16/9] overflow-hidden bg-gray-100">
+                    <img
+                      src={c.image_url}
+                      alt={c.image_alt || c.title}
+                      loading="lazy"
+                      className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
+                    />
+                  </div>
+                )}
+                <div className="p-6 flex flex-col flex-1">
+                  <h3 className="text-xl font-bold mb-3 text-brand-dark">
+                    {c.href ? (
+                      <a
+                        href={c.href}
+                        className="hover:text-brand-primary transition-colors"
+                      >
+                        {c.title}
+                      </a>
+                    ) : (
+                      c.title
+                    )}
+                  </h3>
+                  <p className="text-brand-dark/80 leading-relaxed flex-1">
+                    {c.description}
+                  </p>
+                  {c.meta && (
+                    <p className="mt-4 pt-4 border-t border-gray-100 text-sm text-brand-muted">
+                      {c.meta}
+                    </p>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
     </section>

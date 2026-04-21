@@ -271,6 +271,104 @@ for page in industries our-work education about contact legal-notice privacy-pol
 done
 
 echo ""
+echo "=== /en home row SSR ==="
+home_body=$(curl -sL --max-time 30 -A "$UA" "$HOST/en")
+home_size=${#home_body}
+if [ "$home_size" -lt 22000 ]; then
+  echo "  [FAIL] /en raw=$home_size < min=22000 (content_pages.home row not served)"
+  FAIL=1
+else
+  echo "  [ok]   /en raw=$home_size ≥ 22000"
+fi
+home_seo=$(curl -sIL --max-time 30 -A "$UA" "$HOST/en" | grep -i '^x-seo-source:' | tr -d '\r' | awk -F': ' '{print $2}' | tail -1)
+if [ "$home_seo" = "db" ]; then
+  echo "  [ok]   /en x-seo-source: db"
+else
+  echo "  [FAIL] /en x-seo-source='$home_seo' (expected 'db')"
+  FAIL=1
+fi
+
+echo ""
+echo "=== Industry images in SSR ==="
+industries_body=$(curl -sL --max-time 30 -A "$UA" "$HOST/en/industries")
+img_count=$(printf '%s' "$industries_body" | grep -oE '<img[^>]*unsplash.com' | wc -l | tr -d ' ')
+if [ "$img_count" -lt 10 ]; then
+  echo "  [FAIL] /en/industries only $img_count Unsplash <img> tags, expected ≥10"
+  FAIL=1
+else
+  echo "  [ok]   /en/industries images ($img_count)"
+fi
+
+echo ""
+echo "=== /en home images in SSR (6 services + 6 industries grids) ==="
+home_img_count=$(printf '%s' "$home_body" | grep -oE '<img[^>]*unsplash.com' | wc -l | tr -d ' ')
+if [ "$home_img_count" -lt 12 ]; then
+  echo "  [FAIL] /en only $home_img_count Unsplash <img> tags, expected ≥12"
+  FAIL=1
+else
+  echo "  [ok]   /en images ($home_img_count)"
+fi
+
+echo ""
+echo "=== Hreflang parity: every content page ≥15 alternates ==="
+for page in '' industries our-work education about contact legal-notice privacy-policy blog; do
+  if [ -z "$page" ]; then url="$HOST/en"; else url="$HOST/en/$page"; fi
+  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  count=$(printf '%s' "$body" | grep -oE 'rel="alternate" hreflang=' | wc -l | tr -d ' ')
+  if [ "$count" -lt 15 ]; then
+    echo "  [FAIL] $url only $count hreflang tags, expected ≥15"
+    FAIL=1
+  else
+    echo "  [ok]   $url hreflang ($count)"
+  fi
+done
+
+echo ""
+echo "=== robots + og:locale meta on every content page ==="
+for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/legal-notice"; do
+  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  if printf '%s' "$body" | grep -q '<meta name="robots"'; then
+    echo "  [ok]   $url has meta robots"
+  else
+    echo "  [FAIL] $url missing <meta name=\"robots\">"
+    FAIL=1
+  fi
+  if printf '%s' "$body" | grep -q '<meta property="og:locale"'; then
+    echo "  [ok]   $url has og:locale"
+  else
+    echo "  [FAIL] $url missing <meta property=\"og:locale\">"
+    FAIL=1
+  fi
+done
+
+echo ""
+echo "=== WebSite + SearchAction JSON-LD on /en only ==="
+if printf '%s' "$home_body" | grep -q '"@type":"WebSite"'; then
+  echo "  [ok]   /en has WebSite JSON-LD"
+else
+  echo "  [FAIL] /en missing WebSite JSON-LD"
+  FAIL=1
+fi
+if printf '%s' "$home_body" | grep -q '"@type":"SearchAction"'; then
+  echo "  [ok]   /en has SearchAction JSON-LD"
+else
+  echo "  [FAIL] /en missing SearchAction JSON-LD"
+  FAIL=1
+fi
+
+echo ""
+echo "=== No hidden/aria-hidden regression on #seo-content anywhere ==="
+for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/our-work" "$HOST/en/about" "$HOST/en/contact"; do
+  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  if printf '%s' "$body" | grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)'; then
+    echo "  [FAIL] $url: #seo-content has hidden/aria-hidden (regression)"
+    FAIL=1
+  else
+    echo "  [ok]   $url clean #seo-content"
+  fi
+done
+
+echo ""
 echo "=== Footer VAT / legal-entity SSR regression ==="
 home=$(curl -sL --max-time 30 -A "$UA" "$HOST/en")
 if echo "$home" | grep -q "EL803129638"; then

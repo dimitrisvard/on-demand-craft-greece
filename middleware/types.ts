@@ -19,10 +19,31 @@ export type PageType =
   | 'other';
 
 export const CONTENT_PAGE_SLUGS = [
+  'home',
   'industries', 'our-work', 'education',
   'about', 'contact', 'legal-notice', 'privacy-policy',
 ] as const;
 export type ContentPageSlug = typeof CONTENT_PAGE_SLUGS[number];
+
+// IETF-ish og:locale value per supported language. en_US is the Open Graph
+// convention for English; other languages use the language-script-region form
+// that Facebook / LinkedIn recognize.
+export const OG_LOCALE: Record<Lang, string> = {
+  en: 'en_US',
+  de: 'de_DE',
+  fr: 'fr_FR',
+  es: 'es_ES',
+  it: 'it_IT',
+  nl: 'nl_NL',
+  pl: 'pl_PL',
+  pt: 'pt_PT',
+  sv: 'sv_SE',
+  da: 'da_DK',
+  fi: 'fi_FI',
+  nb: 'nb_NO',
+  hu: 'hu_HU',
+  cs: 'cs_CZ',
+};
 
 export interface ParsedRoute {
   lang: Lang;

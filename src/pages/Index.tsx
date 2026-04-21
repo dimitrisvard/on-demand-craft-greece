@@ -11,8 +11,11 @@ import ComparisonTable from '../components/home/ComparisonTable';
 import MeetYourEngineer from '../components/home/MeetYourEngineer';
 import TestimonialsSection from '../components/home/TestimonialsSection';
 import IndustriesSection from '../components/home/IndustriesSection';
+import HomeContentSections from '../components/home/HomeContentSections';
+import FaqAccordion from '../components/content/FaqAccordion';
 import TenantLandingPage from './TenantLandingPage';
 import { useTenant } from '../contexts/TenantContext';
+import { useContentPage } from '../hooks/useContentPage';
 import {
   heroImage,
   trustedCompanies,
@@ -24,32 +27,51 @@ import {
 } from '../components/home/data';
 
 const Index = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { isTenantSubdomain, isCustomDomain } = useTenant();
+  const { data: home, isLoading } = useContentPage('home');
+  const isEnglish = (i18n.language || 'en').split('-')[0] === 'en';
 
   // Render tenant-specific landing page for subdomains and custom domains
   if (isTenantSubdomain || isCustomDomain) {
     return <TenantLandingPage />;
   }
 
+  // English visitors get the new DB-driven layout below the hero (as soon as
+  // the content_pages.home row loads). Other languages keep the original
+  // static composition until their rows are seeded.
+  const renderDbSections = isEnglish && !isLoading && home && home.sections.length > 0;
+
   return (
     <div className="min-h-screen">
       <SEOMeta
-        title={t('home_title')}
-        description={t('home_subtitle')}
+        title={home?.title || t('home_title')}
+        description={home?.meta_description || t('home_subtitle')}
         keywords={t('seo_keywords', 'CNC machining, 3D printing, manufacturing, Greece, precision parts, sheet metal, injection molding')}
         ogImage="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"
       />
       <HeroSection heroImage={heroImage} />
-      <TrustedCompanies companies={trustedCompanies} />
-      <ServicesSection />
-      <HowItWorksSection steps={workflowSteps} />
-      <QuoteSection benefits={quoteBenefits} />
-      <ComparisonTable />
-      <MeetYourEngineer />
-      <TestimonialsSection testimonials={testimonials} />
-      <IndustriesSection industries={industries} />
-      <CTASection />
+
+      {renderDbSections ? (
+        <>
+          <HomeContentSections sections={home!.sections} />
+          {home!.faq.length > 0 && (
+            <FaqAccordion items={home!.faq} />
+          )}
+        </>
+      ) : (
+        <>
+          <TrustedCompanies companies={trustedCompanies} />
+          <ServicesSection />
+          <HowItWorksSection steps={workflowSteps} />
+          <QuoteSection benefits={quoteBenefits} />
+          <ComparisonTable />
+          <MeetYourEngineer />
+          <TestimonialsSection testimonials={testimonials} />
+          <IndustriesSection industries={industries} />
+          <CTASection />
+        </>
+      )}
     </div>
   );
 };

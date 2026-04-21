@@ -10,7 +10,14 @@ export interface ContentPageSection {
   items?: { term?: string; description: string }[];
   columns?: string[];
   rows?: string[][];
-  cards?: { title: string; description: string; meta?: string; image_url?: string }[];
+  cards?: {
+    title: string;
+    description: string;
+    meta?: string;
+    image_url?: string;
+    image_alt?: string;
+    href?: string;
+  }[];
   body?: string;
   button_label?: string;
   button_href?: string;

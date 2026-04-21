@@ -1,4 +1,4 @@
-import { Lang, LANGUAGES, PageMeta, SITE_BASE } from './types';
+import { Lang, LANGUAGES, PageMeta, SITE_BASE, OG_LOCALE } from './types';
 
 export function escapeHtml(str: string): string {
   return str
@@ -57,6 +57,12 @@ export function rewriteHtml(html: string, input: RewriteInput): string {
   const injections = [
     `<link rel="canonical" href="${SITE_BASE}${canonicalPath}" />`,
     hreflangTags,
+    // Global robots directive. Shell has no <meta name="robots"> so injecting
+    // here guarantees it lands on every SSR response.
+    `<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1" />`,
+    // Open Graph locale for the active language; the shell only sets og:url,
+    // og:title etc., so og:locale is new to this injection pass.
+    `<meta property="og:locale" content="${OG_LOCALE[lang]}" />`,
   ];
   for (const block of jsonLdBlocks) {
     injections.push(`<script type="application/ld+json">\n    ${block}\n    </script>`);
