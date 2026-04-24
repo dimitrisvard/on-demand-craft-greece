@@ -13,17 +13,21 @@ import NotFound from '../pages/NotFound';
 
 // Lazy load page components (code-splitting)
 const Services = lazy(() => import('../pages/Services'));
-const Industries = lazy(() => import('../pages/Industries'));
-const OurWork = lazy(() => import('../pages/OurWork'));
-const About = lazy(() => import('../pages/About'));
-const Contact = lazy(() => import('../pages/Contact'));
-const Education = lazy(() => import('../pages/Education'));
 const Quote = lazy(() => import('../pages/Quote'));
 const QuoteSuccess = lazy(() => import('../pages/QuoteSuccess'));
 const QuoteRequestForm = lazy(() => import('../pages/QuoteRequestForm'));
 const ContactSuccess = lazy(() => import('../pages/ContactSuccess'));
 const ServicePage = lazy(() => import('../pages/ServicePage'));
-const ImpressumPage = lazy(() => import('../pages/ImpressumPage'));
+// DB-backed content pages. Reused across all 14 languages because
+// content_pages is seeded in every language; useContentPage keys off
+// i18n.language so the same component renders the correct localized row.
+const IndustriesPageDB = lazy(() => import('../pages/content/IndustriesPage'));
+const OurWorkPageDB = lazy(() => import('../pages/content/OurWorkPage'));
+const AboutPageDB = lazy(() => import('../pages/content/AboutPage'));
+const ContactPageDB = lazy(() => import('../pages/content/ContactPage'));
+const EducationPageDB = lazy(() => import('../pages/content/EducationPage'));
+const LegalNoticePageDB = lazy(() => import('../pages/content/LegalNoticePage'));
+const PrivacyPolicyPageDB = lazy(() => import('../pages/content/PrivacyPolicyPage'));
 
 // Wrapper components that lock in the service slug at the route level.
 const SurfaceFinishesRoute = () => <ServicePage slug="surface-finishes" />;
@@ -34,16 +38,18 @@ const InjectionMoldingRoute = () => <ServicePage slug="injection-molding" />;
 const RapidPrototypingRoute = () => <ServicePage slug="rapid-prototyping" />;
 
 // Route mapping: English path -> Component. Non-English URLs reverse-translate
-// into one of these keys before dispatching. The 7 content-pages slugs here
-// resolve to the OLD legacy components for non-EN visitors — EN users never
-// reach this matcher because App.tsx declares explicit /en routes first.
+// into one of these keys before dispatching. content_pages now has rows in
+// every language, so every localized content URL resolves to the DB-backed
+// component — the legacy i18n-driven <About /> / <Contact /> / <Industries />
+// / <OurWork /> / <Education /> stubs would render the static template and
+// mask the localized DB copy.
 const ROUTE_MAP: Record<string, React.ComponentType<any>> = {
   '/services': Services,
-  '/industries': Industries,
-  '/our-work': OurWork,
-  '/about': About,
-  '/contact': Contact,
-  '/education': Education,
+  '/industries': IndustriesPageDB,
+  '/our-work': OurWorkPageDB,
+  '/about': AboutPageDB,
+  '/contact': ContactPageDB,
+  '/education': EducationPageDB,
   '/quote': Quote,
   '/quote/success': QuoteSuccess,
   '/quote-request': QuoteRequestForm,
@@ -54,7 +60,8 @@ const ROUTE_MAP: Record<string, React.ComponentType<any>> = {
   '/services/3d-printing': ThreeDPrintingRoute,
   '/services/injection-molding': InjectionMoldingRoute,
   '/services/rapid-prototyping': RapidPrototypingRoute,
-  '/legal-notice': ImpressumPage,
+  '/legal-notice': LegalNoticePageDB,
+  '/privacy-policy': PrivacyPolicyPageDB,
   // '/impressum' is handled as a legacy route in App.tsx.
 };
 

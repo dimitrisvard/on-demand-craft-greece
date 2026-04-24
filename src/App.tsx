@@ -28,13 +28,10 @@ const QuoteRequestForm = lazy(() => import('./pages/QuoteRequestForm'));
 const Index = lazy(() => import('./pages/Index'));
 const Quote = lazy(() => import('./pages/Quote'));
 const Services = lazy(() => import('./pages/Services'));
-const Industries = lazy(() => import('./pages/Industries'));
-const About = lazy(() => import('./pages/About'));
-const Contact = lazy(() => import('./pages/Contact'));
-const OurWork = lazy(() => import('./pages/OurWork'));
 const ServicePage = lazy(() => import('./pages/ServicePage'));
-// Content-pages-backed pages (EN only). Non-EN paths keep the legacy
-// i18n-driven components via the TranslatedRouteMatcher catch-all.
+// Content-pages-backed pages. Used for every language now that content_pages
+// is seeded in all 14 languages — useContentPage keys off i18n.language so
+// the same component renders the correct localized row.
 const ContactPageDB = lazy(() => import('./pages/content/ContactPage'));
 const OurWorkPageDB = lazy(() => import('./pages/content/OurWorkPage'));
 const EducationPageDB = lazy(() => import('./pages/content/EducationPage'));
@@ -66,7 +63,6 @@ const SeoConsolePage = lazy(() => import('./pages/dashboard/SeoConsolePage'));
 const CompanyScannerPage = lazy(() => import('./pages/dashboard/CompanyScannerPage'));
 const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage'));
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
-const Education = lazy(() => import('./pages/Education'));
 
 // Inventory Management Pages
 const InventoryDashboard = lazy(() => import('./pages/inventory/InventoryDashboard'));
@@ -198,14 +194,19 @@ function AppContent() {
                 <Route path="/en/legal-notice" element={<LegalNoticePageDB />} />
                 <Route path="/en/privacy-policy" element={<PrivacyPolicyPageDB />} />
 
-                {/* /:lang/ routes — legacy i18n-driven components for non-EN users. */}
+                {/* /:lang/ routes — point at the DB-backed components for all 14
+                    languages. content_pages is now seeded in every language, so
+                    the legacy i18n-driven <About /> / <Contact /> / ... stubs
+                    would render the old static template and mask the DB copy. */}
                 <Route path="/:lang/services" element={<Services />} />
-                <Route path="/:lang/industries" element={<Industries />} />
-                <Route path="/:lang/our-work" element={<OurWork />} />
-                <Route path="/:lang/about" element={<About />} />
-                <Route path="/:lang/contact" element={<Contact />} />
+                <Route path="/:lang/industries" element={<IndustriesPageDB />} />
+                <Route path="/:lang/our-work" element={<OurWorkPageDB />} />
+                <Route path="/:lang/about" element={<AboutPageDB />} />
+                <Route path="/:lang/contact" element={<ContactPageDB />} />
                 <Route path="/:lang/contact/success" element={<ContactSuccess />} />
-                <Route path="/:lang/education" element={<Education />} />
+                <Route path="/:lang/education" element={<EducationPageDB />} />
+                <Route path="/:lang/legal-notice" element={<LegalNoticePageDB />} />
+                <Route path="/:lang/privacy-policy" element={<PrivacyPolicyPageDB />} />
                 
                 <Route path="/:lang/services/surface-finishes" element={<ServicePage slug="surface-finishes" />} />
                 <Route path="/:lang/services/sheet-metal" element={<ServicePage slug="sheet-metal" />} />

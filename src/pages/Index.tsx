@@ -27,20 +27,20 @@ import {
 } from '../components/home/data';
 
 const Index = () => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { isTenantSubdomain, isCustomDomain } = useTenant();
   const { data: home, isLoading } = useContentPage('home');
-  const isEnglish = (i18n.language || 'en').split('-')[0] === 'en';
 
   // Render tenant-specific landing page for subdomains and custom domains
   if (isTenantSubdomain || isCustomDomain) {
     return <TenantLandingPage />;
   }
 
-  // English visitors get the new DB-driven layout below the hero (as soon as
-  // the content_pages.home row loads). Other languages keep the original
-  // static composition until their rows are seeded.
-  const renderDbSections = isEnglish && !isLoading && home && home.sections.length > 0;
+  // Every language renders the DB-driven layout below the hero once the
+  // content_pages.home row loads. If a language row is missing we fall back
+  // to the original static composition — useContentPage already handles the
+  // EN fallback when a localized row is absent.
+  const renderDbSections = !isLoading && home && home.sections.length > 0;
 
   return (
     <div className="min-h-screen">
