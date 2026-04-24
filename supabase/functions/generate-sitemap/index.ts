@@ -1,6 +1,25 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
+/**
+ * Sitemap generator (canonical writer).
+ *
+ * Writes sitemap-complete.xml to Supabase Storage. api/sitemap.js (the Vercel
+ * handler behind /sitemap.xml) reads this blob on every request and serves it
+ * verbatim; its own dynamic generator is a fallback.
+ *
+ * Content-page URLs (industries, our-work, about, contact, education,
+ * legal-notice, privacy-policy, …) are pulled LIVE from content_pages instead
+ * of a hardcoded array. Previously the array missed education / legal-notice
+ * / privacy-policy × 14 languages (42 URLs) and no alarm fired — the
+ * regression guard at the bottom of this file throws if a future drift
+ * silently drops rows again.
+ *
+ * /sitemap-complete.xml is being collapsed into /sitemap.xml via a Vercel
+ * 301 redirect; both served identical content already. GSC submissions
+ * should point at /sitemap.xml going forward.
+ */
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
@@ -13,30 +32,29 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// All supported languages
 const LANGUAGES = ["en", "de", "fr", "es", "it", "nl", "pl", "pt", "sv", "da", "fi", "nb", "hu", "cs"];
 
-// URL slugs per language — must match api/sitemap.xml.js and src/locales translations
+// Only non-content_pages slugs live here now. Anything in content_pages
+// (industries, our-work, about, contact, education, legal-notice,
+// privacy-policy) is emitted from fetchContentPages() so the sitemap can
+// never fall out of sync with the database again.
 const SLUGS: Record<string, Record<string, string>> = {
-  en: { services: 'services', about: 'about', contact: 'contact', quote: 'quote', industries: 'industries', ourWork: 'our-work', blog: 'blog', cnc: 'cnc-machining', sheetMetal: 'sheet-metal', printing: '3d-printing', injection: 'injection-molding', surface: 'surface-finishes', rapid: 'rapid-prototyping' },
-  de: { services: 'dienstleistungen', about: 'ueber-uns', contact: 'kontakt', quote: 'angebot', industries: 'branchen', ourWork: 'unsere-arbeit', blog: 'blog', cnc: 'cnc-bearbeitung', sheetMetal: 'blechbearbeitung', printing: '3d-druck', injection: 'spritzguss', surface: 'oberflaechenveredelung', rapid: 'rapid-prototyping' },
-  fr: { services: 'services', about: 'a-propos', contact: 'contact', quote: 'devis', industries: 'secteurs', ourWork: 'notre-travail', blog: 'blog', cnc: 'usinage-cnc', sheetMetal: 'tolerie', printing: 'impression-3d', injection: 'injection-plastique', surface: 'finition-surface', rapid: 'prototypage-rapide' },
-  es: { services: 'servicios', about: 'sobre-nosotros', contact: 'contacto', quote: 'cotizacion', industries: 'industrias', ourWork: 'nuestro-trabajo', blog: 'blog', cnc: 'mecanizado-cnc', sheetMetal: 'chapa-metalica', printing: 'impresion-3d', injection: 'moldeo-por-inyeccion', surface: 'acabados-superficie', rapid: 'prototipado-rapido' },
-  it: { services: 'servizi', about: 'chi-siamo', contact: 'contatto', quote: 'preventivo', industries: 'settori', ourWork: 'i-nostri-lavori', blog: 'blog', cnc: 'lavorazione-cnc', sheetMetal: 'lavorazione-lamiera', printing: 'stampa-3d', injection: 'stampaggio-iniezione', surface: 'finitura-superficie', rapid: 'prototipazione-rapida' },
-  nl: { services: 'diensten', about: 'over-ons', contact: 'contact', quote: 'offerte', industries: 'branches', ourWork: 'ons-werk', blog: 'blog', cnc: 'cnc-bewerking', sheetMetal: 'plaatbewerking', printing: '3d-printen', injection: 'spuitgieten', surface: 'oppervlakteafwerking', rapid: 'rapid-prototyping' },
-  pl: { services: 'uslugi', about: 'o-nas', contact: 'kontakt', quote: 'wycena', industries: 'branze', ourWork: 'nasza-praca', blog: 'blog', cnc: 'obrobka-cnc', sheetMetal: 'obrobka-bluzy', printing: 'druk-3d', injection: 'wtrysk-tworzywa', surface: 'wykonczenie-powierzchni', rapid: 'szybkie-prototypowanie' },
-  pt: { services: 'servicos', about: 'sobre-nos', contact: 'contato', quote: 'orcamento', industries: 'industrias', ourWork: 'nosso-trabalho', blog: 'blog', cnc: 'usinagem-cnc', sheetMetal: 'chapa-metalica', printing: 'impressao-3d', injection: 'moldagem-injecao', surface: 'acabamento-superficie', rapid: 'prototipagem-rapida' },
-  sv: { services: 'tjanster', about: 'om-oss', contact: 'kontakt', quote: 'offert', industries: 'branscher', ourWork: 'vart-arbete', blog: 'blogg', cnc: 'cnc-bearbetning', sheetMetal: 'platbearbetning', printing: '3d-skrivning', injection: 'formsprutning', surface: 'ytbehandling', rapid: 'snabb-prototypering' },
-  da: { services: 'tjenester', about: 'om-os', contact: 'kontakt', quote: 'tilbud', industries: 'brancher', ourWork: 'vores-arbejde', blog: 'blog', cnc: 'cnc-bearbejdning', sheetMetal: 'pladearbejde', printing: '3d-printing', injection: 'sprojtestobning', surface: 'overfladebehandling', rapid: 'hurtig-prototypering' },
-  fi: { services: 'palvelut', about: 'meista', contact: 'yhteys', quote: 'tarjous', industries: 'toimialat', ourWork: 'tyomme', blog: 'blogi', cnc: 'cnc-työstö', sheetMetal: 'levytyöstö', printing: '3d-tulostus', injection: 'ruiskupuristus', surface: 'pinnan-viimeistely', rapid: 'nopea-prototyyppaus' },
-  nb: { services: 'tjenester', about: 'om-oss', contact: 'kontakt', quote: 'tilbud', industries: 'bransjer', ourWork: 'vart-arbeid', blog: 'blogg', cnc: 'cnc-bearbeiding', sheetMetal: 'platarbeid', printing: '3d-printing', injection: 'sproytestoping', surface: 'overflatebehandling', rapid: 'rask-prototyping' },
-  hu: { services: 'szolgaltatasok', about: 'rolunk', contact: 'kapcsolat', quote: 'ajanlat', industries: 'iparagak', ourWork: 'munkaink', blog: 'blog', cnc: 'cnc-megmunkalas', sheetMetal: 'lemezfeldolgozas', printing: '3d-nyomtas', injection: 'frccsnyomas', surface: 'feluletkezeles', rapid: 'gyors-prototipus' },
-  cs: { services: 'sluzby', about: 'o-nas', contact: 'kontakt', quote: 'nabidka', industries: 'prumysl', ourWork: 'nase-prace', blog: 'blog', cnc: 'cnc-obrabeni', sheetMetal: 'obrabeni-plechu', printing: '3d-tisk', injection: 'vstrekovani', surface: 'uprava-povrchu', rapid: 'rychle-prototypovani' },
+  en: { services: 'services', quote: 'quote', blog: 'blog', cnc: 'cnc-machining', sheetMetal: 'sheet-metal', printing: '3d-printing', injection: 'injection-molding', surface: 'surface-finishes', rapid: 'rapid-prototyping' },
+  de: { services: 'dienstleistungen', quote: 'angebot', blog: 'blog', cnc: 'cnc-bearbeitung', sheetMetal: 'blechbearbeitung', printing: '3d-druck', injection: 'spritzguss', surface: 'oberflaechenveredelung', rapid: 'rapid-prototyping' },
+  fr: { services: 'services', quote: 'devis', blog: 'blog', cnc: 'usinage-cnc', sheetMetal: 'tolerie', printing: 'impression-3d', injection: 'injection-plastique', surface: 'finition-surface', rapid: 'prototypage-rapide' },
+  es: { services: 'servicios', quote: 'cotizacion', blog: 'blog', cnc: 'mecanizado-cnc', sheetMetal: 'chapa-metalica', printing: 'impresion-3d', injection: 'moldeo-por-inyeccion', surface: 'acabados-superficie', rapid: 'prototipado-rapido' },
+  it: { services: 'servizi', quote: 'preventivo', blog: 'blog', cnc: 'lavorazione-cnc', sheetMetal: 'lavorazione-lamiera', printing: 'stampa-3d', injection: 'stampaggio-iniezione', surface: 'finitura-superficie', rapid: 'prototipazione-rapida' },
+  nl: { services: 'diensten', quote: 'offerte', blog: 'blog', cnc: 'cnc-bewerking', sheetMetal: 'plaatbewerking', printing: '3d-printen', injection: 'spuitgieten', surface: 'oppervlakteafwerking', rapid: 'rapid-prototyping' },
+  pl: { services: 'uslugi', quote: 'wycena', blog: 'blog', cnc: 'obrobka-cnc', sheetMetal: 'obrobka-bluzy', printing: 'druk-3d', injection: 'wtrysk-tworzywa', surface: 'wykonczenie-powierzchni', rapid: 'szybkie-prototypowanie' },
+  pt: { services: 'servicos', quote: 'orcamento', blog: 'blog', cnc: 'usinagem-cnc', sheetMetal: 'chapa-metalica', printing: 'impressao-3d', injection: 'moldagem-injecao', surface: 'acabamento-superficie', rapid: 'prototipagem-rapida' },
+  sv: { services: 'tjanster', quote: 'offert', blog: 'blogg', cnc: 'cnc-bearbetning', sheetMetal: 'platbearbetning', printing: '3d-skrivning', injection: 'formsprutning', surface: 'ytbehandling', rapid: 'snabb-prototypering' },
+  da: { services: 'tjenester', quote: 'tilbud', blog: 'blog', cnc: 'cnc-bearbejdning', sheetMetal: 'pladearbejde', printing: '3d-printing', injection: 'sprojtestobning', surface: 'overfladebehandling', rapid: 'hurtig-prototypering' },
+  fi: { services: 'palvelut', quote: 'tarjous', blog: 'blogi', cnc: 'cnc-työstö', sheetMetal: 'levytyöstö', printing: '3d-tulostus', injection: 'ruiskupuristus', surface: 'pinnan-viimeistely', rapid: 'nopea-prototyyppaus' },
+  nb: { services: 'tjenester', quote: 'tilbud', blog: 'blogg', cnc: 'cnc-bearbeiding', sheetMetal: 'platarbeid', printing: '3d-printing', injection: 'sproytestoping', surface: 'overflatebehandling', rapid: 'rask-prototyping' },
+  hu: { services: 'szolgaltatasok', quote: 'ajanlat', blog: 'blog', cnc: 'cnc-megmunkalas', sheetMetal: 'lemezfeldolgozas', printing: '3d-nyomtas', injection: 'frccsnyomas', surface: 'feluletkezeles', rapid: 'gyors-prototipus' },
+  cs: { services: 'sluzby', quote: 'nabidka', blog: 'blog', cnc: 'cnc-obrabeni', sheetMetal: 'obrabeni-plechu', printing: '3d-tisk', injection: 'vstrekovani', surface: 'uprava-povrchu', rapid: 'rychle-prototypovani' },
 };
 
-/**
- * Escape special XML characters in text content
- */
 function escapeXml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
@@ -46,10 +64,6 @@ function escapeXml(str: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/**
- * Encode non-ASCII characters in a URL path for sitemap compliance.
- * Preserves valid URL characters but percent-encodes characters like ö, ä, ü.
- */
 function encodeSitemapUrl(url: string): string {
   try {
     const urlObj = new URL(url);
@@ -63,7 +77,6 @@ function encodeSitemapUrl(url: string): string {
   }
 }
 
-// Static page definitions with path builder functions
 interface PageDef {
   key: string;
   path: (s: Record<string, string>) => string;
@@ -80,14 +93,20 @@ const STATIC_PAGES: PageDef[] = [
   { key: 'injection', path: (s) => `/${s.services}/${s.injection}`, priority: '0.9', changefreq: 'weekly' },
   { key: 'surface', path: (s) => `/${s.services}/${s.surface}`, priority: '0.8', changefreq: 'weekly' },
   { key: 'rapid', path: (s) => `/${s.services}/${s.rapid}`, priority: '0.8', changefreq: 'weekly' },
-  { key: 'industries', path: (s) => `/${s.industries}`, priority: '0.8', changefreq: 'weekly' },
-  { key: 'about', path: (s) => `/${s.about}`, priority: '0.7', changefreq: 'monthly' },
-  { key: 'contact', path: (s) => `/${s.contact}`, priority: '0.7', changefreq: 'monthly' },
-  { key: 'ourWork', path: (s) => `/${s.ourWork}`, priority: '0.7', changefreq: 'monthly' },
   { key: 'quote', path: (s) => `/${s.quote}`, priority: '0.8', changefreq: 'weekly' },
   { key: 'quoteRequest', path: () => '/quote-request', priority: '0.7', changefreq: 'weekly' },
   { key: 'blog', path: (s) => `/${s.blog}`, priority: '0.8', changefreq: 'daily' },
 ];
+
+const CONTENT_PAGE_META: Record<string, { priority: string; changefreq: string }> = {
+  'industries':     { priority: '0.8', changefreq: 'weekly' },
+  'our-work':       { priority: '0.7', changefreq: 'monthly' },
+  'about':          { priority: '0.7', changefreq: 'monthly' },
+  'contact':        { priority: '0.7', changefreq: 'monthly' },
+  'education':      { priority: '0.7', changefreq: 'monthly' },
+  'legal-notice':   { priority: '0.4', changefreq: 'yearly' },
+  'privacy-policy': { priority: '0.4', changefreq: 'yearly' },
+};
 
 interface Article {
   slug: string;
@@ -97,18 +116,19 @@ interface Article {
   translation_id?: string;
 }
 
-/**
- * Build full URL for a language + page combination
- */
+interface ContentPage {
+  slug: string;
+  language: string;
+  localized_slug: string | null;
+  updated_at: string | null;
+}
+
 function buildPageUrl(lang: string, page: PageDef): string {
   const s = SLUGS[lang];
   const pagePath = page.path(s);
   return encodeSitemapUrl(`${siteUrl}/${lang}${pagePath}`);
 }
 
-/**
- * Build hreflang XML links for a static page across all languages
- */
 function buildStaticPageHreflang(page: PageDef): string {
   const links = LANGUAGES.map(lang => {
     const url = escapeXml(buildPageUrl(lang, page));
@@ -119,9 +139,6 @@ function buildStaticPageHreflang(page: PageDef): string {
   return links.join('\n');
 }
 
-/**
- * Build a static page <url> entry for a specific language
- */
 function buildStaticUrlEntry(lang: string, page: PageDef, today: string): string {
   const loc = escapeXml(buildPageUrl(lang, page));
   return `  <url>
@@ -133,9 +150,46 @@ ${buildStaticPageHreflang(page)}
   </url>`;
 }
 
-/**
- * Build hreflang links for a blog article and its translations
- */
+function buildContentPageUrl(lang: string, row: ContentPage): string {
+  const segment = row.localized_slug || row.slug;
+  return encodeSitemapUrl(`${siteUrl}/${lang}/${segment}`);
+}
+
+function buildContentPageHreflang(slugGroup: Map<string, ContentPage>): string {
+  const links: string[] = [];
+  for (const lang of LANGUAGES) {
+    const row = slugGroup.get(lang);
+    if (!row) continue;
+    const url = escapeXml(buildContentPageUrl(lang, row));
+    links.push(`    <xhtml:link rel="alternate" hreflang="${lang}" href="${url}"/>`);
+  }
+  const defaultLang = slugGroup.has('en') ? 'en' : [...slugGroup.keys()][0];
+  const defaultRow = defaultLang ? slugGroup.get(defaultLang) : undefined;
+  if (defaultRow && defaultLang) {
+    const url = escapeXml(buildContentPageUrl(defaultLang, defaultRow));
+    links.push(`    <xhtml:link rel="alternate" hreflang="x-default" href="${url}"/>`);
+  }
+  return links.join('\n');
+}
+
+function buildContentPageUrlEntry(
+  lang: string,
+  row: ContentPage,
+  slugGroup: Map<string, ContentPage>,
+  today: string,
+): string {
+  const loc = escapeXml(buildContentPageUrl(lang, row));
+  const meta = CONTENT_PAGE_META[row.slug] || { priority: '0.6', changefreq: 'monthly' };
+  const lastmod = row.updated_at ? String(row.updated_at).split('T')[0] : today;
+  return `  <url>
+    <loc>${loc}</loc>
+${buildContentPageHreflang(slugGroup)}
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>${meta.changefreq}</changefreq>
+    <priority>${meta.priority}</priority>
+  </url>`;
+}
+
 function buildBlogHreflang(siblings: Article[]): string {
   const links = siblings.map(sibling => {
     const lang = (sibling.language || 'en').trim().toLowerCase();
@@ -151,9 +205,6 @@ function buildBlogHreflang(siblings: Article[]): string {
   return links.join('\n');
 }
 
-/**
- * Build a blog article <url> entry with hreflang
- */
 function buildBlogUrlEntry(article: Article, siblings: Article[], today: string): string {
   const lang = (article.language || 'en').trim().toLowerCase();
   const blogSlug = SLUGS[lang]?.blog || 'blog';
@@ -169,16 +220,6 @@ function buildBlogUrlEntry(article: Article, siblings: Article[], today: string)
   </url>`;
 }
 
-/**
- * Format date to W3C format
- */
-function formatDate(dateString: string): string {
-  return new Date(dateString).toISOString().split('T')[0];
-}
-
-/**
- * Fetch all published articles, paginating past Supabase's 1000-row default.
- */
 async function fetchAllPublishedArticles(): Promise<Article[]> {
   const all: Article[] = [];
   const PAGE_SIZE = 1000;
@@ -198,18 +239,40 @@ async function fetchAllPublishedArticles(): Promise<Article[]> {
     }
 
     if (!batch || batch.length === 0) break;
-    all.push(...batch);
+    all.push(...batch as Article[]);
     if (batch.length < PAGE_SIZE) break;
     page++;
   }
   return all;
 }
 
-/**
- * Upsert every article URL into gsc_monitored_urls so the Index Status tab
- * and the Indexing API workflow can see all articles. Existing rows are
- * preserved (upsert on `url`), so historical GSC submissions are untouched.
- */
+async function fetchAllPublishedContentPages(): Promise<ContentPage[]> {
+  const { data, error } = await supabase
+    .from("content_pages")
+    .select("language, slug, localized_slug, updated_at")
+    .eq("status", "published")
+    .not("slug", "in", "(home,blog)")
+    .order("slug", { ascending: true })
+    .order("language", { ascending: true });
+
+  if (error) {
+    console.error("Error fetching content_pages:", error);
+    throw new Error(`Failed to fetch content_pages: ${error.message}`);
+  }
+  return (data || []) as ContentPage[];
+}
+
+function groupContentPagesByCanonicalSlug(rows: ContentPage[]): Map<string, Map<string, ContentPage>> {
+  const groups = new Map<string, Map<string, ContentPage>>();
+  for (const row of rows) {
+    const lang = (row.language || '').trim().toLowerCase();
+    if (!LANGUAGES.includes(lang)) continue;
+    if (!groups.has(row.slug)) groups.set(row.slug, new Map());
+    groups.get(row.slug)!.set(lang, row);
+  }
+  return groups;
+}
+
 async function syncArticlesToMonitoredUrls(articles: Article[]): Promise<{ upserted: number; skipped: number }> {
   const rows = articles
     .map((article) => {
@@ -230,7 +293,6 @@ async function syncArticlesToMonitoredUrls(articles: Article[]): Promise<{ upser
   const skipped = articles.length - rows.length;
   let upserted = 0;
 
-  // Upsert in chunks of 500 to stay well under payload limits.
   for (let i = 0; i < rows.length; i += 500) {
     const chunk = rows.slice(i, i + 500);
     const { error } = await supabase
@@ -247,14 +309,13 @@ async function syncArticlesToMonitoredUrls(articles: Article[]): Promise<{ upser
   return { upserted, skipped };
 }
 
-/**
- * Generate the complete sitemap XML with full hreflang support.
- * Accepts pre-fetched articles so the caller can reuse them.
- */
-async function generateSitemap(articles: Article[]): Promise<string> {
+async function generateSitemap(
+  articles: Article[],
+  contentPages: ContentPage[],
+): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
 
-  // 1. Generate static page entries: 14 languages × 15 pages = 210 entries
+  // 1. Static pages: 14 languages × 11 entries = 154 URLs.
   const staticEntries: string[] = [];
   for (const page of STATIC_PAGES) {
     for (const lang of LANGUAGES) {
@@ -262,19 +323,40 @@ async function generateSitemap(articles: Article[]): Promise<string> {
     }
   }
 
-  console.log(`Found ${articles.length} published articles for sitemap`);
-
-  // Log language distribution
-  if (articles && articles.length > 0) {
-    const langCounts: Record<string, number> = {};
-    for (const article of articles) {
-      const lang = (article.language || '').trim().toLowerCase();
-      langCounts[lang] = (langCounts[lang] || 0) + 1;
+  // 2. Content-page entries: one <url> per (slug, language) row in the DB.
+  // Each entry carries the full hreflang cluster for that canonical slug
+  // using each row's localized_slug (fallback: canonical slug).
+  const contentGroups = groupContentPagesByCanonicalSlug(contentPages);
+  const contentEntries: string[] = [];
+  let contentUrlCount = 0;
+  for (const [, slugGroup] of contentGroups) {
+    for (const [lang, row] of slugGroup) {
+      contentEntries.push(buildContentPageUrlEntry(lang, row, slugGroup, today));
+      contentUrlCount++;
     }
-    console.log(`Article language distribution:`, langCounts);
   }
 
-  // 3. Group articles by translation_id for hreflang cross-referencing
+  // Regression guard — hard fail on drift. This exact silent gap (42 missing
+  // URLs for education/legal-notice/privacy-policy × 14 langs) is why we're
+  // here; refusing to write a partial sitemap beats shipping another one.
+  const expectedContentUrls = contentPages.filter(r => {
+    const lang = (r.language || '').trim().toLowerCase();
+    return LANGUAGES.includes(lang);
+  }).length;
+  if (contentUrlCount < expectedContentUrls) {
+    throw new Error(
+      `Sitemap regression guard: emitted ${contentUrlCount} content-page URLs ` +
+      `but content_pages has ${expectedContentUrls} published rows across supported ` +
+      `languages. Refusing to upload a partial sitemap.`
+    );
+  }
+
+  console.log(
+    `content_pages: ${contentUrlCount} URLs across ${contentGroups.size} canonical slugs ` +
+    `(${[...contentGroups.keys()].sort().join(', ')})`
+  );
+
+  // 3. Blog articles: group by translation_id, emit hreflang between siblings.
   const translationGroups = new Map<string, Article[]>();
   const orphanArticles: Article[] = [];
 
@@ -292,7 +374,6 @@ async function generateSitemap(articles: Article[]): Promise<string> {
     }
   }
 
-  // 4. Build blog entries with hreflang
   const blogEntries: string[] = [];
   let totalArticlesAdded = 0;
 
@@ -315,15 +396,13 @@ async function generateSitemap(articles: Article[]): Promise<string> {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
 ${staticEntries.join('\n')}
+${contentEntries.join('\n')}
 ${blogEntries.join('\n')}
 </urlset>`;
 
   return sitemap;
 }
 
-/**
- * Upload sitemap to Supabase Storage (auto-replaces existing)
- */
 async function uploadSitemapToStorage(
   filename: string,
   content: string
@@ -331,7 +410,7 @@ async function uploadSitemapToStorage(
   try {
     const blob = new Blob([content], { type: "application/xml" });
 
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from("sitemaps")
       .upload(filename, blob, {
         contentType: "application/xml",
@@ -356,26 +435,21 @@ async function uploadSitemapToStorage(
   }
 }
 
-/**
- * Main handler
- * Query params:
- * - type: "complete" (default) or specific language code (e.g., "en", "de")
- */
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const url = new URL(req.url);
-    const type = url.searchParams.get("type") || "complete";
-
     const uploadResults: Array<{ filename: string; publicUrl: string | null; success: boolean }> = [];
 
-    // Fetch articles once and reuse for both sitemap XML and monitored-URL sync.
-    const articles = await fetchAllPublishedArticles();
+    // Fetch articles + content pages once and reuse.
+    const [articles, contentPages] = await Promise.all([
+      fetchAllPublishedArticles(),
+      fetchAllPublishedContentPages(),
+    ]);
 
-    const sitemap = await generateSitemap(articles);
+    const sitemap = await generateSitemap(articles, contentPages);
     const urlCount = (sitemap.match(/<url>/g) || []).length;
 
     // Sync every article URL into gsc_monitored_urls for the Index Status tab.
@@ -386,14 +460,18 @@ serve(async (req) => {
       urls: urlCount,
       languages: LANGUAGES.length,
       articles: articles.length,
+      contentPages: contentPages.length,
       monitoredUrlsSynced: syncResult.upserted,
     };
 
-    // Save to storage
     const result = await uploadSitemapToStorage("sitemap-complete.xml", sitemap);
     uploadResults.push({ filename: "sitemap-complete.xml", ...result });
 
-    console.log(`Generated sitemap with ${stats.urls} URLs (${stats.articles} articles across ${stats.languages} languages); synced ${stats.monitoredUrlsSynced} monitored URLs`);
+    console.log(
+      `Generated sitemap with ${stats.urls} URLs (${stats.articles} articles, ` +
+      `${stats.contentPages} content pages across ${stats.languages} languages); ` +
+      `synced ${stats.monitoredUrlsSynced} monitored URLs`
+    );
 
     const storageBaseUrl = `${supabaseUrl}/storage/v1/object/public/sitemaps`;
 

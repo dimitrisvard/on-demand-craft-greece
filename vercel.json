@@ -124,16 +124,17 @@
       "source": "/deorcamento",
       "destination": "/de/angebot",
       "permanent": true
+    },
+    {
+      "source": "/sitemap-complete.xml",
+      "destination": "/sitemap.xml",
+      "permanent": true
     }
   ],
   "rewrites": [
     {
       "source": "/sitemap.xml",
       "destination": "/api/sitemap?type=main"
-    },
-    {
-      "source": "/sitemap-complete.xml",
-      "destination": "/api/sitemap?type=complete"
     },
     {
       "source": "/sitemap-index.xml",
