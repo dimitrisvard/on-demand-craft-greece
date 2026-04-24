@@ -2,8 +2,8 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import emailsHandler from './api/emails.js';
-import sitemapHandler from './api/sitemap.js';
+import emailsHandler from '../api/emails.js';
+import sitemapHandler from '../api/sitemap.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,7 +71,7 @@ async function createServer() {
 
   // Handle all other routes by serving index.html
   app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'index.html'));
+    res.sendFile(path.resolve(__dirname, '..', 'index.html'));
   });
 
   app.listen(8080, () => {

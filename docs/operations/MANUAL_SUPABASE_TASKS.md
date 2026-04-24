@@ -8,7 +8,7 @@ This document lists all manual tasks that need to be performed in the Supabase D
 
 ## CRITICAL / Security
 
-- [ ] **Rotate Exposed Service Role Key** (see `SECURITY_FIX_REQUIRED.md`)
+- [ ] **Rotate Exposed Service Role Key** (see `../security/rls-remediation-plan.md`)
   - Go to: Supabase Dashboard > Project Settings > API > Reset `service_role` key
   - After rotation, update:
     - Cron jobs in database with new key

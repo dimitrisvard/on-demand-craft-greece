@@ -2,18 +2,6 @@
 /**
  * Translation Script for MicronsHub
  * Translates the complete German translation file to all other languages
- * 
- * USAGE:
- * 1. Make sure you're in the project root directory
- * 2. Run: node translate_german_to_all_languages.js
- * 3. The script will translate German to: French, Spanish, Italian, Dutch, Polish, Portuguese, Swedish, Danish, Finnish, Norwegian, Hungarian, Czech
- * 
- * FEATURES:
- * - Uses Google Translate API for real translations
- * - Progress tracking with visual indicators
- * - Handles arrays and complex data structures
- * - Rate limiting to avoid API restrictions
- * - Error handling and fallback to original text
  */
 
 import fs from 'fs';
@@ -54,7 +42,7 @@ async function translateText(text, targetLang) {
 
 function loadGermanTranslations() {
     try {
-        const filePath = path.join(__dirname, 'src', 'locales', 'de', 'translation.json');
+        const filePath = path.join(__dirname, '..', 'src', 'locales', 'de', 'translation.json');
         const data = fs.readFileSync(filePath, 'utf8');
         return JSON.parse(data);
     } catch (error) {
@@ -107,7 +95,7 @@ async function translateFile(germanData, targetLang) {
 }
 
 function saveTranslation(translatedData, targetLang) {
-    const outputDir = path.join(__dirname, 'src', 'locales', targetLang);
+    const outputDir = path.join(__dirname, '..', 'src', 'locales', targetLang);
     const outputFile = path.join(outputDir, 'translation.json');
     
     // Ensure directory exists
@@ -123,8 +111,6 @@ function saveTranslation(translatedData, targetLang) {
 
 async function main() {
     console.log('🚀 Starting translation of German file to all languages...');
-    console.log('📁 Script location:', __filename);
-    console.log('📂 Project root:', __dirname);
     
     // Load German translations
     const germanData = loadGermanTranslations();

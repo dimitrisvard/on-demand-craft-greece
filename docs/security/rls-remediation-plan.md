@@ -1,5 +1,7 @@
 # ⚠️ SECURITY ALERT: Service Role Key Exposed
 
+> Status: Planned remediation — a dry-run migration exists, audit of anon vs service role usage pending before rollout.
+
 ## Issue
 A Supabase Service Role JWT was exposed in the GitHub repository on January 3rd, 2026.
 
