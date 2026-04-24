@@ -545,19 +545,35 @@ const SettingsPage = () => {
                         Submit to Google Search Console
                       </h4>
                       <p className="text-sm text-muted-foreground mb-2">
-                        Submit this URL to Google Search Console. It contains all pages with proper hreflang tags for multi-language SEO.
+                        /sitemap.xml is the canonical URL (the one declared in robots.txt) and is what you should submit to Google Search Console. /sitemap-complete.xml serves the same content for backwards compatibility with older GSC submissions — keep it in GSC too if it's already there.
                       </p>
-                      <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900">
-                        <FileText className="h-4 w-4 text-green-600" />
-                        <a
-                          href="https://www.micronshub.eu/sitemap.xml"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-green-700 dark:text-green-400 hover:underline flex items-center gap-1 font-medium"
-                        >
-                          https://www.micronshub.eu/sitemap.xml
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900">
+                          <FileText className="h-4 w-4 text-green-600" />
+                          <a
+                            href="https://www.micronshub.eu/sitemap.xml"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-green-700 dark:text-green-400 hover:underline flex items-center gap-1 font-medium"
+                          >
+                            https://www.micronshub.eu/sitemap.xml
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          <Badge variant="default" className="ml-auto">canonical</Badge>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-muted/30 rounded-lg border">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <a
+                            href="https://www.micronshub.eu/sitemap-complete.xml"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline flex items-center gap-1 text-sm"
+                          >
+                            https://www.micronshub.eu/sitemap-complete.xml
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          <Badge variant="secondary" className="ml-auto">alias</Badge>
+                        </div>
                       </div>
                     </div>
 
