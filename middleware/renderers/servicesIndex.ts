@@ -4,6 +4,7 @@ import { localizedPath } from '../slugs';
 import { SERVICES } from '../services';
 import { escapeHtml, renderServicesList, renderFooterLinks, renderBreadcrumbs } from './common';
 import { itemListSchema, breadcrumbSchema, faqPageSchemaFromRow } from '../schema';
+import { labelsFor, ServicePageLabels } from '../labels/servicePageLabels';
 
 interface ServicePageRow {
   slug: string;
@@ -17,20 +18,20 @@ interface ServicePageRow {
   differentiators: Array<{ title: string; description: string }>;
 }
 
-function renderDifferentiators(items: ServicePageRow['differentiators']): string {
+function renderDifferentiators(labels: ServicePageLabels, items: ServicePageRow['differentiators']): string {
   if (!items?.length) return '';
   const lis = items.map((d) =>
     `      <li><strong>${escapeHtml(d.title)}</strong> — ${escapeHtml(d.description)}</li>`
   ).join('\n');
   return `  <section>
-    <h2>Why Microns Hub</h2>
+    <h2>${escapeHtml(labels.whyMicronsHub)}</h2>
     <ul>
 ${lis}
     </ul>
   </section>`;
 }
 
-function renderFaq(items: ServicePageRow['faq']): string {
+function renderFaq(labels: ServicePageLabels, items: ServicePageRow['faq']): string {
   if (!items?.length) return '';
   const blocks = items.map((f) =>
     `    <details>
@@ -39,7 +40,7 @@ function renderFaq(items: ServicePageRow['faq']): string {
     </details>`
   ).join('\n');
   return `  <section>
-    <h2>Frequently Asked Questions</h2>
+    <h2>${escapeHtml(labels.faq)}</h2>
 ${blocks}
   </section>`;
 }
@@ -49,6 +50,7 @@ function renderFromRows(
   indexRow: ServicePageRow,
   list: ServicePageRow[],
 ): { bodyHtml: string; jsonLd: string[] } {
+  const labels = labelsFor(lang);
   const homeLabel = t(lang, 'home_title', 'Home');
   const crumbs = [
     { label: homeLabel, href: localizedPath(lang, 'homepage') },
@@ -92,8 +94,8 @@ ${renderServicesList(lang)}
   </header>
 ${renderBreadcrumbs(lang, crumbs)}
 ${cardsBlock}
-${renderDifferentiators(indexRow.differentiators)}
-${renderFaq(indexRow.faq)}
+${renderDifferentiators(labels, indexRow.differentiators)}
+${renderFaq(labels, indexRow.faq)}
   <section>
     <p><a href="${quoteHref}">${escapeHtml(ctaLabel)}</a></p>
     <p><a href="${localizedPath(lang, 'industries')}">${escapeHtml(t(lang, 'seo_industries_title', 'Industries We Serve'))}</a></p>

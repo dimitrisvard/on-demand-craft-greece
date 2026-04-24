@@ -4,6 +4,7 @@ import { localizedPath } from '../slugs';
 import { SERVICES, SERVICE_IDS } from '../services';
 import { escapeHtml, renderFooterLinks, renderBreadcrumbs } from './common';
 import { serviceSchema, serviceSchemaFromRow, faqPageSchemaFromRow, breadcrumbSchema } from '../schema';
+import { labelsFor, ServicePageLabels } from '../labels/servicePageLabels';
 
 interface ServicePageRow {
   slug: string;
@@ -25,41 +26,41 @@ interface ServicePageRow {
   cross_links: Array<{ slug: string; label: string; description: string }>;
 }
 
-function renderCapabilities(items: ServicePageRow['capabilities']): string {
+function renderCapabilities(labels: ServicePageLabels, items: ServicePageRow['capabilities']): string {
   if (!items?.length) return '';
   const lis = items.map((c) =>
     `      <li><strong>${escapeHtml(c.label)}</strong> — ${escapeHtml(c.detail)}</li>`
   ).join('\n');
   return `  <section>
-    <h2>Capabilities</h2>
+    <h2>${escapeHtml(labels.capabilities)}</h2>
     <ul>
 ${lis}
     </ul>
   </section>`;
 }
 
-function renderApplications(items: ServicePageRow['applications']): string {
+function renderApplications(labels: ServicePageLabels, items: ServicePageRow['applications']): string {
   if (!items?.length) return '';
   const lis = items.map((a) =>
     `      <li><strong>${escapeHtml(a.name)}</strong> — ${escapeHtml(a.description)}</li>`
   ).join('\n');
   return `  <section>
-    <h2>Applications</h2>
+    <h2>${escapeHtml(labels.applications)}</h2>
     <ul>
 ${lis}
     </ul>
   </section>`;
 }
 
-function renderMaterials(items: ServicePageRow['materials']): string {
+function renderMaterials(labels: ServicePageLabels, items: ServicePageRow['materials']): string {
   if (!items?.length) return '';
   const rows = items.map((m) =>
     `        <tr><td>${escapeHtml(m.material)}</td><td>${escapeHtml(m.grade)}</td><td>${escapeHtml(m.properties)}</td><td>${escapeHtml(m.uses)}</td></tr>`
   ).join('\n');
   return `  <section>
-    <h2>Materials</h2>
+    <h2>${escapeHtml(labels.materials)}</h2>
     <table>
-      <thead><tr><th>Material</th><th>Grade</th><th>Properties</th><th>Common Uses</th></tr></thead>
+      <thead><tr><th>${escapeHtml(labels.materialHeader)}</th><th>${escapeHtml(labels.gradeHeader)}</th><th>${escapeHtml(labels.propertiesHeader)}</th><th>${escapeHtml(labels.commonUsesHeader)}</th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
@@ -67,15 +68,15 @@ ${rows}
   </section>`;
 }
 
-function renderTolerances(items: ServicePageRow['tolerances']): string {
+function renderTolerances(labels: ServicePageLabels, items: ServicePageRow['tolerances']): string {
   if (!items?.length) return '';
   const rows = items.map((t_) =>
     `        <tr><td>${escapeHtml(t_.spec)}</td><td>${escapeHtml(t_.value)}</td><td>${escapeHtml(t_.notes ?? '')}</td></tr>`
   ).join('\n');
   return `  <section>
-    <h2>Tolerances &amp; Specifications</h2>
+    <h2>${escapeHtml(labels.tolerances)}</h2>
     <table>
-      <thead><tr><th>Spec</th><th>Value</th><th>Notes</th></tr></thead>
+      <thead><tr><th>${escapeHtml(labels.specHeader)}</th><th>${escapeHtml(labels.valueHeader)}</th><th>${escapeHtml(labels.notesHeader)}</th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
@@ -83,29 +84,29 @@ ${rows}
   </section>`;
 }
 
-function renderProcessSteps(items: ServicePageRow['process_steps']): string {
+function renderProcessSteps(labels: ServicePageLabels, items: ServicePageRow['process_steps']): string {
   if (!items?.length) return '';
   const ordered = [...items].sort((a, b) => a.step - b.step);
   const lis = ordered.map((s) =>
-    `      <li><strong>Step ${s.step}: ${escapeHtml(s.title)}</strong> — ${escapeHtml(s.description)}</li>`
+    `      <li><strong>${escapeHtml(labels.step)} ${s.step}: ${escapeHtml(s.title)}</strong> — ${escapeHtml(s.description)}</li>`
   ).join('\n');
   return `  <section>
-    <h2>How It Works</h2>
+    <h2>${escapeHtml(labels.howItWorks)}</h2>
     <ol>
 ${lis}
     </ol>
   </section>`;
 }
 
-function renderLeadTimes(items: ServicePageRow['lead_times']): string {
+function renderLeadTimes(labels: ServicePageLabels, items: ServicePageRow['lead_times']): string {
   if (!items?.length) return '';
   const rows = items.map((lt) =>
     `        <tr><td>${escapeHtml(lt.tier)}</td><td>${escapeHtml(lt.quantity_range)}</td><td>${escapeHtml(lt.working_days)}</td></tr>`
   ).join('\n');
   return `  <section>
-    <h2>Lead Times</h2>
+    <h2>${escapeHtml(labels.leadTimes)}</h2>
     <table>
-      <thead><tr><th>Tier</th><th>Quantity</th><th>Working Days</th></tr></thead>
+      <thead><tr><th>${escapeHtml(labels.tierHeader)}</th><th>${escapeHtml(labels.quantityHeader)}</th><th>${escapeHtml(labels.workingDaysHeader)}</th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
@@ -113,20 +114,20 @@ ${rows}
   </section>`;
 }
 
-function renderDifferentiators(items: ServicePageRow['differentiators']): string {
+function renderDifferentiators(labels: ServicePageLabels, items: ServicePageRow['differentiators']): string {
   if (!items?.length) return '';
   const lis = items.map((d) =>
     `      <li><strong>${escapeHtml(d.title)}</strong> — ${escapeHtml(d.description)}</li>`
   ).join('\n');
   return `  <section>
-    <h2>Why Microns Hub</h2>
+    <h2>${escapeHtml(labels.whyMicronsHub)}</h2>
     <ul>
 ${lis}
     </ul>
   </section>`;
 }
 
-function renderFaq(items: ServicePageRow['faq']): string {
+function renderFaq(labels: ServicePageLabels, items: ServicePageRow['faq']): string {
   if (!items?.length) return '';
   const blocks = items.map((f) =>
     `    <details>
@@ -135,12 +136,12 @@ function renderFaq(items: ServicePageRow['faq']): string {
     </details>`
   ).join('\n');
   return `  <section>
-    <h2>Frequently Asked Questions</h2>
+    <h2>${escapeHtml(labels.faq)}</h2>
 ${blocks}
   </section>`;
 }
 
-function renderCrossLinks(lang: Lang, items: ServicePageRow['cross_links']): string {
+function renderCrossLinks(lang: Lang, labels: ServicePageLabels, items: ServicePageRow['cross_links']): string {
   if (!items?.length) return '';
   const lis = items.map((link) => {
     const id = SERVICE_IDS.includes(link.slug as ServiceId) ? (link.slug as ServiceId) : null;
@@ -151,7 +152,7 @@ function renderCrossLinks(lang: Lang, items: ServicePageRow['cross_links']): str
       </li>`;
   }).join('\n');
   return `  <section>
-    <h2>Related Services</h2>
+    <h2>${escapeHtml(labels.relatedServices)}</h2>
     <ul>
 ${lis}
     </ul>
@@ -159,6 +160,7 @@ ${lis}
 }
 
 function renderFromRow(lang: Lang, serviceId: ServiceId, row: ServicePageRow): { bodyHtml: string; jsonLd: string[] } {
+  const labels = labelsFor(lang);
   const homeLabel = t(lang, 'home_title', 'Home');
   const servicesLabel = t(lang, 'seo_services_title', 'Services');
   const ctaLabel = t(lang, 'seo_quote_title', 'Get a Quote');
@@ -181,15 +183,15 @@ function renderFromRow(lang: Lang, serviceId: ServiceId, row: ServicePageRow): {
     ${row.lead_paragraph ? `<p>${escapeHtml(row.lead_paragraph)}</p>` : ''}
   </header>
 ${renderBreadcrumbs(lang, crumbs)}
-${renderCapabilities(row.capabilities)}
-${renderMaterials(row.materials)}
-${renderTolerances(row.tolerances)}
-${renderProcessSteps(row.process_steps)}
-${renderLeadTimes(row.lead_times)}
-${renderApplications(row.applications)}
-${renderDifferentiators(row.differentiators)}
-${renderFaq(row.faq)}
-${renderCrossLinks(lang, row.cross_links)}
+${renderCapabilities(labels, row.capabilities)}
+${renderMaterials(labels, row.materials)}
+${renderTolerances(labels, row.tolerances)}
+${renderProcessSteps(labels, row.process_steps)}
+${renderLeadTimes(labels, row.lead_times)}
+${renderApplications(labels, row.applications)}
+${renderDifferentiators(labels, row.differentiators)}
+${renderFaq(labels, row.faq)}
+${renderCrossLinks(lang, labels, row.cross_links)}
   <section>
     <p><a href="${quoteHref}">${escapeHtml(ctaLabel)}</a></p>
     <p><a href="${contactHref}">${escapeHtml(contactLabel)}</a></p>

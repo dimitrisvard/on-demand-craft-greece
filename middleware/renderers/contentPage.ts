@@ -1,6 +1,8 @@
 import { Lang, SITE_BASE, ContentPageSlug } from '../types';
+import { t } from '../i18n';
 import { escapeHtml, renderFooterLinks, renderBreadcrumbs } from './common';
 import { contentPageSchemaFromRow, breadcrumbSchema, faqPageSchemaFromRow } from '../schema';
+import { labelsFor } from '../labels/servicePageLabels';
 
 interface ProseSection {
   type: 'prose';
@@ -162,27 +164,29 @@ function renderSection(s: ContentSection): string {
   }
 }
 
-function renderFaq(items: ContentPageRow['faq']): string {
+function renderFaq(lang: Lang, items: ContentPageRow['faq']): string {
   if (!items?.length) return '';
+  const labels = labelsFor(lang);
   const blocks = items.map((f) =>
     `    <dt>${escapeHtml(f.question)}</dt>
     <dd>${escapeHtml(f.answer)}</dd>`
   ).join('\n');
   return `  <section>
-    <h2>Frequently Asked Questions</h2>
+    <h2>${escapeHtml(labels.faq)}</h2>
     <dl>
 ${blocks}
     </dl>
   </section>`;
 }
 
-function renderCrossLinks(items: ContentPageRow['cross_links']): string {
+function renderCrossLinks(lang: Lang, items: ContentPageRow['cross_links']): string {
   if (!items?.length) return '';
+  const labels = labelsFor(lang);
   const lis = items.map((l) =>
     `      <li><a href="${escapeHtml(l.href)}">${escapeHtml(l.label)}</a></li>`
   ).join('\n');
   return `  <section>
-    <h2>Related</h2>
+    <h2>${escapeHtml(labels.relatedServices)}</h2>
     <ul>
 ${lis}
     </ul>
@@ -209,8 +213,11 @@ export function renderContentFromRow(
   const canonicalPath = `/${lang}/${slug}`;
   const canonicalUrl = `${SITE_BASE}${canonicalPath}`;
 
+  // Use the localized "Home" breadcrumb label via t() so non-EN pages don't
+  // ship an English "Home" crumb next to localized section H2s.
+  const homeLabel = t(lang, 'home_title', 'Home');
   const crumbs = [
-    { label: 'Home', href: `/${lang}` },
+    { label: homeLabel, href: `/${lang}` },
     { label: row.h1, href: canonicalPath },
   ];
 
@@ -222,8 +229,8 @@ export function renderContentFromRow(
   </header>
 ${renderBreadcrumbs(lang, crumbs)}
 ${(row.sections || []).map(renderSection).join('\n')}
-${renderFaq(row.faq)}
-${renderCrossLinks(row.cross_links)}
+${renderFaq(lang, row.faq)}
+${renderCrossLinks(lang, row.cross_links)}
 ${renderInternalLinks(row.internal_links)}
 ${renderFooterLinks(lang)}
 `;
