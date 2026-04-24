@@ -170,7 +170,7 @@ const SettingsPage = () => {
       if (result.storage?.uploaded?.[0]?.success) {
         toast({
           title: "✅ Sitemap Generated Successfully",
-          description: `Generated sitemap-complete.xml with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
+          description: `Generated sitemap with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
         });
       } else {
         toast({
@@ -462,9 +462,9 @@ const SettingsPage = () => {
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                     <div>
-                      <h4 className="font-medium">Generate Complete Sitemap</h4>
+                      <h4 className="font-medium">Generate Sitemap</h4>
                       <p className="text-sm text-muted-foreground">
-                        Creates a single SEO-optimized sitemap-complete.xml file with all languages and pages. Google Search Console compatible format.
+                        Rebuilds the canonical sitemap served at /sitemap.xml with every language and page (static routes + content_pages + published blog articles). Google Search Console compatible format.
                       </p>
                     </div>
                     <Button 
@@ -549,13 +549,13 @@ const SettingsPage = () => {
                       </p>
                       <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-900">
                         <FileText className="h-4 w-4 text-green-600" />
-                        <a 
-                          href="https://www.micronshub.eu/sitemap-complete.xml" 
-                          target="_blank" 
+                        <a
+                          href="https://www.micronshub.eu/sitemap.xml"
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="text-green-700 dark:text-green-400 hover:underline flex items-center gap-1 font-medium"
                         >
-                          https://www.micronshub.eu/sitemap-complete.xml
+                          https://www.micronshub.eu/sitemap.xml
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       </div>

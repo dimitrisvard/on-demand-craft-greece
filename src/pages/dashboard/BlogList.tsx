@@ -299,7 +299,7 @@ const BlogList = () => {
         const publicUrl = result.storage.uploaded[0].publicUrl || `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/sitemaps/sitemap-complete.xml`;
         toast({
           title: "✅ Sitemap Generated Successfully",
-          description: `Generated sitemap-complete.xml with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
+          description: `Generated sitemap with ${result.stats.urls} URLs across ${result.stats.languages} languages. ${result.stats.articles} articles included.`,
         });
       } else {
         toast({
