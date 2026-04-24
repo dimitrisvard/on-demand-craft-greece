@@ -584,20 +584,43 @@ export default async function middleware(request: Request): Promise<Response | u
       const description = article.meta_description || article.excerpt || '';
       const image = article.featured_image || DEFAULT_IMAGE;
 
-      const hrefMap: Record<Lang, string | undefined> = {} as Record<Lang, string | undefined>;
+      // Build a map of language → article URL, driven by the translation_id
+      // chain. Articles without a translation record only emit self.
+      // IMPORTANT: for languages WITHOUT a published translation we must OMIT
+      // the hreflang tag entirely — do NOT point at /:lang/blog (the index).
+      // Index URLs fail Google's bidirectional reciprocity check (the index
+      // doesn't link back), which would invalidate the whole cluster. Canonical
+      // already prevents duplicate-content; hreflang is strictly a targeting
+      // hint, so the correct fallback is "omit".
+      const hrefMap: Partial<Record<Lang, string>> = {};
       if (article.translation_id) {
         const translations = await fetchTranslationSlugs(article.translation_id);
         for (const l of LANGUAGES) {
-          if (translations[l]) hrefMap[l] = localizedPath(l, 'blog-article', translations[l]);
+          if (translations[l]) {
+            hrefMap[l] = localizedPath(l, 'blog-article', translations[l]);
+          }
         }
       }
-      if (Object.values(hrefMap).filter(Boolean).length === 0) {
-        hrefMap[route.lang] = localizedPath(route.lang, 'blog-article', article.slug);
+      // Always include self, even when translation_id is NULL or the
+      // translation row for this language is absent from the chain.
+      hrefMap[route.lang] = localizedPath(route.lang, 'blog-article', article.slug);
+
+      // x-default points at the EN translation when available; falls back to
+      // the current language for single-language (imported) articles.
+      const xDefaultPath = hrefMap.en || hrefMap[route.lang]!;
+
+      const hreflangParts: string[] = [];
+      for (const l of LANGUAGES) {
+        const p = hrefMap[l];
+        if (p) {
+          hreflangParts.push(`<link rel="alternate" hreflang="${l}" href="${SITE_BASE}${p}" />`);
+        }
       }
+      hreflangParts.push(`<link rel="alternate" hreflang="x-default" href="${SITE_BASE}${xDefaultPath}" />`);
 
       const canonicalUrl = `${SITE_BASE}${localizedPath(route.lang, 'blog-article', article.slug)}`;
       canonicalPath = localizedPath(route.lang, 'blog-article', article.slug);
-      hreflangTags = staticHreflangs((l) => hrefMap[l] || localizedPath(l, 'blog-index'));
+      hreflangTags = hreflangParts.join('\n    ');
       jsonLdBlocks = [articleSchema({
         lang: route.lang, title, description,
         createdAt: article.created_at, updatedAt: article.updated_at,
