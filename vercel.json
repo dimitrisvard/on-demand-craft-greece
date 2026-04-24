@@ -129,11 +129,11 @@
   "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap?type=main"
+      "destination": "/api/sitemap"
     },
     {
       "source": "/sitemap-complete.xml",
-      "destination": "/api/sitemap?type=complete"
+      "destination": "/api/sitemap"
     },
     {
       "source": "/sitemap-index.xml",
