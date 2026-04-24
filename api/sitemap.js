@@ -356,21 +356,16 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
 
   const urlObj = new URL(req.url, 'http://localhost');
-  const type = urlObj.searchParams.get('type') || 'main';
+  const type = urlObj.searchParams.get('type');
 
-  switch (type) {
-    case 'index':
-      return handleIndex(req, res);
-    case 'lang':
-      return handleLang(req, res);
-    // 'complete' is intentionally absent — /sitemap-complete.xml now
-    // 301-redirects to /sitemap.xml via vercel.json. Leaving the case out
-    // means any direct /api/sitemap?type=complete probe also falls through
-    // to the same canonical payload rather than silently serving a stale
-    // storage blob without the regression guard.
-    case 'main':
-    case 'complete':
-    default:
-      return handleMain(req, res);
-  }
+  // /sitemap.xml and /sitemap-complete.xml both rewrite to /api/sitemap with
+  // NO query string — they take the default path and are therefore literally
+  // indistinguishable at the function level (same code path, same Storage
+  // fetch, same headers, same body). GSC / Googlebot cannot observe any
+  // difference between the two URLs that could explain divergent sitemap
+  // status. The only type-parameterised routes left are /sitemap-index.xml
+  // and /sitemap-:lang.xml which serve different storage blobs on purpose.
+  if (type === 'index') return handleIndex(req, res);
+  if (type === 'lang') return handleLang(req, res);
+  return handleMain(req, res);
 }
