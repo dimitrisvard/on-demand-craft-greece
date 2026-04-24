@@ -214,6 +214,30 @@
 
 ---
 
+## Code Tour
+
+For reviewers short on time, these files best illustrate the systems thinking across the platform:
+
+- **`lib/nesting/index.js`** — End-to-end 2D nesting pipeline: material grouping, bin-packing, and utilization-driven sheet allocation with density-weighted cost calculation.
+- **`sheet-metal-service/main.py`** — FastAPI entry for the Python CAD microservice; STEP → DXF / PDF / SVG unfolding via OpenCascade and CadQuery.
+- **`supabase/functions/extract-flat-pattern/index.ts`** — Polymorphic file-type dispatch (native STL mesh edge-detection, STEP delegation to the unfold service) with graceful error surfacing.
+- **`supabase/migrations/20260407_create_multi_tenant_system.sql`** — Registry-based tenant + capability model with RLS policies enforcing isolation at the data layer, not the application layer.
+- **`middleware.ts`** — SEO body injection for crawlers without breaking React hydration; language-aware metadata and schema markup unified across 10+ route types.
+- **`src/components/ThreeDViewerModal.tsx`** — Multi-format 3D loader (STL / OBJ / GLB / GLTF) with render-mode toggles and PBR material tuning for CAD-like studio lighting.
+
+---
+
+## Roadmap & Known Issues
+
+Active engineering initiatives, tracked transparently:
+
+- **Row-Level Security Hardening** — Migration drafted for additional production tables; pending audit of anon vs. service role key usage across the Next.js codebase before rollout. See `docs/security/rls-remediation-plan.md`.
+- **Server-Side Rendering Migration** — Migrating from Vite prerender to full SSR for improved indexation across the 14-language content corpus.
+- **3D Viewer Tessellation Upgrade** — Improving STEP→GLB tessellation resolution to close the quality gap versus HOOPS-based competitors.
+- **Test Coverage Expansion** — Expanding Playwright E2E and Jest unit coverage, with CI gating planned.
+
+---
+
 ## About the Developer
 
 **Dimitris Vardalachakis** — Full-stack developer and founder based in Heraklion, Crete, Greece.
