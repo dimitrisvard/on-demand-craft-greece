@@ -24,7 +24,7 @@
  * not inside it, so React's hydrateRoot is unaffected.
  */
 
-import { LANGUAGES, Lang, PageMeta, ParsedRoute, SITE_BASE, DEFAULT_IMAGE } from './middleware/types';
+import { LANGUAGES, Lang, PageMeta, ParsedRoute, SITE_BASE, DEFAULT_IMAGE, ContentPageSlug } from './middleware/types';
 import { resolvePageType, localizedPath, localizedContentSlug } from './middleware/slugs';
 import { getMeta } from './middleware/meta';
 import { buildHreflangTags, rewriteHtml } from './middleware/inject';
@@ -534,12 +534,27 @@ export default async function middleware(request: Request): Promise<Response | u
     }
 
     case 'content-page': {
-      const slug = route.contentSlug!;
-      const [row, alternates] = await Promise.all([
-        fetchContentPage(route.lang, slug),
-        fetchContentPageAlternates(slug),
+      // The URL segment that resolvePageType handed us. It may be either
+      // the canonical English slug ('education') or a per-language
+      // localized_slug ('vzdelavani' for cs). fetchContentPageRaw queries
+      // (slug OR localized_slug), so either form finds the row.
+      const requestedSlug = route.contentSlug!;
+      const [row, initialAlternates] = await Promise.all([
+        fetchContentPage(route.lang, requestedSlug),
+        fetchContentPageAlternates(requestedSlug),
       ]);
-      const urlSegment = localizedContentSlug(route.lang, slug, row?.localized_slug ?? alternates[route.lang] ?? null);
+      // The DB row's .slug column is the source of truth for the canonical
+      // English slug. Use it for every downstream lookup (alternates,
+      // hreflang cluster, legacy-fallback dispatch) so localized URLs like
+      // /cs/vzdelavani share the same hreflang group as /en/education etc.
+      const canonicalSlug = ((row?.slug as ContentPageSlug | undefined) ?? requestedSlug) as ContentPageSlug;
+      // Re-fetch alternates only when the URL segment was a localized form
+      // (initialAlternates was looked up by 'vzdelavani' and returned empty;
+      // the real cluster lives under the canonical 'education' key).
+      const alternates = canonicalSlug !== requestedSlug
+        ? await fetchContentPageAlternates(canonicalSlug)
+        : initialAlternates;
+      const urlSegment = localizedContentSlug(route.lang, canonicalSlug, row?.localized_slug ?? alternates[route.lang] ?? null);
       canonicalPath = `/${route.lang}/${urlSegment}`;
       if (row) {
         meta = {
@@ -548,25 +563,28 @@ export default async function middleware(request: Request): Promise<Response | u
           ogType: 'website',
           image: DEFAULT_IMAGE,
         };
-        hreflangTags = contentPageHreflang(slug, alternates);
+        hreflangTags = contentPageHreflang(canonicalSlug, alternates);
         seoSource = 'db';
-        const rendered = renderContentFromRow(route.lang, row, slug);
+        const rendered = renderContentFromRow(route.lang, row, canonicalSlug);
         bodyHtml = rendered.bodyHtml;
         jsonLdBlocks = rendered.jsonLd;
       } else {
         // Row missing — fall back so we never regress the 4 existing legacy
         // slugs. The 3 new slugs (education / legal-notice / privacy-policy)
         // have no legacy renderer; returning undefined lets React handle it.
-        if (slug === 'industries') {
+        // Unknown segments that fell through resolvePageType (e.g. typos)
+        // also land here with no row and no canonical match → undefined,
+        // same outcome as the old "return null from parseRoute" path.
+        if (canonicalSlug === 'industries') {
           meta = getMeta({ ...route, type: 'industries' });
           hreflangTags = staticHreflangs((l) => localizedPath(l, 'industries'));
           const rendered = renderIndustries(route.lang);
           bodyHtml = rendered.bodyHtml;
           jsonLdBlocks = rendered.jsonLd;
-        } else if (slug === 'about' || slug === 'contact' || slug === 'our-work') {
-          meta = getMeta({ ...route, type: slug });
-          hreflangTags = staticHreflangs((l) => localizedPath(l, slug));
-          const rendered = renderSimplePage(route.lang, slug);
+        } else if (canonicalSlug === 'about' || canonicalSlug === 'contact' || canonicalSlug === 'our-work') {
+          meta = getMeta({ ...route, type: canonicalSlug });
+          hreflangTags = staticHreflangs((l) => localizedPath(l, canonicalSlug));
+          const rendered = renderSimplePage(route.lang, canonicalSlug);
           bodyHtml = rendered.bodyHtml;
           jsonLdBlocks = rendered.jsonLd;
         } else {

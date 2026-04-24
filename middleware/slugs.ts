@@ -141,6 +141,20 @@ export function resolvePageType(lang: Lang, segs: string[]): ParsedRoute | null 
     return { lang, type: firstType, pathAfterLang: segs.join('/') };
   }
 
+  // Fall through: unknown 1-segment URL might be a content_pages localized
+  // slug we don't have in any static map (e.g. /cs/vzdelavani — DB row has
+  // slug='education' and localized_slug='vzdelavani', but neither SLUGS nor
+  // CONTENT_SLUG_SET knows about 'vzdelavani'). Hand it to the content-page
+  // arm; fetchContentPageRaw queries (slug OR localized_slug), so it'll
+  // resolve via the localized_slug column. If no row exists, the arm
+  // returns undefined and the SPA shell handles it. Multi-segment unknowns
+  // still return null — content_pages slugs are always single-segment, and
+  // letting deeper paths through would expand the surface area for spurious
+  // DB lookups on 404s.
+  if (segs.length === 1) {
+    return { lang, type: 'content-page', contentSlug: first as ContentPageSlug, pathAfterLang: first };
+  }
+
   return null;
 }
 
