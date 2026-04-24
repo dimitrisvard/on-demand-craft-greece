@@ -25,7 +25,7 @@
  */
 
 import { LANGUAGES, Lang, PageMeta, ParsedRoute, SITE_BASE, DEFAULT_IMAGE } from './middleware/types';
-import { resolvePageType, localizedPath } from './middleware/slugs';
+import { resolvePageType, localizedPath, localizedContentSlug } from './middleware/slugs';
 import { getMeta } from './middleware/meta';
 import { buildHreflangTags, rewriteHtml } from './middleware/inject';
 import { articleSchema, contentPageSchemaFromRow, breadcrumbSchema, faqPageSchemaFromRow, websiteSchemaFromRow, organizationSchema } from './middleware/schema';
@@ -280,8 +280,12 @@ async function fetchContentPageRaw(lang: string, slug: string): Promise<ContentP
   const anonKey = getAnonKey();
   if (!anonKey) return null;
   try {
+    // Match either the canonical slug OR the language-specific localized_slug
+    // so non-EN URLs (e.g. /fr/a-propos) resolve even when the route parser
+    // handed us the raw URL segment instead of the canonical slug.
+    const encoded = encodeURIComponent(slug);
     const url = `${SUPABASE_URL}/rest/v1/content_pages`
-      + `?slug=eq.${encodeURIComponent(slug)}`
+      + `?or=(slug.eq.${encoded},localized_slug.eq.${encoded})`
       + `&language=eq.${lang}`
       + `&status=eq.published`
       + `&select=${CONTENT_PAGE_SELECT}&limit=1`;
@@ -348,20 +352,55 @@ function staticHreflangs(pathFor: (lang: Lang) => string): string {
 }
 
 /**
- * content_pages currently only has English rows, but hreflang needs to list
- * every supported language so Google understands this URL is the canonical
- * for the English content and knows which alternates exist. Since the EN
- * slug is valid in every language URL today (non-EN pages fall back to the
- * same slug), we emit all 14 languages pointing at the same path plus
- * x-default. When translated rows are seeded, swap to localized slugs.
+ * Build a hreflang block for a content_pages URL, emitting the correctly
+ * localized path for each of the 14 languages. `slugByLang` lets the caller
+ * supply overrides from DB rows (content_pages.localized_slug); when an entry
+ * is missing we fall back to the SLUGS map, and for DB-only slugs
+ * (education / legal-notice / privacy-policy) to the canonical English slug.
  */
-function contentPageHreflang(slug: string): string {
+function contentPageHreflang(
+  canonical: import('./middleware/types').ContentPageSlug,
+  slugByLang: Partial<Record<Lang, string | null>> = {},
+): string {
+  const pathFor = (l: Lang) => `/${l}/${localizedContentSlug(l, canonical, slugByLang[l] ?? null)}`;
   const tags: string[] = [];
   for (const l of LANGUAGES) {
-    tags.push(`<link rel="alternate" hreflang="${l}" href="${SITE_BASE}/${l}/${slug}" />`);
+    tags.push(`<link rel="alternate" hreflang="${l}" href="${SITE_BASE}${pathFor(l)}" />`);
   }
-  tags.push(`<link rel="alternate" hreflang="x-default" href="${SITE_BASE}/en/${slug}" />`);
+  tags.push(`<link rel="alternate" hreflang="x-default" href="${SITE_BASE}${pathFor('en')}" />`);
   return tags.join('\n    ');
+}
+
+// ─── Content-page alternates (for hreflang) ──────────────────────────────────
+const contentPageAlternatesCache = new Map<string, { data: Record<string, string | null>; expires: number }>();
+
+async function fetchContentPageAlternates(canonical: string): Promise<Record<string, string | null>> {
+  const cached = contentPageAlternatesCache.get(canonical);
+  if (cached && cached.expires > Date.now()) return cached.data;
+
+  const anonKey = getAnonKey();
+  if (!anonKey) return {};
+
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/content_pages`
+      + `?slug=eq.${encodeURIComponent(canonical)}`
+      + `&status=eq.published`
+      + `&select=language,localized_slug`;
+    const res = await fetch(url, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    });
+    if (!res.ok) return {};
+    const rows: { language: string; localized_slug: string | null }[] = await res.json();
+    const map: Record<string, string | null> = {};
+    for (const r of rows) map[r.language] = r.localized_slug;
+    contentPageAlternatesCache.set(canonical, {
+      data: map,
+      expires: Date.now() + (Object.keys(map).length ? CACHE_TTL : NEGATIVE_CACHE_TTL),
+    });
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 // ─── Middleware Entry Point ──────────────────────────────────────────────────
@@ -496,8 +535,12 @@ export default async function middleware(request: Request): Promise<Response | u
 
     case 'content-page': {
       const slug = route.contentSlug!;
-      const row = await fetchContentPage(route.lang, slug);
-      canonicalPath = `/${route.lang}/${slug}`;
+      const [row, alternates] = await Promise.all([
+        fetchContentPage(route.lang, slug),
+        fetchContentPageAlternates(slug),
+      ]);
+      const urlSegment = localizedContentSlug(route.lang, slug, row?.localized_slug ?? alternates[route.lang] ?? null);
+      canonicalPath = `/${route.lang}/${urlSegment}`;
       if (row) {
         meta = {
           title: row.title.includes('Microns Hub') ? row.title : `${row.title} | Microns Hub`,
@@ -505,7 +548,7 @@ export default async function middleware(request: Request): Promise<Response | u
           ogType: 'website',
           image: DEFAULT_IMAGE,
         };
-        hreflangTags = contentPageHreflang(slug);
+        hreflangTags = contentPageHreflang(slug, alternates);
         seoSource = 'db';
         const rendered = renderContentFromRow(route.lang, row, slug);
         bodyHtml = rendered.bodyHtml;

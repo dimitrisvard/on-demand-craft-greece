@@ -1,8 +1,23 @@
 import { Lang, LANGUAGES, ServiceId, SERVICE_IDS, ParsedRoute, PageType, CONTENT_PAGE_SLUGS, ContentPageSlug } from './types';
 
-// Slugs we render from content_pages when language === 'en'. Other languages
-// keep their existing i18n-based renderers until the DB is populated.
-const CONTENT_SLUG_SET = new Set<string>(CONTENT_PAGE_SLUGS);
+// Slugs we render from content_pages. 'home' is handled by the dedicated
+// homepage arm (empty URL segment), so exclude it; 'blog' isn't in
+// CONTENT_PAGE_SLUGS to begin with (the blog index has its own pipeline).
+const CONTENT_SLUG_SET = new Set<string>(
+  CONTENT_PAGE_SLUGS.filter((s) => s !== 'home'),
+);
+
+// Localized-slug pages in SLUGS that should route through content_pages so
+// every language gets the DB-backed SSR body. The content-page arm in
+// middleware.ts falls back to the legacy renderer when the row is missing,
+// so this is safe even before the content_pages rows for a given language
+// are seeded.
+const PAGE_TYPE_TO_CONTENT_SLUG: Partial<Record<PageType, ContentPageSlug>> = {
+  'about': 'about',
+  'contact': 'contact',
+  'our-work': 'our-work',
+  'industries': 'industries',
+};
 
 // Localized URL slugs per language. Mirrors vite.config.ts SLUGS map and the
 // url_slug_* keys in src/locales/<lang>/translation.json. Kept inline here to
@@ -104,13 +119,21 @@ export function resolvePageType(lang: Lang, segs: string[]): ParsedRoute | null 
     return { lang, type: 'blog-article', blogSlug: segs.slice(1).join('/'), pathAfterLang: segs.join('/') };
   }
 
-  // content_pages: EN-only for now. Matches the 7 English slugs (industries,
-  // our-work, education, about, contact, legal-notice, privacy-policy) so the
-  // middleware fetches from content_pages and renders via renderContentPage.
-  // Other languages keep existing i18n-based routing (industries, about,
-  // contact, our-work) so we don't regress non-EN pages while the DB is
-  // populated only in English.
-  if (lang === 'en' && segs.length === 1 && CONTENT_SLUG_SET.has(first)) {
+  // Route the localized-slug pages (about / contact / our-work / industries)
+  // through content_pages for every language so non-EN URLs pick up the
+  // DB-backed SSR body. /fr/a-propos → content-page(contentSlug=about), etc.
+  if (firstType && segs.length === 1) {
+    const cs = PAGE_TYPE_TO_CONTENT_SLUG[firstType];
+    if (cs) {
+      return { lang, type: 'content-page', contentSlug: cs, pathAfterLang: first };
+    }
+  }
+
+  // Accept the English canonical slugs for the DB-only content pages
+  // (education / legal-notice / privacy-policy) across all 14 languages.
+  // Localized variants populated in SLUGS above are handled by the block
+  // immediately preceding this one.
+  if (segs.length === 1 && CONTENT_SLUG_SET.has(first)) {
     return { lang, type: 'content-page', contentSlug: first as ContentPageSlug, pathAfterLang: first };
   }
 
@@ -119,6 +142,31 @@ export function resolvePageType(lang: Lang, segs: string[]): ParsedRoute | null 
   }
 
   return null;
+}
+
+/**
+ * Resolve the URL segment a given content_pages canonical slug should live
+ * under for a specific language. Preference order:
+ *   1. The row's own localized_slug column (source of truth when populated).
+ *   2. The matching entry in SLUGS (static, matches the React router).
+ *   3. The canonical English slug (safe fallback for education / legal-notice
+ *      / privacy-policy until native translations are seeded).
+ */
+export function localizedContentSlug(
+  lang: Lang,
+  canonical: ContentPageSlug,
+  override: string | null = null,
+): string {
+  if (override) return override;
+  if (lang === 'en') return canonical;
+  const s = SLUGS[lang];
+  switch (canonical) {
+    case 'about':      return s.about;
+    case 'contact':    return s.contact;
+    case 'our-work':   return s.ourWork;
+    case 'industries': return s.industries;
+    default:           return canonical;
+  }
 }
 
 export function localizedPath(lang: Lang, type: PageType, extra?: string): string {
