@@ -351,20 +351,61 @@ async function handleLang(req, res) {
   }
 }
 
+// ─── Sitemap-index pointing at /sitemap-complete.xml ────────────────────────
+// /sitemap.xml is served as a tiny <sitemapindex> that references the full
+// urlset at /sitemap-complete.xml. Why we shape it this way:
+//
+//   • GSC has been holding a stale "could not be read" verdict on /sitemap.xml
+//     even though every wire-level probe shows it serves byte-identical XML
+//     to /sitemap-complete.xml (which IS accepted). Returning a different
+//     XML root element (`<sitemapindex>` instead of `<urlset>`) gives GSC's
+//     parser a freshly-shaped document to validate, which in practice clears
+//     the kind of submission-database error that survives manual re-submits.
+//
+//   • Sitemap-protocol-correct: an index that lists `/sitemap-complete.xml`
+//     is exactly how google.com/webmasters/answer/183668 says to publish
+//     multi-file or future-splittable sitemaps. The index → urlset chain is
+//     resolved by every crawler.
+//
+//   • robots.txt continues advertising /sitemap.xml; Googlebot follows the
+//     index to /sitemap-complete.xml on its own.
+//
+//   • /sitemap-complete.xml is unchanged — still served by handleMain as the
+//     full urlset; existing GSC submissions for it stay valid.
+function handleMainIndex(_req, res) {
+  const today = new Date().toISOString().split('T')[0];
+  const completeUrl = encodeSitemapUrl(BASE_URL + '/sitemap-complete.xml');
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    '  <sitemap>\n' +
+    '    <loc>' + escapeXml(completeUrl) + '</loc>\n' +
+    '    <lastmod>' + today + '</lastmod>\n' +
+    '  </sitemap>\n' +
+    '</sitemapindex>\n';
+  res.status(200).send(xml);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/xml; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+  // Tell intermediaries the response varies by Accept-Encoding so CDN
+  // caches don't mix gzip/br/identity bodies.
+  res.setHeader('Vary', 'Accept-Encoding');
+  // Sitemaps shouldn't appear in search results; this is a Google-recommended
+  // header for sitemap files.
+  res.setHeader('X-Robots-Tag', 'noindex');
 
   const urlObj = new URL(req.url, 'http://localhost');
   const type = urlObj.searchParams.get('type');
 
-  // /sitemap.xml and /sitemap-complete.xml both rewrite to /api/sitemap with
-  // NO query string — they take the default path and are therefore literally
-  // indistinguishable at the function level (same code path, same Storage
-  // fetch, same headers, same body). GSC / Googlebot cannot observe any
-  // difference between the two URLs that could explain divergent sitemap
-  // status. The only type-parameterised routes left are /sitemap-index.xml
-  // and /sitemap-:lang.xml which serve different storage blobs on purpose.
+  // Routing summary (vercel.json rewrites):
+  //   /sitemap.xml          → ?type=main-index (this handler) — sitemap index
+  //                                              pointing at /sitemap-complete.xml
+  //   /sitemap-complete.xml → no query         → handleMain — full urlset
+  //   /sitemap-index.xml    → ?type=index      → legacy storage-backed index
+  //   /sitemap-:lang.xml    → ?type=lang       → per-language storage blob
+  if (type === 'main-index') return handleMainIndex(req, res);
   if (type === 'index') return handleIndex(req, res);
   if (type === 'lang') return handleLang(req, res);
   return handleMain(req, res);
