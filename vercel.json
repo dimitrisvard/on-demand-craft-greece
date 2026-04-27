@@ -56,7 +56,7 @@
       "permanent": true
     },
     {
-      "source": "/pl/wykończenie-powierzchni",
+      "source": "/pl/wykoÅczenie-powierzchni",
       "destination": "/pl/uslugi/wykonczenie-powierzchni",
       "permanent": true
     },
@@ -129,7 +129,7 @@
   "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap?type=main-index"
+      "destination": "/api/sitemap"
     },
     {
       "source": "/sitemap-complete.xml",
