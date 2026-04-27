@@ -400,12 +400,10 @@ export default async function handler(req, res) {
   const type = urlObj.searchParams.get('type');
 
   // Routing summary (vercel.json rewrites):
-  //   /sitemap.xml          → ?type=main-index (this handler) — sitemap index
-  //                                              pointing at /sitemap-complete.xml
-  //   /sitemap-complete.xml → no query         → handleMain — full urlset
+  //   /sitemap.xml          → no query → handleMain — full urlset
+  //   /sitemap-complete.xml → no query → handleMain — full urlset (same)
   //   /sitemap-index.xml    → ?type=index      → legacy storage-backed index
   //   /sitemap-:lang.xml    → ?type=lang       → per-language storage blob
-  if (type === 'main-index') return handleMainIndex(req, res);
   if (type === 'index') return handleIndex(req, res);
   if (type === 'lang') return handleLang(req, res);
   return handleMain(req, res);
