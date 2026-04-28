@@ -392,9 +392,6 @@ export default async function handler(req, res) {
   // Tell intermediaries the response varies by Accept-Encoding so CDN
   // caches don't mix gzip/br/identity bodies.
   res.setHeader('Vary', 'Accept-Encoding');
-  // Sitemaps shouldn't appear in search results; this is a Google-recommended
-  // header for sitemap files.
-  res.setHeader('X-Robots-Tag', 'noindex');
 
   const urlObj = new URL(req.url, 'http://localhost');
   const type = urlObj.searchParams.get('type');
