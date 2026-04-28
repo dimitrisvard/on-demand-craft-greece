@@ -129,7 +129,7 @@
   "rewrites": [
     {
       "source": "/sitemap.xml",
-      "destination": "/api/sitemap"
+      "destination": "/api/sitemap?type=main-index"
     },
     {
       "source": "/sitemap-complete.xml",
