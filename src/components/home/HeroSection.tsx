@@ -7,18 +7,45 @@ interface HeroSectionProps {
   heroImage: string;
 }
 
+const HERO_WEBP_BASE = '/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3';
+
 const HeroSection: React.FC<HeroSectionProps> = ({ heroImage }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
-  console.log('HeroSection language:', i18n.language, 'hero_title:', t('hero_title'));
+  const isDefaultHero = heroImage.includes('b17e4baa-4be2-4892-a725-5871867d3dc3');
   return (
     <section className="relative h-screen flex items-center">
-      {/* Background Image */}
-      <div className="absolute inset-0 bg-cover bg-center z-0" style={{ 
-        backgroundImage: `url(${heroImage})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center'
-      }}>
+      {/* Background Image: <img> with absolute positioning lets the browser pick WebP via <picture>
+          and gives Lighthouse a real LCP candidate it can prioritise. */}
+      <div className="absolute inset-0 z-0">
+        {isDefaultHero ? (
+          <picture>
+            <source
+              type="image/webp"
+              srcSet={`${HERO_WEBP_BASE}-800.webp 800w, ${HERO_WEBP_BASE}-1600.webp 1600w`}
+              sizes="100vw"
+            />
+            <img
+              src={heroImage}
+              alt=""
+              // @ts-expect-error fetchpriority is valid HTML
+              fetchpriority="high"
+              decoding="sync"
+              loading="eager"
+              className="w-full h-full object-cover"
+            />
+          </picture>
+        ) : (
+          <img
+            src={heroImage}
+            alt=""
+            // @ts-expect-error fetchpriority is valid HTML
+            fetchpriority="high"
+            decoding="sync"
+            loading="eager"
+            className="w-full h-full object-cover"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-r from-black/60 to-black/30"></div>
       </div>
       

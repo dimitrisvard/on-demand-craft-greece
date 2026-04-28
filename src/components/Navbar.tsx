@@ -49,11 +49,31 @@ const Navbar = () => {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-white shadow-md py-3">
       <div className="container-custom flex justify-between items-center">
         <Link to={getLocalizedPath('/')} className="flex items-center">
-          <img
-            src={tenant?.logoUrl || "/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"}
-            alt={`${tenant?.name || 'Microns Hub'} Logo`}
-            className="h-10"
-          />
+          {tenant?.logoUrl ? (
+            <img
+              src={tenant.logoUrl}
+              alt={`${tenant?.name || 'Microns Hub'} Logo`}
+              className="h-10"
+              width={172}
+              height={40}
+            />
+          ) : (
+            <picture>
+              <source
+                type="image/webp"
+                srcSet="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e-344.webp"
+              />
+              <img
+                src="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"
+                alt={`${tenant?.name || 'Microns Hub'} Logo`}
+                className="h-10"
+                width={172}
+                height={40}
+                // @ts-expect-error fetchpriority is valid HTML
+                fetchpriority="high"
+              />
+            </picture>
+          )}
         </Link>
 
         <div className="hidden xl:flex items-center space-x-1 text-sm font-medium">

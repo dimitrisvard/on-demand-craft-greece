@@ -15,11 +15,31 @@ const Footer = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           <div className="space-y-4">
             <Link to={getLocalizedPath('/')}>
-              <img
-                src={tenant?.logoUrl || "/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"}
-                alt={`${tenant?.name || 'Microns Hub'} Logo`}
-                className="h-12"
-              />
+              {tenant?.logoUrl ? (
+                <img
+                  src={tenant.logoUrl}
+                  alt={`${tenant?.name || 'Microns Hub'} Logo`}
+                  className="h-12"
+                  width={172}
+                  height={48}
+                  loading="lazy"
+                />
+              ) : (
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcSet="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e-344.webp"
+                  />
+                  <img
+                    src="/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png"
+                    alt={`${tenant?.name || 'Microns Hub'} Logo`}
+                    className="h-12"
+                    width={172}
+                    height={48}
+                    loading="lazy"
+                  />
+                </picture>
+              )}
             </Link>
             <p className="text-sm mt-4 text-gray-600">
               {tenant?.welcomeMessage || t('footer_company_desc', "Microns Hub is Greece's premier on-demand manufacturing platform, specializing in precision CNC machining, sheet metal fabrication and more.")}

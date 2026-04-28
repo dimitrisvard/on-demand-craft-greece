@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import type { ContentPageSection } from '@/hooks/useContentPage';
+import OptimizedImage from '@/components/OptimizedImage';
 
 interface SectionRendererProps {
   section: ContentPageSection;
@@ -23,10 +24,12 @@ const ProseSection: React.FC<{ s: ContentPageSection; alt: boolean }> = ({
         )}
         {s.image_url && (
           <figure className="mb-8 rounded-lg overflow-hidden shadow-lg border border-gray-100 bg-gray-100">
-            <img
+            <OptimizedImage
               src={s.image_url}
               alt={s.image_alt || s.h2 || ''}
-              loading="lazy"
+              width={800}
+              height={450}
+              sizes="(max-width: 768px) 100vw, 800px"
               className="w-full h-auto object-cover"
             />
           </figure>
@@ -192,10 +195,12 @@ const GridSection: React.FC<{ s: ContentPageSection; alt: boolean }> = ({
               >
                 {c.image_url && (
                   <div className="aspect-[16/9] overflow-hidden bg-gray-100">
-                    <img
+                    <OptimizedImage
                       src={c.image_url}
                       alt={c.image_alt || c.title}
-                      loading="lazy"
+                      width={450}
+                      height={253}
+                      sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
                       className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                     />
                   </div>

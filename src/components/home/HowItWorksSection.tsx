@@ -1,5 +1,6 @@
 import React from 'react';
 import IconRenderer from '../IconRenderer';
+import OptimizedImage from '../OptimizedImage';
 import { WorkflowStepItem } from './data';
 import { useTranslation } from 'react-i18next';
 
@@ -8,8 +9,7 @@ interface HowItWorksSectionProps {
 }
 
 const HowItWorksSection: React.FC<HowItWorksSectionProps> = ({ steps }) => {
-  const { t, i18n } = useTranslation();
-  console.log('HowItWorksSection rendered, lang:', i18n.language);
+  const { t } = useTranslation();
   return (
     <section id="workflow" className="section">
       <div className="container-custom">
@@ -34,9 +34,12 @@ const HowItWorksSection: React.FC<HowItWorksSectionProps> = ({ steps }) => {
               </div>
               
               <div className="mb-4">
-                <img 
-                  src={step.image} 
-                  alt={t(`workflow_step_${step.step}_title`, step.title)} 
+                <OptimizedImage
+                  src={step.image}
+                  alt={t(`workflow_step_${step.step}_title`, step.title)}
+                  width={252}
+                  height={252}
+                  sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 25vw"
                   className="rounded-lg w-full h-40 object-cover"
                 />
               </div>

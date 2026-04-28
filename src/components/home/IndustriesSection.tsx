@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
+import OptimizedImage from '@/components/OptimizedImage';
 
 interface Industry {
   name: string;
@@ -15,9 +16,8 @@ interface IndustriesSectionProps {
 }
 
 const IndustriesSection: React.FC<IndustriesSectionProps> = ({ industries }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
-  console.log('IndustriesSection rendered, lang:', i18n.language);
   return (
     <section className="section bg-brand-light">
       <div className="container-custom">
@@ -36,9 +36,12 @@ const IndustriesSection: React.FC<IndustriesSectionProps> = ({ industries }) => 
               className="group relative overflow-hidden rounded-lg transition-all hover:shadow-xl"
             >
               <div className="aspect-[3/2] bg-gray-200">
-                <img 
-                  src={industry.image} 
-                  alt={industry.name} 
+                <OptimizedImage
+                  src={industry.image}
+                  alt={industry.name}
+                  width={300}
+                  height={200}
+                  sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 20vw"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 />
               </div>

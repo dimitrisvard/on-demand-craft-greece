@@ -98,11 +98,30 @@ export default defineConfig(async ({ mode }) => {
 			target: 'es2020',
 			sourcemap: false,
 			minify: 'esbuild',
+			cssCodeSplit: true,
 			rollupOptions: {
 				output: {
-					manualChunks: {
-						vendor: ['react', 'react-dom', 'react-router-dom'],
-						ui: ['@radix-ui/react-dialog', '@radix-ui/react-slot', '@radix-ui/react-tooltip'],
+					// Split heavy / rarely-used dependencies into their own chunks so the
+					// initial bundle stays small and Lighthouse "unused JavaScript" drops.
+					manualChunks(id) {
+						if (!id.includes('node_modules')) return undefined;
+						if (id.includes('react-dom') || id.includes('/react/') || id.includes('react-router')) return 'vendor-react';
+						if (id.includes('@radix-ui')) return 'vendor-radix';
+						if (id.includes('@supabase')) return 'vendor-supabase';
+						if (id.includes('@tanstack')) return 'vendor-query';
+						if (id.includes('react-i18next') || id.includes('i18next')) return 'vendor-i18n';
+						if (id.includes('lucide-react')) return 'vendor-icons';
+						// Heavy editor / 3D / PDF / file-processing libs are only needed on
+						// specific routes — split them so they aren't in the homepage bundle.
+						if (id.includes('three') || id.includes('@react-three') || id.includes('postprocessing')) return 'vendor-three';
+						if (id.includes('jspdf') || id.includes('html2pdf') || id.includes('html2canvas') || id.includes('pdf-lib')) return 'vendor-pdf';
+						if (id.includes('xlsx') || id.includes('papaparse') || id.includes('jszip')) return 'vendor-data';
+						if (id.includes('react-quill') || id.includes('quill')) return 'vendor-editor';
+						if (id.includes('@aws-sdk')) return 'vendor-aws';
+						if (id.includes('occt-import-js') || id.includes('makerjs') || id.includes('dxf-parser') || id.includes('clipper-lib') || id.includes('@gltf-transform')) return 'vendor-cad';
+						if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts';
+						if (id.includes('formik') || id.includes('react-hook-form') || id.includes('yup') || id.includes('zod') || id.includes('@hookform')) return 'vendor-forms';
+						return 'vendor';
 					},
 				},
 			},

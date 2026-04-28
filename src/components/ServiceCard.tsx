@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
 import IconRenderer from './IconRenderer';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLanguage } from '@/contexts/LanguageContext';
+import OptimizedImage from './OptimizedImage';
 
 interface ServiceCardProps {
   id: string;
@@ -13,47 +14,28 @@ interface ServiceCardProps {
 }
 
 const ServiceCard = ({ id, iconName, link, delay = 0, image }: ServiceCardProps) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { getLocalizedPath } = useLanguage();
-  console.log('Current lang:', i18n.language, 'service_cnc-machining_title:', t('service_cnc-machining_title'), 'home_title:', t('home_title'));
-  console.log('ServiceCard rendered', id, 'lang:', i18n.language);
   const [imgSrc, setImgSrc] = useState(image);
-  const [errorCount, setErrorCount] = useState(0);
   const placeholder = '/placeholder.svg';
 
-  useEffect(() => {
-    // Debug: log the image path and try to fetch it
-    console.log('ServiceCard image path:', imgSrc);
-    fetch(imgSrc)
-      .then(res => {
-        console.log('Fetch status for', imgSrc, res.status);
-      })
-      .catch(err => {
-        console.error('Fetch error for', imgSrc, err);
-      });
-  }, [imgSrc]);
-
   const handleImgError = () => {
-    if (errorCount === 0) {
-      // Try cache-busting reload
-      setImgSrc(image + '?v=' + Date.now());
-      setErrorCount(1);
-    } else {
-      setImgSrc(placeholder);
-    }
+    if (imgSrc !== placeholder) setImgSrc(placeholder);
   };
 
   return (
-    <div 
+    <div
       className={`bg-white p-6 rounded-lg shadow-lg border border-gray-100 hover:shadow-xl transition-all opacity-0 animate-fade-in`}
       style={{ animationDelay: `${delay}ms`, minWidth: 0 }}
     >
       <div className="aspect-[16/9] rounded-lg overflow-hidden bg-gray-100 shadow-md relative mb-4">
-        <img 
-          src={imgSrc} 
+        <OptimizedImage
+          src={imgSrc}
           alt={t(`service_${id}_title`)}
+          width={450}
+          height={253}
+          sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
           className="w-full h-full object-cover"
-          loading="lazy"
           onError={handleImgError}
         />
       </div>

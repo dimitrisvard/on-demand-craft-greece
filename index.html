@@ -41,19 +41,46 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Supabase is on the LCP critical path (homepage content fetched from content_pages); preconnect saves ~100ms. -->
+    <link rel="preconnect" href="https://cfjrtmtaitwzggzpkhxi.supabase.co" crossorigin>
     <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     </noscript>
-    
-    <!-- Google tag (gtag.js) - Loaded immediately to track all visits -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-17760727501"></script>
+
+    <!-- Preload the homepage hero (LCP candidate) WebP. Browsers ignore this preload on
+         pages that don't render the same image, so it's safe to keep in the global head. -->
+    <link rel="preload" as="image" type="image/webp"
+          href="/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3-1600.webp"
+          imagesrcset="/lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3-800.webp 800w, /lovable-uploads/b17e4baa-4be2-4892-a725-5871867d3dc3-1600.webp 1600w"
+          imagesizes="100vw"
+          fetchpriority="high">
+
+    <!-- Defer Google Tag Manager until the page is interactive so it doesn't block the
+         main thread during render (it was eating ~820ms of CPU per Lighthouse). -->
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
-      gtag('config', 'AW-17760727501');
-      gtag('config', 'G-G6T5PMFLRH', { anonymize_ip: false });
+      function loadGtag() {
+        if (window.__gtagLoaded) return;
+        window.__gtagLoaded = true;
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=AW-17760727501';
+        document.head.appendChild(s);
+        gtag('config', 'AW-17760727501');
+        gtag('config', 'G-G6T5PMFLRH', { anonymize_ip: false });
+      }
+      if (document.readyState === 'complete') {
+        setTimeout(loadGtag, 1500);
+      } else {
+        window.addEventListener('load', function () { setTimeout(loadGtag, 1500); });
+      }
+      // Fallback so first interaction always boots analytics, even on very slow devices.
+      ['pointerdown','keydown','scroll','touchstart'].forEach(function(ev){
+        window.addEventListener(ev, loadGtag, { once: true, passive: true });
+      });
     </script>
   </head>
 

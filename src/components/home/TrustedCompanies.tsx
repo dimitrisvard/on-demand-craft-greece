@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plane, Car, Stethoscope, Bot } from 'lucide-react';
 import IconRenderer from '../IconRenderer';
+import OptimizedImage from '../OptimizedImage';
 
 interface Company {
   name: string;
@@ -27,9 +27,12 @@ const TrustedCompanies: React.FC<TrustedCompaniesProps> = ({ companies }) => {
             <div key={i} className="flex flex-col items-center group w-full">
               <div className="w-full aspect-[4/3] overflow-hidden rounded-xl shadow-md hover:shadow-xl transition-all duration-300 bg-gray-50">
                 {company.image ? (
-                  <img 
-                    src={company.image} 
-                    alt={company.translationKey ? t(company.translationKey) : company.name} 
+                  <OptimizedImage
+                    src={company.image}
+                    alt={company.translationKey ? t(company.translationKey) : company.name}
+                    width={400}
+                    height={300}
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 ) : (
