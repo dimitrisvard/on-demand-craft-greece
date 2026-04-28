@@ -1,8 +1,8 @@
-import { escapeHtml } from '../inject';
-import { Lang } from '../types';
-import { t } from '../i18n';
-import { localizedPath } from '../slugs';
-import { SERVICES, SERVICE_IDS } from '../services';
+import { escapeHtml } from '../inject.js';
+import { Lang } from '../types.js';
+import { t } from '../i18n.js';
+import { localizedPath } from '../slugs.js';
+import { SERVICES, SERVICE_IDS } from '../services.js';
 
 export { escapeHtml };
 

@@ -1,4 +1,4 @@
-import { Lang } from '../types';
+import { Lang } from '../types.js';
 
 /**
  * Section headings, table column headers, and short string literals surfaced
