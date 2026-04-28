@@ -117,7 +117,9 @@ function buildStaticPageHreflang(page) {
 
 function buildStaticUrlEntry(lang, page, today) {
   const loc = escapeXml(buildPageUrl(lang, page));
-  return '  <url>\n    <loc>' + loc + '</loc>\n' + buildStaticPageHreflang(page) + '\n    <lastmod>' + today + '</lastmod>\n    <changefreq>' + page.changefreq + '</changefreq>\n    <priority>' + page.priority + '</priority>\n  </url>';
+  // sitemaps.org XSD: <loc>/<lastmod>/<changefreq>/<priority> first, then
+  // xhtml:link extensions. Reversing this trips GSC's strict validator.
+  return '  <url>\n    <loc>' + loc + '</loc>\n    <lastmod>' + today + '</lastmod>\n    <changefreq>' + page.changefreq + '</changefreq>\n    <priority>' + page.priority + '</priority>\n' + buildStaticPageHreflang(page) + '\n  </url>';
 }
 
 function buildContentPageUrl(lang, row) {
@@ -146,7 +148,7 @@ function buildContentPageUrlEntry(lang, row, slugGroup, today) {
   const loc = escapeXml(buildContentPageUrl(lang, row));
   const meta = CONTENT_PAGE_META[row.slug] || { priority: '0.6', changefreq: 'monthly' };
   const lastmod = row.updated_at ? String(row.updated_at).split('T')[0] : today;
-  return '  <url>\n    <loc>' + loc + '</loc>\n' + buildContentPageHreflang(slugGroup) + '\n    <lastmod>' + lastmod + '</lastmod>\n    <changefreq>' + meta.changefreq + '</changefreq>\n    <priority>' + meta.priority + '</priority>\n  </url>';
+  return '  <url>\n    <loc>' + loc + '</loc>\n    <lastmod>' + lastmod + '</lastmod>\n    <changefreq>' + meta.changefreq + '</changefreq>\n    <priority>' + meta.priority + '</priority>\n' + buildContentPageHreflang(slugGroup) + '\n  </url>';
 }
 
 function buildBlogHreflang(article, siblings) {
@@ -170,7 +172,7 @@ function buildBlogUrlEntry(article, siblings, today) {
   const loc = escapeXml(encodeSitemapUrl(BASE_URL + '/' + lang + '/' + blogSlug + '/' + article.slug));
   const lastmod = (article.updated_at || article.created_at || today).split('T')[0];
   const hreflang = siblings.length > 1 ? '\n' + buildBlogHreflang(article, siblings) : '';
-  return '  <url>\n    <loc>' + loc + '</loc>' + hreflang + '\n    <lastmod>' + lastmod + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>\n  </url>';
+  return '  <url>\n    <loc>' + loc + '</loc>\n    <lastmod>' + lastmod + '</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.6</priority>' + hreflang + '\n  </url>';
 }
 
 async function fetchBlogArticles() {

@@ -141,12 +141,15 @@ function buildStaticPageHreflang(page: PageDef): string {
 
 function buildStaticUrlEntry(lang: string, page: PageDef, today: string): string {
   const loc = escapeXml(buildPageUrl(lang, page));
+  // sitemaps.org XSD requires <loc>/<lastmod>/<changefreq>/<priority> first,
+  // then extension elements like xhtml:link. GSC's strict parser rejects the
+  // file with "Sitemap could not be read" if hreflang appears before lastmod.
   return `  <url>
     <loc>${loc}</loc>
-${buildStaticPageHreflang(page)}
     <lastmod>${today}</lastmod>
     <changefreq>${page.changefreq}</changefreq>
     <priority>${page.priority}</priority>
+${buildStaticPageHreflang(page)}
   </url>`;
 }
 
@@ -183,10 +186,10 @@ function buildContentPageUrlEntry(
   const lastmod = row.updated_at ? String(row.updated_at).split('T')[0] : today;
   return `  <url>
     <loc>${loc}</loc>
-${buildContentPageHreflang(slugGroup)}
     <lastmod>${lastmod}</lastmod>
     <changefreq>${meta.changefreq}</changefreq>
     <priority>${meta.priority}</priority>
+${buildContentPageHreflang(slugGroup)}
   </url>`;
 }
 
@@ -213,10 +216,10 @@ function buildBlogUrlEntry(article: Article, siblings: Article[], today: string)
   const hreflang = siblings.length > 1 ? `\n${buildBlogHreflang(siblings)}` : '';
 
   return `  <url>
-    <loc>${loc}</loc>${hreflang}
+    <loc>${loc}</loc>
     <lastmod>${lastmod}</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.6</priority>
+    <priority>0.6</priority>${hreflang}
   </url>`;
 }
 
