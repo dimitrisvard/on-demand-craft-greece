@@ -1090,6 +1090,12 @@ def _unfold_via_3d_transforms(
             for face_idx, T in local_t.items():
                 if face_idx not in transforms:
                     transforms[face_idx] = T
+            # Append the local order to the bend graph's unfolding_order so
+            # that downstream consumers (notably _place_bend_lines_3d) see
+            # the anchored bends and draw bend lines for them.
+            for entry in local_order:
+                if entry not in bend_graph.unfolding_order:
+                    bend_graph.unfolding_order.append(entry)
             component_member_set.update(local_t.keys())
     except Exception:
         pass
