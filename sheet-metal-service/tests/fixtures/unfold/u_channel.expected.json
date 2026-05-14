@@ -18,17 +18,17 @@
     }
   ],
   "flat_dimensions_mm": {
-    "width": 192.357,
+    "width": 208.357,
     "height": 60.0
   },
   "bend_lines_on_flat": [
     {
-      "x_from_left_mm": 46.0,
+      "x_from_left_mm": 52.089,
       "y0": 0.0,
       "y1": 60.0
     },
     {
-      "x_from_left_mm": 146.357,
+      "x_from_left_mm": 156.267,
       "y0": 0.0,
       "y1": 60.0
     }

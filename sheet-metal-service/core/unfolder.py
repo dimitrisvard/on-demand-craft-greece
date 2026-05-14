@@ -986,6 +986,7 @@ def _unfold_via_3d_transforms(
     transforms: Dict[int, gp_Trsf] = {base_idx: T_base}
     _bfs_compose_transforms(
         bend_graph.unfolding_order, bend_map, cf_map, transforms,
+        thickness=thickness, k_factor=k_factor,
     )
 
     # ── 3. Process additional MULTI-NODE connected components ──────────
@@ -1081,7 +1082,10 @@ def _unfold_via_3d_transforms(
                     bid = edge_data.get("bend_id", 0)
                     local_order.append((cur, bid, nbr))
                     queue.append(nbr)
-            _bfs_compose_transforms(local_order, bend_map, cf_map, local_t)
+            _bfs_compose_transforms(
+                local_order, bend_map, cf_map, local_t,
+                thickness=thickness, k_factor=k_factor,
+            )
             # Merge into transforms map (we treat these as part of main flat).
             for face_idx, T in local_t.items():
                 if face_idx not in transforms:
@@ -1391,10 +1395,18 @@ def _bfs_compose_transforms(
     bend_map: Dict[int, BendInfo],
     cf_map: Dict[int, "ClassifiedFace"],
     transforms: Dict[int, gp_Trsf],
+    thickness: float = 0.0,
+    k_factor: float = 0.0,
 ) -> None:
     """
     Walk the unfolding order, composing per-flange transforms via
-    rotation around each bend's axis.
+    rotation around each bend's axis followed by an outward translation
+    of the bend's bend-allowance length.
+
+    Without the translation the rotation alone collapses the cylindrical
+    bend region into a single column at the bend axis, so the flat
+    pattern is short by ``BA`` for every bend — flange widths just add
+    up to ``Σ flange_lengths`` instead of ``Σ flange_lengths + Σ BA``.
     """
     for from_idx, bend_id, to_idx in unfolding_order:
         T_parent = transforms.get(from_idx)
@@ -1417,7 +1429,8 @@ def _bfs_compose_transforms(
             continue
 
         child_cf = cf_map.get(to_idx)
-        if child_cf is None:
+        parent_cf = cf_map.get(from_idx)
+        if child_cf is None or parent_cf is None:
             continue
         child_normal_world = _face_plane_normal(child_cf.info.face)
         if child_normal_world is None:
@@ -1451,8 +1464,50 @@ def _bfs_compose_transforms(
                     best_T_child = T_combined
             except Exception:
                 continue
-        if best_T_child is not None:
-            transforms[to_idx] = best_T_child
+
+        if best_T_child is None:
+            continue
+
+        # ── Apply the bend-allowance translation ─────────────────────────
+        # In the unfolded XY plane, push the child flange outward — away
+        # from the parent flange — by BA along the direction perpendicular
+        # to the bend axis. This is the missing piece that turns a pure
+        # rotation into a real unfold.
+        if thickness > 0.0 and k_factor > 0.0 and bend.inner_radius > 0.0:
+            try:
+                bc = compute_bend(
+                    bend.angle_deg, bend.inner_radius, thickness, k_factor,
+                )
+                ba = bc.bend_allowance
+                # Bend axis direction in the unfolded frame (after applying
+                # T_combined to the world-space axis direction).
+                ax_dir_unf = ax_dir_world.Transformed(best_T_child)
+                ax_x, ax_y = ax_dir_unf.X(), ax_dir_unf.Y()
+                # Perpendicular to the axis in the XY plane.
+                perp_x, perp_y = -ax_y, ax_x
+                perp_len = math.sqrt(perp_x ** 2 + perp_y ** 2)
+                if perp_len > 1e-9:
+                    perp_x /= perp_len
+                    perp_y /= perp_len
+                    # Decide the sign: the outward direction is the one
+                    # pointing AWAY from the parent flange's centroid in
+                    # the unfolded frame.
+                    parent_com_world = gp_Pnt(*parent_cf.info.center_of_mass)
+                    child_com_world = gp_Pnt(*child_cf.info.center_of_mass)
+                    pc_unf = parent_com_world.Transformed(T_parent)
+                    cc_unf = child_com_world.Transformed(best_T_child)
+                    dx = cc_unf.X() - pc_unf.X()
+                    dy = cc_unf.Y() - pc_unf.Y()
+                    sign_t = 1.0 if (dx * perp_x + dy * perp_y) >= 0 else -1.0
+                    perp_x *= sign_t
+                    perp_y *= sign_t
+                    T_shift = gp_Trsf()
+                    T_shift.SetTranslation(gp_Vec(perp_x * ba, perp_y * ba, 0.0))
+                    best_T_child = T_shift.Multiplied(best_T_child)
+            except Exception:
+                pass
+
+        transforms[to_idx] = best_T_child
 
 
 def _world_to_base_plane_trsf(face: TopoDS_Face) -> Optional[gp_Trsf]:

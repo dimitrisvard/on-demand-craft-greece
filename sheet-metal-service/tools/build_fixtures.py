@@ -333,41 +333,31 @@ def _expected_l_bend(angle_deg: float, name: str) -> Expected:
     """
     Flat-pattern dimensions for an L-bend.
 
-    The flat sheet has two flanges joined by a single bend allowance:
-        flat_width = (base flange outer dim from sheet-edge to inner-bend tangent line)
-                   + bend_allowance
-                   + (second flange outer dim from inner-bend tangent line to sheet edge)
+    In every fixture in this file, ``BASE_LEN`` and ``FLANGE_LEN`` are the
+    **bend-tangent-to-sheet-edge** dimensions — i.e. the length of the
+    flat portion of each flange, measured from the bend tangent (where
+    the cylindrical bend starts) to the sheet's far edge along the outer
+    surface. They are *not* the outer mold-line lengths and they are not
+    the neutral-axis lengths.
 
-    The OUTER flange length (FLANGE_LEN) is measured along the outer surface
-    *from the outer corner of the bend to the far edge*. The mold-line
-    (k-line) flange length sums to:
-        flange_at_mold_line = (R + T) * tan(θ/2) + FLANGE_LEN - (R + T) * tan(θ/2)
-                            = FLANGE_LEN     ← for θ=90°, where tan(45°)=1
-    For non-90° bends the relationship still holds because both flanges are
-    measured from the same outer-corner reference.
+    With that convention, the flat length is:
 
-    Conservative flat length, matching kfactor.compute_flat_length:
-        flat = Σ outer_flange_lengths - Σ bend_deductions
-    where outer_flange = distance along the outer surface from sheet edge to
-    bend-outer-corner.
+        flat = Σ flange_bend_tangent_lengths + Σ BA
+             = BASE_LEN + FLANGE_LEN + BA
 
-    Base outer = BASE_LEN          (from sheet edge to bend outer corner)
-    Flange outer = FLANGE_LEN + (R+T)*tan(θ/2)*0  →  in this fixture the
-        FLANGE_LEN is already measured from the outer corner of the bend,
-        so outer = FLANGE_LEN.
+    where BA = (π/180) · angle · (R + K·T). This is the "k-line" /
+    "tangent-line" method: the bend allowance arc is *added between*
+    the flat portions (it is not subtracted, because the flat portions
+    do not include the bend region).
 
-    BD = 2*(R+T)*tan(θ/2) - BA
-    flat = BASE_LEN + FLANGE_LEN - BD  ← when each flange's outer dim is
-        measured from its outer bend corner (not from the mold line).
+    The bend line on the flat pattern is at the *center* of the BA gap:
+
+        x_bend = BASE_LEN + BA/2
     """
     ba = bend_allowance(angle_deg, INNER_RADIUS, THICKNESS, K_FACTOR)
-    bd = 2.0 * (INNER_RADIUS + THICKNESS) * math.tan(math.radians(angle_deg) / 2.0) - ba
-    flat_width = BASE_LEN + FLANGE_LEN - bd
+    flat_width = BASE_LEN + FLANGE_LEN + ba
     flat_height = WIDTH
-
-    # Bend line on the flat pattern sits at distance (BASE_LEN - (R+T)*tan(θ/2))
-    # from the left edge — i.e. the base flange's mold-line distance.
-    x_bend = BASE_LEN - (INNER_RADIUS + THICKNESS) * math.tan(math.radians(angle_deg) / 2.0)
+    x_bend = BASE_LEN + ba / 2.0
 
     return Expected(
         name=name,
@@ -382,22 +372,18 @@ def _expected_l_bend(angle_deg: float, name: str) -> Expected:
                             "height": round(flat_height, 3)},
         bend_lines_on_flat=[{"x_from_left_mm": round(x_bend, 3),
                              "y0": 0.0, "y1": round(flat_height, 3)}],
-        notes=("Flat length = BASE_LEN + FLANGE_LEN - BD where "
-               f"BD = 2(R+T)tan({angle_deg}/2) - BA, "
+        notes=("Flat length = BASE_LEN + FLANGE_LEN + BA where "
                f"BA = (π/180)·{angle_deg}·(R+K·T)."),
     )
 
 
 def _expected_z_fold() -> Expected:
-    """Z-fold: two 90° bends, one UP one DOWN. Both BAs deducted."""
+    """Z-fold: two 90° bends, one UP one DOWN. Both BAs added."""
     ba = bend_allowance(90.0, INNER_RADIUS, THICKNESS, K_FACTOR)
-    bd = 2.0 * (INNER_RADIUS + THICKNESS) * math.tan(math.radians(45.0)) - ba
-    # base + middle + top, two bends, each deducting BD once
-    flat_width = BASE_LEN + FLANGE_LEN + FLANGE_LEN - 2.0 * bd
+    flat_width = BASE_LEN + FLANGE_LEN + FLANGE_LEN + 2.0 * ba
     flat_height = WIDTH
-
-    x_bend_1 = BASE_LEN - (INNER_RADIUS + THICKNESS)
-    x_bend_2 = x_bend_1 + (FLANGE_LEN - bd)
+    x_bend_1 = BASE_LEN + ba / 2.0
+    x_bend_2 = BASE_LEN + ba + FLANGE_LEN + ba / 2.0
 
     return Expected(
         name="z_fold",
@@ -418,33 +404,20 @@ def _expected_z_fold() -> Expected:
             {"x_from_left_mm": round(x_bend_2, 3),
              "y0": 0.0, "y1": round(flat_height, 3)},
         ],
-        notes="Z-fold: UP then DOWN, both 90°. Flat length deducts 2× BD.",
+        notes="Z-fold: UP then DOWN, both 90°. Flat length adds 2× BA.",
     )
 
 
 def _expected_u_channel() -> Expected:
     """U-channel: two 90° UP bends, one at each end of the base flange."""
     ba = bend_allowance(90.0, INNER_RADIUS, THICKNESS, K_FACTOR)
-    bd = 2.0 * (INNER_RADIUS + THICKNESS) * math.tan(math.radians(45.0)) - ba
-    flat_width = BASE_LEN + 2.0 * FLANGE_LEN - 2.0 * bd
+    flat_width = BASE_LEN + 2.0 * FLANGE_LEN + 2.0 * ba
     flat_height = WIDTH
-
-    # Bend 1 sits at mold-line distance (R+T) from the LEFT sheet edge after
-    # unfolding (because we extend the left flange by FLANGE_LEN - (R+T)
-    # toward x_left = -(FLANGE_LEN - (R+T)) ... but the unfolded sheet places
-    # origin at sheet's left edge, so:
-    x_bend_left = FLANGE_LEN - bd / 2.0  # approximately — engine uses sum-of-outer minus BDs
-    # Stricter: place bend 1 at distance FLANGE_LEN - (R+T) from the left
-    # edge (mold line of the left flange) and bend 2 symmetrically.
-    x_bend_left = FLANGE_LEN - (INNER_RADIUS + THICKNESS)
-    x_bend_right = x_bend_left + (BASE_LEN - 2.0 * (INNER_RADIUS + THICKNESS)) + bd
-    # Actually for the U-channel both bends share the same base flange so:
-    #   flat = left_flange + base + right_flange - 2*BD
-    # bend lines fall at:
-    #   x1 = FLANGE_LEN - (R+T)*tan(45°) = FLANGE_LEN - (R+T)
-    #   x2 = x1 + (BASE_LEN - 2*(R+T)) + 2*(R+T) - BD  (i.e. base mold-line length)
-    # Simplify (using same-direction symmetric bends):
-    x_bend_right = flat_width - x_bend_left
+    # The base flange is the largest planar face → engine puts it as the
+    # unfolding anchor at the centre. Left side flange unfolds out to the
+    # left, right side flange to the right.
+    x_bend_left = FLANGE_LEN + ba / 2.0
+    x_bend_right = FLANGE_LEN + ba + BASE_LEN + ba / 2.0
 
     return Expected(
         name="u_channel",
