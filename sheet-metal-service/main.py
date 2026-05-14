@@ -59,10 +59,13 @@ async def check_api_key(request: Request, call_next):
 # ── Core processing pipeline ──────────────────────────────────────────────
 
 def _run_pipeline(step_path: str, material: str, thickness_override: float,
-                  k_factor_override: float):
+                  k_factor_override: float, debug: bool = False):
     """
     Run the full unfold pipeline on a STEP file.
-    Returns (flat_pattern, bends, thickness, k_factor, topo, shape, bbox_3d, warnings).
+
+    Returns ``(flat_pattern, bends, thickness, k_factor, topo, shape,
+    bbox_3d, debug_dump)``. ``debug_dump`` is an empty dict unless
+    ``debug=True``.
     """
     from core.step_parser import load_step, build_topology
     from core.thickness_detector import detect_thickness
@@ -70,6 +73,9 @@ def _run_pipeline(step_path: str, material: str, thickness_override: float,
     from core.bend_detector import detect_bends
     from core.bend_graph import build_bend_graph
     from core.unfolder import unfold
+    from core import guards
+
+    debug_dump: dict = {} if debug else {}
 
     # Load STEP
     solids = load_step(step_path)
@@ -87,28 +93,110 @@ def _run_pipeline(step_path: str, material: str, thickness_override: float,
     # Build topology
     topo = build_topology(main_solid)
 
+    if debug:
+        debug_dump["topology"] = {
+            "num_faces": len(topo.faces),
+            "volume_mm3": round(topo.volume, 2),
+            "bbox": list(topo.bbox) if topo.bbox else None,
+        }
+
     # Detect thickness
     if thickness_override > 0:
         thickness = thickness_override
+        thickness_confidence = 1.0
     else:
-        thickness, confidence = detect_thickness(topo)
+        thickness, thickness_confidence = detect_thickness(topo)
         logger.info("Auto-detected thickness: %.2f mm (confidence: %.0f%%)",
-                     thickness, confidence * 100)
+                     thickness, thickness_confidence * 100)
+
+    # Guard: thickness in plausible range
+    try:
+        guards.check_thickness(thickness)
+    except guards.ThicknessOutOfRangeError as e:
+        logger.warning("Thickness guard: %s", e)
 
     # K-factor
     k_factor = k_factor_override if k_factor_override > 0 else get_k_factor(material, thickness)
 
     # Classify faces
     classified = classify_faces(topo, thickness)
+    if debug:
+        ft_counts: dict = {}
+        for cf in classified:
+            ft_counts[cf.face_type.name] = ft_counts.get(cf.face_type.name, 0) + 1
+        debug_dump["face_classification"] = {
+            "thickness_mm": round(thickness, 3),
+            "thickness_confidence": round(thickness_confidence, 3),
+            "k_factor": k_factor,
+            "type_counts": ft_counts,
+            "faces": [
+                {
+                    "index": cf.info.index,
+                    "type": cf.face_type.name,
+                    "area_mm2": round(cf.info.area, 2),
+                    "normal": cf.info.normal,
+                    "radius": cf.info.radius,
+                    "axis": cf.info.axis,
+                }
+                for cf in classified
+            ],
+        }
 
     # Detect bends
     bends = detect_bends(topo, classified, thickness)
 
+    # Guard: bend angles in physical range
+    try:
+        guards.check_bend_angles([b.angle_deg for b in bends])
+    except guards.BendAngleOutOfRangeError as e:
+        logger.warning("Bend-angle guard: %s", e)
+
     # Build bend graph
     bend_graph = build_bend_graph(classified, bends)
+    if debug:
+        debug_dump["bends"] = [
+            {
+                "id": b.bend_id,
+                "face_index": b.face_index,
+                "inner_radius_mm": b.inner_radius,
+                "angle_deg": b.angle_deg,
+                "direction": b.direction,
+                "axis": list(b.axis),
+                "axis_location": list(b.axis_location),
+                "adjacent_flanges": list(b.adjacent_flanges),
+                "length_mm": b.length,
+            }
+            for b in bends
+        ]
+        debug_dump["bend_graph"] = {
+            "base_flange": bend_graph.base_flange,
+            "edges": [
+                [u, v, bend_graph.graph.edges[u, v].get("bend_id")]
+                for u, v in bend_graph.graph.edges()
+            ],
+            "unfolding_order": [list(t) for t in bend_graph.unfolding_order],
+            "has_cycles": bend_graph.has_cycles,
+        }
 
     # Unfold
     flat = unfold(topo, classified, bends, bend_graph, thickness, k_factor)
+
+    if debug:
+        debug_dump["flat_pattern"] = {
+            "width_mm": flat.width,
+            "height_mm": flat.height,
+            "num_outer_edges": len(flat.outer_edges),
+            "num_extra_outlines": len(flat.extra_outlines),
+            "num_holes": len(flat.holes),
+            "num_bend_lines": len(flat.bend_lines),
+            "flange_widths": flat.flange_widths,
+            "warnings": list(flat.warnings),
+            "bend_line_positions": [
+                {"start": list(bl.start), "end": list(bl.end),
+                 "bend_id": bl.bend_info.bend_id}
+                for bl in flat.bend_lines
+            ],
+        }
 
     # Bounding box
     bbox_3d = {}
@@ -119,7 +207,7 @@ def _run_pipeline(step_path: str, material: str, thickness_override: float,
             "z": round(topo.bbox[5] - topo.bbox[2], 2),
         }
 
-    return flat, bends, thickness, k_factor, topo, main_solid, bbox_3d
+    return flat, bends, thickness, k_factor, topo, main_solid, bbox_3d, debug_dump
 
 
 async def _get_step_path(
@@ -176,7 +264,7 @@ async def unfold_endpoint(
 
         part_name = os.path.splitext(os.path.basename(step_path))[0]
 
-        flat, bends, thickness, k_factor, topo, solid, bbox_3d = _run_pipeline(
+        flat, bends, thickness, k_factor, topo, solid, bbox_3d, _debug = _run_pipeline(
             step_path, material, thickness_override, k_factor_override
         )
 
@@ -264,7 +352,7 @@ async def unfold_preview(
 
         part_name = os.path.splitext(os.path.basename(step_path))[0]
 
-        flat, bends, thickness, k_factor, topo, solid, bbox_3d = _run_pipeline(
+        flat, bends, thickness, k_factor, topo, solid, bbox_3d, _debug = _run_pipeline(
             step_path, material, thickness_override, k_factor_override
         )
 
@@ -287,6 +375,7 @@ async def unfold_preview(
 
 @app.post("/api/v1/unfold/info")
 async def unfold_info(
+    request: Request,
     file: Optional[UploadFile] = File(None),
     file_url: Optional[str] = Form(None),
     storage_path: Optional[str] = Form(None),
@@ -294,7 +383,13 @@ async def unfold_info(
     thickness_override: float = Form(0.0),
     k_factor_override: float = Form(0.0),
 ):
-    """JSON metadata only — for the quoting engine."""
+    """JSON metadata only — for the quoting engine.
+
+    Pass ``?debug=true`` to also receive the full per-stage intermediate
+    state as a ``debug_dump`` field for triaging customer-support
+    tickets.
+    """
+    debug = request.query_params.get("debug", "").lower() in ("1", "true", "yes")
     tmpdir = tempfile.mkdtemp(prefix="info_")
     try:
         step_path = await _get_step_path(file, file_url, storage_path, tmpdir)
@@ -302,13 +397,14 @@ async def unfold_info(
         if not validate_step_file(step_path):
             raise HTTPException(400, "Invalid STEP file")
 
-        flat, bends, thickness, k_factor, topo, solid, bbox_3d = _run_pipeline(
-            step_path, material, thickness_override, k_factor_override
+        flat, bends, thickness, k_factor, topo, solid, bbox_3d, debug_dump = _run_pipeline(
+            step_path, material, thickness_override, k_factor_override,
+            debug=debug,
         )
 
         from core.kfactor import compute_bend
 
-        return JSONResponse({
+        payload: dict = {
             "success": True,
             "part_info": {
                 "thickness_detected": thickness,
@@ -331,7 +427,10 @@ async def unfold_info(
                 for b in bends
             ],
             "warnings": flat.warnings,
-        })
+        }
+        if debug:
+            payload["debug_dump"] = debug_dump
+        return JSONResponse(payload)
 
     except HTTPException:
         raise
@@ -371,9 +470,14 @@ async def flat_pattern_compat(request: Request):
         material = part_info.get("material", "steel")
         thickness_input = float(part_info.get("thickness", 0))
         k_factor_input = float(part_info.get("k_factor", 0))
+        debug = (
+            str(body.get("debug", "")).lower() in ("1", "true", "yes")
+            or request.query_params.get("debug", "").lower() in ("1", "true", "yes")
+        )
 
-        flat, bends, thickness, k_factor, topo, solid, bbox_3d = _run_pipeline(
-            step_path, material, thickness_input, k_factor_input
+        flat, bends, thickness, k_factor, topo, solid, bbox_3d, debug_dump = _run_pipeline(
+            step_path, material, thickness_input, k_factor_input,
+            debug=debug,
         )
 
         part_name = os.path.splitext(file_name)[0]
@@ -476,6 +580,8 @@ async def flat_pattern_compat(request: Request):
             response["dxf_base64"] = dxf_base64
         if svg_base64:
             response["svg_base64"] = svg_base64
+        if debug:
+            response["debug_dump"] = debug_dump
 
         return JSONResponse(response)
 
