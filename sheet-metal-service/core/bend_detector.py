@@ -79,6 +79,19 @@ def detect_bends(
         if len(adj_flanges) < 2:
             # Try to include thickness faces bridging to flanges
             adj_flanges = _find_adjacent_flanges_via_thickness(topo, fi, flange_indices, classified_map)
+        # Filter out flanges whose normal is parallel to the bend axis — those
+        # are the end-cap faces produced by an extruded sheet (e.g. the two
+        # y-side faces of an L-bracket extruded along Y). They share an edge
+        # with the cylindrical bend face but they are NOT the two flanges
+        # the bend connects. Without this filter ``set`` iteration order is
+        # what decides which two faces are picked, which made bend_angle_deg
+        # report ~90° regardless of the actual fold angle.
+        bend_axis = face_info.axis
+        if bend_axis is not None:
+            adj_flanges = _filter_perpendicular_to_axis(topo, adj_flanges, bend_axis)
+        # Prefer the two largest remaining faces (the true flanges dwarf any
+        # thin connector strips that survive the perpendicularity filter).
+        adj_flanges = _top_two_by_area(topo, adj_flanges)
         if len(adj_flanges) < 2:
             # Can't determine bend without two flanges — skip
             continue
@@ -243,6 +256,48 @@ def _find_adjacent_flanges(
     """Return flange indices directly adjacent to the bend face."""
     adj = topo.face_adjacency.get(bend_idx, set())
     return [i for i in adj if i in flange_indices]
+
+
+def _filter_perpendicular_to_axis(
+    topo: Topology,
+    face_indices: List[int],
+    axis: Tuple[float, float, float],
+    tol: float = 0.1,
+) -> List[int]:
+    """Drop faces whose normal is parallel to *axis* (end-cap faces).
+
+    A genuine flange adjacent to a bend has its outward normal in the plane
+    perpendicular to the bend axis, so ``|normal · axis|`` is near zero.
+    End-cap faces produced by extruding a sheet-metal profile have their
+    normal along the extrusion direction = the bend axis, so the same dot
+    product is ~1.
+    """
+    ax_len = math.sqrt(axis[0] ** 2 + axis[1] ** 2 + axis[2] ** 2)
+    if ax_len < 1e-9:
+        return list(face_indices)
+    ax = (axis[0] / ax_len, axis[1] / ax_len, axis[2] / ax_len)
+    kept: List[int] = []
+    for idx in face_indices:
+        if idx >= len(topo.faces):
+            continue
+        n = topo.faces[idx].normal
+        if n is None:
+            kept.append(idx)
+            continue
+        dot = abs(n[0] * ax[0] + n[1] * ax[1] + n[2] * ax[2])
+        if dot < 1.0 - tol:
+            kept.append(idx)
+    return kept
+
+
+def _top_two_by_area(topo: Topology, face_indices: List[int]) -> List[int]:
+    """Return up to two face indices ordered by descending area."""
+    scored = sorted(
+        (i for i in face_indices if i < len(topo.faces)),
+        key=lambda i: topo.faces[i].area,
+        reverse=True,
+    )
+    return scored[:2]
 
 
 def _find_adjacent_flanges_via_thickness(
