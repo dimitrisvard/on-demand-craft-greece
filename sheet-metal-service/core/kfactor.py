@@ -1,15 +1,31 @@
 """
 K-factor, bend allowance, and bend deduction calculations.
 
-Bend Allowance (BA) = arc length along the neutral axis:
-    BA = (π/180) × bend_angle × (R_inner + K × T)
+Ground-truth math
+-----------------
+For every formula below ``angle_deg`` is the **rotation from coplanar** —
+90° for an L-bend, 180° for a hem (folded back on itself), 0° for an
+unbent edge. It is *not* the included interior dihedral between the
+flanges. Every consumer of these formulas must feed the rotation-from-
+coplanar angle; ``bend_detector.detect_bends`` is responsible for
+producing that value from the B-rep.
 
-Bend Deduction (BD) = material to subtract for accurate flat length:
-    BD = 2 × OSSB - BA
-    where OSSB (Outside SetBack) = (R + T) × tan(A/2)
+    Bend Allowance       BA  = (π / 180) · angle_deg · (R + K · T)
+    Outside Setback      SB  = (R + T)  · tan(angle_deg / 2)
+    Bend Deduction       BD  = 2 · SB - BA
+    Flat length          L   = Σ flange_outer_dim - Σ BD
+                            = Σ mold_line_flange_len  +  Σ BA
 
-Flat length of a part:
-    L_flat = Σ(flange_outer_dimensions) - Σ(bend_deductions)
+where
+    R = inner bend radius (mm)
+    T = sheet thickness (mm)
+    K = K-factor (dimensionless, neutral-axis position ratio)
+
+Default K-factor table (``K_FACTOR_TABLE`` below) is the source of truth
+for this service. It does not always match published values from other
+references; it was tuned against the existing production part library
+and the per-customer override on the ``/flat-pattern`` endpoint takes
+precedence.
 """
 
 from __future__ import annotations

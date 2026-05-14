@@ -1,0 +1,37 @@
+{
+  "name": "z_fold",
+  "thickness_mm": 2.0,
+  "k_factor": 0.33,
+  "material": "mild_steel",
+  "bends": [
+    {
+      "angle_deg": 90.0,
+      "inner_radius_mm": 2.0,
+      "direction": "UP",
+      "length_mm": 60.0
+    },
+    {
+      "angle_deg": 90.0,
+      "inner_radius_mm": 2.0,
+      "direction": "DOWN",
+      "length_mm": 60.0
+    }
+  ],
+  "flat_dimensions_mm": {
+    "width": 192.357,
+    "height": 60.0
+  },
+  "bend_lines_on_flat": [
+    {
+      "x_from_left_mm": 96.0,
+      "y0": 0.0,
+      "y1": 60.0
+    },
+    {
+      "x_from_left_mm": 142.178,
+      "y0": 0.0,
+      "y1": 60.0
+    }
+  ],
+  "notes": "Z-fold: UP then DOWN, both 90\u00b0. Flat length deducts 2\u00d7 BD."
+}

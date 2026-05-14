@@ -1,0 +1,26 @@
+{
+  "name": "l_bend_90",
+  "thickness_mm": 2.0,
+  "k_factor": 0.33,
+  "material": "mild_steel",
+  "bends": [
+    {
+      "angle_deg": 90.0,
+      "inner_radius_mm": 2.0,
+      "direction": "UP",
+      "length_mm": 60.0
+    }
+  ],
+  "flat_dimensions_mm": {
+    "width": 146.178,
+    "height": 60.0
+  },
+  "bend_lines_on_flat": [
+    {
+      "x_from_left_mm": 96.0,
+      "y0": 0.0,
+      "y1": 60.0
+    }
+  ],
+  "notes": "Flat length = BASE_LEN + FLANGE_LEN - BD where BD = 2(R+T)tan(90.0/2) - BA, BA = (\u03c0/180)\u00b790.0\u00b7(R+K\u00b7T)."
+}
