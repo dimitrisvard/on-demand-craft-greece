@@ -94,7 +94,12 @@ class Expected:
 
 def _arc_midpoint(center: Tuple[float, float], radius: float,
                   start_angle: float, end_angle: float) -> Tuple[float, float]:
-    """Return the point on a circle at the midpoint angle between start and end."""
+    """Return the point on a circle at the midpoint angle between *start_angle*
+    and *end_angle*, traversed in the order given (the arithmetic mean — so
+    callers must pass *end_angle* as a continuous extension of *start_angle*,
+    e.g. ``start=π, end=3π/2`` for a 90° CCW sweep from -X to -Y rather than
+    ``start=π, end=-π/2`` which would silently degenerate into a 270° arc).
+    """
     mid = 0.5 * (start_angle + end_angle)
     cx, cy = center
     return (cx + radius * math.cos(mid), cy + radius * math.sin(mid))
@@ -268,14 +273,17 @@ def _build_u_channel_profile() -> List[Tuple[str, tuple]]:
     arcR_inner_end = (B + R, T + R)
     arcR_mid_inner = _arc_midpoint(cR, R, -math.pi / 2, 0.0)
 
-    # Bend at -X end (mirror image)
+    # Bend at -X end (mirror image of the right bend). The outer arc sweeps
+    # CCW from angle π (at (-R-T, T+R)) to angle 3π/2 (at (0, 0)) — a 90°
+    # arc through (-2.83, 1.17). Pass the unwrapped end angle so the
+    # midpoint lands on the correct side of the circle.
     cL = (0.0, T + R)
     arcL_outer_start = (-(R + T), T + R)
     arcL_outer_end = (0.0, 0.0)
-    arcL_mid_outer = _arc_midpoint(cL, R + T, math.pi, -math.pi / 2)
+    arcL_mid_outer = _arc_midpoint(cL, R + T, math.pi, math.pi + math.pi / 2)
     arcL_inner_start = (-R, T + R)
     arcL_inner_end = (0.0, T)
-    arcL_mid_inner = _arc_midpoint(cL, R, math.pi, -math.pi / 2)
+    arcL_mid_inner = _arc_midpoint(cL, R, math.pi, math.pi + math.pi / 2)
 
     # Side flange tops
     right_outer_top = (B + R + T, T + R + L)
