@@ -45,8 +45,11 @@ def detect_bends(
     Detect all bends from faces classified as BEND/HEM.
 
     For each bend face we determine:
-      - Inner vs outer radius (using adjacent face normals)
-      - Bend angle = 180° - angle_between_adjacent_flange_normals
+      - Inner vs outer radius (using adjacent face orientation)
+      - Bend angle = angle between OUTWARD adjacent flange normals — i.e.
+        the rotation from coplanar (90° for an L-bend, 180° for a hem,
+        0° for an unbent edge). See ``core/kfactor.py`` for the
+        ground-truth definition.
       - Direction (UP/DOWN) relative to the largest flange
       - Adjacent flanges (the two planar faces connected via this bend)
     """
@@ -104,9 +107,14 @@ def detect_bends(
         if n1 is None or n2 is None:
             continue
 
-        angle_between = _angle_between(n1, n2)
-        bend_angle_deg = 180.0 - math.degrees(angle_between)
-        # Clamp to valid range
+        # Angle between two consistently-outward flange normals equals the
+        # rotation from coplanar — 90° for an L-bend, 180° for a hem (folded
+        # back on itself), 0° for an unbent edge. (The previous code did
+        # `180 - degrees(angle_between)`, which only happened to give the
+        # right answer at exactly 90°.)
+        bend_angle_deg = math.degrees(_angle_between(n1, n2))
+        # Clamp to valid range — keep hems (~180°) and reject coplanar
+        # faces that slipped through the BEND face classification.
         bend_angle_deg = max(0.1, min(179.9, bend_angle_deg))
 
         # Inner vs outer: the face whose normal points toward the cylinder axis centre
