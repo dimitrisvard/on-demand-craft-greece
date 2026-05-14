@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Set
 
 from OCP.TopoDS import TopoDS_Face, TopoDS_Edge
+from OCP.TopAbs import TopAbs_REVERSED
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRep import BRep_Tool
 from OCP.gp import gp_Vec, gp_Pnt, gp_Ax1, gp_Dir
@@ -335,41 +336,34 @@ def _find_adjacent_flanges_via_thickness(
 
 def _is_inner_face(fi: FaceInfo) -> bool:
     """
-    Heuristic: for a cylindrical face, check if the face normal at the mid-point
-    points toward the axis (inner) or away (outer).
+    For a cylindrical bend face, decide whether it is the INNER (radius R)
+    or OUTER (radius R + T) side of the bend.
+
+    The cleanest signal is the face's topological orientation in the parent
+    solid. OCC's cylindrical surface has its intrinsic normal radially
+    outward from the axis. The metal of the part is between the two
+    cylindrical surfaces, so:
+
+    * The OUTER cylinder face (radius R + T): the solid sits on the inside
+      of the cylinder, so the topological outward normal must point
+      radially outward — which matches the intrinsic surface normal. The
+      face orientation is FORWARD.
+    * The INNER cylinder face (radius R): the solid sits on the outside of
+      the cylinder, so the topological outward normal must point radially
+      inward — opposite the intrinsic normal. The face orientation is
+      REVERSED.
+
+    The previous heuristic compared the parametric d1u × d1v normal against
+    a vector-to-axis dot product. That gave the same sign for both inner
+    and outer cylinders (both have radially-outward parametric normals
+    regardless of which side the metal is on), so `_is_inner_face` always
+    returned False, collapsing every bend's reported radius to the
+    0.1 mm clamp downstream.
     """
-    face = fi.face
-    adaptor = BRepAdaptor_Surface(face)
-    u_mid = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2
-    v_mid = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2
-
-    pnt = gp_Pnt()
-    d1u = gp_Vec()
-    d1v = gp_Vec()
-    adaptor.D1(u_mid, v_mid, pnt, d1u, d1v)
-
-    normal = d1u.Crossed(d1v)
-    if normal.Magnitude() < 1e-10:
-        return True
-
-    normal.Normalize()
-
-    # Vector from point to axis
-    if fi.axis_location is None:
-        return True
-
-    to_axis = gp_Vec(
-        fi.axis_location[0] - pnt.X(),
-        fi.axis_location[1] - pnt.Y(),
-        fi.axis_location[2] - pnt.Z(),
-    )
-    # Project to radial direction (remove axial component)
-    if fi.axis:
-        ax_dir = gp_Vec(fi.axis[0], fi.axis[1], fi.axis[2])
-        axial_comp = to_axis.Dot(ax_dir)
-        to_axis = to_axis - ax_dir * axial_comp  # type: ignore[operator]
-
-    return normal.Dot(to_axis) > 0
+    try:
+        return fi.face.Orientation() == TopAbs_REVERSED
+    except Exception:
+        return False
 
 
 def _compute_bend_length(face: TopoDS_Face) -> float:
