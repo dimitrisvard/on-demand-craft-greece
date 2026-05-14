@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Set, Tuple, Optional
 
 from OCP.STEPControl import STEPControl_Reader
-from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_SOLID
+from OCP.TopAbs import TopAbs_FACE, TopAbs_EDGE, TopAbs_SOLID, TopAbs_REVERSED
 from OCP.TopExp import TopExp, TopExp_Explorer
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
 from OCP.TopoDS import TopoDS, TopoDS_Solid, TopoDS_Face, TopoDS_Edge, TopoDS_Shape
@@ -195,7 +195,12 @@ def _analyse_face(index: int, face: TopoDS_Face) -> FaceInfo:
     if surface_type == "plane":
         plane = adaptor.Plane()
         d = plane.Axis().Direction()
-        info.normal = (d.X(), d.Y(), d.Z())
+        # The surface's intrinsic axis direction is not orientation-aware:
+        # a face with TopAbs_REVERSED orientation in the parent solid has
+        # its true outward normal flipped. Every downstream stage assumes
+        # info.normal points OUT of the solid, so honour orientation here.
+        sign = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0
+        info.normal = (sign * d.X(), sign * d.Y(), sign * d.Z())
 
     elif surface_type == "cylinder":
         cyl = adaptor.Cylinder()
