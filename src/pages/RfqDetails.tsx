@@ -1097,153 +1097,265 @@ const RfqDetails = (props: RfqDetailsProps) => {
       terms_url: 'https://microns-hub.com/terms',
     };
 
+    // Brand palette (matches scripts/generate_offer_pdf.py reference)
+    const TEAL = '#1FB8B8';
+    const TEAL_LIGHT = '#E6F7F7';
+    const DARK = '#2A2A2A';
+    const GREY_TXT = '#555555';
+    const GREY_LINE = '#D8D8D8';
+    const GREY_BG = '#F5F7F8';
+
+    const inquiryDate = data.inquiry_date ? new Date(data.inquiry_date) : new Date(data.date);
+    const inquiryDateStr = format(inquiryDate, 'yyyy-MM-dd');
+    const dateStr = format(new Date(data.date), 'yyyy-MM-dd');
+    const validUntilStr = format(
+      new Date(inquiryDate.getTime() + 14 * 24 * 60 * 60 * 1000),
+      'yyyy-MM-dd'
+    );
+    const greetingName = (data.buyer.name || '').trim() || 'Sir/Madam';
+    const buyerCompanyOrName = (data.buyer.company || '').trim() || greetingName;
+    const buyerAddress = data.buyer.address_lines.filter(Boolean).join('<br/>');
+    const contactPhone = data.contact_partner.phone ? `Tel: ${data.contact_partner.phone}<br/>` : '';
+    const contactEmail = data.contact_partner.email || '';
+
     // Create a container for html2canvas rendering
     const container = document.createElement('div');
     container.style.width = '800px';
     container.style.fontFamily = 'Helvetica, Arial, sans-serif';
     container.style.fontSize = '12px';
-    container.style.color = '#222';
+    container.style.color = DARK;
     container.style.background = '#fff';
-    container.style.padding = '32px';
+    container.style.padding = '0';
 
-    // Use an absolute path for the logo and set width for reliability (restore to previous size)
-    const logoHtml = `<img src='/logo.png' style="width:180px;height:auto;display:block;" />`;
+    const logoHtml = `<img src='/logo.png' style="width:200px;height:auto;display:block;" />`;
 
-    // Build the HTML for the PDF (header, info, items table, totals, conditions, footer)
     container.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        ${logoHtml}
-        <div style="text-align:right;">
-          <div style="font-size:20px;font-weight:bold;">${data.seller.company_name}</div>
-          <div style="font-size:12px;">${data.seller.address_lines.join('<br/>')}</div>
+      <!-- Top accent bar -->
+      <div style="height:10px;background:${TEAL};"></div>
+      <div style="height:2px;background:${DARK};"></div>
+
+      <div style="padding:24px 32px 0 32px;">
+        <!-- Header: logo left, company right -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          ${logoHtml}
+          <div style="text-align:right;">
+            <div style="font-size:15px;font-weight:bold;color:${DARK};">MICRONS HUB DV E.E.</div>
+            <div style="font-size:10.5px;color:${GREY_TXT};line-height:1.5;margin-top:4px;">
+              Industrial Area Street B, No. 4<br/>
+              71601 Heraklion, Crete, Greece<br/>
+              Tel: +30 210 444 7830<br/>
+              info@micronshub.eu &middot; www.micronshub.eu<br/>
+              VAT ID: EL803129638
+            </div>
+          </div>
         </div>
-      </div>
-      <hr style="margin:16px 0; border: 1px solid #e0e0e0;" />
-      <div style="display:flex;justify-content:space-between;">
-        <div>
-          <b>Buyer:</b><br/>
-          ${data.buyer.name}<br/>
-          ${data.buyer.company}<br/>
-          ${data.buyer.address_lines.join('<br/>')}<br/>
-          ${data.buyer.country}
-        </div>
-        <div style="text-align:right;">
-          <b>Receipt No:</b> ${data.receipt_no}<br/>
-          <b>Date:</b> ${format(new Date(data.date), 'yyyy-MM-dd')}<br/>
-          <b>Inquiry Date:</b> ${format(new Date(data.inquiry_date), 'yyyy-MM-dd')}
-        </div>
-      </div>
-      <h2 style="text-align:center;margin:24px 0 8px 0; color:#1a237e;">OFFER</h2>
-      <div>Dear ${data.buyer.name},<br/>Thank you for your inquiry dated ${format(new Date(data.inquiry_date), 'yyyy-MM-dd')}. We are pleased to submit our offer as follows:</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:24px;">
-        <thead>
-          <tr style="background:#f3f4f6;">
-            <th style="border:1px solid #ccc;padding:6px;">Item</th>
-            <th style="border:1px solid #ccc;padding:6px;">Files</th>
-            <th style="border:1px solid #ccc;padding:6px;">Description</th>
-            <th style="border:1px solid #ccc;padding:6px;">Quantity</th>
-            <th style="border:1px solid #ccc;padding:6px;">Unit Price</th>
-            <th style="border:1px solid #ccc;padding:6px;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.items.map(item => `
+
+        <!-- Teal divider -->
+        <div style="height:2px;background:${TEAL};margin:14px 0 18px 0;"></div>
+
+        <!-- OFFER title + meta box -->
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="font-size:34px;font-weight:bold;color:${DARK};line-height:1;">OFFER</div>
+            <div style="font-size:12px;font-weight:bold;color:${TEAL};margin-top:6px;">Quotation for manufactured parts</div>
+          </div>
+          <table style="border-collapse:collapse;background:${GREY_BG};border:1px solid ${GREY_LINE};font-size:11px;">
             <tr>
-              <td style="border:1px solid #ccc;padding:6px;">${item.product_name}</td>
-              <td style="border:1px solid #ccc;padding:6px;white-space:pre-line;color:#1976d2;">${item.files && item.files.length > 0 ? item.files.join('<br/>') : '-'}</td>
-              <td style="border:1px solid #ccc;padding:6px;white-space:pre-line;">${item.description}</td>
-              <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.quantity}</td>
-              <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.unit_price.toFixed(2)}</td>
-              <td style="border:1px solid #ccc;padding:6px;text-align:right;">${item.total_price.toFixed(2)}</td>
+              <td style="padding:4px 12px;text-align:right;color:${GREY_TXT};font-weight:bold;font-size:9px;border-bottom:1px solid ${GREY_LINE};">OFFER NO.</td>
+              <td style="padding:4px 12px;text-align:right;color:${DARK};font-weight:bold;border-bottom:1px solid ${GREY_LINE};">${data.receipt_no || ''}</td>
             </tr>
-          `).join('')}
-        </tbody>
-      </table>
-      <div style="margin-top:8px;font-size:10px;color:#666;">
-        ${data.items.filter(i => i.notes).map(i => `<div>Note: ${i.notes}</div>`).join('')}
+            <tr>
+              <td style="padding:4px 12px;text-align:right;color:${GREY_TXT};font-weight:bold;font-size:9px;border-bottom:1px solid ${GREY_LINE};">DATE</td>
+              <td style="padding:4px 12px;text-align:right;color:${DARK};font-weight:bold;border-bottom:1px solid ${GREY_LINE};">${dateStr}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 12px;text-align:right;color:${GREY_TXT};font-weight:bold;font-size:9px;border-bottom:1px solid ${GREY_LINE};">INQUIRY DATE</td>
+              <td style="padding:4px 12px;text-align:right;color:${DARK};font-weight:bold;border-bottom:1px solid ${GREY_LINE};">${inquiryDateStr}</td>
+            </tr>
+            <tr>
+              <td style="padding:4px 12px;text-align:right;color:${GREY_TXT};font-weight:bold;font-size:9px;">VALID UNTIL</td>
+              <td style="padding:4px 12px;text-align:right;color:${DARK};font-weight:bold;">${validUntilStr}</td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- Buyer + Supplier blocks -->
+        <div style="display:flex;gap:14px;margin-top:18px;">
+          <div style="flex:1;background:${GREY_BG};border:1px solid ${GREY_LINE};padding:12px 16px;">
+            <div style="font-size:10px;font-weight:bold;color:${TEAL};margin-bottom:6px;letter-spacing:0.5px;">BILL TO</div>
+            <div style="font-size:13px;font-weight:bold;color:${DARK};margin-bottom:4px;">${buyerCompanyOrName}</div>
+            <div style="font-size:11px;color:${DARK};line-height:1.5;">
+              ${data.buyer.name && data.buyer.company ? `Attn: ${greetingName}<br/>` : ''}
+              ${buyerAddress ? `${buyerAddress}<br/>` : ''}
+              ${data.buyer.country ? `${data.buyer.country}<br/>` : ''}
+              ${contactPhone}
+              ${contactEmail}
+            </div>
+          </div>
+          <div style="flex:1;background:${TEAL_LIGHT};border:1px solid ${TEAL};padding:12px 16px;">
+            <div style="font-size:10px;font-weight:bold;color:${TEAL};margin-bottom:6px;letter-spacing:0.5px;">SUPPLIED BY</div>
+            <div style="font-size:13px;font-weight:bold;color:${DARK};margin-bottom:4px;">Microns Hub DV E.E.</div>
+            <div style="font-size:11px;color:${DARK};line-height:1.5;">
+              Attn: Mr. Dimitris Vardalachakis<br/>
+              Founder &amp; Managing Director<br/>
+              Industrial Area Street B, No. 4<br/>
+              71601 Heraklion, Crete, Greece<br/>
+              Tel: +30 210 444 7830<br/>
+              info@micronshub.eu
+            </div>
+          </div>
+        </div>
+
+        <!-- Intro -->
+        <div style="margin-top:18px;font-size:11.5px;color:${DARK};line-height:1.5;">
+          <div>Dear ${greetingName},</div>
+          <div style="margin-top:6px;">Thank you for your inquiry of ${inquiryDateStr}. We are pleased to submit the following quotation for the parts listed in your request.</div>
+        </div>
+
+        <!-- Items table -->
+        <table style="width:100%;border-collapse:collapse;margin-top:14px;font-size:11px;">
+          <thead>
+            <tr style="background:${DARK};color:#fff;">
+              <th style="padding:8px 6px;text-align:center;font-weight:bold;width:32px;">#</th>
+              <th style="padding:8px 6px;text-align:left;font-weight:bold;">PART</th>
+              <th style="padding:8px 6px;text-align:left;font-weight:bold;">DESCRIPTION</th>
+              <th style="padding:8px 6px;text-align:left;font-weight:bold;">FILES</th>
+              <th style="padding:8px 6px;text-align:center;font-weight:bold;border-left:2px solid ${TEAL};">QTY</th>
+              <th style="padding:8px 6px;text-align:center;font-weight:bold;">UNIT PRICE</th>
+              <th style="padding:8px 6px;text-align:center;font-weight:bold;">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.items.map((item, idx) => `
+              <tr style="${idx % 2 === 1 ? `background:${GREY_BG};` : 'background:#fff;'}border-bottom:1px solid ${GREY_LINE};">
+                <td style="padding:6px;text-align:center;color:${DARK};">${idx + 1}</td>
+                <td style="padding:6px;color:${DARK};font-weight:bold;">${item.product_name || ''}</td>
+                <td style="padding:6px;color:${DARK};white-space:pre-line;">${item.description || ''}</td>
+                <td style="padding:6px;color:${GREY_TXT};font-size:9.5px;white-space:pre-line;">${item.files && item.files.length > 0 ? item.files.join('<br/>') : '-'}</td>
+                <td style="padding:6px;text-align:center;color:${DARK};background:${TEAL_LIGHT};border-left:2px solid ${TEAL};">${item.quantity}</td>
+                <td style="padding:6px;text-align:center;color:${DARK};background:${TEAL_LIGHT};font-weight:bold;">${item.unit_price.toFixed(2)}</td>
+                <td style="padding:6px;text-align:center;color:${DARK};background:${TEAL_LIGHT};font-weight:bold;">${item.total_price.toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        ${data.items.filter(i => i.notes).length > 0 ? `
+          <div style="margin-top:6px;font-size:10px;color:${GREY_TXT};line-height:1.4;">
+            ${data.items.filter(i => i.notes).map(i => `<div>Note: ${i.notes}</div>`).join('')}
+          </div>
+        ` : ''}
+
+        <!-- Totals -->
+        <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+          <table style="font-size:11px;border-collapse:collapse;min-width:280px;background:${GREY_BG};border:1px solid ${GREY_LINE};">
+            <tr>
+              <td style="padding:6px 14px;color:${DARK};">Shipping Cost:</td>
+              <td style="padding:6px 14px;text-align:right;color:${DARK};">${data.shipping_cost.toFixed(2)}</td>
+            </tr>
+            <tr style="border-top:1px solid ${GREY_LINE};">
+              <td style="padding:6px 14px;color:${DARK};">VAT (${data.vat_rate}%):</td>
+              <td style="padding:6px 14px;text-align:right;color:${DARK};">${data.vat_amount.toFixed(2)}</td>
+            </tr>
+            <tr style="background:${TEAL};color:#fff;font-weight:bold;font-size:12px;">
+              <td style="padding:8px 14px;">TOTAL:</td>
+              <td style="padding:8px 14px;text-align:right;">${data.total_price.toFixed(2)}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="clear:both;"></div>
+
+        <div style="margin-top:10px;font-size:10px;color:${GREY_TXT};line-height:1.5;">
+          <b>Note on pricing:</b> All prices are in EUR, net of VAT.
+        </div>
+
+        <!-- Conditions strip -->
+        <table style="width:100%;border-collapse:collapse;margin-top:14px;background:${GREY_BG};border:1px solid ${GREY_LINE};">
+          <tr>
+            <td style="padding:8px 14px;border-right:1px solid ${GREY_LINE};width:25%;">
+              <div style="font-size:9px;font-weight:bold;color:${TEAL};letter-spacing:0.5px;">DELIVERY TIME</div>
+              <div style="font-size:12px;font-weight:bold;color:${DARK};margin-top:2px;">${data.conditions.delivery_time}</div>
+            </td>
+            <td style="padding:8px 14px;border-right:1px solid ${GREY_LINE};width:25%;">
+              <div style="font-size:9px;font-weight:bold;color:${TEAL};letter-spacing:0.5px;">INCOTERMS</div>
+              <div style="font-size:12px;font-weight:bold;color:${DARK};margin-top:2px;">${data.conditions.shipping_terms}</div>
+            </td>
+            <td style="padding:8px 14px;border-right:1px solid ${GREY_LINE};width:25%;">
+              <div style="font-size:9px;font-weight:bold;color:${TEAL};letter-spacing:0.5px;">PAYMENT TERMS</div>
+              <div style="font-size:12px;font-weight:bold;color:${DARK};margin-top:2px;">${data.conditions.payment_terms}</div>
+            </td>
+            <td style="padding:8px 14px;width:25%;">
+              <div style="font-size:9px;font-weight:bold;color:${TEAL};letter-spacing:0.5px;">OFFER VALIDITY</div>
+              <div style="font-size:12px;font-weight:bold;color:${DARK};margin-top:2px;">${data.conditions.validity_days}</div>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Intra-community supply notice -->
+        <div style="margin-top:14px;background:${TEAL_LIGHT};border:1px solid ${TEAL};padding:10px 14px;font-size:10.5px;color:${GREY_TXT};line-height:1.5;">
+          <b>Intra-Community Supply (0% VAT):</b> This offer is issued as an intra-Community supply at 0% VAT, conditional on the buyer providing a valid VAT identification number prior to invoicing. All prices shown are net prices. For any clarification regarding this offer, please contact us at <b>+30 210 444 7830</b> or <b>info@micronshub.eu</b>.
+        </div>
+
+        <!-- Closing -->
+        <div style="margin-top:18px;font-size:11px;color:${DARK};line-height:1.5;">
+          We look forward to working with ${buyerCompanyOrName} and remain at your disposal for any technical or commercial questions regarding this quotation.
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:${DARK};">Mit freundlichen Gr&uuml;&szlig;en,</div>
+        <div style="margin-top:2px;font-size:12px;font-weight:bold;color:${DARK};">Dimitris Vardalachakis</div>
+        <div style="font-size:10px;color:${GREY_TXT};">Founder &amp; Managing Director, Microns Hub DV E.E.</div>
+
+        <div style="height:20px;"></div>
       </div>
-      
-      <div style="margin-top:24px;float:right;width:320px;">
-        <table style="width:100%;font-size:13px;background:#f5f7fa;border-radius:8px;box-shadow:0 1px 4px #e0e0e0;">
-          <tr><td style="color:#333;">Shipping Cost:</td><td style="text-align:right;color:#333;">${data.shipping_cost.toFixed(2)}</td></tr>
-          <tr><td style="color:#333;">VAT (${data.vat_rate}%):</td><td style="text-align:right;color:#333;">${data.vat_amount.toFixed(2)}</td></tr>
-          <tr style="font-weight:bold;"><td style="padding:8px 0 8px 8px;">Total Price:</td><td style="text-align:right;padding:8px 8px 8px 0;">${data.total_price.toFixed(2)}</td></tr>
+
+      <!-- Footer band -->
+      <div style="height:2px;background:${TEAL};"></div>
+      <div style="background:${DARK};color:#fff;padding:14px 32px;font-size:9px;line-height:1.5;">
+        <table style="width:100%;border-collapse:collapse;">
+          <tr style="vertical-align:top;">
+            <td style="width:25%;padding-right:10px;">
+              <div style="font-size:8px;font-weight:bold;color:${TEAL};margin-bottom:4px;letter-spacing:0.5px;">COMPANY</div>
+              <div>MICRONS HUB DV E.E.</div>
+              <div>Industrial Area Street B No. 4</div>
+              <div>71601 Heraklion, Greece</div>
+            </td>
+            <td style="width:25%;padding-right:10px;">
+              <div style="font-size:8px;font-weight:bold;color:${TEAL};margin-bottom:4px;letter-spacing:0.5px;">TRADE REGISTER</div>
+              <div>Greece</div>
+              <div>VAT ID: EL803129638</div>
+              <div>GEMI: 169893827000</div>
+            </td>
+            <td style="width:25%;padding-right:10px;">
+              <div style="font-size:8px;font-weight:bold;color:${TEAL};margin-bottom:4px;letter-spacing:0.5px;">MANAGEMENT</div>
+              <div>Dimitris Vardalachakis</div>
+              <div>Founder &amp; Managing Director</div>
+              <div>info@micronshub.eu</div>
+            </td>
+            <td style="width:25%;">
+              <div style="font-size:8px;font-weight:bold;color:${TEAL};margin-bottom:4px;letter-spacing:0.5px;">BANK ACCOUNT</div>
+              <div>National Bank of Greece</div>
+              <div>GR49 0110 2040 0000 2040 0891 170</div>
+              <div>SWIFT/BIC: ETHNGRAA</div>
+            </td>
+          </tr>
         </table>
       </div>
-      <div style="clear:both;"></div>
-      <div style="margin-top:32px;">
-        <b style="color:#1a237e;">Conditions:</b><br/>
-        <ul style="margin:0 0 0 16px;padding:0;font-size:13px;color:#333;background:#f5f7fa;border-radius:8px;padding:12px 16px;box-shadow:0 1px 4px #e0e0e0;">
-          <li><b>Delivery Time:</b> ${data.conditions.delivery_time}</li>
-          <li><b>Shipping Terms:</b> ${data.conditions.shipping_terms}</li>
-          <li><b>Payment Terms:</b> ${data.conditions.payment_terms}</li>
-          <li><b>Offer Validity:</b> ${data.conditions.validity_days}</li>
-        </ul>
-      </div>
-      
-      <div style="margin-top:32px;text-align:center;font-size:12px;color:#1a237e;background:#f8f9fa;padding:16px;border-radius:8px;border:1px solid #e0e0e0;">
-        <strong>This offer is made as an intra-community supply (tax rate 0%) under the condition that the required VAT identification<br/>
-        number of the invoice recipient is subsequently submitted.</strong><br/><br/>
-        The listed prices are net prices. Should you have any questions, please do not hesitate to call us at <strong>+302104447830</strong>
-      </div>
-      
-      <div style="margin-top:32px;display:flex;justify-content:space-between;font-size:10px;color:#444;">
-        <div style="text-align:left;">
-          <div style="font-weight:bold;margin-bottom:4px;">MICRONS HUB DV Ε.Ε.</div>
-          <div>Industrial Area Street B Number 4</div>
-          <div>Heraklion Greece</div>
-          <div>71601</div>
-        </div>
-        
-        <div style="text-align:center;">
-          <div style="font-weight:bold;margin-bottom:4px;">Trade Register</div>
-          <div>Greece</div>
-          <div style="margin-top:8px;font-weight:bold;">VAT ID</div>
-          <div>EL803129638</div>
-        </div>
-        
-        <div style="text-align:center;">
-          <div style="font-weight:bold;margin-bottom:4px;">Managing Directors</div>
-          <div>Dimitris Vardalachakis</div>
-        </div>
-        
-        <div style="text-align:right;">
-          <div style="font-weight:bold;margin-bottom:4px;">Bank Account</div>
-          <div>National Bank of Greece</div>
-          <div style="margin-top:4px;">SWIFT Code: ETHNGRAA</div>
-          <div style="margin-top:4px;">GR4901102040000020400891170</div>
-          <div style="margin-top:4px;">SWIFT/BIC: ETHNGRAA</div>
-        </div>
-      </div>
-      
-      <div style="margin-top:32px;font-size:10px;color:#444;">
-        ${data.footer_notes.map(note => `<div>${note}</div>`).join('')}
-        <div style="margin-top:8px;"><a href='${data.terms_url}' style='color:#1976d2;text-decoration:underline;'>General Sale and Delivery Terms and Conditions</a></div>
-      </div>
-      
-      <!-- Add extra spacing at bottom to prevent text overlap with page number -->
-      <div style="margin-top:60px;height:40px;"></div>
     `;
 
     // Use html2canvas to render the container, then jsPDF to create a multi-page PDF
     document.body.appendChild(container);
     await new Promise(resolve => setTimeout(resolve, 100)); // Wait for DOM
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', putOnlyUsedFonts: true });
-    const pageHeight = pdf.internal.pageSize.getHeight();
     const pageWidth = pdf.internal.pageSize.getWidth();
 
     // Render the HTML to canvas (higher scale for better quality)
     const canvas = await html2canvas(container, { scale: 4, useCORS: true });
     const imgData = canvas.toDataURL('image/png');
     const imgProps = pdf.getImageProperties(imgData);
-    const pdfWidth = pageWidth - 20; // 10mm margin each side
+    // Edge-to-edge so the top accent bar and dark footer reach the page border
+    const pdfWidth = pageWidth;
     const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
-    // Only add the image once (no duplicate pages)
-    pdf.addImage(imgData, 'PNG', 10, 10, pdfWidth, pdfHeight);
-    pdf.setFontSize(9);
-    // Position page number higher to avoid overlap with content
-    pdf.text(`Page 1`, pageWidth - 30, pageHeight - 20);
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
 
     // Get PDF as base64
     const pdfBase64 = pdf.output('datauristring').split(',')[1];
