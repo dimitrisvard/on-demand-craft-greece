@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import os
 import json
+import math
 import shutil
 import logging
 import tempfile
@@ -508,6 +509,79 @@ async def flat_pattern_compat(request: Request):
 
         from core.kfactor import compute_bend
 
+        # ── Build the COMPLETE flat outline ──────────────────────────────
+        # outline_edges must describe the real blank: the outer contour PLUS
+        # every hole loop PLUS any disjoint extra outlines, all as line
+        # segments in the flat frame (origin at (0,0), +Y up). Circular holes
+        # are tessellated so downstream consumers (the PDF wireframe) can draw
+        # them without geometry-specific handling.
+        def _hole_to_edge_dicts(hole) -> list:
+            segs: list = []
+            hole_edges = getattr(hole, "edges", None)
+            if hole_edges:
+                for e in hole_edges:
+                    segs.append({"start": list(e.start), "end": list(e.end)})
+                return segs
+            if hole.center is not None and hole.diameter:
+                cx, cy = hole.center
+                r = hole.diameter / 2.0
+                n = 48
+                pts = [
+                    (cx + r * math.cos(2 * math.pi * i / n),
+                     cy + r * math.sin(2 * math.pi * i / n))
+                    for i in range(n)
+                ]
+                for i in range(n):
+                    a = pts[i]
+                    b2 = pts[(i + 1) % n]
+                    segs.append({"start": [a[0], a[1]], "end": [b2[0], b2[1]]})
+            return segs
+
+        outline_edges = [
+            {"start": list(e.start), "end": list(e.end)}
+            for e in flat.outer_edges
+        ]
+        for ring in flat.extra_outlines:
+            for e in ring:
+                outline_edges.append({"start": list(e.start), "end": list(e.end)})
+        for hole in flat.holes:
+            outline_edges.extend(_hole_to_edge_dicts(hole))
+
+        # ── Validate bend lines against the flat frame ───────────────────
+        # The bend line must lie inside the blank ([0,width] × [0,height]).
+        # If a bend line falls outside (a coordinate-frame error upstream),
+        # drop its geometry so it can't scribble across the drawing — the
+        # bend still appears in the table. distance_from_left_edge is clamped
+        # to a positive value inside [0, width].
+        _flat_w = float(flat.width or 0.0)
+        _flat_h = float(flat.height or 0.0)
+        _frame_margin = max(_flat_w, _flat_h) * 0.05 + 1.0
+
+        def _bend_line_in_frame(bid):
+            bl = next(
+                (x for x in flat.bend_lines if x.bend_info.bend_id == bid), None
+            )
+            if bl is None:
+                return None
+            for (px, py) in (bl.start, bl.end):
+                if (px < -_frame_margin or px > _flat_w + _frame_margin or
+                        py < -_frame_margin or py > _flat_h + _frame_margin):
+                    return None
+            return {"start": list(bl.start), "end": list(bl.end)}
+
+        def _distance_from_left(bid):
+            bl = next(
+                (x for x in flat.bend_lines if x.bend_info.bend_id == bid), None
+            )
+            if bl is None:
+                return 0.0
+            d = float(bl.start[0])
+            if _flat_w > 0:
+                d = max(0.0, min(_flat_w, d))
+            else:
+                d = max(0.0, d)
+            return round(d, 3)
+
         response = {
             "status": "completed",
             "source": "cadquery",
@@ -539,21 +613,13 @@ async def flat_pattern_compat(request: Request):
                         "bend_deduction_mm": compute_bend(
                             b.angle_deg, b.inner_radius, thickness, k_factor
                         ).bend_deduction,
-                        "bend_line_on_flat": {
-                            "start": list(bl.start),
-                            "end": list(bl.end),
-                        } if (bl := next((x for x in flat.bend_lines if x.bend_info.bend_id == b.bend_id), None)) else None,
-                        "distance_from_left_edge_mm": next(
-                            (x.start[0] for x in flat.bend_lines if x.bend_info.bend_id == b.bend_id), 0
-                        ),
+                        "bend_line_on_flat": _bend_line_in_frame(b.bend_id),
+                        "distance_from_left_edge_mm": _distance_from_left(b.bend_id),
                     }
                     for b in bends
                 ],
                 "bend_count": len(bends),
-                "outline_edges": [
-                    {"start": list(e.start), "end": list(e.end)}
-                    for e in flat.outer_edges
-                ],
+                "outline_edges": outline_edges,
             },
             "bends": [
                 {

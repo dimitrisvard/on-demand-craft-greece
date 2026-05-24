@@ -1238,16 +1238,51 @@ export default function OrderDetailsPage() {
 
   const buildPartInfo = (file: QuoteFile, idx: number): PartInfo => {
     const rfqPart = parts[idx] as any;
+    const item = orderItems[idx] as any;
     const ov = rfqPart?.original_values;
-    return {
-      name: file.file_name.replace(/\.[^.]+$/, ''),
+
+    // Prefer the RFQ part's original_values (human-readable labels); fall back
+    // to parsing the order item's free-text description so the manufacturing
+    // drawing gets real material/process/thickness/etc. instead of blanks.
+    const specs = {
       material: ov?.materialSubtypeLabel || ov?.materialLabel || ov?.material || '',
       process: ov?.processLabel || ov?.process || '',
       thickness: ov?.thickness || '',
       tolerance: ov?.toleranceLabel || ov?.tolerance || '',
       surfaceRoughness: ov?.surfaceRoughnessLabel || ov?.surfaceRoughness || '',
       surfaceTreatment: ov?.surfaceTreatmentLabel || ov?.surfaceTreatment || '',
-      needsBending: ov?.needsBending === true || ov?.needsBending === 'true',
+    };
+    if (item?.description) {
+      const lines = item.description.split('\n').map((l: string) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        const lower = line.toLowerCase();
+        const val = () => line.split(':').slice(1).join(':').trim();
+        if (!specs.process && (lower.startsWith('process:') || lower.startsWith('manufacturing process:'))) specs.process = val();
+        else if (!specs.material && lower.startsWith('material:')) specs.material = val();
+        else if (!specs.surfaceRoughness && (lower.startsWith('surface roughness:') || lower.startsWith('roughness:'))) specs.surfaceRoughness = val();
+        else if (!specs.surfaceTreatment && (lower.startsWith('surface treatment:') || lower.startsWith('treatment:') || lower.startsWith('finishing:'))) specs.surfaceTreatment = val();
+        else if (!specs.tolerance && lower.startsWith('tolerance:')) specs.tolerance = val();
+        else if (!specs.thickness && lower.startsWith('thickness:')) specs.thickness = val().replace(/\s*mm\s*$/i, '');
+      }
+    }
+
+    const rawQty = item?.quantity ?? rfqPart?.quantity;
+    const quantity = typeof rawQty === 'number'
+      ? rawQty
+      : (rawQty != null && rawQty !== '' ? Number(rawQty) : undefined);
+
+    return {
+      name: file.file_name.replace(/\.[^.]+$/, ''),
+      material: specs.material,
+      process: specs.process,
+      thickness: specs.thickness,
+      tolerance: specs.tolerance,
+      surfaceRoughness: specs.surfaceRoughness,
+      surfaceTreatment: specs.surfaceTreatment,
+      quantity: Number.isFinite(quantity as number) ? quantity : undefined,
+      needsBending:
+        ov?.needsBending === true || ov?.needsBending === 'true' ||
+        rfqPart?.needsBending === true || rfqPart?.needsBending === 'true',
     };
   };
 

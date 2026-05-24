@@ -84,31 +84,45 @@ async function callUnfoldService(
 
     // Normalize response to UnfoldData format
     if (data.flat_pattern) {
+      const widthMm = data.flat_pattern?.dimensions?.width || data.flat_pattern?.width_mm || 0;
+      const heightMm = data.flat_pattern?.dimensions?.height || data.flat_pattern?.height_mm || 0;
       return {
         success: true,
         part_name: data.part_name || fileName.replace(/\.[^.]+$/, ""),
         thickness_mm: data.flat_pattern?.dimensions?.thickness || data.thickness_mm || 0,
         flat_pattern: {
-          width_mm: data.flat_pattern?.dimensions?.width || data.flat_pattern?.width_mm || 0,
-          height_mm: data.flat_pattern?.dimensions?.height || data.flat_pattern?.height_mm || 0,
+          width_mm: widthMm,
+          height_mm: heightMm,
           outline_edges: data.flat_pattern?.outline_edges || [],
         },
         bends: (data.flat_pattern?.bends || data.bends || []).map(
-          (b: Record<string, unknown>, i: number) => ({
-            index: (b.index as number) || i + 1,
-            angle_deg: (b.angle_deg as number) || (b.angle as number) || 90,
-            inner_radius_mm: (b.inner_radius_mm as number) || (b.radius as number) || 0,
-            direction: (b.direction as string) || "UP",
-            length_mm: (b.length_mm as number) || (b.length as number) || 0,
-            k_factor: (b.k_factor as number) || 0.44,
-            bend_allowance_mm: (b.bend_allowance_mm as number) || 0,
-            bend_deduction_mm: (b.bend_deduction_mm as number) || 0,
-            bend_line_on_flat: b.bend_line_on_flat || undefined,
-            distance_from_left_edge_mm: (b.distance_from_left_edge_mm as number) || 0,
-          }),
+          (b: Record<string, unknown>, i: number) => {
+            // The service occasionally emits a bend distance outside the flat
+            // outline (frame bug). Clamp into [0, width] so the dimension
+            // chain stays sane; the bend line itself is guarded separately.
+            const rawDist = (b.distance_from_left_edge_mm as number) || 0;
+            const dist = widthMm > 0
+              ? Math.max(0, Math.min(widthMm, rawDist))
+              : Math.max(0, rawDist);
+            return {
+              index: (b.index as number) || i + 1,
+              angle_deg: (b.angle_deg as number) || (b.angle as number) || 90,
+              inner_radius_mm: (b.inner_radius_mm as number) || (b.radius as number) || 0,
+              direction: (b.direction as string) || "UP",
+              length_mm: (b.length_mm as number) || (b.length as number) || 0,
+              k_factor: (b.k_factor as number) || 0.44,
+              bend_allowance_mm: (b.bend_allowance_mm as number) || 0,
+              bend_deduction_mm: (b.bend_deduction_mm as number) || 0,
+              bend_line_on_flat: b.bend_line_on_flat || undefined,
+              distance_from_left_edge_mm: dist,
+            };
+          },
         ),
         linear_dimensions: data.linear_dimensions || [],
         unfold_method: data.unfold_method || data.flat_pattern?.source || "unknown",
+        // Real folded 3D bounding box from the service (do NOT confuse with
+        // the flat blank size). Used for the "Bounding Box" field on the PDF.
+        bounding_box_mm: data.analysis?.dimensions,
       };
     }
 
@@ -205,18 +219,22 @@ serve(async (req) => {
           }));
         }
 
-        // Use flat pattern dimensions from unfold if available
-        if (unfoldData.flat_pattern && unfoldData.flat_pattern.width_mm > 0) {
+        // Keep analysis.dimensions as the REAL folded 3D bounding box. The
+        // flat blank size lives on unfoldData.flat_pattern and is shown in its
+        // own "Flat Pattern" field — do NOT overwrite the bounding box with it.
+        // Prefer the service's folded bbox when available (the STEP text
+        // parser's bbox is unreliable).
+        if (
+          unfoldData.bounding_box_mm &&
+          (unfoldData.bounding_box_mm.x > 0 ||
+            unfoldData.bounding_box_mm.y > 0 ||
+            unfoldData.bounding_box_mm.z > 0)
+        ) {
           analysis.dimensions = {
-            ...analysis.dimensions,
-            x: unfoldData.flat_pattern.width_mm,
-            z: unfoldData.flat_pattern.height_mm,
+            x: unfoldData.bounding_box_mm.x,
+            y: unfoldData.bounding_box_mm.y,
+            z: unfoldData.bounding_box_mm.z,
           };
-        }
-
-        // Use thickness from unfold if available
-        if (unfoldData.thickness_mm && unfoldData.thickness_mm > 0) {
-          analysis.dimensions.y = unfoldData.thickness_mm;
         }
 
         // The volume derived from raw STEP triangulation is often wildly

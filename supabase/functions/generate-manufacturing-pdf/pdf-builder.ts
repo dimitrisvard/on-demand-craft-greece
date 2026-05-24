@@ -31,7 +31,7 @@ import {
   PDFPage,
   PDFFont,
 } from "https://esm.sh/pdf-lib@1.17.1";
-import { type Edge2D, type MeshAnalysis, type BendLine, type UnfoldData, type BendDetail } from "./mesh-analyzer.ts";
+import { type Edge2D, type MeshAnalysis, type UnfoldData } from "./mesh-analyzer.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +104,48 @@ function edges2DBounds(edges: Edge2D[]): {
     maxY = Math.max(maxY, e.y1, e.y2);
   }
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Map the unfold service's flat-pattern outline edges ({start:[x,y],end:[x,y]})
+ * into the Edge2D shape drawWireframe expects.
+ *
+ * The flat pattern is already in a +Y-up frame (the same convention pdf-lib
+ * uses), so we do NOT negate Y here — unlike the folded top/iso projections
+ * which negate Z to flip into screen space.
+ */
+function outlineEdgesToEdge2D(
+  edges: Array<{ start: number[]; end: number[] }>,
+): Edge2D[] {
+  const out: Edge2D[] = [];
+  for (const e of edges) {
+    if (!e?.start || !e?.end || e.start.length < 2 || e.end.length < 2) continue;
+    out.push({ x1: e.start[0], y1: e.start[1], x2: e.end[0], y2: e.end[1] });
+  }
+  return out;
+}
+
+/** Greedy word-wrap so a string fits within maxWidth at the given font size. */
+function wrapText(
+  font: PDFFont,
+  text: string,
+  size: number,
+  maxWidth: number,
+): string[] {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const w of words) {
+    const candidate = current ? `${current} ${w}` : w;
+    if (font.widthOfTextAtSize(candidate, size) > maxWidth && current) {
+      lines.push(current);
+      current = w;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 /** Draw 2D wireframe edges onto a PDF page within a given rectangle */
@@ -240,17 +282,39 @@ function drawDimension(
   }
 }
 
-/** Draw projected bend lines onto the flat pattern view */
+/** A bend line expressed in the SAME 2D frame as its reference edges. */
+interface BendSegment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  label: string;
+}
+
+/**
+ * Draw bend-line segments onto the flat pattern view.
+ *
+ * `segments` must already be in the same coordinate frame as `refEdges` (the
+ * flat-pattern outline when unfolded, otherwise the top projection). We scale
+ * with the EXACT same fit math drawWireframe uses, so bend lines land on the
+ * outline they belong to.
+ *
+ * Guard: the unfold service occasionally emits bend coordinates in the wrong
+ * frame (far outside the blank). Any segment with an endpoint outside the
+ * reference bounding box (plus a small margin) is dropped from the drawing —
+ * it still appears in the bend table.
+ */
 function drawBendLines(
   page: PDFPage,
   font: PDFFont,
-  bendLines: BendLine[],
-  topViewEdges: Edge2D[],
+  segments: BendSegment[],
+  refEdges: Edge2D[],
   rect: { x: number; y: number; w: number; h: number },
+  guardOutOfBounds = false,
 ) {
-  if (bendLines.length === 0) return;
+  if (segments.length === 0 || refEdges.length === 0) return;
 
-  const bounds = edges2DBounds(topViewEdges);
+  const bounds = edges2DBounds(refEdges);
   if (bounds.width === 0 && bounds.height === 0) return;
 
   const padding = 8;
@@ -266,21 +330,30 @@ function drawBendLines(
   const offsetX = rect.x + padding + (availW - drawW) / 2;
   const offsetY = rect.y + padding + (availH - drawH) / 2;
 
-  // Project bend lines to top view (XZ plane)
-  for (let i = 0; i < bendLines.length; i++) {
-    const bl = bendLines[i];
-    // Project to top view: x stays, z becomes y (inverted)
-    const x1 = offsetX + (bl.start.x - bounds.minX - (bounds.width - drawW / scale) / 2) * scale;
-    const y1 = offsetY + (-bl.start.z - bounds.minY - (bounds.height - drawH / scale) / 2) * scale;
-    const x2 = offsetX + (bl.end.x - bounds.minX - (bounds.width - drawW / scale) / 2) * scale;
-    const y2 = offsetY + (-bl.end.z - bounds.minY - (bounds.height - drawH / scale) / 2) * scale;
+  // Drop bend lines that fall outside the outline (with a small margin).
+  const margin = Math.max(bounds.width, bounds.height) * 0.05 + 1e-3;
+  const inBounds = (x: number, y: number) =>
+    x >= bounds.minX - margin && x <= bounds.maxX + margin &&
+    y >= bounds.minY - margin && y <= bounds.maxY + margin;
+
+  for (const seg of segments) {
+    if (
+      guardOutOfBounds &&
+      (!inBounds(seg.x1, seg.y1) || !inBounds(seg.x2, seg.y2))
+    ) {
+      continue;
+    }
+
+    const x1 = offsetX + (seg.x1 - bounds.minX) * scale;
+    const y1 = offsetY + (seg.y1 - bounds.minY) * scale;
+    const x2 = offsetX + (seg.x2 - bounds.minX) * scale;
+    const y2 = offsetY + (seg.y2 - bounds.minY) * scale;
 
     drawDashedLine(page, x1, y1, x2, y2, 4, 2.5, RED, 0.6);
 
-    // Label
     const labelX = Math.min(x1, x2) - 2;
     const labelY = Math.max(y1, y2) + 4;
-    page.drawText(`B${i + 1} (${bl.angle.toFixed(0)}°)`, {
+    page.drawText(seg.label, {
       x: labelX,
       y: labelY,
       size: 5.5,
@@ -312,6 +385,9 @@ export async function buildManufacturingPDF(
   let curY = pageH - m; // start from top (pdf-lib uses bottom-left origin)
 
   const dims = analysis.dimensions;
+  // Folded 3D bounding box: prefer the unfold service's value; fall back to the
+  // mesh/STEP bounding box (correct for STL/DXF where there is no unfold).
+  const bbox = unfoldData?.bounding_box_mm ?? { x: dims.x, y: dims.y, z: dims.z };
   const weight = estimateWeight(analysis.volume, partInfo.material);
 
   // ── HEADER BAR ─────────────────────────────────────────
@@ -423,7 +499,7 @@ export async function buildManufacturingPDF(
     ["Flat Pattern:", `${flatW.toFixed(1)} \u00d7 ${flatH_mm.toFixed(1)} mm`],
     [
       "Bounding Box:",
-      `${dims.x.toFixed(1)} \u00d7 ${dims.y.toFixed(1)} \u00d7 ${dims.z.toFixed(1)} mm`,
+      `${bbox.x.toFixed(1)} \u00d7 ${bbox.y.toFixed(1)} \u00d7 ${bbox.z.toFixed(1)} mm`,
     ],
     ["Process:", partInfo.process || "\u2014"],
     ["Quantity:", partInfo.quantity ? String(partInfo.quantity) : "\u2014"],
@@ -486,6 +562,41 @@ export async function buildManufacturingPDF(
     });
   }
 
+  // ── Sanity warnings (rendered inside the info box's lower edge) ─────────
+  const drawingWarnings: string[] = [];
+  const modelThk = unfoldData?.thickness_mm || 0;
+  if (unfoldData?.success && (unfoldData.bends?.length ?? 0) > 0) {
+    const refThk = modelThk > 0 ? modelThk : thicknessMm;
+    if (refThk > 0) {
+      const minR = 0.5 * refThk;
+      if (unfoldData.bends!.some((b) => b.inner_radius_mm > 0 && b.inner_radius_mm < minR)) {
+        drawingWarnings.push(
+          `Inner radius below recommended minimum bend radius (0.5 × t = ${minR.toFixed(2)} mm)`,
+        );
+      }
+    }
+  }
+  const declaredThk = partInfo.thickness ? parseFloat(partInfo.thickness) : 0;
+  if (
+    declaredThk > 0 && modelThk > 0 &&
+    Math.abs(declaredThk - modelThk) / modelThk > 0.10
+  ) {
+    drawingWarnings.push(
+      `Declared thickness ${declaredThk.toFixed(2)} mm vs. model thickness ${modelThk.toFixed(2)} mm`,
+    );
+  }
+  if (drawingWarnings.length > 0) {
+    const wrapped: string[] = [];
+    for (const w of drawingWarnings) {
+      wrapped.push(...wrapText(fontBold, `! ${w}`, 6.5, infoBoxW - 24));
+    }
+    let warnY = curY - topRowH + 8 + (wrapped.length - 1) * 9;
+    for (const ln of wrapped) {
+      page.drawText(ln, { x: infoX + 12, y: warnY, size: 6.5, font: fontBold, color: RED });
+      warnY -= 9;
+    }
+  }
+
   curY -= topRowH + 6;
 
   // ── FLAT PATTERN VIEW ─────────────────────────────────
@@ -537,10 +648,44 @@ export async function buildManufacturingPDF(
     w: flatImgW - 8,
     h: flatContentH,
   };
-  drawWireframe(page, analysis.topView, flatRect, EDGE_COLOR, 0.5);
+  // Flat-pattern geometry: draw the REAL unfolded blank outline (which already
+  // includes the hole loops) when the unfold service succeeded. Only fall back
+  // to the folded part's top projection when there is no unfold data (STL/DXF,
+  // or a failed STEP unfold).
+  const outlineEdges =
+    unfoldData?.success && (unfoldData.flat_pattern?.outline_edges?.length ?? 0) > 0
+      ? outlineEdgesToEdge2D(unfoldData.flat_pattern!.outline_edges!)
+      : [];
+  const flatEdges = outlineEdges.length > 0 ? outlineEdges : analysis.topView;
+  drawWireframe(page, flatEdges, flatRect, EDGE_COLOR, 0.5);
 
-  // Draw bend lines on the flat pattern
-  drawBendLines(page, fontBold, analysis.bendLines, analysis.topView, flatRect);
+  // Build bend-line segments in the SAME frame as flatEdges.
+  //  - unfold path: bend_line_on_flat is in the +Y-up flat frame (no negation),
+  //    and we guard against the service emitting coords outside the blank.
+  //  - fallback path: project mesh bend lines the same way the legacy code did
+  //    (x, −z over the top projection) so STL/DXF output is unchanged.
+  const useOutline = outlineEdges.length > 0;
+  const bendSegments: BendSegment[] = useOutline
+    ? (unfoldData?.bends || [])
+        .filter((b) => b.bend_line_on_flat?.start && b.bend_line_on_flat?.end)
+        .map((b) => ({
+          x1: b.bend_line_on_flat!.start[0],
+          y1: b.bend_line_on_flat!.start[1],
+          x2: b.bend_line_on_flat!.end[0],
+          y2: b.bend_line_on_flat!.end[1],
+          label: `B${b.index} (${b.angle_deg.toFixed(0)}°)`,
+        }))
+    : analysis.bendLines.map((bl, i) => ({
+        x1: bl.start.x,
+        y1: -bl.start.z,
+        x2: bl.end.x,
+        y2: -bl.end.z,
+        label: `B${i + 1} (${bl.angle.toFixed(0)}°)`,
+      }));
+
+  // Only enforce the out-of-bounds guard on the unfold path (the frame where
+  // bad service coordinates can appear); the fallback frame is left untouched.
+  drawBendLines(page, fontBold, bendSegments, flatEdges, flatRect, useOutline);
 
   // Front view reference (right ~28%)
   const refX = m + flatImgW + 4;
@@ -577,7 +722,11 @@ export async function buildManufacturingPDF(
     partInfo.surfaceRoughness && `Surface Ra: ${partInfo.surfaceRoughness}`,
     weight && `Weight: ${weight}`,
     `Volume: ${analysis.volume >= 1000 ? `${(analysis.volume / 1000).toFixed(2)} cm\u00b3` : `${analysis.volume.toFixed(1)} mm\u00b3`}`,
-    `Surface Area: ${analysis.surfaceArea >= 100 ? `${(analysis.surfaceArea / 100).toFixed(2)} cm\u00b2` : `${analysis.surfaceArea.toFixed(1)} mm\u00b2`}`,
+    // Surface area from the STEP text parser is physically meaningless for a
+    // sheet-metal blank, so omit it once the unfold succeeded. Keep it for
+    // STL/DXF where it is computed from real mesh triangles.
+    !unfoldData?.success &&
+      `Surface Area: ${analysis.surfaceArea >= 100 ? `${(analysis.surfaceArea / 100).toFixed(2)} cm\u00b2` : `${analysis.surfaceArea.toFixed(1)} mm\u00b2`}`,
     analysis.triangleCount > 0 && `Triangles: ${analysis.triangleCount.toLocaleString()}`,
     `Feature edges: ${analysis.featureEdges.length.toLocaleString()}`,
     `Detected bends: ${unfoldData?.bends?.length || analysis.bendLines.length}`,
@@ -595,8 +744,8 @@ export async function buildManufacturingPDF(
 
   // ── Dimension arrows on flat pattern ──────────────────
 
-  if (analysis.topView.length > 0) {
-    const bounds = edges2DBounds(analysis.topView);
+  if (flatEdges.length > 0) {
+    const bounds = edges2DBounds(flatEdges);
     const padding = 8;
     const availW = flatRect.w - 2 * padding;
     const availH = flatRect.h - 2 * padding;

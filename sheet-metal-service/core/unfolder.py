@@ -1628,6 +1628,43 @@ def _polys_bbox(
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _clip_infinite_line_to_bbox(
+    cx: float, cy: float, ux: float, uy: float,
+    bx0: float, by0: float, bx1: float, by1: float,
+) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    """
+    Clip the infinite line P(t) = (cx + t·ux, cy + t·uy) to the axis-aligned
+    bounding box [bx0, bx1] × [by0, by1] (Liang–Barsky).
+
+    Returns the two endpoints of the in-box segment, or None when the line
+    misses the box entirely. For an axis-aligned bend line this discards the
+    arbitrary along-axis offset carried by the cylinder's reference point:
+    e.g. a vertical line (ux≈0) collapses to (cx, by0)→(cx, by1) regardless of
+    cy, so the line always spans the blank at the correct perpendicular x.
+    """
+    t_min, t_max = -1e18, 1e18
+    for origin, direction, lo, hi in (
+        (cx, ux, bx0, bx1),
+        (cy, uy, by0, by1),
+    ):
+        if abs(direction) < 1e-12:
+            if origin < lo or origin > hi:
+                return None  # parallel to this slab and outside it
+        else:
+            t1 = (lo - origin) / direction
+            t2 = (hi - origin) / direction
+            if t1 > t2:
+                t1, t2 = t2, t1
+            t_min = max(t_min, t1)
+            t_max = min(t_max, t2)
+    if t_min > t_max:
+        return None
+    return (
+        (cx + t_min * ux, cy + t_min * uy),
+        (cx + t_max * ux, cy + t_max * uy),
+    )
+
+
 def _place_bend_lines_3d(
     fp: FlatPattern,
     bends: List[BendInfo],
@@ -1641,6 +1678,18 @@ def _place_bend_lines_3d(
     """
     Place bend lines at the actual 2D position of each bend axis after
     applying the parent's accumulated transform.
+
+    Coordinate-frame contract (must match ``flat_pattern.outline_edges``):
+      - origin at (0, 0), +Y up,
+      - every endpoint inside [0, width] × [0, height].
+
+    The transformed cylinder *axis reference point* (``axis_location``) gives a
+    reliable PERPENDICULAR position for the bend, but its component ALONG the
+    axis is arbitrary (OCC may anchor it anywhere on the infinite axis). Using
+    it directly as the bend-line midpoint therefore shifts the line off the
+    blank along the bend direction. Instead we keep only the reliable
+    direction + perpendicular position and clip the line to the outline's
+    bounding box so it always spans the blank.
     """
     transforms: Dict[int, gp_Trsf] = getattr(fp, "_3d_transforms", {})
     origin_offset = getattr(fp, "_3d_origin_offset", (0.0, 0.0))
@@ -1648,6 +1697,20 @@ def _place_bend_lines_3d(
         return
 
     minx, miny = origin_offset
+
+    # Outline bounding box (post-normalisation this is ~[0,width] × [0,height]).
+    ox_min = oy_min = float("inf")
+    ox_max = oy_max = float("-inf")
+    for e in fp.outer_edges:
+        for px, py in (e.start, e.end):
+            ox_min = min(ox_min, px)
+            oy_min = min(oy_min, py)
+            ox_max = max(ox_max, px)
+            oy_max = max(oy_max, py)
+    if ox_min == float("inf"):
+        ox_min = oy_min = 0.0
+        ox_max = fp.width or 0.0
+        oy_max = fp.height or 0.0
 
     for from_idx, bend_id, to_idx in bend_graph.unfolding_order:
         T_parent = transforms.get(from_idx)
@@ -1673,16 +1736,32 @@ def _place_bend_lines_3d(
             continue
         ux, uy = dx / mag, dy / mag
 
-        # Bend line midpoint = projection of axis location.
+        # Reliable perpendicular anchor (the along-axis component is arbitrary).
         cx = ax_loc_current.X() - minx
         cy = ax_loc_current.Y() - miny
 
-        # Use bend.length (3D) as the visual length of the bend line.
-        L = bend.length if bend.length and bend.length > 0 else 50.0
-        x0 = cx - ux * (L / 2)
-        y0 = cy - uy * (L / 2)
-        x1 = cx + ux * (L / 2)
-        y1 = cy + uy * (L / 2)
+        # Span the bend line across the blank by clipping the infinite line to
+        # the outline bbox. This drops the arbitrary along-axis offset.
+        clipped = _clip_infinite_line_to_bbox(
+            cx, cy, ux, uy, ox_min, oy_min, ox_max, oy_max,
+        )
+        if clipped is not None:
+            (x0, y0), (x1, y1) = clipped
+        else:
+            # The line missed the blank (perpendicular anchor just outside the
+            # edge). Snap the perpendicular coordinate into range and span the
+            # outline's extent there.
+            if abs(ux) <= abs(uy):
+                # (near-)vertical bend line → fixed x, span the outline's y.
+                x_snap = min(max(cx, ox_min), ox_max)
+                y_lo, y_hi = _outline_y_range_at_x(fp.outer_edges, x_snap)
+                if y_hi <= y_lo:
+                    y_lo, y_hi = oy_min, oy_max
+                x0, y0, x1, y1 = x_snap, y_lo, x_snap, y_hi
+            else:
+                # (near-)horizontal bend line → fixed y, span the outline's x.
+                y_snap = min(max(cy, oy_min), oy_max)
+                x0, y0, x1, y1 = ox_min, y_snap, ox_max, y_snap
 
         try:
             bc = compute_bend(bend.angle_deg, bend.inner_radius, thickness, k_factor)

@@ -98,6 +98,8 @@ export interface UnfoldData {
     type: string;
   }>;
   unfold_method?: string;
+  /** Real folded 3D bounding box (mm) reported by the unfold service. */
+  bounding_box_mm?: { x: number; y: number; z: number };
 }
 
 export interface MeshAnalysis {
