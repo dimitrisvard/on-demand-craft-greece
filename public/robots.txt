@@ -33,4 +33,4 @@ Disallow: /api/
 Disallow: /admin/
 
 # Sitemap location
-Sitemap: https://www.micronshub.eu/sitemap-complete.xml
+Sitemap: https://www.micronshub.eu/sitemap.xml
