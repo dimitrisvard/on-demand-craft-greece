@@ -547,6 +547,32 @@ async def flat_pattern_compat(request: Request):
         for hole in flat.holes:
             outline_edges.extend(_hole_to_edge_dicts(hole))
 
+        # ── True blank area (outer − holes) ──────────────────────────────
+        # The edge function uses this for volume/weight (area × thickness),
+        # which is far more accurate than bounding W × H for parts with
+        # notches or holes.
+        def _loop_area(loop_edges) -> float:
+            pts = [e.start for e in loop_edges]
+            n = len(pts)
+            if n < 3:
+                return 0.0
+            a = 0.0
+            for i in range(n):
+                x1, y1 = pts[i]
+                x2, y2 = pts[(i + 1) % n]
+                a += x1 * y2 - x2 * y1
+            return abs(a) / 2.0
+
+        flat_area = _loop_area(flat.outer_edges)
+        for ring in flat.extra_outlines:
+            flat_area += _loop_area(ring)
+        for hole in flat.holes:
+            if hole.diameter:
+                flat_area -= math.pi * (hole.diameter / 2.0) ** 2
+            elif hole.edges:
+                flat_area -= _loop_area(hole.edges)
+        flat_area = max(flat_area, 0.0)
+
         # ── Validate bend lines against the flat frame ───────────────────
         # The bend line must lie inside the blank ([0,width] × [0,height]).
         # If a bend line falls outside (a coordinate-frame error upstream),
@@ -595,6 +621,7 @@ async def flat_pattern_compat(request: Request):
                     "height": flat.height,
                     "thickness": thickness,
                 },
+                "area_mm2": round(flat_area, 2),
                 "bends": [
                     {
                         "id": f"B{b.bend_id}",

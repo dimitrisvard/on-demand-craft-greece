@@ -642,11 +642,20 @@ export async function buildManufacturingPDF(
   // Main flat pattern wireframe (left ~72%)
   const flatImgW = contentW * 0.72;
   const flatContentH = flatH - 22;
-  const flatRect = {
+  const flatPanelRect = {
     x: m + 4,
     y: curY - flatH + 4,
     w: flatImgW - 8,
     h: flatContentH,
+  };
+  // Reserve CAD-style margins inside the panel so dimension rows (below),
+  // the height dimension (right) and bend labels (above) never overlap the
+  // part geometry or spill onto neighbouring panels.
+  const flatRect = {
+    x: flatPanelRect.x + 4,
+    y: flatPanelRect.y + 44,
+    w: flatPanelRect.w - 4 - 30,
+    h: flatPanelRect.h - 44 - 12,
   };
   // Flat-pattern geometry: draw the REAL unfolded blank outline (which already
   // includes the hole loops) when the unfold service succeeded. Only fall back
@@ -673,7 +682,7 @@ export async function buildManufacturingPDF(
           y1: b.bend_line_on_flat!.start[1],
           x2: b.bend_line_on_flat!.end[0],
           y2: b.bend_line_on_flat!.end[1],
-          label: `B${b.index} (${b.angle_deg.toFixed(0)}°)`,
+          label: `B${b.index} ${b.angle_deg.toFixed(0)}° ${b.direction || ""}`.trim(),
         }))
     : analysis.bendLines.map((bl, i) => ({
         x1: bl.start.x,
@@ -792,44 +801,39 @@ export async function buildManufacturingPDF(
       false,
     );
 
-    // Draw edge-to-bend dimension chain if unfold data has linear dimensions
-    if (unfoldData?.linear_dimensions && unfoldData.linear_dimensions.length > 0 && unfoldData.flat_pattern) {
-      const flatW = unfoldData.flat_pattern.width_mm || dims.x;
-      let dimChainY = oy - 30; // below the overall width dimension
-
-      for (const dim of unfoldData.linear_dimensions) {
-        // Calculate position on the drawing based on the cumulative distances
-        // We need to map mm positions to drawing coordinates
-        const sortedBends = (unfoldData.bends || []).sort(
-          (a, b) => a.distance_from_left_edge_mm - b.distance_from_left_edge_mm,
-        );
-
-        // Build positions array: [0, bend1_pos, bend2_pos, ..., flat_width]
-        const positions = [0, ...sortedBends.map((b) => b.distance_from_left_edge_mm), flatW];
-
-        for (let pi = 0; pi < positions.length - 1; pi++) {
-          const leftMm = positions[pi];
-          const rightMm = positions[pi + 1];
-          const valueMm = rightMm - leftMm;
-
-          if (valueMm < 0.5) continue;
-
-          const x1Draw = ox + (leftMm / flatW) * drawW;
-          const x2Draw = ox + (rightMm / flatW) * drawW;
-
-          drawDimension(
-            page,
-            font,
-            x1Draw,
-            dimChainY,
-            x2Draw,
-            dimChainY,
-            `${valueMm.toFixed(1)}`,
-            -10,
-            true,
-          );
+    // Edge-to-bend dimension chain (CAD-style): 0 → B1 → B2 → … → width.
+    // The unfold service does not send linear_dimensions, so derive the chain
+    // from each bend's distance_from_left_edge_mm (already clamped to the
+    // blank). Skip positions on the blank edges — they would duplicate the
+    // overall width dimension.
+    if (useOutline && unfoldData?.bends && unfoldData.bends.length > 0) {
+      const flatW = unfoldData.flat_pattern?.width_mm || bounds.width;
+      if (flatW > 0) {
+        const interior = unfoldData.bends
+          .map((b) => b.distance_from_left_edge_mm)
+          .filter((d) => d > 0.5 && d < flatW - 0.5)
+          .sort((a, b) => a - b);
+        if (interior.length > 0) {
+          const positions = [0, ...interior, flatW];
+          const dimChainY = oy - 26; // row below the overall width dimension
+          for (let pi = 0; pi < positions.length - 1; pi++) {
+            const valueMm = positions[pi + 1] - positions[pi];
+            if (valueMm < 0.5) continue;
+            const x1Draw = ox + (positions[pi] / flatW) * drawW;
+            const x2Draw = ox + (positions[pi + 1] / flatW) * drawW;
+            drawDimension(
+              page,
+              font,
+              x1Draw,
+              dimChainY,
+              x2Draw,
+              dimChainY,
+              `${valueMm.toFixed(1)}`,
+              -10,
+              true,
+            );
+          }
         }
-        break; // Only draw one row of dimension chain
       }
     }
 
@@ -837,8 +841,8 @@ export async function buildManufacturingPDF(
     const thickVal = unfoldData?.thickness_mm || dims.y;
     if (thickVal > 0.1) {
       page.drawText(`t = ${thickVal.toFixed(1)} mm`, {
-        x: flatRect.x + 8,
-        y: flatRect.y + 6,
+        x: flatPanelRect.x + 8,
+        y: flatPanelRect.y + 6,
         size: 6,
         font: fontBold,
         color: ACCENT_BLUE,

@@ -16,6 +16,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 // @ts-expect-error: no types for BufferGeometryUtils
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils';
 import jsPDF from 'jspdf';
+import type { FlatPatternResponse } from './serverManufacturingPdf';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -298,8 +299,10 @@ export async function generateManufacturingDrawingPdf(
     if (w != null) weight = fmtW(w);
   }
 
-  // 3b. Extract flat pattern data (bend info) from server-side analysis
-  let flatPatternData: { dimensions?: { width: number; height: number; thickness: number }; bends?: Array<{ id: string; angle: number; length: number }>; bend_count?: number } | null = null;
+  // 3b. Extract flat pattern data (real outline + bend geometry) from the
+  // server-side analysis. Keep the full payload so the drawing can use the
+  // actual blank outline and true bend-line positions, not approximations.
+  let flatPatternData: NonNullable<FlatPatternResponse['flat_pattern']> | null = null;
   try {
     const { extractFlatPattern } = await import('./serverManufacturingPdf');
     const fpResult = await extractFlatPattern(fileUrl, fileName);
@@ -315,7 +318,6 @@ export async function generateManufacturingDrawingPdf(
   const flatH = flatPatternData?.dimensions?.height ?? dims.z;
   const flatThickness = flatPatternData?.dimensions?.thickness ?? dims.y;
   const realBendCount = flatPatternData?.bend_count ?? 0;
-  const realBends = flatPatternData?.bends ?? [];
   const hasBends = partInfo.needsBending || realBendCount > 0;
 
   // 4. Render views
@@ -459,10 +461,69 @@ export async function generateManufacturingDrawingPdf(
   pdf.setTextColor(140);
   pdf.text(flatPatternData ? 'Bend lines from analysis — dimensions in mm' : 'Bend lines shown as red dashed lines — dimensions in mm', m + 35, y + 6);
 
-  // Main flat pattern image (left ~75%)
+  // Main flat pattern (left ~72%): draw the REAL vector blank outline
+  // (incl. holes) when the analysis returned one — that is what CAD shows.
+  // Only fall back to the rendered 3D top view when no outline exists.
   const flatImgW = contentW * 0.72;
   const flatImgH = flatSectionH - 18;
-  pdf.addImage(topView, 'PNG', m + 4, y + 9, flatImgW - 8, flatImgH);
+  const outlineEdges = flatPatternData?.outline_edges ?? [];
+  const drewVector = outlineEdges.length > 0;
+  // Vector-drawing frame state (used by dimensions below)
+  let vox = 0, voy = 0, vDrawW = 0, vDrawH = 0, vW = 1, vH = 1;
+  if (drewVector) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const e of outlineEdges) {
+      minX = Math.min(minX, e.start[0], e.end[0]);
+      minY = Math.min(minY, e.start[1], e.end[1]);
+      maxX = Math.max(maxX, e.start[0], e.end[0]);
+      maxY = Math.max(maxY, e.start[1], e.end[1]);
+    }
+    vW = maxX - minX || 1;
+    vH = maxY - minY || 1;
+    // Reserve margins for the dimension rows (bottom) and height dim (right)
+    const areaX = m + 8, areaY = y + 12;
+    const areaW = flatImgW - 34, areaH = flatImgH - 24;
+    const vScale = Math.min(areaW / vW, areaH / vH);
+    vDrawW = vW * vScale;
+    vDrawH = vH * vScale;
+    vox = areaX + (areaW - vDrawW) / 2;
+    voy = areaY + (areaH - vDrawH) / 2;
+    // Flat pattern is +Y-up; jsPDF is +Y-down → flip Y.
+    const VX = (mx: number) => vox + (mx - minX) * vScale;
+    const VY = (my: number) => voy + (maxY - my) * vScale;
+
+    pdf.setDrawColor(26, 26, 46);
+    pdf.setLineWidth(0.3);
+    for (const e of outlineEdges) {
+      pdf.line(VX(e.start[0]), VY(e.start[1]), VX(e.end[0]), VY(e.end[1]));
+    }
+
+    // Real bend lines — direction-coded like the analysis SVG (red = UP,
+    // blue = DOWN). Lines outside the blank (bad service coords) are dropped.
+    const guard = Math.max(vW, vH) * 0.05;
+    const inFrame = (p: [number, number]) =>
+      p[0] >= minX - guard && p[0] <= maxX + guard &&
+      p[1] >= minY - guard && p[1] <= maxY + guard;
+    (flatPatternData?.bends ?? []).forEach((b, i) => {
+      const bl = b.bend_line_on_flat;
+      if (!bl || !inFrame(bl.start) || !inFrame(bl.end)) return;
+      const up = (b.direction || 'UP') === 'UP';
+      if (up) pdf.setDrawColor(...RED); else pdf.setDrawColor(...ACCENT_BLUE);
+      pdf.setLineWidth(0.4);
+      pdf.setLineDashPattern([2, 1.2], 0);
+      pdf.line(VX(bl.start[0]), VY(bl.start[1]), VX(bl.end[0]), VY(bl.end[1]));
+      pdf.setLineDashPattern([], 0);
+      const ang = b.angle_deg ?? b.angle ?? 90;
+      pdf.setFontSize(6);
+      pdf.setFont('helvetica', 'bold');
+      if (up) pdf.setTextColor(...RED); else pdf.setTextColor(...ACCENT_BLUE);
+      const lx = Math.min(VX(bl.start[0]), VX(bl.end[0]));
+      const ly = Math.min(VY(bl.start[1]), VY(bl.end[1])) - 1.5;
+      pdf.text(`B${b.index ?? i + 1} ${Math.round(ang)}° ${b.direction || ''}`.trim(), lx - 2, ly);
+    });
+  } else {
+    pdf.addImage(topView, 'PNG', m + 4, y + 9, flatImgW - 8, flatImgH);
+  }
 
   // Front view reference (right ~25%)
   const refX = m + flatImgW + 2;
@@ -500,29 +561,76 @@ export async function generateManufacturingDrawingPdf(
   pdf.setFontSize(7);
   pdf.setFont('helvetica', 'bold');
 
-  // Horizontal dimension (flat pattern width)
-  const dimLineY = y + flatSectionH - 7;
-  const dimStartX = m + flatImgW * 0.12;
-  const dimEndX = m + flatImgW * 0.88;
-  pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
-  pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY - 1.2);
-  pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY + 1.2);
-  pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY - 1.2);
-  pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY + 1.2);
-  const xDimText = `${flatW.toFixed(1)}`;
-  pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 1.5);
+  if (drewVector) {
+    // Dimensions aligned to the actual drawn outline (CAD-style)
+    const wLabel = (flatPatternData?.dimensions?.width || vW).toFixed(1);
+    const hLabel = (flatPatternData?.dimensions?.height || vH).toFixed(1);
 
-  // Vertical dimension (flat pattern height)
-  const vDimX = m + flatImgW - 6;
-  const vDimStartY = y + 14;
-  const vDimEndY = y + flatSectionH - 14;
-  pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
-  pdf.line(vDimX, vDimStartY, vDimX - 1.2, vDimStartY + 2.5);
-  pdf.line(vDimX, vDimStartY, vDimX + 1.2, vDimStartY + 2.5);
-  pdf.line(vDimX, vDimEndY, vDimX - 1.2, vDimEndY - 2.5);
-  pdf.line(vDimX, vDimEndY, vDimX + 1.2, vDimEndY - 2.5);
-  const zDimText = `${flatH.toFixed(1)}`;
-  pdf.text(zDimText, vDimX + 2, (vDimStartY + vDimEndY) / 2, { angle: 90 });
+    // Width below the part
+    const dimY = voy + vDrawH + 5;
+    pdf.line(vox, dimY, vox + vDrawW, dimY);
+    pdf.line(vox, dimY, vox + 2.5, dimY - 1.2);
+    pdf.line(vox, dimY, vox + 2.5, dimY + 1.2);
+    pdf.line(vox + vDrawW, dimY, vox + vDrawW - 2.5, dimY - 1.2);
+    pdf.line(vox + vDrawW, dimY, vox + vDrawW - 2.5, dimY + 1.2);
+    pdf.text(wLabel, vox + vDrawW / 2 - pdf.getTextWidth(wLabel) / 2, dimY - 1.2);
+
+    // Height to the right of the part
+    const dimX = vox + vDrawW + 5;
+    pdf.line(dimX, voy, dimX, voy + vDrawH);
+    pdf.line(dimX, voy, dimX - 1.2, voy + 2.5);
+    pdf.line(dimX, voy, dimX + 1.2, voy + 2.5);
+    pdf.line(dimX, voy + vDrawH, dimX - 1.2, voy + vDrawH - 2.5);
+    pdf.line(dimX, voy + vDrawH, dimX + 1.2, voy + vDrawH - 2.5);
+    pdf.text(hLabel, dimX + 3, voy + vDrawH / 2, { angle: 90 });
+
+    // Bend-position dimension chain: 0 → B1 → … → width
+    const flatWmm = flatPatternData?.dimensions?.width || vW;
+    const interior = (flatPatternData?.bends ?? [])
+      .map((b) => b.distance_from_left_edge_mm ?? -1)
+      .filter((d) => d > 0.5 && d < flatWmm - 0.5)
+      .sort((a, b) => a - b);
+    if (interior.length > 0) {
+      const chain = [0, ...interior, flatWmm];
+      const chainY = dimY + 5.5;
+      pdf.setFontSize(6);
+      pdf.setFont('helvetica', 'normal');
+      for (let pi = 0; pi < chain.length - 1; pi++) {
+        const seg = chain[pi + 1] - chain[pi];
+        if (seg < 0.5) continue;
+        const x1 = vox + (chain[pi] / flatWmm) * vDrawW;
+        const x2 = vox + (chain[pi + 1] / flatWmm) * vDrawW;
+        pdf.line(x1, chainY, x2, chainY);
+        pdf.line(x1, chainY - 1, x1, chainY + 1);
+        pdf.line(x2, chainY - 1, x2, chainY + 1);
+        const segLabel = seg.toFixed(1);
+        pdf.text(segLabel, (x1 + x2) / 2 - pdf.getTextWidth(segLabel) / 2, chainY - 1);
+      }
+    }
+  } else {
+    // Approximate dimensions over the rendered image (legacy behaviour)
+    const dimLineY = y + flatSectionH - 7;
+    const dimStartX = m + flatImgW * 0.12;
+    const dimEndX = m + flatImgW * 0.88;
+    pdf.line(dimStartX, dimLineY, dimEndX, dimLineY);
+    pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY - 1.2);
+    pdf.line(dimStartX, dimLineY, dimStartX + 2.5, dimLineY + 1.2);
+    pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY - 1.2);
+    pdf.line(dimEndX, dimLineY, dimEndX - 2.5, dimLineY + 1.2);
+    const xDimText = `${flatW.toFixed(1)}`;
+    pdf.text(xDimText, (dimStartX + dimEndX) / 2 - pdf.getTextWidth(xDimText) / 2, dimLineY - 1.5);
+
+    const vDimX = m + flatImgW - 6;
+    const vDimStartY = y + 14;
+    const vDimEndY = y + flatSectionH - 14;
+    pdf.line(vDimX, vDimStartY, vDimX, vDimEndY);
+    pdf.line(vDimX, vDimStartY, vDimX - 1.2, vDimStartY + 2.5);
+    pdf.line(vDimX, vDimStartY, vDimX + 1.2, vDimStartY + 2.5);
+    pdf.line(vDimX, vDimEndY, vDimX - 1.2, vDimEndY - 2.5);
+    pdf.line(vDimX, vDimEndY, vDimX + 1.2, vDimEndY - 2.5);
+    const zDimText = `${flatH.toFixed(1)}`;
+    pdf.text(zDimText, vDimX + 2, (vDimStartY + vDimEndY) / 2, { angle: 90 });
+  }
 
   // Thickness annotation
   if (flatThickness > 0.1) {
@@ -531,30 +639,18 @@ export async function generateManufacturingDrawingPdf(
     pdf.text(`t = ${flatThickness.toFixed(1)} mm`, m + 6, y + flatSectionH - 2);
   }
 
-  // Bend lines (red dashed) — use real bend data when available, otherwise simulate
-  if (hasBends) {
-    pdf.setDrawColor(...RED);
-    pdf.setLineWidth(0.4);
-
-    const numBends = realBendCount > 0 ? realBendCount : Math.max(1, Math.min(4, Math.round(flatW / (flatH || flatW))));
-    for (let i = 1; i <= numBends; i++) {
-      const bx = m + flatImgW * (0.12 + 0.76 * i / (numBends + 1));
-      // Dashed line
-      const segLen = 3;
-      const gapLen = 2;
-      let cy2 = y + 12;
-      while (cy2 < y + flatSectionH - 12) {
-        const endY = Math.min(cy2 + segLen, y + flatSectionH - 12);
-        pdf.line(bx, cy2, bx, endY);
-        cy2 = endY + gapLen;
-      }
-      // Bend label with angle info from real data
-      pdf.setFontSize(6);
-      pdf.setTextColor(...RED);
-      const bendInfo = realBends[i - 1];
-      const bendLabel = bendInfo ? `B${i} (${bendInfo.angle}\u00B0)` : `B${i}`;
-      pdf.text(bendLabel, bx - 4, y + 10);
-    }
+  // Bend lines: only REAL positions are ever drawn (vector path above).
+  // Never fabricate bend positions on a manufacturing drawing — when bending
+  // is required but no geometry came back, state that explicitly instead.
+  if (!drewVector && hasBends) {
+    pdf.setFontSize(6);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setTextColor(...RED);
+    pdf.text(
+      `Bend line positions unavailable (${realBendCount || '?'} bend${realBendCount === 1 ? '' : 's'} detected) — refer to the server drawing or 3D model`,
+      m + 6,
+      y + 11,
+    );
   }
 
   y += flatSectionH + 2;

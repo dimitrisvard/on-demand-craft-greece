@@ -93,6 +93,7 @@ async function callUnfoldService(
         flat_pattern: {
           width_mm: widthMm,
           height_mm: heightMm,
+          area_mm2: data.flat_pattern?.area_mm2 || 0,
           outline_edges: data.flat_pattern?.outline_edges || [],
         },
         bends: (data.flat_pattern?.bends || data.bends || []).map(
@@ -239,17 +240,22 @@ serve(async (req) => {
 
         // The volume derived from raw STEP triangulation is often wildly
         // wrong (overlapping / non-manifold surfaces). For sheet metal we
-        // have a much better estimate: flat_area × thickness. Use it to
-        // compute a realistic weight.
+        // have a much better estimate: flat_area × thickness. Prefer the
+        // service's true blank area (outer − holes); fall back to the
+        // bounding W × H when the service predates area_mm2.
         const thkForVol = unfoldData.thickness_mm && unfoldData.thickness_mm > 0
           ? unfoldData.thickness_mm
           : analysis.dimensions.y;
-        if (unfoldData.flat_pattern && unfoldData.flat_pattern.width_mm > 0
-            && unfoldData.flat_pattern.height_mm > 0
-            && thkForVol > 0) {
-          analysis.volume = unfoldData.flat_pattern.width_mm
-                           * unfoldData.flat_pattern.height_mm
-                           * thkForVol;
+        if (thkForVol > 0 && unfoldData.flat_pattern) {
+          const trueArea = unfoldData.flat_pattern.area_mm2 || 0;
+          if (trueArea > 0) {
+            analysis.volume = trueArea * thkForVol;
+          } else if (unfoldData.flat_pattern.width_mm > 0
+              && unfoldData.flat_pattern.height_mm > 0) {
+            analysis.volume = unfoldData.flat_pattern.width_mm
+                             * unfoldData.flat_pattern.height_mm
+                             * thkForVol;
+          }
         }
       } else {
         console.log("FreeCAD unfold not available or failed, using STEP text parsing only");
