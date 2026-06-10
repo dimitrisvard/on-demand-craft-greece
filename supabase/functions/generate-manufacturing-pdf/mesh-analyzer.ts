@@ -89,6 +89,8 @@ export interface UnfoldData {
   flat_pattern?: {
     width_mm: number;
     height_mm: number;
+    /** True blank area (outer − holes) in mm², when the service provides it. */
+    area_mm2?: number;
     outline_edges?: Array<{ start: number[]; end: number[] }>;
   };
   bends?: BendDetail[];
