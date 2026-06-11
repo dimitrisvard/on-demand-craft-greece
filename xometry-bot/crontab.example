@@ -1,0 +1,3 @@
+# 7x/day scan cadence (§7): 09:00-21:00 every 2h, Europe/Athens server time.
+# One scan at a time is enforced by the pipeline's lockfile as well.
+0 9,11,13,15,17,19,21 * * * cd /opt/xometry-bot && ./.venv/bin/python -m xometry_bot.pipeline >> /var/log/xometry-bot/scan.log 2>&1

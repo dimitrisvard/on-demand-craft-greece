@@ -1,0 +1,36 @@
+[project]
+name = "xometry-bot"
+version = "0.1.0"
+description = "Semi-automatic Xometry job-board scanner + one-click counteroffer queue for Microns Hub"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "psycopg[binary]>=3.2",
+    "playwright>=1.45",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["xometry_bot"]
+
+[[tool.mypy.overrides]]
+module = "playwright.*"
+ignore_missing_imports = true

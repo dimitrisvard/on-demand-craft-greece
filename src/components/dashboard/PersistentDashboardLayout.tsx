@@ -23,6 +23,7 @@ import {
   Scan,
   Building2,
   Rocket,
+  Euro,
   Layers,
   Globe
 } from "lucide-react";
@@ -84,6 +85,7 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/company-scanner') return 'company-scanner';
     if (path === '/dashboard/tenders') return 'tenders';
     if (path === '/dashboard/funded-startups') return 'funded-startups';
+    if (path === '/dashboard/xometry') return 'xometry';
     if (path === '/dashboard/seo') return 'seo';
     if (path.startsWith('/dashboard/tenants')) return 'tenants';
     return 'overview';
@@ -295,6 +297,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/funded-startups")}
                       icon={<Rocket className="h-4 w-4" />}
                       label="Funded Startups"
+                    />
+                    <NavButton
+                      active={activeModule === "xometry"}
+                      onClick={() => handleNavigation("/dashboard/xometry")}
+                      icon={<Euro className="h-4 w-4" />}
+                      label="Xometry Queue"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -523,6 +531,12 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/funded-startups")}
                       icon={<Rocket className="h-4 w-4" />}
                       label="Funded Startups"
+                    />
+                    <NavButton
+                      active={activeModule === "xometry"}
+                      onClick={() => handleNavigation("/dashboard/xometry")}
+                      icon={<Euro className="h-4 w-4" />}
+                      label="Xometry Queue"
                     />
                   </AccordionContent>
                 </AccordionItem>

@@ -63,6 +63,7 @@ const SeoConsolePage = lazy(() => import('./pages/dashboard/SeoConsolePage'));
 const CompanyScannerPage = lazy(() => import('./pages/dashboard/CompanyScannerPage'));
 const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage'));
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
+const XometryQueuePage = lazy(() => import('./pages/dashboard/XometryQueuePage'));
 
 // Inventory Management Pages
 const InventoryDashboard = lazy(() => import('./pages/inventory/InventoryDashboard'));
@@ -290,6 +291,7 @@ function AppContent() {
                 <Route path="/dashboard/company-scanner" element={<CompanyScannerPage />} />
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
                 <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />
+                <Route path="/dashboard/xometry" element={<XometryQueuePage />} />
 
                 {/* Material Catalog */}
                 <Route path="/dashboard/materials" element={<MaterialCatalogPage />} />
