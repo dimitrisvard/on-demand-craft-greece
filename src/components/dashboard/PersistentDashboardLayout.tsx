@@ -256,13 +256,21 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<Mail className="h-4 w-4" />}
                       label="Email Marketing"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "email-inbox"}
                       onClick={() => handleNavigation("/dashboard/email-inbox")}
                       icon={<Inbox className="h-4 w-4" />}
                       label="Email Inbox"
                     />
                   </>
+                 )}
+                 {!isProductionPartner && !isTenantAdminUser && (
+                  <NavButton
+                    active={activeModule === "xometry"}
+                    onClick={() => handleNavigation("/dashboard/xometry")}
+                    icon={<Euro className="h-4 w-4" />}
+                    label="Xometry Queue"
+                  />
                  )}
               </AccordionContent>
             </AccordionItem>
@@ -297,12 +305,6 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/funded-startups")}
                       icon={<Rocket className="h-4 w-4" />}
                       label="Funded Startups"
-                    />
-                    <NavButton
-                      active={activeModule === "xometry"}
-                      onClick={() => handleNavigation("/dashboard/xometry")}
-                      icon={<Euro className="h-4 w-4" />}
-                      label="Xometry Queue"
                     />
                   </AccordionContent>
                 </AccordionItem>
@@ -490,13 +492,21 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       icon={<Mail className="h-4 w-4" />}
                       label="Email Marketing"
                     />
-                    <NavButton 
+                    <NavButton
                       active={activeModule === "email-inbox"}
                       onClick={() => handleNavigation("/dashboard/email-inbox")}
                       icon={<Inbox className="h-4 w-4" />}
                       label="Email Inbox"
                     />
                   </>
+                 )}
+                 {!isProductionPartner && !isTenantAdminUser && (
+                  <NavButton
+                    active={activeModule === "xometry"}
+                    onClick={() => handleNavigation("/dashboard/xometry")}
+                    icon={<Euro className="h-4 w-4" />}
+                    label="Xometry Queue"
+                  />
                  )}
               </AccordionContent>
             </AccordionItem>
@@ -531,12 +541,6 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                       onClick={() => handleNavigation("/dashboard/funded-startups")}
                       icon={<Rocket className="h-4 w-4" />}
                       label="Funded Startups"
-                    />
-                    <NavButton
-                      active={activeModule === "xometry"}
-                      onClick={() => handleNavigation("/dashboard/xometry")}
-                      icon={<Euro className="h-4 w-4" />}
-                      label="Xometry Queue"
                     />
                   </AccordionContent>
                 </AccordionItem>
