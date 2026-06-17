@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 const DISMISS_KEY = "mh_quote_popup_dismissed";
-const DELAY_MS = 4500;
+const DELAY_MS = 5500;
 
 // sessionStorage => the popup shows again on a new visit/session.
 // To make a dismissal permanent across visits, swap sessionStorage -> localStorage
@@ -59,7 +59,9 @@ export function useTimedSessionPopup(enabled: boolean) {
   const convert = useCallback(() => {
     markDismissed();
     track("quote_popup_cta_click");
-    // navigation handled by the link
+    // Hide immediately; the component stays mounted across navigation, so
+    // without this the popup would linger on the quote page after the click.
+    setOpen(false);
   }, []);
 
   return { open, close, convert };
