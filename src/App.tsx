@@ -10,6 +10,7 @@ import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop';
 import CookieConsentBanner from './components/CookieConsentBanner';
+import QuotePopup from './components/quote-popup/QuotePopup';
 import TranslatedRouteMatcher from './components/TranslatedRouteMatcher';
 import SEORedirects from './components/SEORedirects';
 import CustomerPortalLayout from './components/customer-portal/CustomerPortalLayout';
@@ -318,6 +319,7 @@ function AppContent() {
               </Routes>
             </Suspense>
           <CookieConsentBanner />
+          <QuotePopup />
           <ConditionalFooter />
         </AuthProvider>
       </LanguageProvider>
