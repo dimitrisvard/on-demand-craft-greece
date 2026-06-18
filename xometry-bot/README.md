@@ -38,50 +38,94 @@ dashboard/           # original Next.js drop-in, kept as a portable reference �
 tests/               # 106 tests, no network needed
 ```
 
-## Install (Hetzner box)
+## How it runs (serverless — no Hetzner box)
 
-```bash
-python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/playwright install chromium
-cp .env.example .env   # fill in (gitignored)
-```
+The original design assumed a Hetzner box running the scanner (cron) and the
+FastAPI review API. **The default deployment is now serverless** and needs no
+server:
 
-Quality gates: `ruff check .` · `mypy` · `pytest` — all clean.
+| Piece | Where it runs | Status |
+| --- | --- | --- |
+| Phase 1 scan (GraphQL/HTTP, no browser) | GitHub Action `.github/workflows/xometry-scan.yml` | live once you set the secrets below |
+| Queue table `xometry_offers` | Supabase (RLS on, no policies) | already migrated |
+| Read / Skip / Submit | Supabase edge function `xometry-review` | deployed |
+| Review page `/dashboard/xometry` | the hub SPA | deployed |
+| Phase 2 buyer auto-pricing (Playwright) | needs a browser — still box/local only | optional |
 
-## Bring-up order (ship Phase 1 before wiring any Submit)
+The box path (`python -m xometry_bot.pipeline` on a cron + `review_api`) is still
+valid — see "Box alternative" below — but you do not need it.
 
-### Phase 1 — read-only scanner (run this first)
+## Operator setup (do these to make it work)
 
-1. Log into partner.xometry.eu in your browser; copy `localStorage.authToken`
-   into `XB_PARTNER_AUTH_TOKEN` (and/or the session cookie into
-   `XB_PARTNER_COOKIE`). MFA can't be scripted — this is the one manual step.
-2. `python -m xometry_bot.pipeline` — scans, filters to the **milonk** preset,
-   stores excluded-coating rows, downloads CAD files, upserts to Supabase.
-3. Check `/dashboard/xometry` on the dashboard: rows must match what you see with the
-   milonk filter on the board; every row has the right `HJO-…` code; re-running
-   adds no duplicates.
-4. Install the cron: `crontab.example`.
+### A. Scanner → GitHub Actions (fills the queue)
 
-### Phase 2 — buyer pricing (gated until you confirm one selector)
+1. **Get a partner token.** Log into partner.xometry.eu, open DevTools →
+   Application → Local Storage, copy `authToken`. (MFA can't be scripted — this
+   is the recurring manual step; the token expires, refresh it when scans 401.)
+2. **Get the DB string.** Supabase → Project Settings → Database → Connection
+   string → **Session pooler** (IPv4, supports prepared statements). It looks
+   like `postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+3. **Add repo secrets** (GitHub → Settings → Secrets and variables → Actions):
+   `XB_DB_DSN`, `XB_PARTNER_AUTH_TOKEN` (and optionally `XB_PARTNER_COOKIE`).
+4. **Run it**: Actions tab → "Xometry job-board scan" → Run workflow. After it
+   succeeds, open `/dashboard/xometry` — survivors of the **milonk** preset show
+   up as `new` rows (Xometry's partner cost, part-file links, expiry). It then
+   runs ~7×/day on the schedule. Re-runs never duplicate (dedupe on `code`).
 
-1. `python -m xometry_bot.buyer_pricer login` — log into get.xometry.eu once
-   (persistent profile keeps the session warm).
-2. `python -m xometry_bot.buyer_pricer probe path/to/a.step` — runs one real
-   instant quote headed and prints every candidate "Order Value / excl. VAT /
-   Threads" node. Pin `BUYER_ORDER_VALUE_*` and the qty/material/tolerance/Ra
-   control selectors in `selectors.py`.
-3. Set `XB_BUYER_SELECTORS_CONFIRMED=1` and `XB_ENABLE_BUYER_PRICING=1`.
-4. Acceptance: for a known STEP, the stored `buyer_price` matches what the
-   Xometry UI shows for the same qty/material.
+Skip works immediately at this point — no further setup.
 
-### Phase 3 — submit (human-gated)
+### B. Submit → edge function (places the counteroffer)
 
-1. `python -m xometry_bot.partner_form login` — warm the partner profile.
-2. Run the review API: `python -m xometry_bot.review_api` (binds 127.0.0.1:8077;
-   front it with TLS or keep it on a private network).
-3. Configure the edge-function secrets (see `dashboard/README.md`) and submit ONE real
-   counteroffer; verify it in "My Responses" with the right price and a
-   ≥10-business-day date; the row flips to `submitted` and can't be re-sent.
+Submitting is the only money-moving step, so it needs one capture you must do by
+hand (the counteroffer mutation is account-specific and was not captured in the
+build spec):
+
+1. On partner.xometry.eu, open a job and submit one counteroffer manually with
+   DevTools → Network open. Find the GraphQL request and copy its **mutation
+   string** and operation name.
+2. Adapt the mutation to this exact variable signature (rename variables if the
+   capture differs — the edge function always sends these four):
+   ```graphql
+   mutation SubmitCounteroffer($offerId: ID!, $value: Float!, $leadtime: Date!, $comment: String) {
+     # ...the body you captured, using $offerId / $value / $leadtime / $comment...
+   }
+   ```
+3. **Add Supabase secrets** (`supabase secrets set …`, or Dashboard → Edge
+   Functions → Manage secrets):
+   `XOMETRY_PARTNER_AUTH_TOKEN` (same token as the scanner),
+   `XOMETRY_COUNTEROFFER_MUTATION` (the string above), and optionally
+   `XOMETRY_COUNTEROFFER_OPERATION_NAME` / `XOMETRY_PARTNER_COOKIE`.
+4. On `/dashboard/xometry`, set a price + lead time on a row and click Submit.
+   The edge function enforces the §6C floors (≥ `allowCounterofferFrom`,
+   ≥ cost × 1.15, lead time ≥ today + 10 business days), claims the row
+   atomically (no double-submit), sends the mutation, and flips it to
+   `submitted`. A failed send parks the row in `error` and is never auto-retried
+   — check "My Responses" on Xometry before doing anything with it.
+
+Until B is configured, Submit returns a clear "submit backend not configured"
+error (never a silent success).
+
+### C. (Optional) Phase 2 buyer auto-pricing — needs a browser
+
+Auto-suggesting a price from a buyer-side instant quote uses Playwright, so it
+can't run in the Action. Run it locally/on a box:
+
+1. `pip install -r requirements.txt && playwright install chromium`
+2. `python -m xometry_bot.buyer_pricer login` then
+   `python -m xometry_bot.buyer_pricer probe path/to/a.step`; pin the Order Value
+   + control selectors in `selectors.py`.
+3. Set `XB_ENABLE_BUYER_PRICING=1` and `XB_BUYER_SELECTORS_CONFIRMED=1` and run
+   `python -m xometry_bot.pipeline`. Priced rows reach `ready` with a suggested
+   price; without it, you price each `new` row by hand in the dashboard.
+
+### Box alternative (instead of A + the submit half of B)
+
+`python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/playwright install chromium`,
+fill `.env` from `.env.example`, run `python -m xometry_bot.pipeline` on the
+cron in `crontab.example`, and `python -m xometry_bot.review_api` (binds
+127.0.0.1:8077). Point the edge function at it with `XOMETRY_REVIEW_API_URL` +
+`XOMETRY_REVIEW_API_TOKEN` and it proxies Submit to the box's Playwright form
+(no mutation capture needed). Quality gates: `ruff check .` · `mypy` · `pytest`.
 
 ## One-time TODO(confirm) checklist (§8.3)
 

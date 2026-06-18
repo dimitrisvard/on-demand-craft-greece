@@ -129,6 +129,11 @@ def _process_offer(
     if status in TERMINAL_STATUSES:
         return
 
+    if not settings.download_files:
+        # Serverless/CI scan: skip local CAD copies (only the buyer pricer needs
+        # them); the dashboard links to Xometry's own downloadUrl instead.
+        return
+
     try:
         local = client.download_files(offer, settings.files_dir)
         if local:

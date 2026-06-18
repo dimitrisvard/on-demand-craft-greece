@@ -135,6 +135,11 @@ class Settings:
     buyer_selectors_confirmed: bool
     headless: bool
     borderline_exclude: frozenset[str]
+    # Download CAD/drawing files locally during the scan. Needed only by the
+    # Phase-2 buyer pricer; off in serverless/CI runs (the dashboard links to
+    # Xometry's own downloadUrl). Defaults True so existing deployments/tests
+    # keep their behaviour.
+    download_files: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -157,6 +162,7 @@ class Settings:
             buyer_selectors_confirmed=_env_bool("XB_BUYER_SELECTORS_CONFIRMED", False),
             headless=_env_bool("XB_HEADLESS", True),
             borderline_exclude=borderline,
+            download_files=_env_bool("XB_DOWNLOAD_FILES", True),
         )
 
     @property

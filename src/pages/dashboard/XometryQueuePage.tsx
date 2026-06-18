@@ -48,11 +48,29 @@ const STATUS_STYLES: Record<XometryOfferStatus, string> = {
   error: 'bg-red-100 text-red-700',
 };
 
-const SUBMITTABLE: ReadonlySet<XometryOfferStatus> = new Set(['ready', 'needs_review']);
+// Anything not terminal/transient/excluded can be counter-offered. Unpriced rows
+// (`new`, `needs_manual`) require the operator to type a price — the edge function's
+// guard still enforces the cost and counteroffer floors before anything is sent.
+const SUBMITTABLE: ReadonlySet<XometryOfferStatus> = new Set([
+  'new',
+  'priced',
+  'ready',
+  'needs_review',
+  'needs_manual',
+]);
 const TERMINAL: ReadonlySet<XometryOfferStatus> = new Set(['submitted', 'skipped']);
 
 function eur(n: number | null): string {
   return n == null ? '—' : `${n.toFixed(2)} €`;
+}
+
+// Default lead-time hint for rows the scanner never priced: today + 21 calendar
+// days clears the "today + 10 business days" floor comfortably. The operator can
+// always change it; the guard re-checks on submit.
+function defaultLeadtime(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 21);
+  return d.toISOString().slice(0, 10);
 }
 
 const XometryQueuePage = () => {
@@ -131,7 +149,7 @@ function OfferTable({
   const editFor = (row: XometryOfferRow): RowEdit =>
     edits[row.code] ?? {
       price: row.suggested_price != null ? String(row.suggested_price) : '',
-      leadtime: row.suggested_leadtime ?? '',
+      leadtime: row.suggested_leadtime ?? defaultLeadtime(),
     };
 
   const setEdit = (code: string, patch: Partial<RowEdit>, row: XometryOfferRow) =>
@@ -140,6 +158,10 @@ function OfferTable({
   async function act(row: XometryOfferRow, action: 'submit' | 'skip') {
     const edit = editFor(row);
     if (action === 'submit') {
+      if (edit.price === '' || edit.leadtime === '') {
+        setErrors((e) => ({ ...e, [row.code]: 'Enter a price and lead time before submitting.' }));
+        return;
+      }
       const confirmed = window.confirm(
         `Send counteroffer for ${row.code}: ${edit.price} €, lead time ${edit.leadtime}?\n` +
           'This places a real counteroffer on Xometry.',
@@ -149,8 +171,8 @@ function OfferTable({
     setBusyCode(row.code);
     setErrors((e) => ({ ...e, [row.code]: '' }));
     try {
-      // Empty inputs go up as null so the review API falls back to the row's
-      // suggested values; its guard still refuses prices below the floor.
+      // accept_review_row widens the server-side claim to non-`ready` rows (manual
+      // pricing of new/needs_review/needs_manual). The guard still applies.
       const payload =
         action === 'submit'
           ? {
@@ -158,7 +180,7 @@ function OfferTable({
               code: row.code,
               price: edit.price === '' ? null : Number(edit.price),
               leadtime: edit.leadtime === '' ? null : edit.leadtime,
-              accept_review_row: row.status === 'needs_review',
+              accept_review_row: row.status !== 'ready',
             }
           : { action, code: row.code };
       await invokeReview(payload);
@@ -212,7 +234,9 @@ function OfferTable({
           {rows.length === 0 && (
             <tr>
               <td colSpan={10} className="px-2 py-8 text-center text-gray-400">
-                Queue is empty — the next scan runs on the 2-hour cron.
+                Queue is empty. Offers appear after the scanner runs — trigger the{' '}
+                <span className="font-mono">xometry-scan</span> GitHub Action (or wait for its
+                schedule). See xometry-bot/README.md.
               </td>
             </tr>
           )}
@@ -317,7 +341,7 @@ function OfferRow({
             disabled={!submittable || busy}
             onClick={() => onAct('submit')}
           >
-            {busy ? '…' : row.status === 'needs_review' ? 'Submit (override)' : 'Submit'}
+            {busy ? '…' : row.status === 'ready' ? 'Submit' : 'Submit (override)'}
           </button>
           <button
             type="button"

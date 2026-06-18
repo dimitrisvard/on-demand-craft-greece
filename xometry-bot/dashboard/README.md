@@ -9,13 +9,17 @@
 >   Lead Monitor → "Xometry Queue".
 > - **Backend**: `supabase/functions/xometry-review` edge function. Reads
 >   `xometry_offers` with the service role key after checking the caller has an
->   admin-level row in `user_roles` (same bar as `api/_lib/admin-auth.js`), and
->   proxies Submit/Skip to the Hetzner review API so the bearer token never
->   reaches the browser.
-> - **Secrets** (instead of the Vercel env below):
->   `supabase secrets set XOMETRY_REVIEW_API_URL=https://<box>:8077 XOMETRY_REVIEW_API_TOKEN=<token>`
->   — the token must match `XB_REVIEW_API_TOKEN` on the box. Until they are set,
->   the queue renders read-only and Submit/Skip return "not configured".
+>   admin-level row in `user_roles` (same bar as `api/_lib/admin-auth.js`).
+>   `skip` is a direct DB transition; `submit` enforces the §6C guard, claims the
+>   row atomically, and sends the counteroffer (no box needed).
+> - **Secrets** for submit (Dashboard → Edge Functions → Manage secrets, or
+>   `supabase secrets set …`) — see `../README.md` "Operator setup B":
+>   `XOMETRY_PARTNER_AUTH_TOKEN` + `XOMETRY_COUNTEROFFER_MUTATION` for the direct
+>   GraphQL path, **or** `XOMETRY_REVIEW_API_URL` + `XOMETRY_REVIEW_API_TOKEN` to
+>   proxy to a review-API box instead. Until one pair is set, `pending`/`skip`
+>   work and `submit` returns a clear "not configured" error (never a silent OK).
+> - The scanner that fills the queue is the `xometry-scan` GitHub Action, not
+>   this page — see `../README.md` "Operator setup A".
 >
 > The files below are the original portable Next.js (App Router) variant, kept
 > for reference in case the page ever needs to move to a Next.js app.

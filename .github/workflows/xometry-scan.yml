@@ -1,0 +1,69 @@
+name: Xometry job-board scan
+
+# Phase-1 scanner for the counteroffer queue (xometry-bot). Pure GraphQL/HTTP —
+# no browser — so it runs serverlessly here instead of on a dedicated box. It
+# scans partner.xometry.eu, filters to the CNC "milonk" preset, excludes
+# coating/finishing jobs, and upserts survivors into the Supabase xometry_offers
+# table. It NEVER sends anything to Xometry (submission is a human dashboard click
+# routed through the xometry-review edge function).
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   XB_DB_DSN              Supabase Postgres connection string. Use the SESSION
+#                          pooler (IPv4, supports prepared statements), e.g.
+#                          postgresql://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#   XB_PARTNER_AUTH_TOKEN  localStorage `authToken` from partner.xometry.eu (expires — refresh when scans 401)
+#   XB_PARTNER_COOKIE      (optional) session cookie header, if bearer alone is rejected
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # ~7×/day. Cron is UTC; 06–18 UTC ≈ 09–21 in Greece (EEST). Adjust to taste.
+    - cron: "0 6,8,10,12,14,16,18 * * *"
+
+# Never let two scans overlap (mirrors the worker's lockfile).
+concurrency:
+  group: xometry-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xometry-bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if not configured
+        id: guard
+        env:
+          XB_DB_DSN: ${{ secrets.XB_DB_DSN }}
+          XB_PARTNER_AUTH_TOKEN: ${{ secrets.XB_PARTNER_AUTH_TOKEN }}
+          XB_PARTNER_COOKIE: ${{ secrets.XB_PARTNER_COOKIE }}
+        run: |
+          if [ -z "$XB_DB_DSN" ] || { [ -z "$XB_PARTNER_AUTH_TOKEN" ] && [ -z "$XB_PARTNER_COOKIE" ]; }; then
+            echo "::notice::xometry-scan secrets not set yet (XB_DB_DSN + XB_PARTNER_AUTH_TOKEN/COOKIE) — skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          python-version: "3.11"
+
+      - name: Install scanner deps (no browser, Phase-1 only)
+        if: steps.guard.outputs.ready == 'true'
+        run: pip install "httpx>=0.27" "pydantic>=2.7" "psycopg[binary]>=3.2"
+
+      - name: Scan and upsert
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          XB_DB_DSN: ${{ secrets.XB_DB_DSN }}
+          XB_PARTNER_AUTH_TOKEN: ${{ secrets.XB_PARTNER_AUTH_TOKEN }}
+          XB_PARTNER_COOKIE: ${{ secrets.XB_PARTNER_COOKIE }}
+          XB_ENABLE_BUYER_PRICING: "0"   # Phase 2 needs a browser + warm login — off here
+          XB_DOWNLOAD_FILES: "0"         # dashboard links to Xometry's downloadUrl; no local copies
+          XB_BORDERLINE_EXCLUDE: ${{ vars.XB_BORDERLINE_EXCLUDE }}
+        run: python -m xometry_bot.pipeline
