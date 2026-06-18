@@ -113,6 +113,18 @@ class TestRunScan:
         assert store.rows["HJO-G"]["status"] == "excluded_secondary_ops"
         assert store.rows["HJO-G"]["excluded_reason"] == "Grinding flat"
 
+    def test_download_files_disabled_skips_local_copies(self, tmp_path: Path) -> None:
+        # Serverless/CI scan (XB_DOWNLOAD_FILES=0): row is still upserted, but no
+        # CAD files are fetched and local_files stays empty.
+        store = FakeStore()
+        client = FakeClient([fx.make_offer("HJO-CNC")])
+        settings = make_settings(tmp_path, download_files=False)
+        run_scan(store, client, settings)  # type: ignore[arg-type]
+        assert "HJO-CNC" in store.rows
+        assert store.rows["HJO-CNC"]["status"] == "new"
+        assert client.downloads == []
+        assert store.rows["HJO-CNC"]["local_files"] == []
+
     def test_one_bad_offer_does_not_kill_run(self, tmp_path: Path) -> None:
         store = FakeStore()
         bad = fx.make_offer("HJO-BAD")
