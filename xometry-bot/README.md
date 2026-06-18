@@ -131,7 +131,7 @@ cron in `crontab.example`, and `python -m xometry_bot.review_api` (binds
 
 | Item | How it resolves |
 | --- | --- |
-| Money field names (`amount/currency` vs `value/currencyCode`) | Auto: the client retries with the alt fragment and logs `TODO(confirm) resolved: money fields = …` on the first scan |
+| Money field names | ✅ Resolved: live `Money` is `amount`/`amountCents`/`currencyCode`; the scan query selects `cost { amount currencyCode }` (fallback seam retired) |
 | Partner auth header (bearer vs cookie) | Auto: configure one or both; the first scan succeeds or fails loudly |
 | "Order Value excl. VAT" node + quote-config controls | `buyer_pricer probe` on one STEP file, then update `selectors.py` |
 | Urgent-tab filter enum | Read one DevTools request on the Urgent tab → `config.URGENT_FILTER_ENUM`, flip `SCAN_URGENT_TAB` |

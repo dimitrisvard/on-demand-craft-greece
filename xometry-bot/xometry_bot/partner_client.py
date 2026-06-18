@@ -4,10 +4,9 @@ GraphQL is the robust half and the primary integration. The counteroffer
 mutation is intentionally NOT implemented until captured live from DevTools
 (§6C TODO(confirm)) — submission goes through partner_form.PlaywrightFormSubmitter.
 
-Money-fragment seam: the captured query asks for `cost { amount currency }`.
-If the live schema rejects those field names, the client swaps the fragment to
-`{ value currencyCode }` once, logs it loudly, and retries — models.Money
-normalises both response shapes.
+Money fragment: the live partner schema's Money type exposes
+`amount`/`amountCents`/`currencyCode` (confirmed 2026-06), so the query selects
+`cost { amount currencyCode }`; models.Money maps `currencyCode` to `currency`.
 """
 
 from __future__ import annotations
@@ -26,10 +25,10 @@ from .models import JobOffer, ScanPage
 
 log = logging.getLogger(__name__)
 
-MONEY_FRAGMENT_PRIMARY = "{ amount currency }"
-MONEY_FRAGMENT_ALT = "{ value currencyCode }"
+# Live Money type = amount / amountCents / currencyCode (confirmed 2026-06).
+MONEY_FRAGMENT = "{ amount currencyCode }"
 
-# Verbatim shape captured live (§1A); the money fragment is templated for the seam above.
+# Verbatim shape captured live (§1A); the money fragment is templated in (see MONEY_FRAGMENT).
 GSH_JOB_OFFERS_QUERY_TMPL = """
 query gshJobOffers(
   $filter: OffersFilterType!, $offsetAttributes: OffsetAttributes, $sort: OffersSortType
@@ -121,8 +120,6 @@ class PartnerClient:
         self._client = httpx.Client(
             headers=headers, timeout=timeout, transport=transport, follow_redirects=True
         )
-        self._money_fragment = MONEY_FRAGMENT_PRIMARY
-        self._money_shape_logged = False
 
     def close(self) -> None:
         self._client.close()
@@ -154,42 +151,10 @@ class PartnerClient:
 
     def _scan_page(self, flt: dict[str, Any], limit: int, offset: int) -> dict[str, Any]:
         variables = {"filter": flt, "offsetAttributes": {"limit": limit, "offset": offset}}
-        query = GSH_JOB_OFFERS_QUERY_TMPL.replace("__MONEY__", self._money_fragment)
-        try:
-            data = self._gql(query, variables, "gshJobOffers")
-        except PartnerApiError as exc:
-            # Money-field seam (§1A TODO(confirm)): swap fragment once and retry.
-            msg = str(exc)
-            if self._money_fragment == MONEY_FRAGMENT_PRIMARY and (
-                "amount" in msg or "currency" in msg or "Cannot query field" in msg
-            ):
-                log.warning(
-                    "money fragment %s rejected, retrying with %s — update "
-                    "partner_client.MONEY_FRAGMENT_PRIMARY once confirmed: %s",
-                    MONEY_FRAGMENT_PRIMARY,
-                    MONEY_FRAGMENT_ALT,
-                    msg,
-                )
-                self._money_fragment = MONEY_FRAGMENT_ALT
-                query = GSH_JOB_OFFERS_QUERY_TMPL.replace("__MONEY__", self._money_fragment)
-                data = self._gql(query, variables, "gshJobOffers")
-            else:
-                raise
+        query = GSH_JOB_OFFERS_QUERY_TMPL.replace("__MONEY__", MONEY_FRAGMENT)
+        data = self._gql(query, variables, "gshJobOffers")
         node: dict[str, Any] = data["gshJobOffers"]
         return node
-
-    def _log_money_shape_once(self, node: dict[str, Any]) -> None:
-        if self._money_shape_logged:
-            return
-        for offer in node.get("offers", []):
-            cost = offer.get("cost")
-            if isinstance(cost, dict):
-                log.info(
-                    "TODO(confirm) resolved: money fields on live response = %s",
-                    sorted(cost.keys()),
-                )
-                self._money_shape_logged = True
-                return
 
     # --- Public API ---------------------------------------------------------------
 
@@ -203,7 +168,6 @@ class PartnerClient:
         offset = 0
         for _ in range(config.SCAN_MAX_PAGES):
             node = self._scan_page(flt or dict(config.SCAN_FILTER), limit, offset)
-            self._log_money_shape_once(node)
             page = ScanPage.model_validate(node)
             for raw, offer in zip(node.get("offers", []), page.offers, strict=True):
                 offer.raw = raw

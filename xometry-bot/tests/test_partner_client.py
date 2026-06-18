@@ -84,27 +84,23 @@ class TestScan:
             list(client.scan())
 
 
-class TestMoneyFragmentSeam:
-    def test_swaps_fragment_and_retries(self) -> None:
+class TestMoneyFragment:
+    def test_uses_confirmed_amount_currencycode_fragment(self) -> None:
+        # Live Money is amount/currencyCode (confirmed) — one query, no fallback retry.
         calls: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            body = json.loads(request.content)
-            calls.append(body["query"])
-            if "amount currency" in body["query"]:
-                return httpx.Response(
-                    200,
-                    json={"errors": [{"message": 'Cannot query field "amount" on "Money"'}]},
-                )
-            offer = fx.make_offer(cost={"value": 123.45, "currencyCode": "EUR"})
+            calls.append(json.loads(request.content)["query"])
+            offer = fx.make_offer(cost={"amount": 123.45, "currencyCode": "EUR"})
             return httpx.Response(200, json=fx.gql_page([offer]))
 
         client = PartnerClient(auth_token="tok", transport=httpx.MockTransport(handler))
         offers = list(client.scan())
-        assert len(calls) == 2
-        assert "value currencyCode" in calls[1]
+        assert len(calls) == 1
+        assert "{ amount currencyCode }" in calls[0]
         assert offers[0].cost is not None
-        assert offers[0].cost.amount == 123.45  # alt shape normalised by models.Money
+        assert offers[0].cost.amount == 123.45  # currencyCode normalised by models.Money
+        assert offers[0].cost.currency == "EUR"
 
 
 class TestDownloadFiles:
