@@ -483,17 +483,18 @@ export default function CustomersPage() {
               <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Registered</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center">Loading...</TableCell>
+                <TableCell colSpan={8} className="text-center">Loading...</TableCell>
               </TableRow>
             ) : filteredCustomers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center">
+                <TableCell colSpan={8} className="text-center">
                   {searchQuery ? 'No customers match your search' : 'No customers found'}
                 </TableCell>
               </TableRow>
@@ -506,6 +507,7 @@ export default function CustomersPage() {
                   <TableCell>{customer.email}</TableCell>
                   <TableCell>{customer.phone || '-'}</TableCell>
                   <TableCell>{getStatusBadge(customer.status)}</TableCell>
+                  <TableCell>{customer.created_at ? format(new Date(customer.created_at), 'MMM d, yyyy') : '-'}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button 
