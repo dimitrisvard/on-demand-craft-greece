@@ -55,12 +55,34 @@ export default defineConfig(async ({ mode }) => {
 	// Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
 	const env = loadEnv(mode, process.cwd(), '');
 
-	console.log('Loaded environment variables:', {
-		region: env.VITE_AWS_REGION,
-		bucket: env.VITE_AWS_BUCKET_NAME,
-		hasAccessKey: !!env.VITE_AWS_ACCESS_KEY_ID,
-		hasSecretKey: !!env.VITE_AWS_SECRET_ACCESS_KEY
-	});
+	// SECURITY: only a vetted subset of env vars may be inlined into the client
+	// bundle. The `define` block at the bottom statically replaces every
+	// occurrence of `process.env` / `import.meta.env` with the object below, so
+	// anything included here ends up in public JavaScript. Previously the *entire*
+	// env (VITE_ and non-VITE alike) was injected, which leaked
+	// SUPABASE_SERVICE_ROLE_KEY, AWS secret keys and other server-only secrets to
+	// every visitor. We now expose only VITE_-prefixed vars and explicitly drop
+	// the ones that must never reach the browser. AWS access runs server-side via
+	// /api/s3 instead of from the client.
+	const CLIENT_SECRET_DENYLIST = new Set([
+		'VITE_AWS_ACCESS_KEY_ID',
+		'VITE_AWS_SECRET_ACCESS_KEY',
+		'VITE_AWS_ARTICLES_ACCESS_KEY_ID',
+		'VITE_AWS_ARTICLES_SECRET_ACCESS_KEY',
+		'VITE_ADMIN_PASSWORD_UPDATE_SECRET',
+	]);
+	const clientEnv: Record<string, unknown> = Object.fromEntries(
+		Object.entries(env).filter(
+			([key]) => key.startsWith('VITE_') && !CLIENT_SECRET_DENYLIST.has(key)
+		)
+	);
+	// Preserve the standard Vite fields and the one non-VITE value the client
+	// legitimately reads (process.env.NODE_ENV).
+	clientEnv.MODE = mode;
+	clientEnv.DEV = mode !== 'production';
+	clientEnv.PROD = mode === 'production';
+	clientEnv.BASE_URL = '/';
+	clientEnv.NODE_ENV = mode === 'production' ? 'production' : (env.NODE_ENV || 'development');
 
 	// Load prerender plugin only for production builds (not dev/preview)
 	// Requires Chromium to be available (set PUPPETEER_SKIP_DOWNLOAD=false on Vercel)
@@ -141,8 +163,8 @@ export default defineConfig(async ({ mode }) => {
 			},
 		},
 		define: {
-			'process.env': env,
-			'import.meta.env': env
+			'process.env': clientEnv,
+			'import.meta.env': clientEnv
 		}
 	};
 });

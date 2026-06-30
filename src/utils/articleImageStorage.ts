@@ -1,75 +1,42 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { getSignedUrl as getPresignedUrl } from '@aws-sdk/s3-request-presigner';
+// S3 storage helpers for article images.
+//
+// All AWS operations run server-side via /api/s3 (scope "articles") so AWS
+// credentials are never bundled into the browser. Public function signatures
+// are unchanged.
+import { callS3 } from './s3Api';
 
-// Helper to get client lazily
-let s3ClientInstance: S3Client | null = null;
-
-const getS3Client = () => {
-  if (s3ClientInstance) return s3ClientInstance;
-
-  const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
-  
-  // Use specific article credentials if available, otherwise fall back to generic ones
-  const accessKeyId = import.meta.env.VITE_AWS_ARTICLES_ACCESS_KEY_ID || import.meta.env.VITE_AWS_ACCESS_KEY_ID;
-  const secretAccessKey = import.meta.env.VITE_AWS_ARTICLES_SECRET_ACCESS_KEY || import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
-
-  if (!accessKeyId || !secretAccessKey) {
-    console.error('AWS credentials missing. Please check VITE_AWS_ARTICLES_ACCESS_KEY_ID or VITE_AWS_ACCESS_KEY_ID');
-    throw new Error('AWS Credentials are required');
-  }
-
-  try {
-    s3ClientInstance = new S3Client({
-      region,
-      credentials: {
-        accessKeyId: accessKeyId.trim(),
-        secretAccessKey: secretAccessKey.trim(),
-      },
-    });
-    return s3ClientInstance;
-  } catch (error) {
-    console.error('Failed to initialize S3 client:', error);
-    throw error;
-  }
-};
-
-const getBucketName = () => {
-  return import.meta.env.VITE_AWS_ARTICLES_BUCKET_NAME || 'articles';
-};
+const SCOPE = 'articles' as const;
 
 /**
- * Upload an article image to S3
+ * Upload an article image to S3.
  * @param file The file to upload
  * @param type 'featured' or 'content'
  * @param articleId The ID of the article
- * @returns The full URL of the uploaded image
+ * @returns The full public URL of the uploaded image, or null on failure
  */
 export const uploadArticleImageToS3 = async (
-  file: File, 
-  type: 'featured' | 'content', 
+  file: File,
+  type: 'featured' | 'content',
   articleId: string
 ): Promise<string | null> => {
   try {
-    const bucketName = getBucketName();
-    const client = getS3Client();
-
-    // Create a unique file path
     const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const filePath = `${type}/${articleId}/${Date.now()}_${safeFileName}`;
+    const fileName = `${Date.now()}_${safeFileName}`;
+    const prefix = `${type}/${articleId}`;
 
-    console.log(`Uploading article image to S3: ${bucketName}/${filePath}`);
+    const { uploadUrl, publicUrl } = await callS3<{ uploadUrl: string; publicUrl: string }>(
+      'presign-upload',
+      {
+        fileName,
+        contentType: file.type || 'application/octet-stream',
+        prefix,
+        scope: SCOPE,
+      }
+    );
 
-    // Generate a presigned PUT URL
-    const putCommand = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: filePath,
-      ContentType: file.type || 'application/octet-stream',
-    });
+    console.log(`Uploading article image to S3: ${prefix}/${fileName}`);
 
-    const presignedUrl = await getPresignedUrl(client, putCommand, { expiresIn: 300 });
-
-    // Upload using simple fetch
-    const response = await fetch(presignedUrl, {
+    const response = await fetch(uploadUrl, {
       method: 'PUT',
       body: file,
       headers: {
@@ -81,13 +48,6 @@ export const uploadArticleImageToS3 = async (
       throw new Error(`S3 upload failed: ${response.status}`);
     }
 
-    // Construct the public URL
-    // Assuming the bucket is public or served via CloudFront/S3 URL
-    // If using Vercel Blob or similar, this might differ. 
-    // Standard S3 URL: https://{bucket}.s3.{region}.amazonaws.com/{key}
-    const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
-    const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${filePath}`;
-    
     return publicUrl;
   } catch (error) {
     console.error('Error uploading article image:', error);
@@ -96,27 +56,19 @@ export const uploadArticleImageToS3 = async (
 };
 
 /**
- * Delete an article image from S3
+ * Delete an article image from S3.
  * @param imageUrl The full URL or key of the image
  */
 export const deleteArticleImageFromS3 = async (imageUrl: string): Promise<boolean> => {
   try {
-    const bucketName = getBucketName();
-    const client = getS3Client();
-    
-    // Extract key from URL
+    // Extract the object key from a full URL.
     let key = imageUrl;
     if (imageUrl.startsWith('http')) {
       const url = new URL(imageUrl);
       key = url.pathname.substring(1); // Remove leading slash
     }
 
-    const command = new DeleteObjectCommand({
-      Bucket: bucketName,
-      Key: key,
-    });
-
-    await client.send(command);
+    await callS3('delete', { key, scope: SCOPE });
     return true;
   } catch (error) {
     console.error('Error deleting article image:', error);
@@ -125,16 +77,15 @@ export const deleteArticleImageFromS3 = async (imageUrl: string): Promise<boolea
 };
 
 /**
- * List article images from S3
+ * List article images from S3.
  * @param type 'featured' or 'content' (optional filter)
  * @param articleId (optional filter)
  */
-export const listArticleImages = async (type?: 'featured' | 'content', articleId?: string): Promise<Array<{key: string, url: string, lastModified?: Date}>> => {
+export const listArticleImages = async (
+  type?: 'featured' | 'content',
+  articleId?: string
+): Promise<Array<{ key: string; url: string; lastModified?: Date }>> => {
   try {
-    const bucketName = getBucketName();
-    const client = getS3Client();
-    const region = import.meta.env.VITE_AWS_REGION || 'us-east-1';
-
     let prefix = '';
     if (type) {
       prefix += `${type}/`;
@@ -143,21 +94,17 @@ export const listArticleImages = async (type?: 'featured' | 'content', articleId
       }
     }
 
-    const command = new ListObjectsV2Command({
-      Bucket: bucketName,
-      Prefix: prefix
-    });
+    const { objects } = await callS3<{
+      objects: Array<{ key: string; url: string; lastModified?: string }>;
+    }>('list', { prefix, scope: SCOPE });
 
-    const response = await client.send(command);
-    
-    return (response.Contents || []).map(item => ({
-      key: item.Key!,
-      url: `https://${bucketName}.s3.${region}.amazonaws.com/${item.Key}`,
-      lastModified: item.LastModified
+    return (objects || []).map((item) => ({
+      key: item.key,
+      url: item.url,
+      lastModified: item.lastModified ? new Date(item.lastModified) : undefined,
     }));
   } catch (error) {
     console.error('Error listing article images:', error);
     return [];
   }
 };
-
