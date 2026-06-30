@@ -152,6 +152,10 @@
       "destination": "/api/marketing?action=track"
     },
     {
+      "source": "/api/connector-status",
+      "destination": "/api/tenders?connectors=true"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

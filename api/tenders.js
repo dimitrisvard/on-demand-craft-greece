@@ -1,7 +1,8 @@
 /**
  * Tenders API
- * GET  /api/tenders     — list/filter tenders
- * PATCH /api/tenders    — update tender status/notes
+ * GET  /api/tenders                  — list/filter tenders
+ * GET  /api/tenders?connectors=true  — connector status (also served at /api/connector-status via rewrite)
+ * PATCH /api/tenders                 — update tender status/notes
  *
  * Query params for GET:
  *   country, cpv_prefix, min_value, max_value, min_score,
@@ -33,8 +34,13 @@ export default async function handler(req, res) {
       country, cpv_prefix, min_value, max_value, min_score,
       deadline_within_days, status, relevant_only, search,
       limit = 50, offset = 0, sort = 'relevance_score',
-      id, stats_only, export: exportMode,
+      id, stats_only, export: exportMode, connectors,
     } = req.query;
+
+    // Connector status (merged from former /api/connector-status)
+    if (connectors === 'true') {
+      return handleConnectors(res);
+    }
 
     // Stats request
     if (stats_only === 'true') {
@@ -262,4 +268,40 @@ async function handleStats(res) {
     byCountry: countryMap,
     byStatus: statusMap,
   });
+}
+
+// ─── Connector status (merged from former /api/connector-status) ────────
+async function handleConnectors(res) {
+  const [{ data: connectors, error }, { data: recentLogs }] = await Promise.all([
+    supabase.from('tender_connectors').select('*').order('country_code'),
+    supabase.from('tender_scan_logs')
+      .select('country_code, tenders_found, tenders_new, tenders_relevant, errors, duration_ms, completed_at')
+      .order('completed_at', { ascending: false })
+      .limit(100),
+  ]);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Attach most recent log to each connector
+  const enriched = (connectors || []).map(c => {
+    const log = (recentLogs || []).find(l => l.country_code === c.country_code);
+    return {
+      ...c,
+      recent_log: log || null,
+      health: getConnectorHealth(c, log),
+    };
+  });
+
+  return res.status(200).json({ connectors: enriched });
+}
+
+function getConnectorHealth(connector, log) {
+  if (!connector.is_active) return 'inactive';
+  if (!connector.last_scan_at) return 'never_scanned';
+  if (connector.last_error && !connector.last_scan_count) return 'error';
+
+  const hoursSinceLastScan = (Date.now() - new Date(connector.last_scan_at).getTime()) / 3600000;
+  if (hoursSinceLastScan > connector.scan_frequency_hours * 2) return 'stale';
+  if (connector.last_error) return 'warning';
+  return 'healthy';
 }
