@@ -207,6 +207,34 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
     loadProfile();
   }, [skipCompanyStep, user]);
 
+  // Restore a quote the visitor filled in before being asked to log in. The
+  // login/register flow navigates away and unmounts this form, so the values
+  // are stashed on submit-while-logged-out (see persistPendingQuote) and
+  // brought back here. File objects can't be serialized, so those must be
+  // re-attached — everything else is preserved.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('rfq_pending_quote');
+      if (!raw) return;
+      localStorage.removeItem('rfq_pending_quote');
+      const saved = JSON.parse(raw);
+      // Ignore stale drafts (older than 2h) so we don't resurrect abandoned data.
+      if (!saved || !saved.savedAt || Date.now() - saved.savedAt > 2 * 60 * 60 * 1000) return;
+      const { savedAt, _hadFiles, ...restored } = saved;
+      setPrefillValues((prev) => ({ ...(prev || {}), ...restored }));
+      toast({
+        title: 'Your quote details were restored',
+        description: _hadFiles
+          ? 'Please re-attach your file(s) and submit again.'
+          : 'Please review and submit again.',
+      });
+    } catch {
+      /* ignore corrupt/unavailable storage */
+    }
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const steps = [
     { title: t('quote_form_step_company_contact'), component: StepCompanyInfo },
     { title: t('quote_form_step_parts_files'), component: StepPartDetails },
@@ -271,12 +299,31 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
     setCurrentStep((prev) => Math.max(prev - 1, minStep));
   };
 
+  // Persist the in-progress quote so it survives the login/register redirect.
+  // File objects are dropped (not serializable) but flagged so we can prompt
+  // the user to re-attach them after they return.
+  const persistPendingQuote = (values: FormValues) => {
+    try {
+      const parts = values.parts || [];
+      const serializable = {
+        ...values,
+        savedAt: Date.now(),
+        _hadFiles: parts.some((p) => Array.isArray(p?.files) && p.files.length > 0),
+        parts: parts.map((p) => ({ ...p, files: [] })),
+      };
+      localStorage.setItem('rfq_pending_quote', JSON.stringify(serializable));
+    } catch {
+      /* storage full/unavailable — non-fatal, we just can't preserve the draft */
+    }
+  };
+
   const handleSubmit = async (values: FormValues, { setSubmitting, setErrors, setTouched }: any) => {
     console.log('Formik handleSubmit called with values:', values);
 
     // Check if user is logged in before allowing submission
     if (!user) {
-      console.log('User not logged in, showing login dialog');
+      console.log('User not logged in, preserving draft and showing login dialog');
+      persistPendingQuote(values);
       setShowLoginDialog(true);
       setSubmitting(false);
       return;
