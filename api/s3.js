@@ -20,10 +20,18 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  GetBucketLocationCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const REGION = process.env.AWS_REGION || process.env.VITE_AWS_REGION || 'us-east-1';
+// Region the env *claims* the bucket is in. This is only a fallback: the real
+// region is discovered from S3 at runtime (see resolveRegion). Presigned URLs
+// are region-specific and cannot follow the 301 redirect a wrong region
+// produces, so signing with the wrong region silently breaks every upload —
+// which is exactly what happened when this was pinned to us-east-1 while the
+// bucket actually lives in eu-north-1.
+const FALLBACK_REGION =
+  process.env.AWS_REGION || process.env.VITE_AWS_REGION || 'us-east-1';
 
 const BUCKETS = {
   rfq:
@@ -57,26 +65,21 @@ const CREDS = {
 };
 
 const clients = {};
+const regionByBucket = {};
 
 function scopeKey(scope) {
   return scope === 'articles' ? 'articles' : 'rfq';
 }
 
-function getClient(scope) {
-  const key = scopeKey(scope);
-  if (clients[key]) return clients[key];
-  const creds = CREDS[key];
+function credsFor(scope) {
+  const creds = CREDS[scopeKey(scope)];
   if (!creds.accessKeyId || !creds.secretAccessKey) {
     throw new Error('AWS credentials are not configured on the server');
   }
-  clients[key] = new S3Client({
-    region: REGION,
-    credentials: {
-      accessKeyId: creds.accessKeyId.trim(),
-      secretAccessKey: creds.secretAccessKey.trim(),
-    },
-  });
-  return clients[key];
+  return {
+    accessKeyId: creds.accessKeyId.trim(),
+    secretAccessKey: creds.secretAccessKey.trim(),
+  };
 }
 
 function bucketFor(scope) {
@@ -85,8 +88,40 @@ function bucketFor(scope) {
   return bucket;
 }
 
-function publicUrl(scope, key) {
-  return `https://${bucketFor(scope)}.s3.${REGION}.amazonaws.com/${key}`;
+// Discover the bucket's real region once and cache it. GetBucketLocation is a
+// global call (any region works) and returns null for us-east-1 and the legacy
+// "EU" alias for eu-west-1. Falls back to the env region if the lookup fails.
+async function resolveRegion(scope) {
+  const bucket = bucketFor(scope);
+  if (regionByBucket[bucket]) return regionByBucket[bucket];
+  let region = FALLBACK_REGION;
+  try {
+    const probe = new S3Client({ region: 'us-east-1', credentials: credsFor(scope) });
+    const loc = await probe.send(new GetBucketLocationCommand({ Bucket: bucket }));
+    region = loc.LocationConstraint || 'us-east-1';
+    if (region === 'EU') region = 'eu-west-1';
+  } catch (err) {
+    console.error(`[api/s3] region lookup for "${bucket}" failed, using ${FALLBACK_REGION}:`, err?.message);
+  }
+  regionByBucket[bucket] = region;
+  return region;
+}
+
+async function getClient(scope) {
+  const key = scopeKey(scope);
+  if (clients[key]) return clients[key];
+  const region = await resolveRegion(scope);
+  clients[key] = new S3Client({
+    region,
+    credentials: credsFor(scope),
+    followRegionRedirects: true,
+  });
+  return clients[key];
+}
+
+async function publicUrl(scope, key) {
+  const region = await resolveRegion(scope);
+  return `https://${bucketFor(scope)}.s3.${region}.amazonaws.com/${key}`;
 }
 
 function sanitizeName(name) {
@@ -127,15 +162,15 @@ export default async function handler(req, res) {
           Key: key,
           ContentType: contentType || 'application/octet-stream',
         });
-        const uploadUrl = await getSignedUrl(getClient(scope), command, { expiresIn: 300 });
-        return res.status(200).json({ uploadUrl, key, publicUrl: publicUrl(scope, key) });
+        const uploadUrl = await getSignedUrl(await getClient(scope), command, { expiresIn: 300 });
+        return res.status(200).json({ uploadUrl, key, publicUrl: await publicUrl(scope, key) });
       }
 
       case 'presign-download': {
         const { key, expiresIn } = body;
         if (!key) return res.status(400).json({ error: 'key is required' });
         const command = new GetObjectCommand({ Bucket: bucketFor(scope), Key: key });
-        const url = await getSignedUrl(getClient(scope), command, {
+        const url = await getSignedUrl(await getClient(scope), command, {
           expiresIn: Number(expiresIn) || 3600,
         });
         return res.status(200).json({ url });
@@ -144,7 +179,7 @@ export default async function handler(req, res) {
       case 'delete': {
         const { key } = body;
         if (!key) return res.status(400).json({ error: 'key is required' });
-        await getClient(scope).send(
+        await (await getClient(scope)).send(
           new DeleteObjectCommand({ Bucket: bucketFor(scope), Key: key })
         );
         return res.status(200).json({ success: true });
@@ -153,7 +188,7 @@ export default async function handler(req, res) {
       case 'delete-folder': {
         const { prefix } = body;
         if (!prefix) return res.status(400).json({ error: 'prefix is required' });
-        const client = getClient(scope);
+        const client = await getClient(scope);
         const bucket = bucketFor(scope);
         const listed = await client.send(
           new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
@@ -173,14 +208,15 @@ export default async function handler(req, res) {
 
       case 'list': {
         const { prefix } = body;
-        const client = getClient(scope);
+        const client = await getClient(scope);
         const bucket = bucketFor(scope);
+        const region = await resolveRegion(scope);
         const listed = await client.send(
           new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix || '' })
         );
         const objects = (listed.Contents || []).map((item) => ({
           key: item.Key,
-          url: publicUrl(scope, item.Key),
+          url: `https://${bucket}.s3.${region}.amazonaws.com/${item.Key}`,
           lastModified: item.LastModified,
         }));
         return res.status(200).json({ objects });
