@@ -339,42 +339,10 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
         await validationSchemas[i].validate(values, { abortEarly: false });
       }
 
-      // Generate RFQ/ORD number
-      const rfqPrefix = isOrder ? 'ORD' : 'RFQ';
-      const today = new Date();
-      const formattedDate = today.toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      }).split('/').join('');
-
-      // Check existing RFQ numbers for today to get the next sequence number
-      const { data: existingRfqs, error: rfqsError } = await supabase
-        .from('rfqs')
-        .select('rfq_number')
-        .like('rfq_number', `${rfqPrefix}-${formattedDate}-%`)
-        .order('rfq_number', { ascending: false });
-
-      if (rfqsError) {
-        console.error('Error getting existing RFQs:', rfqsError);
-        throw rfqsError;
-      }
-
-      let sequenceNumber = 1;
-      if (existingRfqs && existingRfqs.length > 0) {
-        // Extract the highest sequence number and increment by 1
-        const latestRfq = existingRfqs[0];
-        if (latestRfq && 'rfq_number' in latestRfq) {
-          const rfqNumber = latestRfq.rfq_number as string;
-          const match = rfqNumber.match(new RegExp(`${rfqPrefix}-\\d{8}-(\\d+)`));
-          if (match && match[1]) {
-            sequenceNumber = parseInt(match[1], 10) + 1;
-          }
-        }
-      }
-
-      const rfqNumber = `${rfqPrefix}-${formattedDate}-${sequenceNumber}`;
-      console.log('Generated RFQ number:', rfqNumber);
+      // RFQ number generation and RFQ creation now happen server-side inside the
+      // SECURITY DEFINER function `create_public_rfq` (see migration
+      // 20260713_enable_rls_security). This lets the public/anonymous quote form
+      // create RFQs without any direct access to the rfqs table under RLS.
 
       // Note: Customer creation removed - RFQs will be created without customer assignment
       // Customer can be assigned later manually through admin interface
@@ -455,63 +423,50 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         };
       });
 
-      // Create RFQ record in Supabase
-      const { data: rfqData, error: rfqError } = await supabase
-        .from('rfqs')
-        .insert([
-          {
-            title: `${rfqNumber} - ${values.companyName}`,
-            company_name: values.companyName,
-            vat_id: values.vatId,
-            address: values.address?.street,
-            city: values.address?.city,
-            zip_code: values.address?.zipCode,
-            country: values.address?.country,
-            contact_first_name: values.contact?.firstName,
-            contact_last_name: values.contact?.lastName,
-            contact_position: values.contact?.position,
-            contact_email: values.contact?.email,
-            contact_phone: values.contact?.phone,
-            mobile: values.contact?.mobile,
-            customer_id: null,
-            status: isOrder ? 'approved' : 'draft',
-            currency: 'EUR',
-            due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            version: 1,
-            description: values.generalNotes,
-            parts_details: partsDetails,
-            rfq_number: rfqNumber
-          }
-        ])
-        .select()
-        .single();
+      // Create the RFQ via a SECURITY DEFINER RPC. Number generation, insertion
+      // and parts_details assembly all happen server-side, so the public quote
+      // form needs no direct access to the rfqs table under RLS.
+      const { data: rpcResult, error: rfqError } = await (supabase as any).rpc('create_public_rfq', {
+        p_payload: {
+          company_name: values.companyName,
+          vat_id: values.vatId,
+          address: values.address?.street,
+          city: values.address?.city,
+          zip_code: values.address?.zipCode,
+          country: values.address?.country,
+          contact_first_name: values.contact?.firstName,
+          contact_last_name: values.contact?.lastName,
+          contact_position: values.contact?.position,
+          contact_email: values.contact?.email,
+          contact_phone: values.contact?.phone,
+          mobile: values.contact?.mobile,
+          description: values.generalNotes,
+          due_date: values.delivery.maxDeliveryDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          is_order: isOrder,
+          parts: partsDetails,
+        },
+      });
 
       if (rfqError) {
         console.error('Error creating RFQ:', rfqError);
         throw rfqError;
       }
 
-      console.log('RFQ created:', rfqData);
+      const rfqRow = Array.isArray(rpcResult) ? rpcResult[0] : rpcResult;
+      if (!rfqRow?.id) {
+        throw new Error('RFQ creation did not return an id');
+      }
+      const rfqNumber: string = rfqRow.rfq_number;
+      const rfqData = { id: rfqRow.id as string };
+      console.log('RFQ created:', rfqData, rfqNumber);
 
-      // Update parts with the correct rfq_id
+      // Local copy of parts carrying the server-assigned rfq_id + product names,
+      // used below to associate uploaded files (rfq_files.part_id).
       const updatedPartsDetails = partsDetails.map((part, index) => ({
         ...part,
         rfq_id: rfqData.id,
         product_name: `Part ${index + 1} ${rfqNumber}-${index + 1}`
       }));
-
-      // Update the RFQ with the correct rfq_id in parts_details
-      const { error: updateError } = await supabase
-        .from('rfqs')
-        .update({ 
-          parts_details: updatedPartsDetails 
-        } as any)
-        .eq('id', rfqData.id);
-
-      if (updateError) {
-        console.error('Error updating RFQ parts:', updateError);
-        throw updateError;
-      }
 
       // Upload files to S3 and save references in Supabase
       for (let i = 0; i < values.parts.length; i++) {
