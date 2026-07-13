@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from "@/integrations/supabase/client";
 import { Order, OrderItem, Partner } from "@/types/customer";
 import { BackToDashboardButton } from "@/components/dashboard/BackToDashboardButton";
+import PersistentDashboardLayout from "@/components/dashboard/PersistentDashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -1316,33 +1317,38 @@ export default function OrderDetailsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-          <div className="h-8 bg-gray-200 rounded w-1/2"></div>
-          <div className="h-32 bg-gray-200 rounded"></div>
+      <PersistentDashboardLayout>
+        <div className="p-6">
+          <div className="animate-pulse space-y-4">
+            <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+            <div className="h-32 bg-gray-200 rounded"></div>
+          </div>
         </div>
-      </div>
+      </PersistentDashboardLayout>
     );
   }
 
   if (!order) {
     return (
-      <div className="p-6">
-        <BackToDashboardButton />
-        <div className="text-center mt-8">
-          <h2 className="text-2xl font-bold">Order not found</h2>
-          <p className="text-muted-foreground mt-2">The order you're looking for doesn't exist.</p>
-          <Button className="mt-4" onClick={() => navigate('/dashboard')}>
-            Return to Dashboard
-          </Button>
+      <PersistentDashboardLayout>
+        <div className="p-6">
+          <BackToDashboardButton />
+          <div className="text-center mt-8">
+            <h2 className="text-2xl font-bold">Order not found</h2>
+            <p className="text-muted-foreground mt-2">The order you're looking for doesn't exist.</p>
+            <Button className="mt-4" onClick={() => navigate('/dashboard')}>
+              Return to Dashboard
+            </Button>
+          </div>
         </div>
-      </div>
+      </PersistentDashboardLayout>
     );
   }
 
   return (
-    <div className="p-6 pt-20 space-y-6">
+    <PersistentDashboardLayout>
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
         <BackToDashboardButton />
         <div className="flex space-x-2">
@@ -1873,6 +1879,7 @@ export default function OrderDetailsPage() {
         fileName={viewerFileName}
       />
     </div>
+    </PersistentDashboardLayout>
   );
 }
 

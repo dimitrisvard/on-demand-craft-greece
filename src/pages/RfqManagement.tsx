@@ -405,9 +405,13 @@ export default function RfqManagement() {
         toast({ title: "Error", description: "Title and customer are required", variant: "destructive" });
         return;
       }
+      // `company_name` is NOT NULL on the rfqs table, so it must always be provided.
+      // Derive it from the selected customer, falling back to the RFQ title.
+      const selectedCustomer = customers.find(c => c.id === newRfq.customer_id);
+      const companyName = selectedCustomer?.company_name || newRfq.title || 'Unassigned';
       const { data, error } = await supabase
         .from('rfqs')
-        .insert([{ title: newRfq.title, customer_id: newRfq.customer_id, status: newRfq.status, currency: newRfq.currency, due_date: newRfq.due_date, version: newRfq.version, total_amount: 0 }])
+        .insert([{ title: newRfq.title, company_name: companyName, customer_id: newRfq.customer_id, status: newRfq.status, currency: newRfq.currency, due_date: newRfq.due_date, version: newRfq.version, total_amount: 0 }])
         .select();
 
       if (error) throw error;
