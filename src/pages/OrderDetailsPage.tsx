@@ -130,14 +130,30 @@ export default function OrderDetailsPage() {
       if (itemsError) throw itemsError;
       setOrderItems(itemsData as OrderItem[]);
 
+      // Resolve the linked RFQ — prefer the direct rfq_id, but fall back to
+      // matching on from_rfq_number when the link was lost (e.g. the RFQ's FK
+      // was nulled). This lets an order still show its parts and 3D files
+      // whenever the source RFQ still exists.
+      let rfqData: any = null;
       if (orderData.rfq_id) {
-        // Fetch RFQ and its parts_details
-        const { data: rfqData, error: rfqError } = await supabase
+        const { data, error: rfqError } = await supabase
           .from('rfqs')
           .select('*, customers(*)')
           .eq('id', orderData.rfq_id)
-          .single();
+          .maybeSingle();
         if (rfqError) throw rfqError;
+        rfqData = data;
+      }
+      if (!rfqData && (orderData as any).from_rfq_number) {
+        const { data } = await supabase
+          .from('rfqs')
+          .select('*, customers(*)')
+          .eq('rfq_number', (orderData as any).from_rfq_number)
+          .maybeSingle();
+        rfqData = data;
+      }
+
+      if (rfqData) {
         setRfq(rfqData);
 
         const typedRfq = rfqData as any;
@@ -171,7 +187,7 @@ export default function OrderDetailsPage() {
         const partsDetails = typedRfq.parts_details;
         setParts(Array.isArray(partsDetails) ? partsDetails : []);
         // Fetch files from rfq_files and organize them by parts
-        await fetchQuoteFiles(orderData.rfq_id, partsDetails);
+        await fetchQuoteFiles(typedRfq.id, partsDetails);
       }
 
       setOrder({
