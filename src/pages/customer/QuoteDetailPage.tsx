@@ -402,21 +402,19 @@ export default function QuoteDetailPage() {
                             .eq('id', rfq.id);
                           if (statusError) throw statusError;
 
-                          // Generate PO number: PO-DDMMYYYY-N
-                          const now = new Date();
-                          const day = String(now.getDate()).padStart(2, '0');
-                          const month = String(now.getMonth() + 1).padStart(2, '0');
-                          const year = now.getFullYear();
-                          const dateStr = `${day}${month}${year}`;
-                          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-                          const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
-                          const { data: todayOrders } = await supabase
-                            .from('orders')
-                            .select('id')
-                            .gte('created_at', startOfDay)
-                            .lt('created_at', endOfDay);
-                          const seq = (todayOrders?.length || 0) + 1;
-                          const poNumber = `PO-${dateStr}-${seq}`;
+                          // Generate PO number server-side: under per-customer
+                          // RLS this client can no longer count today's orders
+                          // across all customers, so the sequence must come
+                          // from a SECURITY DEFINER function.
+                          const { data: poData, error: poError } = await (supabase as any).rpc('next_po_number');
+                          let poNumber: string = typeof poData === 'string' ? poData : '';
+                          if (poError || !poNumber) {
+                            const now = new Date();
+                            const day = String(now.getDate()).padStart(2, '0');
+                            const month = String(now.getMonth() + 1).padStart(2, '0');
+                            const dateStr = `${day}${month}${now.getFullYear()}`;
+                            poNumber = `PO-${dateStr}-${Date.now() % 1000}`;
+                          }
 
                           const rfqNumber = rfq.rfq_number || '';
 

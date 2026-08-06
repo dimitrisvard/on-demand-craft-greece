@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { Plus, Eye, Copy, Trash2, FileText, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { getMyCustomerIds } from '@/utils/myCustomer';
 import { useToast } from '@/hooks/use-toast';
 import type { RFQ } from '@/types/customer';
 
@@ -46,9 +47,17 @@ export default function MyProjectsPage() {
   const fetchRfqs = async () => {
     try {
       setLoading(true);
+      // Only this user's quotes: RLS also enforces this server-side, but the
+      // explicit filter keeps the page correct regardless of deploy order.
+      const customerIds = await getMyCustomerIds();
+      if (customerIds.length === 0) {
+        setRfqs([]);
+        return;
+      }
       const { data, error } = await supabase
         .from('rfqs')
         .select('*')
+        .in('customer_id', customerIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -261,7 +270,9 @@ export default function MyProjectsPage() {
                   <Copy className="h-4 w-4" />
                 </Button>
 
-                {isDeleteConfirm ? (
+                {/* Only drafts can be deleted from the portal (matches RLS);
+                    quoted/approved RFQs are part of the order history. */}
+                {rfq.status === 'draft' && (isDeleteConfirm ? (
                   <div className="flex items-center gap-1">
                     <Button
                       variant="destructive"
@@ -287,7 +298,7 @@ export default function MyProjectsPage() {
                   >
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
-                )}
+                ))}
               </div>
             </div>
           </div>

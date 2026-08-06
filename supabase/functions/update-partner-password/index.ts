@@ -27,6 +27,29 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // Only staff may reset partner passwords: the anon key alone is a valid
+    // JWT but resolves to no user, so it is rejected here.
+    const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    const { data: callerData, error: callerError } = await supabase.auth.getUser(token);
+    if (callerError || !callerData?.user) {
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    const { data: callerRole } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', callerData.user.id)
+      .maybeSingle();
+    const STAFF_ROLES = ['admin', 'sales_rep', 'production_manager', 'accountant'];
+    if (!callerRole || !STAFF_ROLES.includes(callerRole.role)) {
+      return new Response(
+        JSON.stringify({ error: 'Admin access required' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Get partner details
     const { data: partner, error: partnerError } = await supabase
       .from('production_partners')

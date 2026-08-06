@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { getMyCustomerIds } from '@/utils/myCustomer';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -67,9 +68,17 @@ const CustomerDashboard = () => {
   useEffect(() => {
     const fetchRfqs = async () => {
       try {
+        // Only this user's quotes: RLS also enforces this server-side, but the
+        // explicit filter keeps the page correct regardless of deploy order.
+        const customerIds = await getMyCustomerIds();
+        if (customerIds.length === 0) {
+          setRfqs([]);
+          return;
+        }
         const { data, error } = await supabase
           .from('rfqs')
           .select('*')
+          .in('customer_id', customerIds)
           .order('created_at', { ascending: false })
           .limit(5);
 

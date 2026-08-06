@@ -171,21 +171,31 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       throw error;
     }
 
-    // The database trigger (handle_new_user_role) auto-assigns 'customer' role
-    // Also create a record in the customers table so admins can see this customer
+    // The database triggers auto-assign the 'customer' role and create the
+    // customers row (handle_new_user_customer). The client-side insert is only
+    // a fallback for environments where that trigger isn't installed yet, so
+    // first check whether the row already exists to avoid duplicates.
     if (data.user) {
       try {
-        const contactName = `${firstName} ${lastName}`.trim();
-        await supabase.from('customers').insert({
-          email,
-          first_name: firstName,
-          last_name: lastName,
-          contact_name: contactName,
-          company_name: contactName,
-          status: 'active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
+        const { data: existing } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .limit(1);
+        if (!existing || existing.length === 0) {
+          const contactName = `${firstName} ${lastName}`.trim();
+          await supabase.from('customers').insert({
+            user_id: data.user.id,
+            email,
+            first_name: firstName,
+            last_name: lastName,
+            contact_name: contactName,
+            company_name: contactName,
+            status: 'active',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
       } catch (insertError) {
         console.error('Failed to create customer record during signup:', insertError);
       }

@@ -53,10 +53,22 @@ export default function PartnerOrdersPage() {
   const fetchOrders = async () => {
     setLoading(true);
     try {
+      // orders.partner_id stores production_partners.id (admin assigns it from
+      // the partners list), so resolve the partner row by login e-mail first.
+      const { data: partnerRows, error: partnerError } = await supabase
+        .from('production_partners')
+        .select('id')
+        .ilike('email', user!.email || '');
+      if (partnerError) throw partnerError;
+      const partnerIds = (partnerRows || []).map((p: { id: string }) => p.id);
+      if (partnerIds.length === 0) {
+        setOrders([]);
+        return;
+      }
       const { data, error } = await supabase
         .from('orders')
         .select('*')
-        .eq('partner_id', user!.id)
+        .in('partner_id', partnerIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
