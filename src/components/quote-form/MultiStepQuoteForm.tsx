@@ -458,7 +458,10 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
       }
       const rfqNumber: string = rfqRow.rfq_number;
       const rfqData = { id: rfqRow.id as string };
-      console.log('RFQ created:', rfqData, rfqNumber);
+      // create_public_rfq resolves (and, if needed, creates) the customer record
+      // and links it to the RFQ. Reuse that id so the order below is linked too.
+      const resolvedCustomerId: string | null = (rfqRow.customer_id as string) ?? null;
+      console.log('RFQ created:', rfqData, rfqNumber, 'customer:', resolvedCustomerId);
 
       // Local copy of parts carrying the server-assigned rfq_id + product names,
       // used below to associate uploaded files (rfq_files.part_id).
@@ -537,7 +540,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
           .from('orders')
           .insert([
             {
-              customer_id: null,
+              customer_id: resolvedCustomerId,
               rfq_id: rfqData.id,
               status: 'new',
               total_amount: 0,
