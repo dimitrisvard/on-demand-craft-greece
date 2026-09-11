@@ -97,7 +97,7 @@ https://your-domain.vercel.app/api/contact
 {
   "name": "John Doe",
   "email": "john@example.com",
-  "phone": "+302104447830",
+  "phone": "+306970077401",
   "subject": "Inquiry",
   "message": "Hello, I have a question..."
 }

@@ -206,7 +206,7 @@ company_info = [
     Paragraph(
         "Industrial Area Street B, No. 4<br/>"
         "71601 Heraklion, Crete, Greece<br/>"
-        "Tel: +30 210 444 7830<br/>"
+        "Tel: +30 697 007 7401<br/>"
         "info@micronshub.eu &nbsp;&middot;&nbsp; www.micronshub.eu<br/>"
         "VAT ID: EL803129638",
         st_h_company_sub,
@@ -296,7 +296,7 @@ supplier_content = [
         "Founder &amp; Managing Director<br/>"
         "Industrial Area Street B, No. 4<br/>"
         "71601 Heraklion, Crete, Greece<br/>"
-        "Tel: +30 210 444 7830<br/>"
+        "Tel: +30 697 007 7401<br/>"
         "info@micronshub.eu",
         st_normal,
     ),
@@ -459,7 +459,7 @@ notice = Table([[
         "intra-Community supply at 0% VAT, conditional on the buyer providing "
         "a valid VAT identification number prior to invoicing. All prices "
         "shown are net prices. For any clarification regarding this offer, "
-        "please contact us at <b>+30 210 444 7830</b> or "
+        "please contact us at <b>+30 697 007 7401</b> or "
         "<b>info@micronshub.eu</b>.",
         st_note,
     )

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS public.impressum_settings (
   address_street text NOT NULL DEFAULT 'Industrial Area Street B Number 4',
   address_zip_city text NOT NULL DEFAULT '71601 Heraklion',
   address_country text NOT NULL DEFAULT 'Griechenland',
-  phone text NOT NULL DEFAULT '+302104447830',
+  phone text NOT NULL DEFAULT '+306970077401',
   email text NOT NULL DEFAULT 'info@micronshub.eu',
   -- Per-language translated details stored as JSONB
   -- Structure: { "en": { "legal_form_detail": "...", "register_detail": "...", ... }, "de": { ... }, ... }
@@ -45,7 +45,7 @@ INSERT INTO public.impressum_settings (
   'Industrial Area Street B Number 4',
   '71601 Heraklion',
   'Griechenland',
-  '+302104447830',
+  '+306970077401',
   'info@micronshub.eu',
   jsonb_build_object(
     'en', jsonb_build_object(

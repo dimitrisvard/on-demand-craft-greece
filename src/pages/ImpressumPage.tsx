@@ -67,7 +67,7 @@ const ImpressumPage = () => {
   const addressStreet = settings?.address_street ?? 'Industrial Area Street B Number 4';
   const addressZipCity = settings?.address_zip_city ?? '71601 Heraklion';
   const addressCountry = settings?.address_country ?? 'Griechenland';
-  const phone = settings?.phone ?? '+302104447830';
+  const phone = settings?.phone ?? '+306970077401';
   const email = settings?.email ?? 'info@micronshub.eu';
 
   // Extract clickable URL from the EU dispute text

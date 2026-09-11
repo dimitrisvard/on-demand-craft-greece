@@ -99,7 +99,7 @@ async function handlePartner(req, res) {
         <div style="text-align: center; margin: 30px 0; padding: 20px; background: #f1f5f9; border-radius: 8px;">
           <p style="color: #1e293b; font-size: 16px; margin: 0 0 10px 0;"><strong>Best regards,</strong></p>
           <p style="color: #1e293b; font-size: 16px; margin: 0;">Microns Hubs Production Team</p>
-          <p style="color: #64748b; font-size: 14px; margin: 10px 0 0 0;">📧 info@micronshub.eu | 📞 +302104447830</p>
+          <p style="color: #64748b; font-size: 14px; margin: 10px 0 0 0;">📧 info@micronshub.eu | 📞 +306970077401</p>
         </div>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
         <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">This email was sent from the Microns Hubs production management system at ${new Date().toLocaleString()}</p>
@@ -231,7 +231,7 @@ async function handleProductionStatus(req, res) {
         <div style="text-align: center; margin: 30px 0; padding: 20px; background: #f1f5f9; border-radius: 8px;">
           <p style="color: #1e293b; font-size: 16px; margin: 0 0 10px 0;"><strong>Best regards,</strong></p>
           <p style="color: #1e293b; font-size: 16px; margin: 0;">Microns Hubs Production Team</p>
-          <p style="color: #64748b; font-size: 14px; margin: 10px 0 0 0;">📧 info@micronshub.eu | 📞 +302104447830</p>
+          <p style="color: #64748b; font-size: 14px; margin: 10px 0 0 0;">📧 info@micronshub.eu | 📞 +306970077401</p>
         </div>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
         <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0;">This email was sent from the Microns Hubs production management system at ${new Date().toLocaleString()}</p>

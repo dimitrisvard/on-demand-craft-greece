@@ -433,7 +433,7 @@ const Login = () => {
                       <Input
                         id="reg-phone"
                         type="tel"
-                        placeholder="+30 210 444 7830"
+                        placeholder="+30 697 007 7401"
                         className="pl-9"
                         value={regPhone}
                         onChange={(e) => setRegPhone(e.target.value)}

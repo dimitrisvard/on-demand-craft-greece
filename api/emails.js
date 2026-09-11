@@ -179,7 +179,7 @@ async function handleEmail(req, res) {
           <ul style="color: #374151; padding-left: 20px;">
             <li>Our team will review your inquiry</li>
             <li>We'll respond within 24 hours</li>
-            <li>If urgent, call us directly at +302104447830</li>
+            <li>If urgent, call us directly at +306970077401</li>
           </ul>
         </div>
         <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
@@ -329,7 +329,7 @@ async function handleRfqPdf(req, res) {
             <p style="color: #374151; font-size: 16px; margin: 0 0 15px 0;">Our team is here to help! Feel free to contact us if you have any questions.</p>
             <div style="display: flex; justify-content: center; gap: 30px; flex-wrap: wrap;">
               <div style="text-align: center;"><p style="color: #1e40af; font-weight: bold; margin: 0; font-size: 16px;">📧 Email</p><a href="mailto:info@micronshub.eu" style="color: #3b82f6; text-decoration: none; font-size: 14px;">info@micronshub.eu</a></div>
-              <div style="text-align: center;"><p style="color: #1e40af; font-weight: bold; margin: 0; font-size: 16px;">📱 Phone</p><a href="tel:+302104447830" style="color: #3b82f6; text-decoration: none; font-size: 14px;">+302104447830</a></div>
+              <div style="text-align: center;"><p style="color: #1e40af; font-weight: bold; margin: 0; font-size: 16px;">📱 Phone</p><a href="tel:+306970077401" style="color: #3b82f6; text-decoration: none; font-size: 14px;">+306970077401</a></div>
             </div>
           </div>
         </div>

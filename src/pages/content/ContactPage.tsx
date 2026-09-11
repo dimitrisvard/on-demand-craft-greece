@@ -72,10 +72,10 @@ const ContactPage: React.FC = () => {
                   </InfoRow>
                   <InfoRow icon={<Phone size={22} />} title="Phone">
                     <a
-                      href="tel:+302104447830"
+                      href="tel:+306970077401"
                       className="hover:text-brand-primary underline-offset-2 hover:underline"
                     >
-                      +30 210 444 7830
+                      +30 697 007 7401
                     </a>
                   </InfoRow>
                   <InfoRow icon={<MapPin size={22} />} title="Address">

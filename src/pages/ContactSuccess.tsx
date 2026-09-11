@@ -47,7 +47,7 @@ const ContactSuccess = () => {
               </li>
               <li className="flex items-start">
                 <span className="text-blue-600 mr-2">•</span>
-                If urgent, call us directly at +302104447830
+                If urgent, call us directly at +306970077401
               </li>
             </ul>
           </div>

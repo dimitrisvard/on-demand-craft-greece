@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: TenantPdfConfig = {
   logoUrl: '/lovable-uploads/a27a8329-2c4a-4b05-b1c4-b200b903617e.png',
   primaryColor: '#2563EB',
   contactEmail: 'info@micronshub.eu',
-  contactPhone: '+302104447830',
+  contactPhone: '+306970077401',
   address: 'Kosti Fragkouli 3, Heraklion Greece 71414',
   website: 'https://micronshub.eu',
 };

@@ -1038,7 +1038,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
         address_lines: [
           'Industrial Area Street B Number 4',
           'Heraklion Greece 71601',
-          '+302104447830',
+          '+306970077401',
           'info@micronshub.eu',
           'VAT ID EL803129638'
         ],
@@ -1143,7 +1143,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
             <div style="font-size:10.5px;color:${GREY_TXT};line-height:1.5;margin-top:4px;">
               Industrial Area Street B, No. 4<br/>
               71601 Heraklion, Crete, Greece<br/>
-              Tel: +30 210 444 7830<br/>
+              Tel: +30 697 007 7401<br/>
               info@micronshub.eu &middot; www.micronshub.eu<br/>
               VAT ID: EL803129638
             </div>
@@ -1200,7 +1200,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
               Founder &amp; Managing Director<br/>
               Industrial Area Street B, No. 4<br/>
               71601 Heraklion, Crete, Greece<br/>
-              Tel: +30 210 444 7830<br/>
+              Tel: +30 697 007 7401<br/>
               info@micronshub.eu
             </div>
           </div>
@@ -1293,7 +1293,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
 
         <!-- Intra-community supply notice -->
         <div style="margin-top:14px;background:${TEAL_LIGHT};border:1px solid ${TEAL};padding:10px 14px;font-size:10.5px;color:${GREY_TXT};line-height:1.5;">
-          <b>Intra-Community Supply (0% VAT):</b> This offer is issued as an intra-Community supply at 0% VAT, conditional on the buyer providing a valid VAT identification number prior to invoicing. All prices shown are net prices. For any clarification regarding this offer, please contact us at <b>+30 210 444 7830</b> or <b>info@micronshub.eu</b>.
+          <b>Intra-Community Supply (0% VAT):</b> This offer is issued as an intra-Community supply at 0% VAT, conditional on the buyer providing a valid VAT identification number prior to invoicing. All prices shown are net prices. For any clarification regarding this offer, please contact us at <b>+30 697 007 7401</b> or <b>info@micronshub.eu</b>.
         </div>
 
         <!-- Closing -->

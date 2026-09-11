@@ -92,7 +92,7 @@ const DEFAULT_UNIVERSAL: UniversalFormValues = {
   address_street: 'Industrial Area Street B Number 4',
   address_zip_city: '71601 Heraklion',
   address_country: 'Griechenland',
-  phone: '+302104447830',
+  phone: '+306970077401',
   email: 'info@micronshub.eu',
 };
 

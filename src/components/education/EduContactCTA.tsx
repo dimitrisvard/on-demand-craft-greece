@@ -115,10 +115,10 @@ const EduContactCTA: React.FC = () => {
             </a>
             <span className="hidden sm:block text-white/30">|</span>
             <a
-              href="tel:+302104447830"
+              href="tel:+306970077401"
               className="text-white font-semibold hover:text-[#FF5722] transition-colors flex items-center gap-2"
             >
-              📞 +30-210-444-7830
+              📞 +30-697-007-7401
             </a>
           </div>
           <p className="text-white/40 text-xs mt-4">
