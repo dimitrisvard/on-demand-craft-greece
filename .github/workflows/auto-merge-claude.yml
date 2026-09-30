@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - 'claude/**'
+      # The Cloudflare migration branch must not reach production (main → Vercel)
+      # until the Phase 3 cutover; it is merged by pull request instead.
+      # See docs/migration/PLAN.md P0-1.
+      - '!claude/microns-cloudflare-migration-*'
 
 jobs:
   auto-merge:
