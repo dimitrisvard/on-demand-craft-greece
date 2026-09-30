@@ -11,7 +11,8 @@ This document is brief §7 item 8 (today vs target monthly estimate) and the evi
 | Convention | Meaning |
 |---|---|
 | **LP** | Vendor list price or included quota read from the vendor's pricing page on 2026-09-30 (§11 lists the pages); list price — re-check at execution |
-| **§15a** | CF docs (verified 2026-09-27), plan §15a; the Containers figures were fetched again on 2026-09-30 and are unchanged |
+| **plan §n** | Section n of the approved plan of 2026-09-27 (the Phase 0 planning proposal; its decisions are carried into [README.md](README.md) and [PLAN.md](PLAN.md)) |
+| **§15a** | CF docs (verified 2026-09-27), plan §15a; the Containers rates were fetched again on 2026-09-30 and are unchanged |
 | **live** | live 2026-09-30 (Vercel API, DNS, Supabase snapshot in the planning record) |
 | **A** | Assumption. No measured request volume exists (§4), so traffic and workload are three explicit scenarios |
 | Currency | Cloudflare, Vercel, Resend and LLM prices in USD; EUR where the baseline is EUR. Planning rate **USD 1 = EUR 0.90** (assumption, deliberately high so that USD targets are not understated in EUR; re-check) |
@@ -29,11 +30,11 @@ V = today's VPS cost for `sheet-metal-service`, unknown (PLAN.md Q2). Which base
 | VPS | V | V | — (decommissioned in Phase 6) | — | — |
 | GitHub Actions | $0 | $0 | $0 | $0 | $0 |
 | Workers Paid subscription | — | — | $5.00 | $5.00 | $5.00 |
-| Cloudflare usage above included quotas (§3) | — | — | $0.00 | $0.00 | $2.30 |
+| Cloudflare usage above included quotas (§3) | — | — | $0.00 | $0.00 | $2.24 |
 | Containers, `standard-1`, `sleepAfter` 10 min, no keep-warm (§5) | — | — | $0.20 | $2.07 | $12.12 |
-| **Total** | **€0 + V** | **€18.00 + V** | **$5.20 ≈ €4.68** | **$7.07 ≈ €6.36** | **$19.42 ≈ €17.48** |
+| **Total** | **€0 + V** | **€18.00 + V** | **$5.20 ≈ €4.68** | **$7.07 ≈ €6.36** | **$19.36 ≈ €17.42** |
 | Variant: business-hours keep-warm (§5) | — | — | — | $13.56 ≈ €12.20 | — |
-| Variant: `standard-2` instead of `standard-1` | — | — | $5.37 ≈ €4.83 | $7.96 ≈ €7.16 | $25.12 ≈ €22.61 |
+| Variant: `standard-2` instead of `standard-1` | — | — | $5.37 ≈ €4.83 | $7.96 ≈ €7.16 | $25.06 ≈ €22.55 |
 
 Reading: at the expected load the target is about $7 a month (about $13.50 with a business-hours keep-warm); plan §11 estimated $8–15. The Workers Paid subscription is almost the whole bill; every per-request product stays inside its included quota up to roughly 25,000 HTML page requests a day (§7). Verdict in §8.
 
@@ -64,7 +65,7 @@ Included quotas and overage prices are Workers Paid figures (LP) unless stated. 
 | Workers CPU | 30M ms | $0.02 per M ms | 1.9M / 7.9M / 45.2M ms | $0 / $0 / $0.30 |
 | Static Assets | Free and unlimited when the Worker is not invoked; with `run_worker_first: true` every asset hit is a billed Worker request (counted above) | — | — | $0 |
 | KV reads (`SEO_CACHE`, `FLAGS`) | 10M | $0.50 per M | 0.18M / 0.6M / 2.4M | $0 / $0 / $0 |
-| KV writes | 1M | $5.00 per M | 0.17M / 0.51M / 1.28M | $0 / $0 / $1.40 |
+| KV writes | 1M | $5.00 per M | 0.17M / 0.51M / 1.27M | $0 / $0 / $1.34 |
 | KV storage | 1 GB | $0.50 per GB-month | < 0.05 GB | $0 |
 | R2 storage (`microns-public`, `microns-private`) | 10 GB-month | $0.015 per GB-month | 0.1 / 1 / 5 GB | $0 |
 | R2 Class A (writes) / Class B (reads) | 1M / 10M | $4.50 per M / $0.36 per M | A 1k / 5k / 30k; B 10k / 100k / 1M | $0 |
@@ -79,7 +80,7 @@ Included quotas and overage prices are Workers Paid figures (LP) unless stated. 
 | Browser Rendering (`BROWSER`) | 10 browser-hours; 10 concurrent browsers (monthly average of daily peaks) | $0.09 per hour; $2.00 per extra browser | 0.5 / 1.5 / 16.7 h; ≤ 2 concurrent | $0 / $0 / $0.60 |
 | Vectorize (`quotes-v1`, 1024 dims) | 50M queried dims; 10M stored dims | $0.01 per M queried; $0.05 per 100M stored | Stored 0.2M / 2.0M / 20.5M; queried 0.5M / 3.9M / 31M | $0 / $0 / < $0.01 |
 | Workers AI (`@cf/baai/bge-m3` for the `embed` route) | 10,000 neurons/day; bge-m3 = 1,075 neurons per M input tokens (≈ 9.3M tokens/day free) | $0.011 per 1,000 neurons ($0.012 per M bge-m3 tokens) | < 1M tokens | $0 |
-| AI Gateway (`microns`) | Core features free (analytics, caching, rate limits); logs for gateways created after 2026-09-24 follow Workers Logs pricing | Workers Logs price | 0.7k / 3.3k / 16.5k requests | $0 |
+| AI Gateway (`microns`) | Core features free (analytics, caching, rate limits); logs for gateways created after 2026-09-24 follow Workers Logs pricing | Workers Logs price | 0.7k / 3.5k / 16.5k requests | $0 |
 | Email Routing + `microns-mail` | Email Routing free on all plans; Worker invocations counted as requests (conservative) | — | 30 / 300 / 1,200 messages | $0 |
 | Access (preview host, `mcp.micronshub.eu`) | Zero Trust Free up to 50 users (Cloudflare Zero Trust plans page, search result 2026-09-30; re-check) | Standalone Access ≈ $3 per user (same source; re-check) | 1–3 users plus service tokens | $0 |
 | Turnstile | Free plan: 20 widgets, unlimited challenges | — | 2 widgets | $0 |
@@ -88,7 +89,7 @@ Included quotas and overage prices are Workers Paid figures (LP) unless stated. 
 | Workers Logs | 20M events/month, 7-day retention | $0.60 per M | ≈ 2 per request: 0.9M / 3.2M / 14.4M | $0 |
 | Hyperdrive `SUPABASE_DB` (optional) | Unlimited queries on Workers Paid | — | Xometry upserts | $0 |
 | Zone `micronshub.eu`, Cloudflare for SaaS | Free zone plan (plan §7); SaaS deferred (C8), 100 hostnames free (plan §11; re-check) | — | — | $0 |
-| **Total** | | | | **$5.20 / $7.07 / $19.42** |
+| **Total** | | | | **$5.20 / $7.07 / $19.36** |
 
 ## 4. Traffic and workload assumptions
 
@@ -105,25 +106,26 @@ All rows are A unless a source is given. Basis: ≈ 2,610 public URLs (CANON cou
 | 7 | SEO handler CPU per HTML request | 5 ms | 8 ms | 15 ms | A (string rewrite of the shell plus rendering); measure in Phase 1 from Workers Logs |
 | 8 | CPU per asset hit / per API request | 1 ms / 5 ms | 1 ms / 5 ms | 1 ms / 5 ms | A |
 | 9 | Supabase REST calls per uncached HTML request | 0–3 | 0–3 | 0–3 | Homepage 1 (middleware.ts:448), services index 2 (:477), service 1 (:492), blog index 1 (:517), content page 2–3 (:542, :555), article 2 (:598, :615); about/contact/quote/our-work 0 |
-| 10 | Supabase REST calls/month from the SEO handler | ≈ KV writes (row 12) | ≈ 0.5M | ≈ 1.3M | KV `SEO_CACHE` 1 h in front of Supabase (ARCHITECTURE.md:599); same order as today's per-isolate caches (middleware.ts:44, :193); Supabase tier unchanged |
+| 10 | Supabase REST calls/month from the SEO handler | ≈ 0.17M | ≈ 0.5M | ≈ 1.3M | ≈ KV writes (row 12): KV `SEO_CACHE` 1 h in front of Supabase ([ARCHITECTURE.md](ARCHITECTURE.md) §17); same order as today's per-isolate caches (middleware.ts:44, :193); Supabase tier unchanged |
 | 11 | KV reads/month | 0.18M | 0.60M | 2.40M | Row 3 × 2 keys × 30 (every request misses the isolate cache: upper bound) |
-| 12 | KV writes/month | 0.17M | 0.51M | 1.28M | Row 3 × 2 keys × share of requests arriving > 1 h after the key's last write, e^(−r/24) with r = requests per URL per day (0.95 / 0.85 / 0.54) × 30. Upper bound: ≈ 4,000 keys × 24 × 30 = 2.9M |
+| 12 | KV writes/month | 0.17M | 0.51M | 1.27M | Row 3 × 2 keys × share of requests arriving > 1 h after the key's last write, e^(−r/24) with r = row 3 ÷ 2,610 requests per URL per day (0.95 / 0.85 / 0.53) × 30. Upper bound: ≈ 4,000 keys × 24 × 30 = 2.9M |
 | 13 | Sitemap requests/day | 20 | 50 | 200 | A; Cache API 1 h, so at most one Supabase Storage fetch per data centre per hour (H-12); Cache API calls not billed |
 | 14 | `microns-ops` API calls/day (over `OPS`) | 100 | 500 | 2,000 | A; not billed as requests (service binding), CPU 20 ms each |
-| 15 | Cron invocations/month | 52,800 | 52,800 | 52,800 | CANON §6 per day: 07:00 → 1; */15 → 96; */30 (reddit tier2 + hn share one expression) → 48; hourly → 24; 06:00 → 1; Xometry 7; Monday 06:30 → 0.14; every minute → 1,440; */10 → 144; sum 1,760.1 × 30 |
+| 15 | Cron invocations/month | 52,800 | 52,800 | 52,800 | CANON §6 per day: 07:00 → 1; */15 → 96; */30 (reddit tier2 + hn share one expression) → 48; hourly → 24; 06:00 → 1; Xometry 7; Monday 06:30 → 0.14; every minute → 1,440; */10 → 144; sum 1,761.1 × 30 |
 | 16 | Queue messages/day | 316 | 1,122 | 7,430 | Reddit 168 ticks × 1 / 5 / 40 due subreddits (cap 40, supabase/functions/reddit-collector/index.ts:263-264); HN 48 / 96 / 144; tenders 26 connectors; Xometry 7; translations 13; `cad-jobs` 4 / 30 / 120; `agent-events` 20 / 50 / 200; `outbound-mail` 30 / 60 / 200 |
 | 17 | Queue operations/month | 28k | 101k | 669k | Row 16 × 3 ops × 30 (messages < 64 KB) |
-| 18 | `microns-ops` CPU/month | 1.1M ms | 4.0M ms | 20.3M ms | Crons 52,800 × 10 ms; consumers row 16 × 30 × 50 ms; API row 14 × 30 × 20 ms; `nest` 0 / 1 / 5 per day × 50 s (H-18; `cpu_ms` 60000, wrangler.jsonc.draft:255) |
-| 19 | Workflow runs/month | 108 | 544 | 2,005 | `rfq-intake` 30 / 300 / 1,200; `quote` 15 / 150 / 600; `post-order` 3 / 30 / 120; `content-daily` 30; `sitemap` 30; `ops-digest` ≈ 5 (expected = AGENTS.md §8 planning load) |
+| 18 | `microns-ops` CPU/month | 1.1M ms | 4.0M ms | 20.4M ms | Crons 52,800 × 10 ms; consumers row 16 × 30 × 50 ms; API row 14 × 30 × 20 ms; `nest` 0 / 1 / 5 per day × 50 s (H-18; `cpu_ms` 60000, wrangler.jsonc.draft:255) |
+| 19 | Workflow runs/month | 112 | 544 | 1,984 | `rfq-intake` 30 / 300 / 1,200; `quote` 15 / 150 / 600; `post-order` 3 / 30 / 120; `content-daily` 30; `sitemap` 30; `ops-digest` 4.3 (expected = AGENTS.md §8 planning load) |
 | 20 | Workflow steps/month | 1.6k | 7.4k | 26.7k | Steps per run: `rfq-intake` 13 (AGENTS.md §3.1), `quote` 15, `post-order` 10, `content-daily` 25, `sitemap` 5, `ops-digest` 5 |
 | 21 | CAD bursts/day × jobs per burst | 2 × 2 | 10 × 3 | 40 × 3 | A; 3 jobs per quote (AGENTS.md §3.2) |
-| 22 | Container unfold work/day | 80 vCPU-s | 600 vCPU-s | 2,400 vCPU-s | Row 21 × 20 vCPU-s per job (= 40 s at ½ vCPU, AGENTS.md §3.2) |
+| 22 | Container unfold time/day on `standard-1` (work) | 2.7 min (80 vCPU-s) | 20 min (600 vCPU-s) | 80 min (2,400 vCPU-s) | Row 21 × 40 s per job at ½ vCPU = 20 vCPU-s per job (AGENTS.md §3.2) |
 | 23 | Container awake hours/month (`standard-1`) | 11.7 | 61.7 | 300 | Bursts × (20 s cold start + jobs × 40 s + 600 s `sleepAfter` tail) × 30; high capped at a 10 h business day |
-| 24 | Browser Rendering hours/month | 0.5 | 1.5 | 16.7 | Scans 10 / 30 / 200 × 3 / 3 / 5 min (A; scrapers on demand, AGENTS.md §3.4) |
+| 24 | Browser Rendering time/month | 30 min (0.5 h) | 90 min (1.5 h) | 1,000 min (16.7 h) | Scans 10 / 30 / 200 × 3 / 3 / 5 min (A; scrapers on demand, AGENTS.md §3.4) |
 | 25 | Vectorize vectors × dims; queries/month | 200 × 1024; 300 | 2,000 × 1024; 1,800 | 20,000 × 1024; 10,000 | Tender scoring ≈ 50/day plus quote similarity; queried dims = (queries + stored vectors) × 1024 |
-| 26 | AI Gateway requests/month | 700 | 3,300 | 16,500 | LLM and embed calls of §6 |
+| 26 | AI Gateway requests/month | 700 | 3,500 | 16,500 | LLM and embed calls of §6 (expected: RFQ 900, quote 600, post-order 60, content 420, digest 4, tender embeddings ≈ 1,500) |
 | 27 | R2 storage | 0.1 GB | 1 GB | 5 GB | RFQ files, raw e-mail, CAD outputs, quote PDFs, sitemaps (17 files, 6.76 MB live), new article images |
-| 28 | Worker requests, all Workers, per month | 0.47M | 1.59M | 7.18M | Row 6 + row 15 + consumer invocations (row 16 × 30, batch 1) + e-mails |
+| 28 | R2 operations/month: Class A (writes) / Class B (reads) | 1k / 10k | 5k / 100k | 30k / 1M | Writes: e-mail + attachments ≈ 4 per RFQ, CAD outputs ≈ 3 per job, 17 sitemap files + 1 image per day; reads: CAD inputs, signed downloads, `files.micronshub.eu` cache misses, sitemap reads on Cache API misses (A) |
+| 29 | Worker requests, all Workers, per month | 0.47M | 1.59M | 7.18M | Row 6 + row 15 + consumer invocations (row 16 × 30, batch 1) + e-mails |
 
 ## 5. Containers deep-dive (`microns-cad`)
 
@@ -143,15 +145,15 @@ cost = max(0, GiB × H − 25) × $0.009 + max(0, GB × H − 200) × $0.000252 
 | Keep-warm 10 h × 22 working days + 20 % of expected bursts off-hours, `standard-1` | 232.3 | (929 − 25) × 0.009 = $8.14 | (1,859 − 200) × 0.000252 = $0.42 | $0 | **$8.56** |
 | Same keep-warm, `standard-2` | 232.3 | (1,394 − 25) × 0.009 = $12.32 | (2,788 − 200) × 0.000252 = $0.65 | $0 | **$12.97** |
 | Same keep-warm, `basic` (only if the memory measurement allows it, below) | 232.3 | (232 − 25) × 0.009 = $1.87 | (929 − 200) × 0.000252 = $0.18 | $0 | **$2.05** |
-| Always on, `standard-1`, 5 % busy | 720 | (2,880 − 25) × 0.009 = $25.70 | (5,760 − 200) × 0.000252 = $1.40 | (1,080 − 375) × 0.0012 = $0.85 | **$27.95** |
+| Always on, `standard-1`, 5 % busy | 720 | (2,880 − 25) × 0.009 = $25.70 | (5,760 − 200) × 0.000252 = $1.40 | (1,080 − 375) × 0.0012 = $0.85 | **$27.94** |
 | Always on, `standard-1`, 100 % busy (the plan §11 and R-55 method) | 720 | $25.70 | $1.40 | (21,600 − 375) × 0.0012 = $25.47 | **$52.57** |
-| Always on, `standard-2`, 5 % busy | 720 | (4,320 − 25) × 0.009 = $38.66 | (8,640 − 200) × 0.000252 = $2.13 | (2,160 − 375) × 0.0012 = $2.14 | **$42.93** |
+| Always on, `standard-2`, 5 % busy | 720 | (4,320 − 25) × 0.009 = $38.66 | (8,640 − 200) × 0.000252 = $2.13 | (2,160 − 375) × 0.0012 = $2.14 | **$42.92** |
 
 Findings:
 
 | # | Finding | Consequence |
 |---|---|---|
-| 1 | Memory, not CPU, drives the bill: an awake `standard-1` costs $0.036 per hour even when idle | Awake time is the lever: keep `sleepAfter` ≈ 10 min and avoid fixed keep-warm unless cold starts hurt |
+| 1 | Memory, not CPU, drives the bill: beyond the included hours an awake `standard-1` costs ≈ $0.038 per hour even when idle (memory $0.036 + disk $0.002) | Awake time is the lever: keep `sleepAfter` ≈ 10 min and avoid fixed keep-warm unless cold starts hurt |
 | 2 | Always-on costs $28–53/month (`standard-1`) or $43–92 (`standard-2`); plan §11 and R-55 quote ≈ $50–52 because they bill CPU as provisioned, while the pricing page of 2026-09-30 bills CPU on active usage | Avoid always-on in either reading; it alone exceeds Baseline B |
 | 3 | Business-hours keep-warm adds ≈ $6.50/month over the expected on-demand case (`standard-1`) | Default off. The quote path is asynchronous (`cad-jobs` Queue), so a 10–30 s cold start is invisible there; prefer an on-demand pre-warm when a staff user opens an RFQ with CAD files |
 | 4 | The service runs today under a 1 GiB memory limit (sheet-metal-service/docker-compose.yml:18-21), and its README says a single 512 MB VM handles typical unfold workloads (sheet-metal-service/README.md:41-42) | P5-6 should measure peak memory on the largest recent STEP files; if it stays well under 1 GiB, `basic` makes even keep-warm ≈ $2/month. Keep `standard-1` as the draft until measured |
@@ -174,15 +176,15 @@ LLM spend exists today (article generation and translation) and is budgeted sepa
 | Quote (`quote`, one version, one reply) | price-notes `extract` 10,000 / 1,500; cover-email `extract` 3,000 / 800; classify-reply 2,000 / 150; embed ≈ $0 | 0.035 + 0.014 + 0.003 = $0.052, plus CAD minutes | $0.06 | 150 | $9.00 |
 | Post-order (`post-order`) | traveller-notes 3,000 / 500; reorder draft 2,000 / 400 when needed | 0.011 + 0.008 | $0.015 | 30 | $0.45 |
 | Article + 13 translations (`content-daily`), price P1 | generate-en `extract` 3,000 / 6,000; 13 × `translate` 7,000 / 7,000 | 0.066 + 13 × (0.0021 + 0.0175) = 0.066 + 0.255 | $0.32/day | 30 | $9.60 |
-| Same, price P2 | as above | 0.066 + 13 × (0.00525 + 0.02625) = 0.066 + 0.410 | $0.48/day | 30 | $14.28 |
+| Same, price P2 | as above | 0.066 + 13 × (0.00525 + 0.02625) = 0.066 + 0.410 | $0.48/day | 30 | $14.27 |
 | Same, price P3 | as above | 0.066 + 13 × (0.0105 + 0.0525) = 0.066 + 0.819 | $0.89/day | 30 | $26.55 |
 | Ops digest (`ops-digest`) | narrative `extract` 4,000 / 600 | 0.008 + 0.006 | $0.014 | 4.3 | $0.06 |
 | Growth (tenders, optional relevance) | `embed` ≈ 50 tenders; optional `classify` 10 × 1,500 / 100 | ≈ 0 + 0.02 | $0.02 | 30 | $0.60 |
-| **Total at planning load** | | | | | **P1 $31.71 · P2 $36.39 · P3 $48.66** |
+| **Total at planning load** | | | | | **P1 $31.71 · P2 $36.38 · P3 $48.66** |
 
 | Observation | Detail |
 |---|---|
-| Today | The current code generates with `claude-sonnet-4-20250514` (supabase/functions/generate-daily-article/index.ts:183), a model the Anthropic list marks deprecated; at its earlier list price of $3 / $15 (not re-verified) that is 3,000 × 3/10⁶ + 6,000 × 15/10⁶ = $0.099/day ≈ $3/month. Translation calls Gemini with a free-tier rate-limit comment (supabase/functions/translate-article/index.ts:63-76; live v81 may differ, H-26), so today's translation spend is between $0 and ≈ $7.65/month (13 × $0.0196 × 30) |
+| Today | The current code generates with `claude-sonnet-4-20250514` (supabase/functions/generate-daily-article/index.ts:183), a model the Anthropic list marks deprecated; at its earlier list price of $3 / $15 (not re-verified) that is 3,000 × 3/10⁶ + 6,000 × 15/10⁶ = $0.099/day ≈ $3/month. Translation calls Gemini with a free-tier rate-limit comment (supabase/functions/translate-article/index.ts:63-76; live v81 may differ, H-26), so today's translation spend is between $0 and ≈ $7.64/month (13 × $0.0196 × 30) |
 | At today's volume | ≈ $10/month (AGENTS.md §8), almost all of it the content pipeline |
 | Headroom under Q20 | P3 prices at the planning load leave ≈ $7 of headroom under the €50 proposal; choose a Flash-Lite-class model for `translate`, or Gemini batch mode (−50 %) since the pipeline tolerates hours of delay |
 | Price risk | Gemini Flash list prices double on 2027-01-01 for the newest models (P2 → P3); Anthropic Message Batches (−50 %) fit `generate-en`, which is not latency-sensitive (list price — re-check at execution) |
@@ -198,16 +200,16 @@ LLM spend exists today (article generation and translation) and is budgeted sepa
 | KV writes | 1M/month | `SEO_CACHE` refresh after the 1 h TTL | 51 % | ≈ 25,000 HTML documents/day; bounded by keys × 24 × 30 ≈ 2.9M | Bounded: ≤ 1.9M × $5 = $9.50 |
 | KV reads | 10M/month | 2 keys per HTML request | 6 % | ≈ 166,000 HTML documents/day | $5.00 |
 | Workers Logs | 20M events/month | ≈ 2 events per request | 16 % | ≈ 333,000 requests/day (same as requests) | $12.00 (lower with `head_sampling_rate`) |
-| Queues | 1M operations/month | 3 per message | 10 % | ≈ 11,100 messages/day (e.g. 66 due subreddits per reddit tick) | $0.40 |
+| Queues | 1M operations/month | 3 per message | 10 % | ≈ 11,100 messages/day (the reddit cap of 40 per tick alone gives at most 6,720) | $0.40 |
 | Workflows steps | 500,000/month | Agent and content Workflows | 1.5 % | ≈ 38,000 RFQ intakes/month | 500k × $0.80/100k = $4.00 |
 | Durable Objects requests | 1M/month | MCP, limiter, stock, CAD router | < 1 % | ≈ 33,000/day | $0.15 |
-| Containers memory | 25 GiB-h/month | Awake time × 4 GiB | Exceeded at 247 % | ≈ 6.25 awake hours/month on `standard-1` (≈ 2 short bursts/day) | Linear: $0.036 per awake hour |
+| Containers memory | 25 GiB-h/month | Awake time × 4 GiB | 987 % (246.7 GiB-h) | ≈ 6.25 awake hours/month on `standard-1` (≈ 1 short burst/day) | Linear: ≈ $0.038 per awake hour |
 | Browser Rendering | 10 h/month; 10 concurrent | Scrapers | 15 % | ≈ 200 scans of 3 min/month; concurrency capped at 2 | 10 h × $0.09 = $0.90 |
 | R2 storage / Class A / Class B | 10 GB / 1M / 10M | Files, sitemaps, images | 10 % / 0.5 % / 1 % | 10 GB of new files | $0.15 / $4.50 / $3.60 |
 | Vectorize stored dims | 10M | 1024 per vector | 20 % | ≈ 9,760 stored vectors | < $0.01 |
-| Workers AI neurons | 10,000/day | bge-m3 embeddings | < 1 % | ≈ 9.3M tokens/day | $0.10 per extra 9.3M tokens |
+| Workers AI neurons | 10,000/day | bge-m3 embeddings | < 1 % | ≈ 9.3M tokens/day | $0.11 per extra 9.3M tokens |
 
-Reading: the first per-request quota to run out is KV writes at ≈ 25,000 HTML documents a day, 2.5 × the expected load, and its overage is bounded at ≈ $9.50/month. Requests and CPU run out at ≈ 6–7 × the expected load and cost a few dollars more per extra 10M requests. Containers are the only item that is billed from normal use, which is why §5 and §9 focus on awake time.
+Reading: the first per-request quota to run out is KV writes at ≈ 25,000 HTML documents a day, 2.5 × the expected load, and its overage is bounded at ≈ $9.50/month. Requests run out at ≈ 6.7 × the expected load; beyond that each extra 10M requests a month costs ≈ $3.50 (requests $3.00 + CPU ≈ $0.50) plus ≈ $12 of Workers Logs unless `head_sampling_rate` is lowered (§9 row 12). Containers are the only item billed from normal use, which is why §5 and §9 focus on awake time.
 
 ## 8. Cost gate verdict
 
@@ -218,8 +220,8 @@ The gate is "target ≤ baseline" for the lines that change (Vercel, VPS, CI com
 | Low, `standard-1` | $5.20 ≈ €4.68 | V ≥ €4.68 | Always |
 | Expected, no keep-warm | $7.07 ≈ €6.36 | V ≥ €6.36 | Always |
 | Expected, business-hours keep-warm | $13.56 ≈ €12.20 | V ≥ €12.20 | Always |
-| High, `standard-1` | $19.42 ≈ €17.48 | V ≥ €17.48 | Always |
-| High, `standard-2` | $25.12 ≈ €22.61 | V ≥ €22.61 | V ≥ €4.61 |
+| High, `standard-1` | $19.36 ≈ €17.42 | V ≥ €17.42 | Always |
+| High, `standard-2` | $25.06 ≈ €22.55 | V ≥ €22.55 | V ≥ €4.55 |
 
 | Verdict | Detail |
 |---|---|
@@ -241,8 +243,8 @@ The gate is "target ≤ baseline" for the lines that change (Vercel, VPS, CI com
 | 7 | Container awake time | `CadContainer`, wrangler.jsonc.draft:419-421 | `sleepAfter` ≈ 10 min; keep-warm off by default, on-demand pre-warm; `max_instances` 3; enforced wall-clock in `sheet-metal-service/main.py` (`PROCESSING_TIMEOUT` sheet-metal-service/config.py:37) | Bounds awake hours (§5) | P5-6 |
 | 8 | CAD queue concurrency | `cad-jobs` consumer, wrangler.jsonc.draft:322 | `max_concurrency` 3 = `max_instances`; `max_retries` 2 with DLQ | No extra instances from retries | P4, P5-6 |
 | 9 | Browser Rendering concurrency | `scrapes` consumer, wrangler.jsonc.draft:311-313 | `max_batch_size` 1, `max_concurrency` 2; page cap per scan; close each browser session | Stays under 10 concurrent browsers and 10 h | P4-10 |
-| 10 | Narrow `run_worker_first` | `microns-site` assets config (ARCHITECTURE.md:201) | After the Phase 3 gate, a glob array that leaves hashed `/assets/*` to the asset layer, validated by a full parity run (R-57) | Removes ≈ 76 % of expected requests (38,000 of 50,000/day) from billing | Phase 6 |
-| 11 | KV write discipline | SEO handler (P1-4), flag mirror (P4-2) | Write only on a KV miss; keep 30 s negative results in the isolate `Map` rather than KV (ARCHITECTURE.md:599 currently stores them in KV), so bot probes of unknown slugs do not create KV writes; mirror `FLAGS` only when a flag changes | Keeps writes ≤ keys × 24 per day | Phases 1, 4 |
+| 10 | Narrow `run_worker_first` | `microns-site` assets config ([ARCHITECTURE.md](ARCHITECTURE.md) §6.1) | After the Phase 3 gate, a glob array that leaves hashed `/assets/*` to the asset layer, validated by a full parity run (R-57) | Removes ≈ 76 % of expected requests (38,000 of 50,000/day) from billing | Phase 6 |
+| 11 | KV write discipline | SEO handler (P1-4), flag mirror (P4-2) | Write only on a KV miss; keep 30 s negative results in the isolate `Map` rather than KV ([ARCHITECTURE.md](ARCHITECTURE.md) §17 currently stores them in KV), so bot probes of unknown slugs do not create KV writes; mirror `FLAGS` only when a flag changes | Keeps writes ≤ keys × 24 per day | Phases 1, 4 |
 | 12 | Log volume | `observability.head_sampling_rate` (wrangler.jsonc.draft:92, :249) | 1 until the Phase 3 exit gate (zero-5xx check needs full logs); lower for `microns-site` if events approach 20M/month | Keeps Workers Logs in quota | Phase 6 |
 | 13 | Retry hygiene | All Queue consumers | `max_retries` and a `<name>-dlq` per queue (CANON §3) | Retries cost 1 read each; DLQs end loops | P2–P5 |
 | 14 | Monthly review | `agent_runs.cost_cents`, AI Gateway analytics, Cloudflare billable-usage dashboard, weekly ops digest | Compare with §3 and §6 monthly; the 30-day report P6-7 closes the gate | Detects drift | P4 onwards |
