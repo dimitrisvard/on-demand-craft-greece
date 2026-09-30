@@ -1,0 +1,580 @@
+// Microns Hub wrangler configuration draft (three Workers and one Container app)
+// Status: Phase 0 planning deliverable · 2026-09-30 · nothing here is deployed.
+// Related: README.md · PLAN.md · ARCHITECTURE.md · INVENTORY.md · inventory.csv · SEO_PARITY.md · AGENTS.md ·
+//          RISKS.md · COSTS.md (all in docs/migration/)
+//
+// =====================================================================================================
+// DRAFT. NOT DEPLOYABLE. Never rename this file to wrangler.jsonc and never point wrangler at it.
+// =====================================================================================================
+// This is one JSONC document. Its top-level keys are the three future config files; each value is a
+// complete wrangler configuration object. Keys were checked against the config-schema.json bundled with
+// wrangler 4.145.0 (installed 2026-09-30). The document is split like this:
+//
+//   Future file                   Worker         Created in       Grows in
+//   workers/site/wrangler.jsonc   microns-site   Phase 1 (P1-1)   Phase 2 (OPS, R2, rate limit), Phase 3 (routes)
+//   workers/ops/wrangler.jsonc    microns-ops    Phase 2 (P2-1)   Phase 4 (agent layer), Phase 5 (crons, Container)
+//   workers/mail/wrangler.jsonc   microns-mail   Phase 4 (P4-4)   -
+//   (no file of its own)          microns-cad    Phase 5 (P5-6)   Container stanza in microns-ops, which exports
+//                                                                 the CadContainer class (source in workers/cad)
+//
+// Conventions
+// - "Phase N" next to an entry = the phase in which the entry is added to the real file. When a file is
+//   first created, copy only the entries of the current and earlier phases: a binding to a Worker, queue,
+//   index, Hyperdrive config or container image that does not exist yet makes the deploy fail.
+// - Kept as comments on purpose, because enabling them changes production behaviour instead of adding an
+//   idle binding: the Phase 3 routes (they take production traffic; PLAN.md §6 runbook S11-S14), the
+//   Phase 4 mcp.micronshub.eu Custom Domain, the Phase 5 crons (each replaces a live pg_cron job or the
+//   GitHub Action; enabled one at a time at P5-8) and the optional Phase 7 D1 entries.
+// - IDs are placeholders in angle brackets, for example "<KV_ID_SEO_CACHE>". Replace them with the IDs that
+//   `wrangler kv namespace create`, `wrangler hyperdrive create` and the dashboard print. A placeholder is
+//   never replaced by a secret value.
+// - account_id is not set: CI passes CLOUDFLARE_ACCOUNT_ID (GitHub secret, PLAN.md P0-8).
+// - Evidence tags follow PLAN.md: path:line = this repository at commit 9afcba8; "live 2026-09-30";
+//   "CF docs (verified 2026-09-27)" = checked during planning (README.md §11); "CF docs (verified 2026-09-30)"
+//   = checked while writing this draft; "CF docs, re-check at execution" = not verified yet. The component,
+//   binding target, queue, Workflow and Durable Object class names are the canonical ones of ARCHITECTURE.md;
+//   binding variable names that ARCHITECTURE.md does not fix (queues, Workflows, Durable Objects) are set here.
+// - No send_email binding anywhere: outbound mail stays on Resend (brief §2 item 4).
+//
+// Secrets: NAMES ONLY. Values are set with `wrangler secret put <NAME>` in the Worker's folder (or in the
+// dashboard), never in a file: the repository is public. Every secret set is appended to the P0-2 consumer
+// checklist the same day (PLAN.md P0-2, P2-9) and rotated in P6-1. Each object below also carries
+// "secrets": { "required": [...] }; with it, `wrangler deploy` and `wrangler versions upload` fail when a
+// listed secret is missing on the Worker (CF docs, verified 2026-09-30).
+//
+//   microns-site  Phase 1: SUPABASE_ANON_KEY
+//                 Phase 2: SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, TURNSTILE_SECRET_KEY, R2_ACCESS_KEY_ID,
+//                          R2_SECRET_ACCESS_KEY, LEGACY_AWS_ACCESS_KEY_ID, LEGACY_AWS_SECRET_ACCESS_KEY
+//   microns-ops   Phase 2: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, RESEND_API_KEY, RESEND_WEBHOOK_SECRET,
+//                          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+//                          GOOGLE_REDIRECT_URI, APOLLO_API_KEY, GSC_SERVICE_ACCOUNT_JSON (reserved; note in the ops secrets block)
+//                 Phase 4: ANTHROPIC_API_KEY (not needed if AI Gateway BYOK is used, P4-3), MCP_OAUTH_* (exact
+//                          names fixed in P4-11)
+//                 Phase 5: GEMINI_API_KEY (not needed with BYOK), XOMETRY_TOKEN, CAD_SHARED_SECRET, INDEXNOW_KEY
+//   microns-mail  Phase 4: SUPABASE_SERVICE_ROLE_KEY
+//
+// Where today's names differ (for the P0-2 checklist): the Xometry scanner reads XB_PARTNER_AUTH_TOKEN
+// (xometry-bot/xometry_bot/config.py:153) and xometry-review reads XOMETRY_PARTNER_AUTH_TOKEN
+// (supabase/functions/xometry-review/index.ts:196); both become XOMETRY_TOKEN on the Worker. The legacy S3
+// pair replaces AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and their VITE_AWS_* fallbacks (api/s3.js:47-52).
+// The articles scope can use its own pair, AWS_ARTICLES_ACCESS_KEY_ID / AWS_ARTICLES_SECRET_ACCESS_KEY
+// (api/s3.js:53-64); if Vercel sets it, the site Worker needs a second legacy pair (P0-4 lists the names).
+{
+  // ===================================================================================================
+  // microns-site: Static Assets, SEO handler, redirect table, sitemap routes, /api/* router
+  // ===================================================================================================
+  "workers/site/wrangler.jsonc": {
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "microns-site",
+    // Router order (PLAN.md P1-3): redirect table -> sitemap routes -> /api/* -> SEO handler for /{lang}
+    // and /{lang}/* -> directory-index emulation (only if the baseline shows it) -> env.ASSETS.fetch(request).
+    "main": "src/index.ts",
+    // Set to the scaffolding date at P1-1; it must stay >= 2025-04-01 (see the flag note below).
+    "compatibility_date": "2026-09-01",
+    "compatibility_flags": [
+      // nodejs_compat: the ported handlers use Buffer, node:crypto and the Resend SDK (H-20; for example
+      // api/marketing.js:9, :25 and api/emails.js:12, :290), and read process.env at module scope. With
+      // nodejs_compat, nodejs_compat_populate_process_env is on by default for compatibility dates on or
+      // after 2025-04-01 and exposes vars and secrets through process.env (CF docs, verified 2026-09-30),
+      // so no second flag is listed.
+      "nodejs_compat"
+    ],
+    // Phase 1 serves only here: microns-site.<WORKERS_SUBDOMAIN>.workers.dev, behind Cloudflare Access with a
+    // service token for the parity tool, Playwright and Lighthouse (P1-7), and always with X-Robots-Tag: noindex.
+    "workers_dev": true,
+    // Version and alias URLs for `wrangler versions upload --preview-alias staging` (P1-9). Possible here
+    // because this Worker has no Durable Objects; version URLs are not generated for Workers that implement
+    // Durable Objects (CF docs, verified 2026-09-30).
+    "preview_urls": true,
+    // Workers Logs at full sampling: the Phase 3 gate needs "zero 5xx on SEO paths" as evidence.
+    "observability": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+
+    // Phase 1. Vite writes the build to dist/ (no outDir in vite.config.ts:119-120); the path is relative
+    // to workers/site/.
+    "assets": {
+      "directory": "../../dist",
+      "binding": "ASSETS",
+      // "none": exact file paths such as /index.html and /laserkritis/index.html are served as they are,
+      // and everything else goes to not_found_handling. The default "auto-trailing-slash" would answer
+      // /index.html with a 307 to / and /en with a 307 to /en/ (CF docs, verified 2026-09-27), which breaks
+      // URL parity and the shell fetch described below.
+      "html_handling": "none",
+      // Unknown paths get /index.html with 200, like the Vercel SPA fallback "/(.*)" -> "/index.html"
+      // (vercel.json:158-161). This is soft-404 parity (H-9); real 404s come from the Worker once the flag
+      // seo.strict_404 is on, never from the asset layer.
+      "not_found_handling": "single-page-application",
+      // true: every request reaches the Worker first, as on Vercel, where middleware.ts runs before the
+      // 210 prerendered files and shadows them (H-8). The SEO handler takes the shell from
+      // env.ASSETS.fetch(new URL('/index.html', url)), because a Worker cannot fetch its own hostname
+      // (H-4; today middleware.ts:424 does exactly that on Vercel). A glob array is allowed later to save
+      // requests, but every /{lang} path must stay Worker-first.
+      "run_worker_first": true
+    },
+    // No _redirects and no _headers file in dist/:
+    // - public/_redirects:1 ("/*  /index.html  200", Netlify syntax, inert on Vercel) is deleted in P1-2 (H-3).
+    //   Static Assets would apply it inside the asset layer to every request the Worker hands to ASSETS,
+    //   whether or not an asset matches (CF docs, verified 2026-09-27), overriding the Worker's decision.
+    // - The 25 redirects of vercel.json:2-128 and the 3 client-only entries of
+    //   src/components/SEORedirects.tsx:14-73 live in workers/site/src/redirects.ts instead: status 308 (what
+    //   Vercel emits for permanent: true), matched on the raw and the NFC-decoded path, with the dead mojibake
+    //   source kept byte-identical. _redirects cannot do the NFC matching and defaults to 302.
+    // - _headers is optional (immutable caching of /assets/* only). CORS on /api/* is emitted by the Worker
+    //   with the same values as vercel.json:163-172 (H-28).
+
+    "kv_namespaces": [
+      // Phase 1. SEO row cache shared by all isolates (1 h TTL), behind the per-isolate Map caches ported
+      // from middleware.ts. KV's minimum expirationTtl is 60 s (CF docs, verified 2026-09-30), so the 30 s
+      // negative entries stay in the Map, or are stored with their own timestamp and checked on read.
+      { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" },
+      // Phase 1. Feature flags read on each request (seo.strict_404, api.forward_to_vercel). Set by hand
+      // until Phase 4, then mirrored every minute from table feature_flags by microns-ops (P4-2).
+      { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+    ],
+
+    "services": [
+      // Phase 2. /api/* routes that microns-site does not serve itself go to microns-ops
+      // (PLAN.md §5.2 route table).
+      { "binding": "OPS", "service": "microns-ops" }
+    ],
+
+    "r2_buckets": [
+      // Phase 2. New RFQ files for the /api/s3 replacement, prefix rfq/<rfq_id>/<file_id>-<name>. Browser
+      // uploads use presigned URLs (aws4fetch against the R2 S3 API with R2_ACCESS_KEY_ID /
+      // R2_SECRET_ACCESS_KEY); the binding streams downloads and deletes. The bucket has no public access
+      // and no custom domain. EU jurisdiction can only be chosen when the bucket is created (P2-9); if it
+      // is, every binding of the bucket gains "jurisdiction": "eu" (CF docs, re-check at execution).
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" }
+    ],
+
+    "ratelimits": [
+      // Phase 2. Workers Rate Limiting binding for /api/* write paths (key = client IP + route class, P2-7).
+      // namespace_id is a positive integer as a string, chosen by us and unique in the account; period is
+      // 10 or 60 s. Counters are per Cloudflare location and eventually consistent (CF docs, verified
+      // 2026-09-30), so this complements Turnstile and the zone rate-limiting rule of Phase 3.
+      // The limit below is a starting value, tuned in P2-7.
+      {
+        "name": "API_RATE_LIMIT",
+        "namespace_id": "<RATELIMIT_NAMESPACE_ID_API>",
+        "simple": { "limit": 30, "period": 60 }
+      }
+    ],
+
+    // Phase 7 (optional, owner decision 2026-09-30): SEO reads move from Supabase REST to D1 (P7-8).
+    // "d1_databases": [
+    //   { "binding": "DB", "database_name": "microns-db", "database_id": "<D1_ID_MICRONS_DB>" }
+    // ],
+
+    "vars": {
+      // Phase 1. Replaces the literal at middleware.ts:43 (a project URL, not a secret).
+      "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+      // Phase 1. Production origin: canonical and hreflang host, sitemap <loc> host.
+      "SITE_ORIGIN": "https://www.micronshub.eu",
+      // Phase 1. Comma-separated non-production hosts. The Worker adds X-Robots-Tag: noindex on these and
+      // on any *.workers.dev host (P1-7). Alias hosts have the form <alias>-<worker>.<subdomain>.workers.dev
+      // (CF docs, verified 2026-09-30).
+      "PREVIEW_HOSTNAMES": "microns-site.<WORKERS_SUBDOMAIN>.workers.dev,staging-microns-site.<WORKERS_SUBDOMAIN>.workers.dev",
+      // Phase 1. Deploy-time default of flag seo.strict_404 (a value in KV FLAGS wins). "false" keeps the
+      // soft-404 parity with Vercel (H-9); switched only after PLAN.md Q5 (P3-7).
+      "SEO_STRICT_404": "false",
+      // Phase 2. Account ID for the R2 S3 API endpoint used when presigning (not a secret).
+      "R2_ACCOUNT_ID": "<CF_ACCOUNT_ID>",
+      // Phase 2. Region of the legacy S3 buckets, kept read-only for existing keys (H-17; api/s3.js:28-34).
+      "LEGACY_S3_REGION": "eu-north-1"
+      // Constants in code, not vars (PLAN.md §5.2): the api.forward_to_vercel target
+      // on-demand-craft-greece.vercel.app and the two legacy S3 bucket names (api/s3.js:36-45).
+    },
+
+    "secrets": {
+      "required": [
+        // Phase 1. SEO reads; today read from process.env with a silent empty fallback (middleware.ts:103-109).
+        // The Worker fails loudly instead when it is missing (P1-4).
+        "SUPABASE_ANON_KEY",
+        // Phase 2 (site-local /api/* subset: emails, files, notifications, track; PLAN.md §5.2).
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "RESEND_API_KEY",
+        "TURNSTILE_SECRET_KEY",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "LEGACY_AWS_ACCESS_KEY_ID",
+        "LEGACY_AWS_SECRET_ACCESS_KEY"
+      ]
+    },
+
+    // Phase 3 (runbook S11): empty until the zone is on Cloudflare. Routes are inert while the records are
+    // DNS only; the flips at S12 (www) and S14 (wildcard) make them live. The apex is not a route: it is a
+    // Single Redirect Rule to https://www.micronshub.eu${path}${query} with the status seen in the baseline.
+    // www uses a Route on a proxied placeholder record, not a Custom Domain: a Custom Domain cannot be created
+    // while www has a CNAME, and a Route keeps rollback a single record flip (CF docs, verified 2026-09-27).
+    // The most specific pattern wins, so www.micronshub.eu/* beats *.micronshub.eu/* (CF docs, verified
+    // 2026-09-30).
+    // Routes run in front of Custom Domains: "A Worker running on a Custom Domain is treated as an origin"
+    // (CF docs, verified 2026-09-30). The wildcard route would therefore also catch mcp.micronshub.eu
+    // (Custom Domain of microns-ops) and, by the same logic, files.micronshub.eu (R2 custom domain; CF docs,
+    // re-check at execution). At S11 add dashboard routes mcp.micronshub.eu/* and files.micronshub.eu/* with
+    // Worker "None" (a route without a Worker cannot be written in this file), or have the router pass those
+    // hosts through with fetch(request).
+    "routes": [
+      // { "pattern": "www.micronshub.eu/*", "zone_name": "micronshub.eu" },
+      // { "pattern": "*.micronshub.eu/*", "zone_name": "micronshub.eu" }
+    ]
+  },
+
+  // ===================================================================================================
+  // microns-ops: ops/admin API (Hono), Cron Triggers, Queue consumers, Workflows, Durable Objects,
+  // Container, Vectorize, AI Gateway, Browser Rendering, remote MCP on mcp.micronshub.eu
+  // ===================================================================================================
+  "workers/ops/wrangler.jsonc": {
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "microns-ops",
+    // Hono app (routes reuse api/*.js through workers/ops/src/compat/express-shim.ts), plus the scheduled()
+    // and queue() handlers; exports the Workflow, Durable Object and Container classes listed below.
+    "main": "src/index.ts",
+    "compatibility_date": "2026-09-01",
+    "compatibility_flags": [
+      // node:crypto createSign RSA-SHA256 for the Google service-account token (api/_lib/gsc-client.js:18,
+      // :131), createHmac, Buffer and module-scope process.env in api/*.js and lib/* (H-20).
+      "nodejs_compat"
+    ],
+    // No public workers.dev host: reached only through the OPS service binding, Cron and Queue triggers,
+    // and (Phase 4) the mcp.micronshub.eu Custom Domain.
+    "workers_dev": false,
+    // Version URLs are not generated for Workers with Durable Objects or Containers (CF docs, verified
+    // 2026-09-30).
+    "preview_urls": false,
+    "observability": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    // Phase 2. /api/notifications?action=nest runs the nesting engine with a 50 s budget
+    // (lib/nesting/nester.js:286); the default CPU limit is 30 s and the maximum 300,000 ms (CF docs,
+    // verified 2026-09-30). The limit applies to every invocation of this Worker.
+    "limits": {
+      "cpu_ms": 60000
+    },
+
+    "vars": {
+      // Phase 2. Not in the planned binding list for microns-ops; added because the ported code needs them.
+      // ARCHITECTURE.md should list them too.
+      "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+      "SITE_ORIGIN": "https://www.micronshub.eu",
+      // Phase 4. AI Gateway id. The gateway has no binding of its own; calls go through the AI binding or
+      // the gateway URL with routes extract, classify, translate and embed, each carrying
+      // cf-aig-metadata {"agent", "run_id", "tenant_id"} (ARCHITECTURE.md; P4-3).
+      "AI_GATEWAY_ID": "microns"
+    },
+
+    "kv_namespaces": [
+      // Phase 2 (read, api.forward_to_vercel and agent flags); Phase 4 writer: the every-minute cron mirrors
+      // table feature_flags here (P4-2). Same namespace as microns-site.
+      { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" },
+      // Phase 5. Purge of SEO entries when content-daily publishes (same namespace as microns-site).
+      // KV allows 1 write per second to the same key (CF docs, verified 2026-09-30); purges are per key.
+      { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" }
+    ],
+
+    "r2_buckets": [
+      // Phase 4. Prefixes email/<message_id_sha256>/..., cad/<job_id>/{input,output}/...,
+      // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf; Phase 5 adds sitemaps/...
+      // (served by microns-site at the identical sitemap URLs).
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" },
+      // Phase 5. Public objects behind the R2 custom domain files.micronshub.eu (connected in P3-6):
+      // articles/<yyyy>/<mm>/<slug>.<ext>, tenants/<slug>/... Customer files never go here.
+      { "binding": "PUBLIC_FILES", "bucket_name": "microns-public" }
+    ],
+
+    // Queue binding names are this draft's choice (the queue names are canonical). Dead-letter queues
+    // <name>-dlq are created automatically when first named (CF docs, verified 2026-09-30). They have no
+    // consumer: the ops digest reports their depth and a manual task re-drives them.
+    "queues": {
+      "producers": [
+        // Phase 2. tender-scan, funded-startups scan, GSC bulk actions (P2-6); Phase 4 adds scraper jobs.
+        { "binding": "SCRAPES", "queue": "scrapes" },
+        // Phase 4. CAD analysis jobs from rfq-intake and quote (P4-6).
+        { "binding": "CAD_JOBS", "queue": "cad-jobs" },
+        // Phase 4. Agent events (see AGENTS.md).
+        { "binding": "AGENT_EVENTS", "queue": "agent-events" },
+        // Phase 5. One message per article and language (P5-2; fixes the translation lag of H-19).
+        { "binding": "TRANSLATIONS", "queue": "translations" },
+        // Phase 5. One message per campaign recipient; pacing per sender in SenderLimiter (P5-4).
+        { "binding": "OUTBOUND_MAIL", "queue": "outbound-mail" }
+      ],
+      // Batch sizes, retries and concurrency are starting values, tuned when each consumer ships.
+      // Defaults are batch 10, timeout 5 s, 3 retries (CF docs, verified 2026-09-30); a consumer invocation
+      // may keep at most 6 connections waiting for response headers (CF docs, verified 2026-09-30).
+      "consumers": [
+        {
+          // Phase 2. One scan per message: scans are long and hit third-party sites.
+          "queue": "scrapes",
+          "max_batch_size": 1,
+          "max_retries": 3,
+          "max_concurrency": 2,
+          "dead_letter_queue": "scrapes-dlq"
+        },
+        {
+          // Phase 4. One CAD job per message; concurrency equals the Container max_instances below,
+          // because each instance runs one synchronous uvicorn worker (README.md §7 item 3).
+          "queue": "cad-jobs",
+          "max_batch_size": 1,
+          "max_retries": 2,
+          "max_concurrency": 3,
+          "dead_letter_queue": "cad-jobs-dlq"
+        },
+        {
+          // Phase 4.
+          "queue": "agent-events",
+          "max_batch_size": 25,
+          "max_batch_timeout": 10,
+          "max_retries": 3,
+          "dead_letter_queue": "agent-events-dlq"
+        },
+        {
+          // Phase 5. One language per message; concurrency and retry delay (seconds) tuned to the Gemini
+          // rate limits at P5-2.
+          "queue": "translations",
+          "max_batch_size": 1,
+          "max_retries": 5,
+          "retry_delay": 120,
+          "max_concurrency": 3,
+          "dead_letter_queue": "translations-dlq"
+        },
+        {
+          // Phase 5. The SenderLimiter Durable Object enforces per-sender pacing; the queue only buffers.
+          "queue": "outbound-mail",
+          "max_batch_size": 10,
+          "max_retries": 3,
+          "retry_delay": 60,
+          "max_concurrency": 2,
+          "dead_letter_queue": "outbound-mail-dlq"
+        }
+      ]
+    },
+
+    // Workflow binding names are this draft's choice (names and classes are canonical). Workflow-level
+    // "schedules" exist in the wrangler 4.145.0 schema but are not used: one scheduled() dispatcher keeps
+    // the flag check and the agent_runs row in one place.
+    "workflows": [
+      // Phase 4 (P4-5). Started by microns-mail through the OPS service binding.
+      { "name": "rfq-intake", "binding": "RFQ_INTAKE", "class_name": "RfqIntakeWorkflow" },
+      // Phase 4 (P4-7). waitForEvent type "quote-approved": event types allow letters, digits, - and _ only
+      // (CF docs, verified 2026-09-27).
+      { "name": "quote", "binding": "QUOTE", "class_name": "QuoteWorkflow" },
+      // Phase 4 (P4-9).
+      { "name": "post-order", "binding": "POST_ORDER", "class_name": "PostOrderWorkflow" },
+      // Phase 5 (P5-2). Generate, translate (queue translations), fix links, sitemap, IndexNow.
+      { "name": "content-daily", "binding": "CONTENT_DAILY", "class_name": "ContentDailyWorkflow" },
+      // Phase 5 (P5-2).
+      { "name": "sitemap", "binding": "SITEMAP", "class_name": "SitemapWorkflow" },
+      // Phase 5 (P5-7).
+      { "name": "ops-digest", "binding": "OPS_DIGEST", "class_name": "OpsDigestWorkflow" }
+    ],
+
+    // Durable Object binding names are this draft's choice (the classes are canonical).
+    "durable_objects": {
+      "bindings": [
+        // Phase 4. One per RFQ (name = rfq_id).
+        { "name": "RFQ_THREAD", "class_name": "RfqThread" },
+        // Phase 4. One per material/stock key: a single writer per material prevents double-booking (P4-9).
+        { "name": "MATERIAL_STOCK", "class_name": "MaterialStock" },
+        // Phase 4. Fronts the CAD backend: the existing unfold service until Phase 5, then CadContainer (P4-6).
+        { "name": "CAD_ROUTER", "class_name": "CadRouter" },
+        // Phase 4. Agents SDK McpAgent (as planned). MCP_OBJECT is the binding name McpAgent.serve() is believed
+        // to look for by default (re-check at execution). CF docs (verified 2026-09-30) mark McpAgent as
+        // deprecated and feature-frozen in favour of createMcpHandler (stateless); P4-11 re-decides, and with
+        // createMcpHandler this binding and the class leave migration tag v1 before it is first deployed.
+        { "name": "MCP_OBJECT", "class_name": "MicronsMcp" },
+        // Phase 5. One per sender account (P5-4).
+        { "name": "SENDER_LIMITER", "class_name": "SenderLimiter" },
+        // Phase 5. Container-enabled Durable Object class of microns-cad (P5-6).
+        { "name": "CAD_CONTAINER", "class_name": "CadContainer" }
+      ]
+    },
+    // Append-only: a tag is never edited or reused after it has been deployed. All classes use SQLite-backed
+    // storage, which Containers and the Agents SDK expect (CF docs, re-check at execution).
+    // CF docs (verified 2026-09-30) now show a declarative "exports" block, for example
+    // "exports": { "RfqThread": { "type": "durable-object", "storage": "sqlite" } }, and call "migrations" the
+    // legacy form: it keeps working, but the two cannot be combined in one Worker. Choose one when the real
+    // file first declares a Durable Object (Phase 4) and never mix them.
+    "migrations": [
+      // Phase 4.
+      { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter", "MicronsMcp"] },
+      // Phase 5.
+      { "tag": "v2", "new_sqlite_classes": ["SenderLimiter", "CadContainer"] }
+    ],
+
+    "containers": [
+      {
+        // Phase 5 (P5-6). Component microns-cad: sheet-metal-service built from its existing Dockerfile
+        // (uvicorn on port 8000, sheet-metal-service/Dockerfile:34, :40). The build context defaults to the
+        // Dockerfile's folder (CF docs, verified 2026-09-30), which its COPY lines need. The port,
+        // sleepAfter (about 10 min) and the CAD_SHARED_SECRET handed to the container are set in the
+        // CadContainer class, not here.
+        "name": "microns-cad",
+        "class_name": "CadContainer",
+        "image": "../../sheet-metal-service/Dockerfile",
+        // standard-1 = 1/2 vCPU, 4 GiB memory, 8 GB disk; standard-2 = 1 vCPU, 6 GiB, 12 GB if unfold times
+        // need it (CF docs, verified 2026-09-30).
+        "instance_type": "standard-1",
+        // Equals max_concurrency of the cad-jobs consumer (README.md §7 item 3: 2-3 instances).
+        "max_instances": 3
+      }
+    ],
+
+    "vectorize": [
+      // Phase 4. RAG over past won/lost quotes. Create with
+      // `wrangler vectorize create quotes-v1 --dimensions=1024 --metric=cosine` (bge-m3 embeddings).
+      { "binding": "QUOTES_INDEX", "index_name": "quotes-v1" }
+    ],
+
+    // Phase 4. Workers AI (@cf/baai/bge-m3 for the embed route) and access to AI Gateway "microns".
+    "ai": { "binding": "AI" },
+
+    // Phase 4 (P4-10). Europages and wlw scrapers; at most 6 concurrent connections per invocation.
+    "browser": { "binding": "BROWSER" },
+
+    "hyperdrive": [
+      // Phase 5, optional (P5-5): only for bulk upserts such as xometry_offers. The database connection
+      // string lives in the Hyperdrive config created with `wrangler hyperdrive create`, never in this file;
+      // localConnectionString is not used here either.
+      { "binding": "SUPABASE_DB", "id": "<HYPERDRIVE_ID_SUPABASE_DB>" }
+    ],
+
+    "analytics_engine_datasets": [
+      // Phase 4 (P4-13). Per-agent counters and cost events.
+      { "binding": "EVENTS", "dataset": "microns_events" }
+    ],
+
+    // Phase 7 (optional, owner decision 2026-09-30): data API /api/data/* on D1 (P7-1, P7-2); migrations
+    // managed with `wrangler d1 migrations` in workers/ops/migrations/.
+    // "d1_databases": [
+    //   {
+    //     "binding": "DB",
+    //     "database_name": "microns-db",
+    //     "database_id": "<D1_ID_MICRONS_DB>",
+    //     "migrations_dir": "migrations"
+    //   }
+    // ],
+
+    "secrets": {
+      "required": [
+        // Phase 2 (ops/admin API routes: gsc, tenders, tender-scan, scrape-*, scan-directory, funded-startups,
+        // marketing webhook/google-auth/apollo-enrich, inv-*, nest).
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_ANON_KEY",
+        "RESEND_API_KEY",
+        "RESEND_WEBHOOK_SECRET",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_CHAT_ID",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        // Replaces the VERCEL_URL-derived default of api/marketing.js:46-47.
+        "GOOGLE_REDIRECT_URI",
+        "APOLLO_API_KEY",
+        // Reserved, not required yet: the GSC client reads its Google credentials from the database today
+        // (api/_lib/gsc-client.js:4), not from env. Add it here only if they move to a Worker secret.
+        // "GSC_SERVICE_ACCOUNT_JSON",
+        // Phase 4. Required only if AI Gateway BYOK is not used (P4-3).
+        // "ANTHROPIC_API_KEY",
+        // Phase 4. MCP_OAUTH_* for the remote MCP OAuth flow; exact names fixed in P4-11.
+        // Phase 5. GEMINI_API_KEY only without BYOK.
+        // "GEMINI_API_KEY",
+        "XOMETRY_TOKEN",
+        "CAD_SHARED_SECRET",
+        "INDEXNOW_KEY"
+      ]
+    },
+
+    "triggers": {
+      // UTC: "Cron Triggers execute on UTC time" (CF docs, verified 2026-09-30). One scheduled() handler
+      // dispatches on controller.cron; every job checks its flag in KV FLAGS and writes an agent_runs row
+      // (H-29). Identical schedules share one entry: reddit tier2 and hn both run on "*/30 * * * *".
+      // Weekday names are used because Cloudflare counts 1 = Sunday (CF docs, verified 2026-09-30).
+      // 9 expressions in all; Workers Paid allows 250 Cron Triggers per account (CF docs, verified 2026-09-30).
+      "crons": [
+        // Phase 5. Uncomment one at a time at P5-8; the matching pg_cron job (or the GitHub Action schedule)
+        // is deactivated in the same step, so a job never runs on both schedulers. Replaced schedules are the
+        // live cron.job rows of 2026-09-30.
+        //
+        // content-daily Workflow, 07:00 (flag agent.content_daily). Replaces enqueue-daily-article 07:00,
+        // process-article-queue every 5 min, auto-translate-daily-articles 08:00, auto-fix-article-links 08:30
+        // and auto-update-sitemap 09:00; the Workflow runs those steps in order.
+        // "0 7 * * *",
+        // reddit tier1, every 15 min (pg_cron reddit-tier1; flag agent.growth.reddit).
+        // "*/15 * * * *",
+        // reddit tier2 and hn, every 30 min (reddit-tier2, hn-collector; flags agent.growth.reddit, agent.growth.hn).
+        // "*/30 * * * *",
+        // reddit tier3, hourly (reddit-tier3; flag agent.growth.reddit).
+        // "0 * * * *",
+        // tenders, 06:00 (tender-scan-daily; flag agent.growth.tenders).
+        // "0 6 * * *",
+        // Xometry scan 7x/day, same hours as .github/workflows/xometry-scan.yml:21 (flag agent.growth.xometry).
+        // "0 6,8,10,12,14,16,18 * * *",
+        // ops-digest Workflow, Mondays 06:30 (flag agent.ops_digest).
+        // "30 6 * * mon",
+        //
+        // Phase 4 (P4-2). Mirror table feature_flags to KV FLAGS every minute.
+        "* * * * *",
+        // Phase 4 (P4-8). Gmail reply poller for the 2 Workspace sender accounts (live 2026-09-30).
+        "*/10 * * * *"
+      ]
+    },
+
+    // Phase 4 (P4-11). Remote MCP on a Custom Domain (Cloudflare creates the DNS record and certificate;
+    // CF docs, verified 2026-09-27). Needs the Phase 3 zone and the Worker "None" route for
+    // mcp.micronshub.eu/* described under microns-site "routes". Access + OAuth protect it. If the OAuth flow
+    // uses a library that stores grants in KV, that namespace is added to ARCHITECTURE.md first.
+    "routes": [
+      // { "pattern": "mcp.micronshub.eu", "custom_domain": true }
+    ]
+  },
+
+  // ===================================================================================================
+  // microns-mail: Email Worker for rfq.micronshub.eu
+  // ===================================================================================================
+  "workers/mail/wrangler.jsonc": {
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "microns-mail",
+    // Exports email() only. Email Routing on the subdomain rfq.micronshub.eu sends rfq@ and replies@ here
+    // (P4-4). Raw MIME goes to R2, one inbound_emails row is written, then rfq-intake is started through OPS.
+    // The routing rules are set in the dashboard, so there are no routes. Apex MX stays untouched.
+    "main": "src/index.ts",
+    "compatibility_date": "2026-09-01",
+    // Buffer for the MIME parser and SHA-256 of the Message-ID (node:crypto or Web Crypto).
+    "compatibility_flags": ["nodejs_compat"],
+    // No HTTP surface.
+    "workers_dev": false,
+    "preview_urls": false,
+    "observability": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+
+    "vars": {
+      // Recipients accepted; anything else is refused with setReject(). Catch-all rules exist only on the
+      // apex (CF docs, verified 2026-09-27), so both are explicit Email Routing addresses.
+      "ALLOWED_RCPT": "rfq@rfq.micronshub.eu,replies@rfq.micronshub.eu",
+      // Not in the planned binding list for microns-mail; needed to write the inbound_emails row.
+      // ARCHITECTURE.md should list it too.
+      "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co"
+    },
+
+    "r2_buckets": [
+      // Phase 4. email/<message_id_sha256>/raw.eml and email/<message_id_sha256>/att/<n>-<name>.
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" }
+    ],
+
+    "services": [
+      // Phase 4. Starts the rfq-intake Workflow, which lives in microns-ops.
+      { "binding": "OPS", "service": "microns-ops" }
+    ],
+
+    "secrets": {
+      "required": [
+        // Phase 4. Writes the inbound_emails row.
+        "SUPABASE_SERVICE_ROLE_KEY"
+      ]
+    }
+  }
+}
