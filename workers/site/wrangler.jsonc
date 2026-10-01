@@ -1,0 +1,84 @@
+// microns-site: Static Assets, SEO handler, redirect table, sitemap routes, /api/* router.
+// Phase 1 (PLAN.md §5.1, P1-1): preview only on *.workers.dev; nothing in production uses this Worker.
+// Source: the "workers/site/wrangler.jsonc" object of docs/migration/wrangler.jsonc.draft, reduced to the
+// Phase 1 entries. Phase 2 adds OPS, PRIVATE_FILES, API_RATE_LIMIT and the R2 vars; Phase 3 adds the routes.
+//
+// Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put
+// them in workers/site/.dev.vars (gitignored). The repository is public: never write a value here.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "microns-site",
+  // Router order (src/index.ts): redirect table -> sitemap routes -> /api/* -> SEO handler for /{lang} and
+  // /{lang}/* -> static (directory-index emulation, then env.ASSETS.fetch with the SPA fallback).
+  "main": "src/index.ts",
+  // Must stay >= 2025-04-01 (nodejs_compat populates process.env from that date on).
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Phase 1 serves only on microns-site.<WORKERS_SUBDOMAIN>.workers.dev, behind Cloudflare Access and always
+  // with X-Robots-Tag: noindex (P1-7, src/preview.ts).
+  "workers_dev": true,
+  // Version and alias URLs for `wrangler versions upload --preview-alias staging` (P1-9).
+  "preview_urls": true,
+  // Workers Logs at full sampling: the Phase 3 gate needs "zero 5xx on SEO paths" as evidence.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+
+  // Vite writes the build to <repo>/dist (vite.config.ts has no outDir); run `npx vite build` at the repo
+  // root first. The path is relative to this folder.
+  "assets": {
+    "directory": "../../dist",
+    "binding": "ASSETS",
+    // Exact file paths only: the default "auto-trailing-slash" would answer /index.html with a 307 to / and
+    // /en with a 307 to /en/, which breaks URL parity and the shell fetch of the SEO handler.
+    "html_handling": "none",
+    // Unknown paths get /index.html with 200, like the Vercel fallback "/(.*)" -> "/index.html"
+    // (vercel.json:158-161). Soft-404 parity (H-9); real 404s only from the Worker when seo.strict_404 is on.
+    "not_found_handling": "single-page-application",
+    // Every request reaches the Worker first, as middleware.ts runs before the prerendered files on Vercel (H-8).
+    "run_worker_first": true
+  },
+
+  // Create the namespaces once and paste the printed IDs over the placeholders (IDs are not secrets):
+  //   npx wrangler kv namespace create SEO_CACHE
+  //   npx wrangler kv namespace create FLAGS
+  // `wrangler dev --local` accepts the placeholders as they are (local namespaces are keyed by this string).
+  "kv_namespaces": [
+    // SEO row cache shared by all isolates, behind the per-isolate Map caches (src/seo/handler.ts).
+    { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" },
+    // Feature flags, JSON {"enabled": true|false} per key: seo.strict_404 (src/flags.ts). Set by hand until
+    // Phase 4 mirrors table feature_flags into it.
+    { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+  ],
+
+  "vars": {
+    // Replaces the literal at middleware.ts:43 (a project URL, not a secret).
+    "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+    // Production origin: the only host that may receive Strict-Transport-Security (src/preview.ts).
+    "SITE_ORIGIN": "https://www.micronshub.eu",
+    // Comma-separated extra non-production hosts that get X-Robots-Tag: noindex. Every *.workers.dev host and
+    // localhost get it anyway, so this stays empty until a custom preview host exists.
+    "PREVIEW_HOSTNAMES": "",
+    // Deploy-time default of flag seo.strict_404; an entry in KV FLAGS wins (SEO_PARITY.md §7). "false" keeps
+    // soft-404 parity with Vercel (H-9) until PLAN.md Q5 is answered (P3-7).
+    "SEO_STRICT_404": "false",
+    // Phase 1: every /api/* request is forwarded here (src/api/forward.ts). Must point at the Vercel
+    // deployment host, not www, before the Phase 3 routes send www to this Worker (the forward refuses to
+    // call its own host).
+    "API_FORWARD_ORIGIN": "https://www.micronshub.eu"
+    // HSTS_VALUE (optional): set to the Strict-Transport-Security value of the P0-3 baseline to have the
+    // Worker emit it on the SITE_ORIGIN host. Left unset in Phase 1 (preview hosts never get it).
+  },
+
+  "secrets": {
+    // Deploys and version uploads fail when a listed secret is missing on the Worker.
+    "required": ["SUPABASE_ANON_KEY"]
+  },
+
+  // Phase 3 (runbook S11-S14): empty until the zone is on Cloudflare.
+  "routes": [
+    // { "pattern": "www.micronshub.eu/*", "zone_name": "micronshub.eu" },
+    // { "pattern": "*.micronshub.eu/*", "zone_name": "micronshub.eu" }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "microns-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:dry": "wrangler deploy --dry-run --outdir .wrangler/dry",
+    "preview": "wrangler versions upload --preview-alias staging"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.145.0"
+  }
+}
