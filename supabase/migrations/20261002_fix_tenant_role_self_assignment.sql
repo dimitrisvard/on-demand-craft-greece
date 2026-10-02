@@ -1,30 +1,16 @@
 -- ============================================================================
--- H-5: stop users granting themselves tenant roles
+-- Tighten role assignment on public.user_tenant_roles (RISKS.md H-5)
 -- ============================================================================
--- The policy "users_insert_own_tenant_roles" (20260408_fix_user_tenant_roles_
--- rls_recursion.sql) lets any authenticated user insert a user_tenant_roles
--- row for themselves with role 'tenant_admin' or 'tenant_user' for ANY tenant.
--- That row then passes get_user_tenant_ids() / has_tenant_role(), which gate
--- ALL access to that tenant's customers, orders, rfqs, products,
--- production_partners, tenant_pages, tenant_capabilities, tenant_quote_fields
--- and UPDATE on the tenant itself.
+-- Role rows are assigned by super admins only, through "super_admin_manage_roles".
+-- The page that creates tenant admins (TenantEditPage.tsx) already runs that
+-- insert as the super admin. Edge functions use the service role.
 --
--- The policy was added for TenantEditPage.tsx, which calls signUp() (switching
--- the session to the new user) before assigning the role. The page restores
--- the super_admin session before the insert, so "super_admin_manage_roles"
--- (FOR ALL USING is_super_admin(), which Postgres also applies as the INSERT
--- check) already covers it. Edge functions use the service role and bypass RLS.
---
--- Live state on 2026-10-02: 2 rows (1 super_admin, 1 tenant_admin for
--- laserkritis, both expected); no sign the policy was abused.
---
--- Rollback: re-create the policy from 20260408_fix_user_tenant_roles_rls_
--- recursion.sql:66-69 (not recommended).
+-- Rollback: re-create the dropped policy from
+-- 20260408_fix_user_tenant_roles_rls_recursion.sql.
 -- ============================================================================
 
 BEGIN;
 
--- Refuse to run if super admins would lose the ability to assign roles.
 DO $$
 BEGIN
   IF NOT EXISTS (
