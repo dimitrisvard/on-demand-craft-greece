@@ -175,6 +175,13 @@ print(re.sub(r"\s+", " ", text).strip())
 '
 }
 
+# Every grep -q / head below reads the fetched page through a here-string
+# (grep -q PATTERN <<<"$var"), never through `echo "$var" | grep -q PATTERN`.
+# grep -q stops reading at its first match, so the echo on the left of such a
+# pipe can be killed by SIGPIPE at random; under pipefail the whole test then
+# reads as "no match": a passing check is reported as failed, and a check that
+# looks for a regression (hidden #seo-content, mojibake) can miss it.
+# (`printf ... | grep -o ... | wc -l` is fine: grep -o reads to the end.)
 check() {
   local url="$1"; local min_body="$2"; local must_contain="$3"
   local html body_text body_len contains_ok has_seo_content has_canonical has_jsonld
@@ -183,16 +190,16 @@ check() {
   body_len=${#body_text}
 
   contains_ok="no"
-  if echo "$body_text" | grep -qiE "$must_contain"; then contains_ok="yes"; fi
+  if grep -qiE "$must_contain" <<<"$body_text"; then contains_ok="yes"; fi
 
   has_seo_content="no"
-  if echo "$html" | grep -q 'id="seo-content"'; then has_seo_content="yes"; fi
+  if grep -q 'id="seo-content"' <<<"$html"; then has_seo_content="yes"; fi
 
   has_canonical="no"
-  if echo "$html" | grep -q '<link rel="canonical"'; then has_canonical="yes"; fi
+  if grep -q '<link rel="canonical"' <<<"$html"; then has_canonical="yes"; fi
 
   has_jsonld="no"
-  if echo "$html" | grep -q 'application/ld+json'; then has_jsonld="yes"; fi
+  if grep -q 'application/ld+json' <<<"$html"; then has_jsonld="yes"; fi
 
   if [ "$body_len" -ge "$min_body" ] \
      && [ "$contains_ok" = "yes" ] \
@@ -211,9 +218,11 @@ check() {
 
 check_encoding() {
   local url="$1"
-  local body
+  local body first_bytes
   body=$(fetch body "$HOST$url")
-  if echo "$body" | head -c 8000 | grep -qE "Ã§|Ã£|Ã¡|Ã©|Ã¶|Ã¼|ÃŸ|Ã¨|Ã²|Ã¬"; then
+  # The first 8000 bytes, cut without a pipe into grep -q (see the note above check()).
+  first_bytes=$(head -c 8000 <<<"$body")
+  if grep -qE "Ã§|Ã£|Ã¡|Ã©|Ã¶|Ã¼|ÃŸ|Ã¨|Ã²|Ã¬" <<<"$first_bytes"; then
     echo "  [FAIL] $url contains UTF-8 mojibake"
     FAIL=1
   else
@@ -386,7 +395,7 @@ for page in industries our-work education about contact legal-notice privacy-pol
   else
     echo "  [ok]   /en/$page raw=$size ≥ $MIN_SIZE"
   fi
-  if echo "$html" | grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)'; then
+  if grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)' <<<"$html"; then
     echo "  [FAIL] /en/$page #seo-content has hidden/aria-hidden (yesterday-bug regression)"
     FAIL=1
   fi
@@ -469,13 +478,13 @@ echo ""
 echo "=== robots + og:locale meta on every content page ==="
 for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/legal-notice"; do
   body=$(fetch body "$url")
-  if printf '%s' "$body" | grep -q '<meta name="robots"'; then
+  if grep -q '<meta name="robots"' <<<"$body"; then
     echo "  [ok]   $url has meta robots"
   else
     echo "  [FAIL] $url missing <meta name=\"robots\">"
     FAIL=1
   fi
-  if printf '%s' "$body" | grep -q '<meta property="og:locale"'; then
+  if grep -q '<meta property="og:locale"' <<<"$body"; then
     echo "  [ok]   $url has og:locale"
   else
     echo "  [FAIL] $url missing <meta property=\"og:locale\">"
@@ -485,13 +494,13 @@ done
 
 echo ""
 echo "=== WebSite + SearchAction JSON-LD on /en only ==="
-if printf '%s' "$home_body" | grep -q '"@type":"WebSite"'; then
+if grep -q '"@type":"WebSite"' <<<"$home_body"; then
   echo "  [ok]   /en has WebSite JSON-LD"
 else
   echo "  [FAIL] /en missing WebSite JSON-LD"
   FAIL=1
 fi
-if printf '%s' "$home_body" | grep -q '"@type":"SearchAction"'; then
+if grep -q '"@type":"SearchAction"' <<<"$home_body"; then
   echo "  [ok]   /en has SearchAction JSON-LD"
 else
   echo "  [FAIL] /en missing SearchAction JSON-LD"
@@ -502,7 +511,7 @@ echo ""
 echo "=== No hidden/aria-hidden regression on #seo-content anywhere ==="
 for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/our-work" "$HOST/en/about" "$HOST/en/contact"; do
   body=$(fetch body "$url")
-  if printf '%s' "$body" | grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)'; then
+  if grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)' <<<"$body"; then
     echo "  [FAIL] $url: #seo-content has hidden/aria-hidden (regression)"
     FAIL=1
   else
@@ -513,19 +522,19 @@ done
 echo ""
 echo "=== Footer VAT / legal-entity SSR regression ==="
 home=$(fetch body "$HOST/en")
-if echo "$home" | grep -q "EL803129638"; then
+if grep -q "EL803129638" <<<"$home"; then
   echo "  [ok]   /en contains VAT EL803129638 in SSR body"
 else
   echo "  [FAIL] /en missing EL803129638 in SSR body"
   FAIL=1
 fi
-if echo "$home" | grep -q "MICRONS HUB DV"; then
+if grep -q "MICRONS HUB DV" <<<"$home"; then
   echo "  [ok]   /en contains legal entity MICRONS HUB DV in SSR body"
 else
   echo "  [FAIL] /en missing MICRONS HUB DV in SSR body"
   FAIL=1
 fi
-if echo "$home" | grep -q "190254227000"; then
+if grep -q "190254227000" <<<"$home"; then
   echo "  [ok]   /en contains GEMI 190254227000 in SSR body"
 else
   echo "  [FAIL] /en missing GEMI 190254227000 in SSR body"

@@ -6,10 +6,10 @@
 // returns on a miss or failure.
 //
 // Adapted: SUPABASE_URL and the anon key come from env (middleware.ts:43, :103-109); the per-isolate Map caches
-// sit in front of KV SEO_CACHE (./cache.ts); a failed lookup is reported to the request state so the strict-404
-// path never answers 404 because Supabase was down. For the three lookups middleware.ts bounds with its 2.5 s
-// Promise.race (service page, service page list, content page) the KV read runs INSIDE the same 2.5 s budget, so
-// the answer time of middleware.ts holds whatever KV does.
+// sit in front of KV SEO_CACHE (./cache.ts), which holds positives only (cacheLookup); a failed lookup is
+// reported to the request state so the strict-404 path never answers 404 because Supabase was down. For the three
+// lookups middleware.ts bounds with its 2.5 s Promise.race (service page, service page list, content page) the KV
+// read runs INSIDE the same 2.5 s budget, so the answer time of middleware.ts holds whatever KV does.
 
 import type { ContentPageRow } from '../../../../middleware/renderers/contentPage';
 import { TieredCache, fingerprint, type CacheHit, type CacheIo, type CacheKind } from './cache';
@@ -176,6 +176,14 @@ interface BoundedResult<T> extends RawResult<T> {
   cached: boolean;
 }
 
+// The cache write middleware.ts makes after a lookup: data found for CACHE_TTL, "no row" for NEGATIVE_CACHE_TTL.
+// Found data goes to the Map and KV; "no row" (and a failed lookup, tagged) only to this isolate's Map, as in
+// middleware.ts, so unknown URLs cost no KV write. `failed` matters only when nothing was found.
+function cacheLookup<T>(cache: TieredCache<T>, parts: readonly string[], data: T, found: boolean, io: CacheIo, failed = false): void {
+  if (found) cache.set(parts, data, CACHE_TTL, io);
+  else cache.setLocal(parts, data, NEGATIVE_CACHE_TTL, failed);
+}
+
 // Map check (synchronous, as middleware.ts), then KV and Supabase together under ONE 2.5 s budget: a timeout gives
 // `empty` as a failure, exactly what middleware.ts's race gives when the fetch is slow.
 async function boundedLookup<T>(
@@ -216,8 +224,7 @@ export async function fetchArticleMeta(c: SeoCaches, io: SupabaseIo, lang: strin
     }
     const data = (await res.json()) as ArticleMeta[] | null;
     const article = data?.[0] ?? null;
-    const expiresIn = article ? CACHE_TTL : NEGATIVE_CACHE_TTL;
-    c.article.set(parts, article, expiresIn, io);
+    cacheLookup(c.article, parts, article, !!article, io);
     return article;
   } catch {
     io.state.degraded = true;
@@ -294,8 +301,7 @@ export async function fetchServicePage(c: SeoCaches, io: SupabaseIo, lang: strin
   const { data: row, failed, cached } = await boundedLookup(c.sp, parts, io, null, () => fetchServicePageRaw(io, lang, slug));
   if (failed) io.state.degraded = true;
   if (cached) return row;
-  const expiresIn = row ? CACHE_TTL : NEGATIVE_CACHE_TTL;
-  c.sp.set(parts, row, expiresIn, io, failed && !row);
+  cacheLookup(c.sp, parts, row, !!row, io, failed);
   return row;
 }
 
@@ -323,8 +329,7 @@ export async function fetchServicePageList(c: SeoCaches, io: SupabaseIo, lang: s
   const { data: rows, failed, cached, skipCache } = await boundedLookup(c.splist, parts, io, [] as ServicePageRow[], fetchForLang);
   if (failed) io.state.degraded = true;
   if (cached || skipCache) return rows;
-  const expiresIn = rows.length ? CACHE_TTL : NEGATIVE_CACHE_TTL;
-  c.splist.set(parts, rows, expiresIn, io, failed && !rows.length);
+  cacheLookup(c.splist, parts, rows, rows.length > 0, io, failed);
   return rows;
 }
 
@@ -372,8 +377,7 @@ export async function fetchContentPage(c: SeoCaches, io: SupabaseIo, lang: strin
   const { data: row, failed, cached } = await boundedLookup(c.cp, parts, io, null, () => fetchContentPageRaw(io, lang, slug));
   if (failed) io.state.degraded = true;
   if (cached) return row;
-  const expiresIn = row ? CACHE_TTL : NEGATIVE_CACHE_TTL;
-  c.cp.set(parts, row, expiresIn, io, failed && !row);
+  cacheLookup(c.cp, parts, row, !!row, io, failed);
   return row;
 }
 
@@ -396,7 +400,7 @@ export async function fetchContentPageAlternates(c: SeoCaches, io: SupabaseIo, c
     const rows = (await res.json()) as { language: string; localized_slug: string | null }[];
     const map: Record<string, string | null> = {};
     for (const r of rows) map[r.language] = r.localized_slug;
-    c.cpalt.set(parts, map, Object.keys(map).length ? CACHE_TTL : NEGATIVE_CACHE_TTL, io);
+    cacheLookup(c.cpalt, parts, map, Object.keys(map).length > 0, io);
     return map;
   } catch {
     return {};

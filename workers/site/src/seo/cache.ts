@@ -11,12 +11,18 @@
 // errors AND slow KV reads (KV_GET_TIMEOUT_MS) are logged and treated as a miss; KV writes run through
 // ctx.waitUntil. Neither can delay a request by more than the read deadline or fail it.
 //
+// Two write paths:
+//   - set(): a lookup that found data (a "positive", cached 1 h). Map and KV.
+//   - setLocal(): a "negative" (Supabase answered with no row, cached 30 s) or a failed lookup. THIS isolate's
+//     Map only, exactly as middleware.ts caches it. KV holds positives only, so a URL that matches nothing
+//     costs no KV write, however many distinct unknown URLs are requested. KV is still read for such a key
+//     (another isolate may have written a positive for it).
+//
 // Differences from the plain Map of middleware.ts. None of them changes a byte that is served; they only change
 // how often KV or Supabase is asked:
-//   - Failed lookups (non-2xx, network error, timeout, missing anon key) are cached in THIS isolate's Map only,
-//     tagged `failed`, exactly as middleware.ts caches them per isolate. They are never written to KV, so one
-//     isolate's transient Supabase failure cannot change the document other isolates serve. The tag is read by
-//     the strict-404 path, which never turns a failed lookup into a 404.
+//   - Failed lookups (non-2xx, network error, timeout, missing anon key) are cached through setLocal, tagged
+//     `failed`, so one isolate's transient Supabase failure cannot change the document other isolates serve.
+//     The tag is read by the strict-404 path, which never turns a failed lookup into a 404.
 //   - "v" is a fingerprint of the query and normalisation that produced the data (supabase.ts cacheShape). A KV
 //     value with another "v" (written by an older or newer deployed version, or a preview version sharing the
 //     namespace) is a miss, so a deploy that changes a select list or the normaliser behaves as a cache flush,
@@ -147,16 +153,14 @@ export class TieredCache<T> {
     return this.peek(parts) ?? this.getShared(parts, io);
   }
 
-  // Same place and TTL as the Map write of middleware.ts. The KV write is fire-and-forget and skipped for a
-  // failed lookup (per-isolate only, as in middleware.ts).
-  set(parts: readonly string[], data: T, ttlMs: number, io: CacheIo, failed = false): void {
+  // A positive: same place and TTL as the Map write of middleware.ts, plus a fire-and-forget KV write.
+  set(parts: readonly string[], data: T, ttlMs: number, io: CacheIo): void {
     const key = this.cacheableKey(parts);
     if (key === null) return;
     const entry: CacheEntry<T> = { data, expires: Date.now() + ttlMs };
-    if (failed) entry.failed = true;
     this.store(parts.join(':'), entry);
 
-    if (failed || !io.kv) return;
+    if (!io.kv) return;
     const value: KvValue = { data, expires: entry.expires };
     if (this.shape) value.v = this.shape;
     let put: Promise<unknown>;
@@ -167,6 +171,14 @@ export class TieredCache<T> {
       return;
     }
     io.waitUntil(put.catch((err: unknown) => logKvError('put', key, err)));
+  }
+
+  // A negative or a failed lookup: this isolate's Map only, never KV (see header). Same TTL as middleware.ts.
+  setLocal(parts: readonly string[], data: T, ttlMs: number, failed = false): void {
+    if (this.cacheableKey(parts) === null) return;
+    const entry: CacheEntry<T> = { data, expires: Date.now() + ttlMs };
+    if (failed) entry.failed = true;
+    this.store(parts.join(':'), entry);
   }
 
   // Tests only.

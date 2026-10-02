@@ -2,11 +2,23 @@
 // run on the same shell and the same recorded Supabase REST responses must return byte-identical bodies, the same
 // status and the same headers, request the same REST URLs with the same headers, and agree on where there is no
 // document (middleware.ts undefined <=> handleSeo null). A second Worker run with a fresh isolate in front of the
-// warm KV SEO_CACHE must serve identical bytes without a single REST call.
+// warm KV SEO_CACHE must serve identical bytes without a REST call for any lookup that found data; only lookups
+// Supabase answered with no row are asked again, as negatives are cached per isolate only (src/seo/cache.ts).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSeoHandler } from '../src/seo/handler';
-import { CASES, firstDiff, runMiddleware, runWorker, type Failure } from './helpers/seo-harness';
+import { CASES, FixtureFetch, firstDiff, runMiddleware, runWorker, type Failure, type Override } from './helpers/seo-harness';
+
+// The recorded REST calls (FixtureFetch.calls format) whose answer, overrides applied, is not "no row" ([]).
+async function callsWithRows(calls: readonly string[], overrides?: Override[]): Promise<string[]> {
+  const replay = new FixtureFetch({ overrides });
+  const out: string[] = [];
+  for (const call of calls) {
+    const body: unknown = await (await replay.fetch(call.split(' | ')[0])).json();
+    if (!(Array.isArray(body) && body.length === 0)) out.push(call);
+  }
+  return out;
+}
 
 beforeEach(() => {
   // would_404 shadow-mode lines (flag off) are expected for the null cases; keep the output readable.
@@ -49,13 +61,14 @@ describe('offline document parity: middleware.ts vs handleSeo', () => {
         expect(wk.assets.requests).toEqual([{ method: 'GET', url: `${new URL(c.path, 'https://www.micronshub.eu').origin}/index.html` }]);
       }
 
-      // Warm KV, cold isolate: same bytes, no REST call.
+      // Warm KV, cold isolate: same bytes; no REST call except the "no row" lookups (negatives are per isolate).
       const warm = await runWorker(c.path, {
         overrides: c.overrides,
         seoCache: wk.seoCache,
         handler: createSeoHandler(),
       });
-      expect(warm.fixture.calls).toEqual([]);
+      expect(await callsWithRows(warm.fixture.calls, c.overrides)).toEqual([]);
+      expect(warm.fixture.calls.filter((call) => !wk.fixture.calls.includes(call))).toEqual([]);
       expect(warm.fixture.unknown).toEqual([]);
       if (c.expect === 'null') {
         expect(warm.result).toBeNull();

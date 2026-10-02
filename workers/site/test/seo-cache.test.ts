@@ -36,7 +36,7 @@ describe('TieredCache', () => {
     expect(kvKey('sp', ['en', 'cnc-machining'])).toBe('seo:v1:sp:en:cnc-machining');
     expect(kvKey('cpalt', ['education'])).toBe('seo:v1:cpalt:education');
     expect(kvTtlSeconds(CACHE_TTL)).toBe(3600);
-    expect(kvTtlSeconds(NEGATIVE_CACHE_TTL)).toBe(60);
+    expect(kvTtlSeconds(1000)).toBe(60);
     expect(kvTtlSeconds(90_500)).toBe(91);
   });
 
@@ -74,16 +74,12 @@ describe('TieredCache', () => {
 
   it('a KV entry with expires in the past is a miss even though KV still returns it', async () => {
     const kv = new MemoryKV();
-    const cache = new TieredCache<null>('cp');
-    cache.set(['en', 'zz'], null, NEGATIVE_CACHE_TTL, io(kv));
-    expect(kv.puts[0].expirationTtl).toBe(60);
-    const fresh = new TieredCache<null>('cp');
-    vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL - 1);
-    expect(await fresh.get(['en', 'zz'], io(kv))).toEqual({ data: null, failed: false });
-    const fresh2 = new TieredCache<null>('cp');
-    vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
-    expect(kv.store.has('seo:v1:cp:en:zz')).toBe(true);
-    expect(await fresh2.get(['en', 'zz'], io(kv))).toBeUndefined();
+    new TieredCache<string>('cp').set(['en', 'about'], 'row', CACHE_TTL, io(kv));
+    vi.setSystemTime(NOW + CACHE_TTL - 1);
+    expect(await new TieredCache<string>('cp').get(['en', 'about'], io(kv))).toEqual({ data: 'row', failed: false });
+    vi.setSystemTime(NOW + CACHE_TTL);
+    expect(kv.store.has('seo:v1:cp:en:about')).toBe(true);
+    expect(await new TieredCache<string>('cp').get(['en', 'about'], io(kv))).toBeUndefined();
   });
 
   it('malformed KV values are misses', async () => {
@@ -119,6 +115,7 @@ describe('TieredCache', () => {
     const cache = new TieredCache<string>('article');
     const parts = ['en', 'a'.repeat(600)];
     cache.set(parts, 'v', CACHE_TTL, io(kv));
+    cache.setLocal(parts, 'v', NEGATIVE_CACHE_TTL);
     expect(kv.puts).toEqual([]);
     expect(cache.isolateSize).toBe(0);
     expect(await cache.get(parts, io(kv))).toBeUndefined();
@@ -126,13 +123,23 @@ describe('TieredCache', () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
+  it('a negative (no row) is cached in the isolate Map only, never written to KV; another isolate reads KV', async () => {
+    const kv = new MemoryKV();
+    const cache = new TieredCache<null>('cp', { shape: 'abc' });
+    cache.setLocal(['en', 'zz'], null, NEGATIVE_CACHE_TTL);
+    expect(kv.puts).toEqual([]);
+    expect(await cache.get(['en', 'zz'], io(kv))).toEqual({ data: null, failed: false });
+    expect(kv.gets).toEqual([]); // served by the Map
+    expect(await new TieredCache<null>('cp', { shape: 'abc' }).get(['en', 'zz'], io(kv))).toBeUndefined();
+    expect(kv.gets).toEqual(['seo:v1:cp:en:zz']); // a positive another isolate wrote would have been found
+    vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
+    expect(cache.peek(['en', 'zz'])).toBeUndefined();
+  });
+
   it('a failed lookup is cached in the isolate Map only (tagged failed), never written to KV', async () => {
     const kv = new MemoryKV();
-    const ctx = new TestContext();
     const cache = new TieredCache<null>('sp', { shape: 'abc' });
-    cache.set(['en', 'x'], null, NEGATIVE_CACHE_TTL, io(kv, ctx), true);
-    await ctx.settle();
-    expect(ctx.pending).toEqual([]);
+    cache.setLocal(['en', 'x'], null, NEGATIVE_CACHE_TTL, true);
     expect(kv.puts).toEqual([]);
     expect(cache.peek(['en', 'x'])).toEqual({ data: null, failed: true });
     expect(await new TieredCache<null>('sp', { shape: 'abc' }).get(['en', 'x'], io(kv))).toBeUndefined();
@@ -176,7 +183,7 @@ describe('TieredCache', () => {
   it('the isolate Map is bounded: expired entries go first, then the oldest written', async () => {
     const cache = new TieredCache<number>('cp', { maxEntries: 3 });
     const none = io(undefined);
-    cache.set(['a'], 1, NEGATIVE_CACHE_TTL, none);
+    cache.setLocal(['a'], 1, NEGATIVE_CACHE_TTL);
     cache.set(['b'], 2, CACHE_TTL, none);
     cache.set(['c'], 3, CACHE_TTL, none);
     vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL); // 'a' expired
@@ -196,7 +203,7 @@ describe('TieredCache', () => {
 
   it('expired Map entries are dropped on read', () => {
     const cache = new TieredCache<number>('cp');
-    cache.set(['a'], 1, NEGATIVE_CACHE_TTL, io(undefined));
+    cache.setLocal(['a'], 1, NEGATIVE_CACHE_TTL);
     vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
     expect(cache.peek(['a'])).toBeUndefined();
     expect(cache.isolateSize).toBe(0);
@@ -223,16 +230,50 @@ describe('handleSeo with KV SEO_CACHE', () => {
     }
   });
 
-  it('writes negative rows for 30 s (expires) with a 60 s KV TTL', async () => {
-    const run = await runWorker('/en/zz-parity-404');
-    expect(run.result).toBeNull();
-    const keys = run.seoCache.puts.map((p) => p.key).sort();
-    expect(keys).toEqual(['seo:v1:cp:en:zz-parity-404', 'seo:v1:cpalt:zz-parity-404']);
-    for (const p of run.seoCache.puts) {
-      expect(p.expirationTtl).toBe(60);
-      expect(JSON.parse(p.value)).toEqual({
-        data: p.key.includes('cpalt') ? {} : null, expires: NOW + NEGATIVE_CACHE_TTL, v: cacheShape(kindOf(p.key)),
-      });
+  it('a lookup answered with no row is a 30 s negative in the isolate Map, read from but never written to KV', async () => {
+    const page = await runWorker('/en/zz-parity-404');
+    expect(page.result).toBeNull();
+    expect(page.seoCache.puts).toEqual([]);
+    expect([...page.seoCache.gets].sort()).toEqual(['seo:v1:cp:en:zz-parity-404', 'seo:v1:cpalt:zz-parity-404']);
+    expect(page.handler.caches.cp.peek(['en', 'zz-parity-404'])).toEqual({ data: null, failed: false });
+    expect(page.handler.caches.cpalt.peek(['zz-parity-404'])).toEqual({ data: {}, failed: false });
+    const article = await runWorker('/en/blog/zz-parity-404');
+    expect(article.result).toBeNull();
+    expect(article.seoCache.puts).toEqual([]);
+    expect(article.seoCache.gets).toEqual(['seo:v1:article:en:zz-parity-404']);
+    expect(article.handler.caches.article.peek(['en', 'zz-parity-404'])).toEqual({ data: null, failed: false });
+    vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
+    expect(page.handler.caches.cp.peek(['en', 'zz-parity-404'])).toBeUndefined();
+    expect(article.handler.caches.article.peek(['en', 'zz-parity-404'])).toBeUndefined();
+  });
+
+  it('N distinct unknown URLs cost no KV write; a real page in the same isolate still writes its rows', async () => {
+    const N = 40;
+    const handler = createSeoHandler();
+    const seoCache = new MemoryKV();
+    for (let i = 0; i < N; i += 1) {
+      const lang = ['en', 'de', 'fr', 'cs'][i % 4];
+      for (const path of [`/${lang}/zz-probe-${i}`, `/${lang}/blog/zz-probe-${i}`]) {
+        const run = await runWorker(path, { handler, seoCache, emptyForUnknown: true });
+        expect(run.result, path).toBeNull();
+        expect(run.fixture.calls.length, path).toBeGreaterThan(0); // Supabase answered "no row"
+      }
+    }
+    expect(seoCache.puts).toEqual([]);
+    // KV is still read for each key (a row another isolate wrote would be found) ...
+    const reads = (kind: CacheKind) => seoCache.gets.filter((k) => kindOf(k) === kind).length;
+    expect([reads('cp'), reads('cpalt'), reads('article')]).toEqual([N, N, N]);
+    // ... and each "no row" is held for 30 s in this isolate's Map, as in middleware.ts.
+    expect([handler.caches.cp.isolateSize, handler.caches.cpalt.isolateSize, handler.caches.article.isolateSize]).toEqual([N, N, N]);
+    expect(handler.caches.cp.peek(['de', 'zz-probe-1'])).toEqual({ data: null, failed: false });
+    expect(handler.caches.article.peek(['fr', 'zz-probe-2'])).toEqual({ data: null, failed: false });
+
+    const real = await runWorker('/en/about', { handler, seoCache });
+    expect(real.result).not.toBeNull();
+    expect(seoCache.puts.map((p) => p.key).sort()).toEqual(['seo:v1:cp:en:about', 'seo:v1:cpalt:about']);
+    for (const p of seoCache.puts) {
+      expect(p.expirationTtl).toBe(3600);
+      expect(JSON.parse(p.value)).toMatchObject({ expires: NOW + CACHE_TTL, v: cacheShape(kindOf(p.key)) });
     }
   });
 
@@ -268,14 +309,18 @@ describe('handleSeo with KV SEO_CACHE', () => {
     expect(seoCache.gets).toEqual([]);
   });
 
-  it('negative entries expire after 30 s: Supabase is asked again', async () => {
+  it('negatives are per isolate (as middleware.ts): no new REST call within 30 s, another isolate asks Supabase', async () => {
+    const handler = createSeoHandler();
     const seoCache = new MemoryKV();
-    await runWorker('/en/zz-parity-404', { seoCache });
-    const within = await runWorker('/en/zz-parity-404', { seoCache, handler: createSeoHandler() });
+    await runWorker('/en/zz-parity-404', { handler, seoCache });
+    const within = await runWorker('/en/zz-parity-404', { handler, seoCache });
     expect(within.fixture.calls).toEqual([]);
+    const otherIsolate = await runWorker('/en/zz-parity-404', { seoCache, handler: createSeoHandler() });
+    expect(otherIsolate.fixture.calls).toHaveLength(2);
     vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
-    const after = await runWorker('/en/zz-parity-404', { seoCache, handler: createSeoHandler() });
+    const after = await runWorker('/en/zz-parity-404', { handler, seoCache });
     expect(after.fixture.calls).toHaveLength(2);
+    expect(seoCache.puts).toEqual([]);
   });
 
   it('KV errors never fail a request and give the same document', async () => {
@@ -334,7 +379,7 @@ describe('handleSeo with KV SEO_CACHE', () => {
     const handler = createSeoHandler();
     const seoCache = new MemoryKV();
     for (let i = 0; i < MAP_MAX_ENTRIES + 50; i += 1) {
-      handler.caches.cp.set(['en', `probe-${i}`], null, NEGATIVE_CACHE_TTL, { kv: undefined, waitUntil: () => {} });
+      handler.caches.cp.setLocal(['en', `probe-${i}`], null, NEGATIVE_CACHE_TTL);
     }
     expect(handler.caches.cp.isolateSize).toBe(MAP_MAX_ENTRIES);
     // And through the request path (unknown REST URLs answer [] here).
