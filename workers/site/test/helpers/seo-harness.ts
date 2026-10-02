@@ -57,6 +57,8 @@ export interface FixtureOptions {
   failures?: Failure[];
   // When false, the fetch stub refuses the shell URL (the Worker must use env.ASSETS, never a self-fetch).
   allowShellFetch?: boolean;
+  // Soft-404 tests only: an unrecorded REST URL answers 200 [] (an authoritative "no row") instead of throwing.
+  emptyForUnknown?: boolean;
 }
 
 // globalThis.fetch replacement: shell for <origin>/index.html, recorded REST responses, nothing else. An unknown
@@ -88,6 +90,9 @@ export class FixtureFetch {
     if (failure?.mode === 'hang') return new Promise<Response>(() => {});
 
     const recorded = REST[url];
+    if (!recorded && this.options.emptyForUnknown) {
+      return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     if (!recorded) {
       this.unknown.push(url);
       throw new Error(`unrecorded REST URL (run test/fixtures/seo/record.mjs): ${url}`);
@@ -129,8 +134,8 @@ export function firstDiff(a: string, b: string): string | null {
 // ─── middleware.ts ────────────────────────────────────────────────────────────
 
 const processEnv = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
-// Computed so tsc does not follow it (middleware.ts is not strict-clean); resolved relative to this file.
-const MIDDLEWARE_SPEC = ['..', '..', '..', '..', 'middleware.ts'].join('/');
+// Computed so tsc does not follow it (middleware.ts is not strict-clean): <repo>/middleware.ts as an absolute path.
+const MIDDLEWARE_SPEC = new URL(['..', '..', '..', '..', 'middleware.ts'].join('/'), (import.meta as unknown as { url: string }).url).pathname;
 
 type MiddlewareFn = (request: Request) => Promise<Response | undefined>;
 
