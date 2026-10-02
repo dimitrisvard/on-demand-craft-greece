@@ -66,7 +66,10 @@
     // Phase 1: every /api/* request is forwarded here (src/api/forward.ts). Must point at the Vercel
     // deployment host, not www, before the Phase 3 routes send www to this Worker (the forward refuses to
     // call its own host).
-    "API_FORWARD_ORIGIN": "https://www.micronshub.eu"
+    "API_FORWARD_ORIGIN": "https://www.micronshub.eu",
+    // Router step 5: serve <dir>/index.html for /dir/ and /dir (public/laserkritis/, public/zohoverify/) as Vercel's
+    // filesystem step is expected to. "true" until the P0-3 baseline says otherwise (SEO_PARITY.md G8 4-9, G9 10-11).
+    "DIRECTORY_INDEX_EMULATION": "true"
     // HSTS_VALUE (optional): set to the Strict-Transport-Security value of the P0-3 baseline to have the
     // Worker emit it on the SITE_ORIGIN host. Left unset in Phase 1 (preview hosts never get it).
   },
