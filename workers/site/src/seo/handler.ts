@@ -11,8 +11,11 @@
 //     error (LOG_PREFIX) before returning null, instead of middleware.ts:424-431's silent undefined.
 //   - SUPABASE_URL and SUPABASE_ANON_KEY from env (middleware.ts:43, :103-109). A missing value is logged as an
 //     error once per request; the helpers then behave as middleware.ts with an empty key (empty values).
-//   - Caches: per-isolate Map plus KV SEO_CACHE (./cache.ts, ./supabase.ts).
-//   - seo.strict_404 (SEO_PARITY.md §7), wired but off by default: see softNotFound below.
+//   - Caches: per-isolate Map plus KV SEO_CACHE (./cache.ts, ./supabase.ts). KV reads have a deadline and, for the
+//     three lookups middleware.ts races against 2.5 s, run inside that same budget; failed lookups stay in the
+//     isolate Map (never KV); KV values carry a shape fingerprint; the Maps are bounded. See cache.ts.
+//   - seo.strict_404 (SEO_PARITY.md §7), wired but off by default: see softNotFound below. The FLAGS read has a
+//     deadline (FLAG_READ_TIMEOUT_MS) after which the SEO_STRICT_404 fallback applies.
 
 import type { Env } from '../env';
 import { LOG_PREFIX } from '../env';
@@ -134,6 +137,28 @@ function logError(msg: string, fields: Record<string, unknown>): void {
   console.error(`${LOG_PREFIX} ${JSON.stringify({ msg, ...fields })}`);
 }
 
+// middleware.ts answers every would-be 404 with an immediate `return undefined`; the flag read in front of that
+// must not be able to stall the request. A FLAGS read slower than this uses the SEO_STRICT_404 fallback.
+export const FLAG_READ_TIMEOUT_MS = 500;
+
+async function strict404Enabled(env: Env, path: string): Promise<boolean> {
+  const fallback = env.SEO_STRICT_404 === 'true';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), FLAG_READ_TIMEOUT_MS);
+  });
+  try {
+    const result = await Promise.race([getFlag(env, 'seo.strict_404', fallback), deadline]);
+    if (result === 'timeout') {
+      logError('seo_flag_timeout', { flag: 'seo.strict_404', path, fallback });
+      return fallback;
+    }
+    return result;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 // middleware.ts:421-431, against the asset binding.
 async function fetchShell(env: Env, url: URL): Promise<Shell | null> {
   try {
@@ -164,7 +189,7 @@ export function createSeoHandler(options: SeoHandlerOptions = {}): SeoHandler {
     if (!lp) return null;
     if (isClientRoute(lp.lang, lp.segs)) return null;
     const cls = soft404Class(lp.lang, lp.segs, route);
-    const strict = await getFlag(env, 'seo.strict_404', env.SEO_STRICT_404 === 'true');
+    const strict = await strict404Enabled(env, url.pathname);
     if (!strict) {
       console.log(JSON.stringify({ msg: 'would_404', path: url.pathname, class: cls }));
       return null;

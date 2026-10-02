@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sitemapHandler from '../../../api/sitemap.js';
 import type { Env } from '../src/env';
-import { handleSitemap, rewriteSitemapPath } from '../src/sitemap';
+import { FUNCTION_TIMEOUT_MS, runVercelHandler } from '../src/compat/vercel-shim';
+import { handleSitemap, isPublicSitemapPath, rewriteSitemapPath } from '../src/sitemap';
 
 const ORIGIN = 'https://microns-site.example.workers.dev';
 const SUPABASE = 'https://cfjrtmtaitwzggzpkhxi.supabase.co';
@@ -137,9 +138,16 @@ const MAPPED: Array<[string, string]> = [
   ['/api/sitemap?type=lang&lang=fr', '/api/sitemap?type=lang&lang=fr'],
   ['/sitemap-xx.xml', '/api/sitemap?type=lang&lang=xx'],
   ['/sitemap-enx.xml', '/api/sitemap?type=lang&lang=enx'],
-  ['/sitemap-de.xml?utm_source=parity', '/api/sitemap?type=lang&lang=de&utm_source=parity'],
+  // Query merge of Vercel's reference router (src/sitemap.ts): request keys first and overriding, then the
+  // rewrite-only keys; components decoded and re-encoded.
+  ['/sitemap-de.xml?utm_source=parity', '/api/sitemap?utm_source=parity&type=lang&lang=de'],
   ['/sitemap-complete.xml?x=1', '/api/sitemap?x=1'],
-  ['/sitemap.xml?type=index', '/api/sitemap?type=main-index&type=index'],
+  ['/sitemap.xml?type=index', '/api/sitemap?type=index'],
+  ['/sitemap-index.xml?type=lang&lang=fr', '/api/sitemap?type=lang&lang=fr'],
+  ['/sitemap-de.xml?lang=fr', '/api/sitemap?lang=fr&type=lang'],
+  ['/sitemap-de.xml?hl=fr', '/api/sitemap?hl=fr&type=lang&lang=de'],
+  ['/sitemap-d%65.xml', '/api/sitemap?type=lang&lang=de'],
+  ['/api/sitemap?lang=d%65&type=lang', '/api/sitemap?lang=de&type=lang'],
 ];
 
 beforeEach(() => {
@@ -166,9 +174,34 @@ describe('rewriteSitemapPath', () => {
     expect(rewriteSitemapPath(new URL(path, ORIGIN))).toBe(expected);
   });
 
-  it('keeps the :lang value raw (path-to-regexp segment, non-greedy before .xml)', () => {
+  it('captures :lang on the raw pathname (non-greedy before .xml) and decodes it through the query merge', () => {
     expect(rewriteSitemapPath(new URL('/sitemap-a.b.xml', ORIGIN))).toBe('/api/sitemap?type=lang&lang=a.b');
-    expect(rewriteSitemapPath(new URL('/sitemap-%65n.xml', ORIGIN))).toBe('/api/sitemap?type=lang&lang=%65n');
+    expect(rewriteSitemapPath(new URL('/sitemap-%65n.xml', ORIGIN))).toBe('/api/sitemap?type=lang&lang=en');
+    expect(rewriteSitemapPath(new URL('/sitemap-%C3%A9.xml', ORIGIN))).toBe('/api/sitemap?type=lang&lang=%C3%A9');
+  });
+
+  it('merges the query like the Vercel dev router (repeats, bare keys, re-encoding, malformed escapes)', () => {
+    const r = (path: string) => rewriteSitemapPath(new URL(path, ORIGIN));
+    // A repeated request key replaces the rewrite value as a whole and keeps its order.
+    expect(r('/sitemap.xml?type=index&type=lang')).toBe('/api/sitemap?type=index&type=lang');
+    // Bare keys stay bare; a bare "?" carries no query.
+    expect(r('/sitemap-complete.xml?debug')).toBe('/api/sitemap?debug');
+    expect(r('/sitemap-complete.xml?')).toBe('/api/sitemap');
+    // Re-encoded with encodeURIComponent; '+' is not a space.
+    expect(r("/sitemap-complete.xml?q=a+b&p=/x&s=it's")).toBe("/api/sitemap?q=a%2Bb&p=%2Fx&s=it's");
+    // A malformed escape is kept raw (then encoded), never thrown.
+    expect(r('/sitemap-complete.xml?x=%E9')).toBe('/api/sitemap?x=%25E9');
+    // A value is split at the first '=' only.
+    expect(r('/sitemap-complete.xml?a=b=c')).toBe('/api/sitemap?a=b%3Dc');
+  });
+
+  it('isPublicSitemapPath: the rewritten public URLs only', () => {
+    for (const path of ['/sitemap.xml', '/sitemap-complete.xml', '/sitemap-index.xml', '/sitemap-de.xml', '/sitemap-enx.xml']) {
+      expect(isPublicSitemapPath(new URL(path, ORIGIN)), path).toBe(true);
+    }
+    for (const path of ['/api/sitemap', '/api/sitemap?type=index', '/robots.txt', '/en/sitemap.xml']) {
+      expect(isPublicSitemapPath(new URL(path, ORIGIN)), path).toBe(false);
+    }
   });
 
   it.each([
@@ -325,5 +358,141 @@ describe('handleSitemap', () => {
     await Promise.all(pending);
     expect(spy).toHaveBeenCalledTimes(2);
     spy.mockRestore();
+  });
+});
+
+describe('query merge end to end (Vercel reference router; P0-3 baseline to confirm)', () => {
+  it('/sitemap.xml?type=index serves the storage index, not the main index', async () => {
+    expect(await (await viaWorker('/sitemap.xml?type=index'))!.text()).toBe(INDEX_BLOB);
+  });
+
+  it('/sitemap-de.xml?lang=fr serves the fr blob; /sitemap-d%65.xml the de blob', async () => {
+    expect(await (await viaWorker('/sitemap-de.xml?lang=fr'))!.text()).toBe(langBlob('fr'));
+    expect(await (await viaWorker('/sitemap-d%65.xml'))!.text()).toBe(langBlob('de'));
+  });
+});
+
+describe('a hung upstream', () => {
+  it('is bounded by the shim deadline: 504, logged, not cached', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = viaWorker('/sitemap-de.xml');
+    let settled = false;
+    void result.then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(FUNCTION_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = (await result)!;
+    expect(res.status).toBe(504);
+    expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('did not end the response within 30000 ms: GET /api/sitemap?type=lang&lang=de'));
+    await Promise.all(pending);
+    expect(cache.puts).toEqual([]);
+    spy.mockRestore();
+  });
+});
+
+describe('vercel shim lifecycle', () => {
+  const init = (timeoutMs?: number) => ({ method: 'GET', url: '/api/x?a=1', headers: new Headers({ 'X-Test': 'y' }), timeoutMs });
+
+  it('passes req.method, req.url, req.query (node querystring form) and lowercased req.headers', async () => {
+    let seen: unknown;
+    await runVercelHandler(
+      (req, res) => {
+        seen = { method: req.method, url: req.url, query: req.query, headers: req.headers };
+        res.end();
+      },
+      { method: 'POST', url: '/api/x?a=1&a=2&b=', headers: new Headers({ 'X-Test': 'y' }) },
+    );
+    expect(seen).toEqual({ method: 'POST', url: '/api/x?a=1&a=2&b=', query: { a: ['1', '2'], b: '' }, headers: { 'x-test': 'y' } });
+  });
+
+  it('returns the response on end(), without waiting for work after it', async () => {
+    let release: () => void = () => {};
+    const tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const res = await runVercelHandler(async (_req, res) => {
+      res.status(201).send('done');
+      await tail; // never released before the assertion below
+    }, init(50));
+    expect(res.status).toBe(201);
+    expect(await res.text()).toBe('done');
+    expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    release();
+  });
+
+  it('a throw after end() keeps the response and is logged', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await runVercelHandler(async (_req, res) => {
+      res.send('ok');
+      await Promise.resolve();
+      throw new Error('after send');
+    }, init(50));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('ok');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('handler failed after the response was settled'), expect.any(Error));
+    spy.mockRestore();
+  });
+
+  it('a throw (sync or async) before end() propagates', async () => {
+    await expect(
+      runVercelHandler(() => {
+        throw new Error('sync');
+      }, init(50)),
+    ).rejects.toThrow('sync');
+    await expect(runVercelHandler(async () => Promise.reject(new Error('async')), init(50))).rejects.toThrow('async');
+  });
+
+  it('waits for an end() that comes after the handler returned, within the deadline', async () => {
+    const res = await runVercelHandler((_req, res) => {
+      setTimeout(() => res.end('late'), 5);
+    }, init(1000));
+    expect(await res.text()).toBe('late');
+  });
+
+  it('a handler that never ends, or awaits a hung promise, gets 504 at the deadline', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const hung = await runVercelHandler(() => new Promise(() => {}), init(20));
+    expect(hung.status).toBe(504);
+    expect(await hung.text()).toBe('Gateway Timeout');
+    const silent = await runVercelHandler(() => undefined, init(20));
+    expect(silent.status).toBe(504);
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
+
+  it.each([
+    ['an object', { a: 1 }],
+    ['a number', 42],
+    ['a boolean', true],
+    ['an array', ['x']],
+  ])('send(%s) and end(%s) fail loudly instead of emitting "[object Object]"', async (_label, payload) => {
+    await expect(runVercelHandler((_req, res) => res.send(payload), init(50))).rejects.toThrow(TypeError);
+    await expect(runVercelHandler((_req, res) => res.end(payload), init(50))).rejects.toThrow(TypeError);
+  });
+
+  it('send(bytes) defaults to application/octet-stream; send(null) has no body and no Content-Type', async () => {
+    const bytes = await runVercelHandler((_req, res) => res.send(new Uint8Array([1, 2])), init(50));
+    expect(bytes.headers.get('content-type')).toBe('application/octet-stream');
+    expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(new Uint8Array([1, 2]));
+    const empty = await runVercelHandler((_req, res) => res.status(204).send(null), init(50));
+    expect(empty.status).toBe(204);
+    expect(empty.headers.has('content-type')).toBe(false);
+    expect(empty.body).toBeNull();
+  });
+
+  it('keeps an explicit Content-Type and array header values', async () => {
+    const res = await runVercelHandler((_req, res) => {
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Set-Cookie', ['a=1', 'b=2']);
+      res.send('<x/>');
+    }, init(50));
+    expect(res.headers.get('content-type')).toBe('application/xml; charset=utf-8');
+    expect(res.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
   });
 });

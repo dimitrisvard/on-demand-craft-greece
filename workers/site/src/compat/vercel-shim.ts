@@ -5,12 +5,28 @@
 //   req: method, url (path + query, as Vercel passes the rewritten destination), query (parsed), headers
 //        (lowercased names, as Node's IncomingMessage).
 //   res: statusCode, setHeader / getHeader / hasHeader / removeHeader / getHeaders, status(code), send(string |
-//        bytes), end([string | bytes]).
+//        bytes | null), end([string | bytes | null]).
 // Not implemented yet (P2-2): req.body / req.cookies parsing, res.json, res.redirect, res.write streaming,
-// res.writeHead, events. A handler that touches them fails loudly (TypeError) instead of silently differing.
+// res.writeHead, events, and @vercel/node's send(object | number | boolean) JSON branch. A handler that touches
+// them fails loudly: a missing method is a TypeError on call, and send() / end() throw a TypeError for any other
+// payload type instead of emitting "[object Object]".
 //
-// Differences from @vercel/node's helpers that do not affect gated parity fields (SEO_PARITY.md §2.2):
-// no ETag / Content-Length computation (the runtime sets Content-Length), no 304 freshness check.
+// Lifecycle (as @vercel/node, where the response is flushed on res.end()):
+//   - the Response is returned as soon as the handler ends it, even if the handler's promise is still pending;
+//     work after end() and a later rejection are only logged (not awaited, not propagated). Vercel does not
+//     guarantee post-response work without waitUntil either; P2-2 can add ctx.waitUntil for it;
+//   - a throw (or rejection) BEFORE end() propagates to the caller (Vercel: 500 FUNCTION_INVOCATION_FAILED);
+//   - one deadline covers the whole invocation (a handler awaiting a hung upstream included): when it expires
+//     before end(), the caller gets 504 (Vercel: FUNCTION_INVOCATION_TIMEOUT). FUNCTION_TIMEOUT_MS is an explicit
+//     budget; the project's real Vercel maxDuration is to be confirmed (vercel.json sets none).
+//
+// Differences from @vercel/node's helpers that do not affect gated parity fields (SEO_PARITY.md section 2.2):
+// no ETag / Content-Length computation (the runtime sets Content-Length), no 304 freshness check, plain-text
+// bodies on the 504 instead of Vercel's error page.
+
+import { LOG_PREFIX } from '../env';
+
+const SHIM_LOG_PREFIX = `${LOG_PREFIX} vercel-shim:`;
 
 export type HeaderValue = string | number | ReadonlyArray<string>;
 
@@ -31,8 +47,8 @@ export interface VercelResponseShim {
   removeHeader(name: string): void;
   getHeaders(): Record<string, HeaderValue>;
   status(code: number): VercelResponseShim;
-  send(body?: string | Uint8Array | null): VercelResponseShim;
-  end(body?: string | Uint8Array | null): VercelResponseShim;
+  send(body?: ShimPayload): VercelResponseShim;
+  end(body?: ShimPayload): VercelResponseShim;
 }
 
 // Handlers are plain JS (api/*.js); their parameter types are not known to TypeScript.
@@ -43,13 +59,23 @@ export interface ShimRequestInit {
   // Path and query the handler sees as req.url, e.g. '/api/sitemap?type=lang&lang=en'.
   url: string;
   headers: Headers;
+  // Overrides FUNCTION_TIMEOUT_MS (tests).
+  timeoutMs?: number;
+}
+
+export type ShimPayload = string | Uint8Array | null | undefined;
+
+function assertPayload(method: 'send' | 'end', payload: unknown): asserts payload is ShimPayload {
+  if (payload === null || payload === undefined || typeof payload === 'string' || payload instanceof Uint8Array) return;
+  const kind = Array.isArray(payload) ? 'array' : typeof payload;
+  throw new TypeError(`res.${method}(${kind}) is not implemented by the Vercel shim (only string, Uint8Array or no body)`);
 }
 
 // Statuses whose Response must not carry a body (Fetch spec "null body status").
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
-// Wait for res.end() after the handler's promise settled; Vercel waits up to the function timeout.
-const END_TIMEOUT_MS = 30_000;
+// Deadline for one invocation, from the call to res.end() (see the lifecycle notes above).
+export const FUNCTION_TIMEOUT_MS = 30_000;
 
 // Node querystring semantics: a repeated key becomes an array, in order.
 export function parseQuery(search: string): Record<string, string | string[]> {
@@ -128,6 +154,7 @@ function createResponse(): Collected {
       return res;
     },
     send(payload) {
+      assertPayload('send', payload);
       // @vercel/node send(): a string body defaults Content-Type to text/html with charset utf-8.
       if (typeof payload === 'string' && !res.hasHeader('content-type')) {
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -137,6 +164,7 @@ function createResponse(): Collected {
       return res.end(payload);
     },
     end(payload) {
+      assertPayload('end', payload);
       if (ended) return res;
       body = payload ?? null;
       ended = true;
@@ -161,22 +189,54 @@ function createResponse(): Collected {
   };
 }
 
-// Run a Vercel (req, res) handler and return what it wrote as a Response. A throw (or a rejected promise) from
-// the handler propagates to the caller; a handler that never ends the response fails after END_TIMEOUT_MS.
+function timeoutResponse(): Response {
+  return new Response('Gateway Timeout', {
+    status: 504,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
+}
+
+type Outcome = { kind: 'ended' } | { kind: 'returned' } | { kind: 'threw'; error: unknown } | { kind: 'timeout' };
+
+// Run a Vercel (req, res) handler and return what it wrote as a Response, as soon as it calls res.end() (or
+// send()). A throw or rejection before that propagates to the caller; no end() within the deadline gives 504.
 export async function runVercelHandler(handler: VercelHandler, init: ShimRequestInit): Promise<Response> {
   const req = createRequest(init);
   const collected = createResponse();
-  await handler(req, collected.res);
-  if (!collected.isEnded()) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`handler did not end the response within ${END_TIMEOUT_MS} ms`)), END_TIMEOUT_MS);
-    });
-    try {
-      await Promise.race([collected.ended, timeout]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
+  const timeoutMs = init.timeoutMs ?? FUNCTION_TIMEOUT_MS;
+
+  // Promise.resolve().then(): a synchronous throw becomes a rejection like an async one.
+  const run = Promise.resolve().then(() => handler(req, collected.res));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<Outcome>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs);
+  });
+  const ended = collected.ended.then((): Outcome => ({ kind: 'ended' }));
+  const settled = run.then(
+    (): Outcome => ({ kind: 'returned' }),
+    (error: unknown): Outcome => ({ kind: 'threw', error }),
+  );
+
+  let propagated: unknown = undefined;
+  try {
+    let outcome = await Promise.race([ended, settled, deadline]);
+    // Returned without ending: keep waiting for end() within the same deadline.
+    if (outcome.kind === 'returned' && !collected.isEnded()) outcome = await Promise.race([ended, deadline]);
+    if (outcome.kind === 'threw' && !collected.isEnded()) {
+      propagated = outcome.error;
+      throw outcome.error;
     }
+    if (outcome.kind === 'timeout' && !collected.isEnded()) {
+      console.error(`${SHIM_LOG_PREFIX} handler did not end the response within ${timeoutMs} ms: ${init.method} ${init.url}`);
+      return timeoutResponse();
+    }
+    return collected.toResponse();
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    // The handler may still be running (work after end(), or a hung upstream after the deadline): never let a
+    // late rejection become an unhandled one.
+    run.catch((err: unknown) => {
+      if (err !== propagated) console.error(`${SHIM_LOG_PREFIX} handler failed after the response was settled: ${init.method} ${init.url}`, err);
+    });
   }
-  return collected.toResponse();
 }

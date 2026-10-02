@@ -36,6 +36,7 @@ const FILES: Record<string, { body: string; type: string }> = {
   '/robots.txt': { body: 'User-agent: *\n', type: 'text/plain' },
   '/zohoverify/index.html': { body: 'zoho', type: 'text/html' },
   '/en/index.html': { body: 'prerendered en', type: 'text/html' },
+  '/en/services/index.html': { body: 'prerendered en/services (Helmet head, no #seo-content)', type: 'text/html' },
 };
 
 function makeAssets() {
@@ -236,29 +237,81 @@ describe('HEAD', () => {
       const get = await call(path);
       const head = await call(path, { method: 'HEAD' });
       expect(head.status).toBe(get.status);
-      expect([...head.headers.entries()]).toEqual([...get.headers.entries()]);
+      // On the wire GET also carries Content-Length (the runtime sets it from the body); HEAD of a static file
+      // carries it explicitly (headFromAssets), so it is compared against the GET body length instead.
+      const withoutLength = (h: Headers) => [...h.entries()].filter(([name]) => name !== 'content-length');
+      expect(withoutLength(head.headers)).toEqual(withoutLength(get.headers));
+      const getBytes = new TextEncoder().encode(await get.text()).byteLength;
+      if (head.headers.has('Content-Length')) expect(head.headers.get('Content-Length')).toBe(String(getBytes));
       expect(head.body).toBeNull();
       expect(await head.text()).toBe('');
     },
   );
+
+  it.each(['/zz', '/robots.txt', '/zohoverify/', '/index.html'])(
+    'HEAD %s (static step): Content-Length is the GET body length, assets read as GET',
+    async (path) => {
+      const get = await call(path);
+      const getBytes = new TextEncoder().encode(await get.text()).byteLength;
+      assets.fetch.mockClear();
+      const head = await call(path, { method: 'HEAD' });
+      expect(head.headers.get('Content-Length')).toBe(String(getBytes));
+      expect(head.body).toBeNull();
+      const methods = assets.fetch.mock.calls.map(([input, init]) =>
+        (input instanceof Request ? input : new Request(String(input), init)).method);
+      expect(methods.at(-1)).toBe('GET');
+    },
+  );
+
+  it('HEAD on a language path (SEO step) is not given a Content-Length by the router', async () => {
+    const head = await call('/en/services', { method: 'HEAD' });
+    expect(head.headers.has('Content-Length')).toBe(false);
+  });
 });
 
 describe('errors', () => {
-  it('a throw in the sitemap step is logged and falls through', async () => {
-    vi.mocked(handleSitemap).mockRejectedValueOnce(new Error('boom'));
-    const res = await call('/sitemap.xml');
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe(SHELL);
-    expect(handleSeo).toHaveBeenCalledTimes(1);
-    expect(errorSpy).toHaveBeenCalledWith('[microns-site] router step sitemap failed: GET /sitemap.xml', expect.any(Error));
+  it('a throw in the sitemap step on a public sitemap URL answers 500 (Vercel: crashing Function), never the shell', async () => {
+    for (const path of ['/sitemap.xml', '/sitemap-complete.xml', '/sitemap-de.xml']) {
+      vi.mocked(handleSitemap).mockRejectedValueOnce(new Error('boom'));
+      vi.mocked(finalise).mockClear();
+      const res = await call(path);
+      expect(res.status, path).toBe(500);
+      expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+      expect(await res.text()).toBe('Internal Server Error');
+      expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+      expect(finalise).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(`[microns-site] router step sitemap failed: GET ${path}`, expect.any(Error));
+    }
+    expect(handleSeo).not.toHaveBeenCalled();
+    expect(handleApi).not.toHaveBeenCalled();
+    expect(assets.fetch).not.toHaveBeenCalled();
   });
 
-  it('a throw in the SEO step is logged and falls through to static', async () => {
-    vi.mocked(handleSeo).mockRejectedValueOnce(new Error('boom'));
-    const res = await call('/en/services');
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe(SHELL);
-    expect(errorSpy).toHaveBeenCalledWith('[microns-site] router step seo failed: GET /en/services', expect.any(Error));
+  it('a throw in the sitemap step on /api/sitemap is logged and falls through to the /api forward', async () => {
+    vi.mocked(handleSitemap).mockRejectedValueOnce(new Error('boom'));
+    const res = await call('/api/sitemap?type=index');
+    expect(handleApi).toHaveBeenCalledTimes(1);
+    expect(await res.json()).toEqual({ forwarded: true });
+    expect(errorSpy).toHaveBeenCalledWith('[microns-site] router step sitemap failed: GET /api/sitemap', expect.any(Error));
+  });
+
+  it('a throw in the SEO step answers 500 (Vercel MIDDLEWARE_INVOCATION_FAILED), never the prerendered file (H-8)', async () => {
+    for (const path of ['/en/services', '/en']) {
+      vi.mocked(handleSeo).mockRejectedValueOnce(new Error('boom'));
+      vi.mocked(finalise).mockClear();
+      const res = await call(path);
+      expect(res.status, path).toBe(500);
+      expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+      expect(await res.text()).toBe('Internal Server Error');
+      expect(finalise).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(`[microns-site] router step seo failed: GET ${path}`, expect.any(Error));
+    }
+    expect(assets.fetch).not.toHaveBeenCalled();
+  });
+
+  it('null (not a throw) from the SEO handler on a prerendered language path still reaches static', async () => {
+    vi.mocked(handleSeo).mockResolvedValueOnce(null);
+    expect(await (await call('/en/services')).text()).toBe('prerendered en/services (Helmet head, no #seo-content)');
   });
 
   it('a throw in the static step answers 500 text/plain, still finalised once', async () => {

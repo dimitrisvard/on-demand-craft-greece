@@ -8,7 +8,7 @@ import appSource from '../../../src/App.tsx?raw';
 import { LANGUAGES } from '../../../middleware/types';
 import { t } from '../../../middleware/i18n';
 import { APP_ONLY_PATHS, ROUTE_MAP_PATHS, SLUG_TRANSLATION_KEYS, englishPath, isClientRoute } from '../src/seo/clientRoutes';
-import { parseRoute, soft404Class } from '../src/seo/handler';
+import { FLAG_READ_TIMEOUT_MS, createSeoHandler, parseRoute, soft404Class } from '../src/seo/handler';
 import { MemoryKV } from './helpers/kv';
 import { AssetsStub, SHELL, SHELL_HEADERS, runWorker } from './helpers/seo-harness';
 
@@ -230,12 +230,40 @@ describe('seo.strict_404 on', () => {
     expect(noKey.result).toBeNull();
   });
 
-  it('a cached failure (30 s negative tagged failed) is not a 404 either', async () => {
+  it('a cached failure (30 s isolate negative tagged failed) is not a 404 either', async () => {
+    const handler = createSeoHandler();
     const seoCache = new MemoryKV();
-    await runWorker('/en/zz-parity-404', { emptyForUnknown: true, seoCache, failures: [{ match: 'content_pages?or=', mode: 'status500' }] });
-    const run = await runWorker('/en/zz-parity-404', { emptyForUnknown: true, seoCache, flags: flagsWith(true) });
+    await runWorker('/en/zz-parity-404', { handler, emptyForUnknown: true, seoCache, failures: [{ match: 'content_pages?or=', mode: 'status500' }] });
+    const run = await runWorker('/en/zz-parity-404', { handler, emptyForUnknown: true, seoCache, flags: flagsWith(true) });
     expect(run.fixture.calls.some((c) => c.includes('content_pages?or='))).toBe(false);
     expect(run.result).toBeNull();
+    // Another isolate does not inherit the failure: it asks Supabase, gets "no row" and answers 404.
+    const other = await runWorker('/en/zz-parity-404', { emptyForUnknown: true, seoCache, flags: flagsWith(true) });
+    expect(other.fixture.calls.some((c) => c.includes('content_pages?or='))).toBe(true);
+    expect(other.outcome?.status).toBe(404);
+  });
+
+  it('a stalled FLAGS read cannot stall a would-be 404: SEO_STRICT_404 fallback after FLAG_READ_TIMEOUT_MS', async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [fallback, expected] of [['false', null], ['true', 404]] as const) {
+        const flags = new MemoryKV();
+        flags.hangGet = true;
+        errors.mockClear();
+        logs.mockClear();
+        const run = await runWorker('/en/zz/zz', {
+          emptyForUnknown: true,
+          flags,
+          env: { SEO_STRICT_404: fallback },
+          advance: async () => { await vi.advanceTimersByTimeAsync(FLAG_READ_TIMEOUT_MS); },
+        });
+        expect(run.outcome?.status ?? null, fallback).toBe(expected);
+        expect(errors.mock.calls.some((a) => String(a[0]).includes('"msg":"seo_flag_timeout"')), fallback).toBe(true);
+        if (expected === null) expect(would404Lines()).toEqual([{ msg: 'would_404', path: '/en/zz/zz', class: 'S-02' }]);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shell failure on the 404 path: logged, null', async () => {

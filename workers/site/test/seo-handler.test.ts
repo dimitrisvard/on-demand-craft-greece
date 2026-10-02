@@ -10,7 +10,8 @@ import type { ParsedRoute } from '../../../middleware/types';
 import { SLUGS } from '../../../middleware/slugs';
 import { LOG_PREFIX } from '../src/env';
 import { parseRoute } from '../src/seo/handler';
-import { AssetsStub, CASES, ORIGIN, runWorker } from './helpers/seo-harness';
+import { AssetsStub, CASES, FixtureFetch, ORIGIN, makeEnv, outcomeOf, runWorker } from './helpers/seo-harness';
+import { MemoryKV, TestContext } from './helpers/kv';
 
 type ParseRoute = (pathname: string) => ParsedRoute | null;
 
@@ -152,8 +153,38 @@ describe('handleSeo: shell and configuration', () => {
   });
 
   it('the exported handleSeo uses the module-level instance and the global fetch', async () => {
+    vi.resetModules(); // a fresh module-level instance (empty isolate Maps)
     const mod = await import('../src/seo/handler');
-    expect(typeof mod.handleSeo).toBe('function');
-    expect(typeof mod.createSeoHandler).toBe('function');
+    const seoCache = new MemoryKV();
+    const env = makeEnv({ seoCache, flags: new MemoryKV(), assets: new AssetsStub() });
+    const path = '/en/services/cnc-machining';
+    const reference = await runWorker(path);
+
+    const first = new FixtureFetch({ allowShellFetch: false });
+    vi.stubGlobal('fetch', first.fetch);
+    try {
+      const ctx = new TestContext();
+      const res = await mod.handleSeo(new Request(ORIGIN + path), env, ctx.asContext());
+      await ctx.settle();
+      expect(res).not.toBeNull();
+      expect(await outcomeOf(res!)).toEqual(reference.outcome);
+      expect(first.calls).toHaveLength(1); // the global fetch reached the REST fixture
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const second = new FixtureFetch({ allowShellFetch: false });
+    vi.stubGlobal('fetch', second.fetch);
+    seoCache.gets.length = 0;
+    try {
+      const ctx = new TestContext();
+      const res = await mod.handleSeo(new Request(ORIGIN + path), env, ctx.asContext());
+      expect(await outcomeOf(res!)).toEqual(reference.outcome);
+      // Served by the module-level isolate Map: no KV read, no REST call.
+      expect(second.calls).toEqual([]);
+      expect(seoCache.gets).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

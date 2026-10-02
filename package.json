@@ -13,7 +13,14 @@
     "test": "jest --config jest.config.ts",
     "test:unit": "jest --config jest.config.ts",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "cf:install": "npm --prefix workers/site ci && npm --prefix scripts/seo-parity ci",
+    "cf:typecheck": "npm --prefix workers/site run typecheck",
+    "cf:test": "npm --prefix workers/site run test",
+    "cf:dev": "npm --prefix workers/site run dev",
+    "cf:dry": "npm --prefix workers/site run build:dry",
+    "cf:parity": "node scripts/seo-parity.mjs",
+    "cf:smoke": "node tests/middleware/smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",

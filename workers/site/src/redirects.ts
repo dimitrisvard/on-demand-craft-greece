@@ -1,13 +1,13 @@
-// Router step 1: the redirect table (PLAN.md P1-5; ARCHITECTURE.md §6.2 step 1; INVENTORY.md RD-01…RD-28).
+// Router step 1: the redirect table (PLAN.md P1-5; ARCHITECTURE.md section 6.2 step 1; INVENTORY.md RD-01...RD-28).
 //
-// RD-01…RD-25: the 25 "redirects" of vercel.json in file order, source and destination copied byte-exact from
+// RD-01...RD-25: the 25 "redirects" of vercel.json in file order, source and destination copied byte-exact from
 // the parsed file (all "permanent": true, so Vercel answers 308). test/redirects.test.ts compares them with
 // JSON.parse(vercel.json).redirects, so any drift fails CI. Non-ASCII characters are written as \u escapes:
-// RD-12's source holds U+00C5 U+0084 (the UTF-8 bytes of "ń" read as Latin-1, a dead mojibake source that no
+// RD-12's source holds U+00C5 U+0084 (the UTF-8 bytes of "n-acute" (U+0144) read as Latin-1, a dead mojibake source that no
 // real request matches; INVENTORY.md RD-12) and stays byte-identical on purpose.
 //
-// RD-26…RD-28: client-only entries of src/components/SEORedirects.tsx:39-57 (today: 200 SPA shell, then a client
-// navigate(replace)). Served here as 308: a documented parity deviation, SEO_PARITY.md AL-001…AL-003. The client
+// RD-26...RD-28: client-only entries of src/components/SEORedirects.tsx:39-57 (today: 200 SPA shell, then a client
+// navigate(replace)). Served here as 308: a documented parity deviation, SEO_PARITY.md AL-001...AL-003. The client
 // map stays in the SPA as a fallback. The two client regex patterns (RD-P1, SEORedirects.tsx:66; RD-P2, :73) are
 // NOT ported; they stay client-side (no AL-005).
 //
@@ -42,7 +42,7 @@ export const REDIRECTS: ReadonlyArray<RedirectRule> = [
   { id: 'RD-10', source: '/nb/sproyetestoping', destination: '/nb/tjenester/sproytestoping', origin: 'vercel' }, // vercel.json:48-52
   { id: 'RD-11', source: '/it/blog/minimizzare-chiacchiericcio-fresatura-cavita-profonde', destination: '/it/blog/minimizzare-vibrazioni-fresatura-cavita-profonde', origin: 'vercel' }, // vercel.json:53-57
   // Mojibake source (UTF-8 bytes C3 85 C2 84 after "/pl/wyko"), kept byte-identical; see RD-28 for the real URL.
-  { id: 'RD-12', source: '/pl/wykoÅ\u0084czenie-powierzchni', destination: '/pl/uslugi/wykonczenie-powierzchni', origin: 'vercel' }, // vercel.json:58-62
+  { id: 'RD-12', source: '/pl/wyko\u00c5\u0084czenie-powierzchni', destination: '/pl/uslugi/wykonczenie-powierzchni', origin: 'vercel' }, // vercel.json:58-62
   { id: 'RD-13', source: '/dawycena', destination: '/pl/wycena', origin: 'vercel' }, // vercel.json:63-67
   // Inside the /{lang}/* matcher: must redirect before the SEO handler (router step 1 before step 4).
   { id: 'RD-14', source: '/en/dawycena', destination: '/pl/wycena', origin: 'vercel' }, // vercel.json:68-72
@@ -57,11 +57,11 @@ export const REDIRECTS: ReadonlyArray<RedirectRule> = [
   { id: 'RD-23', source: '/itorcamento', destination: '/it/preventivo', origin: 'vercel' }, // vercel.json:113-117
   { id: 'RD-24', source: '/daorcamento', destination: '/da/tilbud', origin: 'vercel' }, // vercel.json:118-122
   { id: 'RD-25', source: '/deorcamento', destination: '/de/angebot', origin: 'vercel' }, // vercel.json:123-127
-  // Client-only entries: documented parity deviation 200 -> 308 (SEO_PARITY.md AL-001…AL-003).
+  // Client-only entries: documented parity deviation 200 -> 308 (SEO_PARITY.md AL-001...AL-003).
   { id: 'RD-26', source: '/csoffert', destination: '/cs/nabidka', origin: 'client' }, // src/components/SEORedirects.tsx:43
   { id: 'RD-27', source: '/enoffert', destination: '/en/quote', origin: 'client' }, // src/components/SEORedirects.tsx:57
   // Also reached as /pl/wyko%C5%84czenie-powierzchni (SEORedirects.tsx:40) through the decoded match.
-  { id: 'RD-28', source: '/pl/wykończenie-powierzchni', destination: '/pl/uslugi/wykonczenie-powierzchni', origin: 'client' }, // src/components/SEORedirects.tsx:39-40
+  { id: 'RD-28', source: '/pl/wyko\u0144czenie-powierzchni', destination: '/pl/uslugi/wykonczenie-powierzchni', origin: 'client' }, // src/components/SEORedirects.tsx:39-40
 ];
 
 const BY_SOURCE: ReadonlyMap<string, RedirectRule> = new Map(REDIRECTS.map((rule) => [rule.source, rule]));
@@ -85,7 +85,7 @@ export function findRedirect(url: URL): RedirectRule | null {
 export function matchRedirect(url: URL): Response | null {
   const rule = findRedirect(url);
   if (!rule) return null;
-  // url.search is '' without a query and '?…' otherwise (a bare '?' is dropped, as by the URL parser).
+  // url.search is '' without a query and '?...' otherwise (a bare '?' is dropped, as by the URL parser).
   return new Response(null, {
     status: REDIRECT_STATUS,
     headers: { Location: rule.destination + url.search },

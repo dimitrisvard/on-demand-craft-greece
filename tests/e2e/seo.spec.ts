@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/access';
 
 test.describe('SEO & Meta Tags', () => {
   test('should have a proper meta description', async ({ page }) => {
@@ -34,8 +34,17 @@ test.describe('SEO & Meta Tags', () => {
     expect(body).toContain('User-agent');
   });
 
-  test('should return a valid sitemap.xml', async ({ page }) => {
+  // /sitemap.xml is a sitemap index (api/sitemap.js:377-389); the URL set is
+  // served at /sitemap-complete.xml.
+  test('should return a valid sitemap.xml (sitemap index)', async ({ page }) => {
     const response = await page.goto('/sitemap.xml');
+    expect(response?.status()).toBe(200);
+    const body = await response?.text();
+    expect(body).toContain('<sitemapindex');
+  });
+
+  test('should return a valid sitemap-complete.xml (URL set)', async ({ page }) => {
+    const response = await page.goto('/sitemap-complete.xml');
     expect(response?.status()).toBe(200);
     const body = await response?.text();
     expect(body).toContain('<urlset');

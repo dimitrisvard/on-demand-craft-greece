@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import vercelJson from '../../../vercel.json';
+import redirectsSource from '../src/redirects.ts?raw';
 import { REDIRECTS, matchRedirect } from '../src/redirects';
 
 const ORIGIN = 'https://microns-site.example.workers.dev';
@@ -52,12 +53,12 @@ const EXPECTED: ReadonlyArray<readonly [id: string, requestPath: string, locatio
 ];
 
 describe('redirect table', () => {
-  it('has RD-01…RD-28 in order', () => {
+  it('has RD-01...RD-28 in order', () => {
     expect(REDIRECTS.map((r) => r.id)).toEqual(EXPECTED.map(([id]) => id));
     expect(new Set(REDIRECTS.map((r) => r.source)).size).toBe(28);
   });
 
-  it('RD-01…RD-25 equal JSON.parse(vercel.json).redirects byte for byte, in file order', () => {
+  it('RD-01...RD-25 equal JSON.parse(vercel.json).redirects byte for byte, in file order', () => {
     const fromVercel = (vercelJson as { redirects: Array<{ source: string; destination: string; permanent: boolean }> }).redirects;
     expect(fromVercel).toHaveLength(25);
     expect(fromVercel.every((r) => r.permanent === true)).toBe(true);
@@ -70,14 +71,21 @@ describe('redirect table', () => {
     const bytes = (s: string) => Array.from(new TextEncoder().encode(s));
     expect(bytes(REDIRECTS[11].source)).toEqual(bytes(fromVercel[11].source));
     expect(bytes(REDIRECTS[11].source).slice(8, 12)).toEqual([0xc3, 0x85, 0xc2, 0x84]);
-    expect(REDIRECTS[11].source).toBe('/pl/wykoÅ\u0084czenie-powierzchni');
+    expect(REDIRECTS[11].source).toBe('/pl/wyko\u00c5\u0084czenie-powierzchni');
   });
 
-  it('RD-26…RD-28 are the client-only entries of SEORedirects.tsx', () => {
+  it('src/redirects.ts is pure ASCII (non-ASCII characters only as \\u escapes, robust to re-encoding)', () => {
+    const offending = [...redirectsSource].filter((ch) => ch.codePointAt(0)! > 0x7f);
+    expect(offending).toEqual([]);
+    expect(redirectsSource).toContain("source: '/pl/wyko\\u00c5\\u0084czenie-powierzchni'");
+    expect(redirectsSource).toContain("source: '/pl/wyko\\u0144czenie-powierzchni'");
+  });
+
+  it('RD-26...RD-28 are the client-only entries of SEORedirects.tsx', () => {
     expect(REDIRECTS.slice(25).map((r) => [r.id, r.source, r.destination, r.origin])).toEqual([
       ['RD-26', '/csoffert', '/cs/nabidka', 'client'],
       ['RD-27', '/enoffert', '/en/quote', 'client'],
-      ['RD-28', '/pl/wykończenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni', 'client'],
+      ['RD-28', '/pl/wyko\u0144czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni', 'client'],
     ]);
   });
 
@@ -88,11 +96,11 @@ describe('redirect table', () => {
   }
 
   it('RD-12 also matches its source written with the literal characters', () => {
-    expectRedirect('/pl/wykoÅ\u0084czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
+    expectRedirect('/pl/wyko\u00c5\u0084czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
   });
 
   it('RD-28 matches the literal, the encoded and the decomposed (NFD) forms', () => {
-    expectRedirect('/pl/wykończenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
+    expectRedirect('/pl/wyko\u0144czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
     expectRedirect('/pl/wyko%c5%84czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
     expectRedirect('/pl/wykon%CC%81czenie-powierzchni', '/pl/uslugi/wykonczenie-powierzchni');
   });

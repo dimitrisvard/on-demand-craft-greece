@@ -7,16 +7,19 @@ export interface MemoryKvPut {
 }
 
 // Minimal KVNamespace: get (text or json), put, delete. Expiration is recorded but NOT enforced, so tests can
-// prove that the SEO cache honours its own "expires" field. `failGet` / `failPut` make every call reject.
+// prove that the SEO cache honours its own "expires" field. `failGet` / `failPut` make every call reject;
+// `hangGet` makes every get return a promise that never settles (a stalled KV read).
 export class MemoryKV {
   readonly store = new Map<string, string>();
   readonly puts: MemoryKvPut[] = [];
   readonly gets: string[] = [];
   failGet = false;
   failPut = false;
+  hangGet = false;
 
   async get(key: string, options?: unknown): Promise<unknown> {
     this.gets.push(key);
+    if (this.hangGet) return new Promise<unknown>(() => {});
     if (this.failGet) throw new Error('KV get failed (test)');
     const value = this.store.get(key);
     if (value === undefined) return null;

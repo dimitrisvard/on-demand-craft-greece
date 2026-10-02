@@ -12,15 +12,155 @@
 #   HOST=https://preview-xyz.vercel.app ./scripts/verify-ssr.sh
 #   HOST=http://localhost:3000 ./scripts/verify-ssr.sh
 #
+#   # Cloudflare preview behind Cloudflare Access (service token):
+#   CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
+#     HOST=https://staging-microns-site.<account>.workers.dev ./scripts/verify-ssr.sh
+#
+#   # Two hosts: every check runs against HOST and HOST_B, the per-check
+#   # result lines are written to two files and compared with diff. The Access
+#   # headers go to HOST_B only (the preview), never to the HOST baseline:
+#   HOST_B=https://staging-microns-site.<account>.workers.dev \
+#     CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... ./scripts/verify-ssr.sh
+#
+# Environment:
+#   HOST                     host under test (default https://www.micronshub.eu)
+#   HOST_B                   optional second host; enables the paired run + diff
+#   CF_ACCESS_CLIENT_ID      optional Cloudflare Access service-token id
+#   CF_ACCESS_CLIENT_SECRET  optional Cloudflare Access service-token secret
+#   CF_ACCESS_HOST           optional; the one origin that receives the Access
+#                            headers (it must also be the host under test).
+#                            Default: HOST_B in a paired run, else HOST — but
+#                            never the production origin https://www.micronshub.eu
+#                            unless CF_ACCESS_HOST names it explicitly.
+#
+# Access headers are only ever sent to that origin (scheme://host[:port]), and
+# only while it is the host under test. Requests that carry them do not use
+# curl -L: same-origin redirects are followed by hand (headers re-added), a
+# redirect to any other origin is not followed and is reported as a failed
+# request. Header values are passed to curl through a mode-600 file in a
+# private temp dir and are never printed.
+#
 # Exit code:
-#   0 — all checks passed
-#   1 — at least one check failed
+#   0 — all checks passed (and, with HOST_B, no differing result line)
+#   1 — at least one check failed, a request failed, or (with HOST_B) the two
+#       hosts produced a differing result line
 
 set -euo pipefail
 
 UA="Mozilla/5.0 (compatible; micronshub-verify-ssr/1.0)"
 HOST="${HOST:-https://www.micronshub.eu}"
+HOST_B="${HOST_B:-}"
 FAIL=0
+
+RUN_DIR=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/verify-ssr.XXXXXX")
+trap 'rm -rf "$RUN_DIR"' EXIT
+
+# Lower-cased scheme://host[:port] of a URL, default ports dropped.
+# (Written for bash 3.2 too, so it also runs on a stock macOS shell.)
+url_origin() {
+  local o
+  o=$(printf '%s' "$1" | sed -nE 's#^([A-Za-z][A-Za-z0-9+.-]*://[^/?#]+).*#\1#p' \
+    | tr '[:upper:]' '[:lower:]')
+  case "$o" in
+    https://*:443) o=${o%:443} ;;
+    http://*:80) o=${o%:80} ;;
+  esac
+  printf '%s' "$o"
+}
+
+PRODUCTION_ORIGIN="https://www.micronshub.eu"
+ACCESS_HEADER_FILE=""
+ACCESS_ORIGIN=""
+if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+  # The single origin allowed to receive the Access headers.
+  if [ -n "${CF_ACCESS_HOST:-}" ]; then
+    ACCESS_ORIGIN=$(url_origin "$CF_ACCESS_HOST")
+  elif [ -n "$HOST_B" ]; then
+    # Paired run: the token never reaches the HOST baseline (Vercel production).
+    ACCESS_ORIGIN=$(url_origin "$HOST_B")
+  elif [ "$(url_origin "$HOST")" != "$PRODUCTION_ORIGIN" ]; then
+    ACCESS_ORIGIN=$(url_origin "$HOST")
+  else
+    echo "note: CF_ACCESS_CLIENT_ID/SECRET are set but HOST is the production origin; Access headers are not sent (set HOST to the preview, or CF_ACCESS_HOST)." >&2
+  fi
+  if [ -n "$ACCESS_ORIGIN" ]; then
+    ACCESS_HEADER_FILE="$RUN_DIR/access-headers"
+    ( umask 077
+      printf 'CF-Access-Client-Id: %s\nCF-Access-Client-Secret: %s\n' \
+        "$CF_ACCESS_CLIENT_ID" "$CF_ACCESS_CLIENT_SECRET" > "$ACCESS_HEADER_FILE" )
+  fi
+fi
+
+# Record a failed request for the current run (fetch runs in a subshell, so it
+# cannot set FAIL itself). Only the URL and a reason are written, never headers.
+request_error() {
+  printf '  [FAIL] request %s: %s\n' "$1" "$2" >> "$RUN_DIR/request-errors"
+}
+
+# True when the Access headers may be sent to URL $1: credentials are set, the
+# URL's origin is the origin under test, and it is also ACCESS_ORIGIN.
+access_applies() {
+  [ -n "$ACCESS_HEADER_FILE" ] || return 1
+  local o
+  o=$(url_origin "$1")
+  [ -n "$o" ] && [ "$o" = "$(url_origin "$HOST")" ] && [ "$o" = "$ACCESS_ORIGIN" ]
+}
+
+# fetch MODE URL — the single request wrapper used by every check.
+#   body         GET, follow redirects, print the final body      (was: curl -sL)
+#   head         HEAD, no redirects, print the headers             (was: curl -sI)
+#   head_follow  HEAD, follow redirects, print every hop's headers (was: curl -sIL)
+# Without Access credentials, or for a URL that is not on the origin under
+# test, this is exactly the original curl invocation.
+fetch() {
+  local mode="$1" url="$2" flags
+  case "$mode" in
+    body) flags=-sL ;;
+    head) flags=-sI ;;
+    head_follow) flags=-sIL ;;
+    *) request_error "$url" "unknown fetch mode $mode"; return 0 ;;
+  esac
+
+  if ! access_applies "$url"; then
+    curl "$flags" --max-time 30 -A "$UA" "$url" || request_error "$url" "curl exit $?"
+    return 0
+  fi
+
+  # Access path: no -L, so the headers can never be forwarded to another host.
+  # Same-origin redirects are followed by hand with the headers re-added.
+  local follow=1 method=-s hops=0 cur="$url" out next tmp rc
+  [ "$mode" != "head" ] || follow=0
+  [ "$mode" = "body" ] || method=-sI
+  tmp=$(mktemp -d "$RUN_DIR/req.XXXXXX")
+  while :; do
+    rc=0
+    out=$(curl "$method" --max-time 30 -A "$UA" -H @"$ACCESS_HEADER_FILE" \
+      -D "$tmp/headers" -o "$tmp/body" -w '%{http_code} %{redirect_url}' "$cur") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      request_error "$cur" "curl exit $rc"
+      break
+    fi
+    [ "$mode" = "body" ] || cat "$tmp/headers"
+    next=${out#* }
+    case "$out" in 3*) ;; *) break ;; esac
+    if [ "$follow" -eq 0 ] || [ -z "$next" ]; then
+      break
+    fi
+    hops=$((hops + 1))
+    if [ "$hops" -gt 50 ]; then
+      request_error "$url" "more than 50 redirects"
+      break
+    fi
+    if ! access_applies "$next"; then
+      request_error "$url" "redirect to another origin not followed ($(url_origin "$next"))"
+      break
+    fi
+    cur="$next"
+  done
+  [ "$mode" != "body" ] || cat "$tmp/body" 2>/dev/null || true
+  rm -rf "$tmp"
+  return 0
+}
 
 extract_body() {
   python3 -c '
@@ -38,7 +178,7 @@ print(re.sub(r"\s+", " ", text).strip())
 check() {
   local url="$1"; local min_body="$2"; local must_contain="$3"
   local html body_text body_len contains_ok has_seo_content has_canonical has_jsonld
-  html=$(curl -sL --max-time 30 -A "$UA" "$HOST$url")
+  html=$(fetch body "$HOST$url")
   body_text=$(echo "$html" | extract_body)
   body_len=${#body_text}
 
@@ -72,7 +212,7 @@ check() {
 check_encoding() {
   local url="$1"
   local body
-  body=$(curl -sL --max-time 30 -A "$UA" "$HOST$url")
+  body=$(fetch body "$HOST$url")
   if echo "$body" | head -c 8000 | grep -qE "Ã§|Ã£|Ã¡|Ã©|Ã¶|Ã¼|ÃŸ|Ã¨|Ã²|Ã¬"; then
     echo "  [FAIL] $url contains UTF-8 mojibake"
     FAIL=1
@@ -81,6 +221,8 @@ check_encoding() {
   fi
 }
 
+# Every check, in the original order, against $HOST.
+run_checks() {
 echo "=== Homepage (all 14 languages) ==="
 check "/en"          500 "manufactur"
 check "/de"          500 "fertigung|hergestellt|cnc"
@@ -231,7 +373,7 @@ check "/en/privacy-policy"    1500 "GDPR|regulation|2016/679|data subject|person
 # 3. x-seo-source: db header must be present so we know the row was fetched.
 for page in industries our-work education about contact legal-notice privacy-policy; do
   url="$HOST/en/$page"
-  html=$(curl -sL --max-time 30 -A "$UA" "$url")
+  html=$(fetch body "$url")
   size=${#html}
   if [ "$page" = "legal-notice" ] || [ "$page" = "privacy-policy" ]; then
     MIN_SIZE=20000
@@ -263,7 +405,7 @@ for page in industries our-work education about contact legal-notice privacy-pol
     echo "  [FAIL] /en/$page only $ld_count JSON-LD blocks (expected ≥ $MIN_LD)"
     FAIL=1
   fi
-  src=$(curl -sI --max-time 30 -A "$UA" "$url" | grep -i '^x-seo-source:' | tr -d '\r\n' | awk -F': ' '{print $2}')
+  src=$(fetch head "$url" | grep -i '^x-seo-source:' | tr -d '\r\n' | awk -F': ' '{print $2}')
   if [ "$src" != "db" ]; then
     echo "  [FAIL] /en/$page x-seo-source='$src' (expected 'db')"
     FAIL=1
@@ -272,7 +414,7 @@ done
 
 echo ""
 echo "=== /en home row SSR ==="
-home_body=$(curl -sL --max-time 30 -A "$UA" "$HOST/en")
+home_body=$(fetch body "$HOST/en")
 home_size=${#home_body}
 if [ "$home_size" -lt 22000 ]; then
   echo "  [FAIL] /en raw=$home_size < min=22000 (content_pages.home row not served)"
@@ -280,7 +422,7 @@ if [ "$home_size" -lt 22000 ]; then
 else
   echo "  [ok]   /en raw=$home_size ≥ 22000"
 fi
-home_seo=$(curl -sIL --max-time 30 -A "$UA" "$HOST/en" | grep -i '^x-seo-source:' | tr -d '\r' | awk -F': ' '{print $2}' | tail -1)
+home_seo=$(fetch head_follow "$HOST/en" | grep -i '^x-seo-source:' | tr -d '\r' | awk -F': ' '{print $2}' | tail -1)
 if [ "$home_seo" = "db" ]; then
   echo "  [ok]   /en x-seo-source: db"
 else
@@ -290,7 +432,7 @@ fi
 
 echo ""
 echo "=== Industry images in SSR ==="
-industries_body=$(curl -sL --max-time 30 -A "$UA" "$HOST/en/industries")
+industries_body=$(fetch body "$HOST/en/industries")
 img_count=$(printf '%s' "$industries_body" | grep -oE '<img[^>]*unsplash.com' | wc -l | tr -d ' ')
 if [ "$img_count" -lt 10 ]; then
   echo "  [FAIL] /en/industries only $img_count Unsplash <img> tags, expected ≥10"
@@ -313,7 +455,7 @@ echo ""
 echo "=== Hreflang parity: every content page ≥15 alternates ==="
 for page in '' industries our-work education about contact legal-notice privacy-policy blog; do
   if [ -z "$page" ]; then url="$HOST/en"; else url="$HOST/en/$page"; fi
-  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  body=$(fetch body "$url")
   count=$(printf '%s' "$body" | grep -oE 'rel="alternate" hreflang=' | wc -l | tr -d ' ')
   if [ "$count" -lt 15 ]; then
     echo "  [FAIL] $url only $count hreflang tags, expected ≥15"
@@ -326,7 +468,7 @@ done
 echo ""
 echo "=== robots + og:locale meta on every content page ==="
 for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/legal-notice"; do
-  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  body=$(fetch body "$url")
   if printf '%s' "$body" | grep -q '<meta name="robots"'; then
     echo "  [ok]   $url has meta robots"
   else
@@ -359,7 +501,7 @@ fi
 echo ""
 echo "=== No hidden/aria-hidden regression on #seo-content anywhere ==="
 for url in "$HOST/en" "$HOST/en/industries" "$HOST/en/our-work" "$HOST/en/about" "$HOST/en/contact"; do
-  body=$(curl -sL --max-time 30 -A "$UA" "$url")
+  body=$(fetch body "$url")
   if printf '%s' "$body" | grep -qE '<article[^>]*id="seo-content"[^>]*(hidden|aria-hidden)'; then
     echo "  [FAIL] $url: #seo-content has hidden/aria-hidden (regression)"
     FAIL=1
@@ -370,7 +512,7 @@ done
 
 echo ""
 echo "=== Footer VAT / legal-entity SSR regression ==="
-home=$(curl -sL --max-time 30 -A "$UA" "$HOST/en")
+home=$(fetch body "$HOST/en")
 if echo "$home" | grep -q "EL803129638"; then
   echo "  [ok]   /en contains VAT EL803129638 in SSR body"
 else
@@ -405,8 +547,60 @@ check_encoding "/pt"
 check_encoding "/de"
 check_encoding "/fr"
 
+if [ -s "$RUN_DIR/request-errors" ]; then
+  echo ""
+  echo "=== Request errors ==="
+  cat "$RUN_DIR/request-errors"
+  FAIL=1
+fi
+rm -f "$RUN_DIR/request-errors"
+}
+
+# run_host LABEL — run every check against $HOST, stream the output, keep a copy
+# with the host replaced by <HOST> in $RUN_DIR/LABEL.txt and the run's FAIL
+# value in $RUN_DIR/LABEL.fail. A run that aborts counts as failed.
+run_host() {
+  local label="$1" rc=0
+  FAIL=0
+  rm -f "$RUN_DIR/request-errors"
+  { run_checks; printf '%s' "$FAIL" > "$RUN_DIR/$label.fail"; } \
+    | tee "$RUN_DIR/$label.raw" || rc=$?
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "${line//"$HOST"/<HOST>}"
+  done < "$RUN_DIR/$label.raw" > "$RUN_DIR/$label.txt"
+  if [ "$rc" -ne 0 ] || [ "$(cat "$RUN_DIR/$label.fail" 2>/dev/null)" != "0" ]; then
+    [ "$rc" -eq 0 ] || echo "  [FAIL] run against $HOST aborted (exit $rc)"
+    return 1
+  fi
+  return 0
+}
+
+if [ -z "$HOST_B" ]; then
+  TOTAL_FAIL=0
+  run_host a || TOTAL_FAIL=1
+else
+  TOTAL_FAIL=0
+  HOST_A="$HOST"
+  echo "##### HOST   = $HOST_A"
+  run_host a || TOTAL_FAIL=1
+  echo ""
+  echo "##### HOST_B = $HOST_B"
+  HOST="$HOST_B"
+  run_host b || TOTAL_FAIL=1
+  HOST="$HOST_A"
+  echo ""
+  echo "=== Result diff: HOST ($HOST_A) vs HOST_B ($HOST_B) ==="
+  if diff -u --label HOST --label HOST_B "$RUN_DIR/a.txt" "$RUN_DIR/b.txt"; then
+    echo "  [ok]   no differing result line"
+  else
+    echo "  [FAIL] result lines differ between HOST and HOST_B"
+    TOTAL_FAIL=1
+  fi
+fi
+
 echo ""
-if [ "$FAIL" -eq 0 ]; then
+if [ "$TOTAL_FAIL" -eq 0 ]; then
   echo "ALL CHECKS PASSED"
   exit 0
 else

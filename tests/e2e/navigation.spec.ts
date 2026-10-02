@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/access';
 
 test.describe('Navigation — Service Pages', () => {
   test('should navigate to CNC machining page', async ({ page }) => {

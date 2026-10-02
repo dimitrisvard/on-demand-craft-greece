@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "AL-001",
+      "url": "/csoffert",
+      "match": "exact",
+      "field": "response",
+      "expected": { "base": { "status": 200 }, "candidate": { "status": 308, "location": "/cs/nabidka" } },
+      "justification": "Client-only redirect becomes a server 308 (PLAN.md P1-5; INVENTORY.md RD-26).",
+      "applies_to": ["preview", "production"],
+      "expires": "2027-01-29",
+      "approver": "Dimitris",
+      "approved_on": "pending"
+    },
+    {
+      "id": "AL-002",
+      "url": "/enoffert",
+      "match": "exact",
+      "field": "response",
+      "expected": { "base": { "status": 200 }, "candidate": { "status": 308, "location": "/en/quote" } },
+      "justification": "Client-only redirect becomes a server 308 (PLAN.md P1-5; INVENTORY.md RD-27).",
+      "applies_to": ["preview", "production"],
+      "expires": "2027-01-29",
+      "approver": "Dimitris",
+      "approved_on": "pending"
+    },
+    {
+      "id": "AL-003",
+      "url": "/pl/wyko%C5%84czenie-powierzchni",
+      "match": "exact",
+      "field": "response",
+      "expected": { "base": { "status": 200 }, "candidate": { "status": 308, "location": "/pl/uslugi/wykonczenie-powierzchni" } },
+      "justification": "Client-only redirect becomes a server 308 (PLAN.md P1-5; INVENTORY.md RD-28).",
+      "applies_to": ["preview", "production"],
+      "expires": "2027-01-29",
+      "approver": "Dimitris",
+      "approved_on": "pending"
+    },
+    {
+      "id": "AL-004",
+      "url": "/_redirects",
+      "match": "exact",
+      "field": ["F5", "F23", "F24"],
+      "expected": {
+        "F5": { "base": "text/plain;charset=utf-8", "candidate": "text/html;charset=utf-8" },
+        "F23": { "base": "bd00766d6edbe8742fc1546343749db9adf898e447b0a109350182e41b9c4534", "candidate": { "same_as_url": "/index.html" } },
+        "F24": { "base": "66584af744075248a042165adbdbd6a0551fa708a85650ea1e3e777eee17080c", "candidate": { "same_as_url": "/index.html" } }
+      },
+      "justification": "public/_redirects is deleted in P1-2 (a Worker-config file on Cloudflare), so the path falls through to the SPA shell (PLAN.md P1-2; H-3). Base values are the SHA-256 of the committed 24-byte file (raw, and whitespace-collapsed); the candidate must serve exactly the bytes it serves for /index.html.",
+      "notes": "The base Content-Type (text/plain;charset=utf-8, per SEO_PARITY.md section 5.5) is to be confirmed from the P0-3 baseline before approval.",
+      "applies_to": ["preview", "production"],
+      "expires": "2027-01-29",
+      "approver": "Dimitris",
+      "approved_on": "pending"
+    }
+  ]
+}

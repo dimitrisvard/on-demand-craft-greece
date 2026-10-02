@@ -1,0 +1,245 @@
+name: Cloudflare preview (microns-site)
+
+# Phase 1-2 of the Cloudflare migration (docs/migration/PLAN.md P1-9,
+# docs/migration/ARCHITECTURE.md §19). Manual dispatch only.
+#
+# Builds the site exactly like the Vercel build (`vite build` at the repo root),
+# runs the Worker checks, and uploads a new *version* of the `microns-site`
+# Worker with a preview alias (default: staging). It never runs `wrangler
+# deploy` and never changes what serves production: a version upload only
+# creates a preview URL such as https://staging-microns-site.<subdomain>.workers.dev
+# (protected by Cloudflare Access, always X-Robots-Tag: noindex).
+#
+# Repository secrets (names only; Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN    API token with "Workers Scripts: Edit" on the account
+#   CLOUDFLARE_ACCOUNT_ID   Cloudflare account ID
+#   VITE_SUPABASE_URL       same value as the Vercel build env
+#   VITE_SUPABASE_ANON_KEY  same value as the Vercel build env (public anon key)
+# The Worker secret SUPABASE_ANON_KEY is set once on the Worker itself
+# (`npx wrangler secret put SUPABASE_ANON_KEY` in workers/site), not here.
+#
+# Order of first-time setup: `wrangler versions upload` cannot create a Worker
+# ("You cannot upload a new version of a Worker that does not yet exist").
+# Before the first dispatch, run once in workers/site:
+#   npx wrangler secret put SUPABASE_ANON_KEY
+# which, on a missing Worker, creates `microns-site` as a draft Worker with no
+# route (nothing is served from it). The "Worker exists" guard below fails
+# early with this instruction until that has been done.
+
+on:
+  workflow_dispatch:
+    inputs:
+      preview_alias:
+        description: "Preview alias for the uploaded version (lowercase letters, digits, dashes)"
+        required: true
+        default: staging
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cf-preview-${{ inputs.preview_alias }}
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  preview:
+    name: Build, check and upload preview version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Explicit bash = `bash --noprofile --norc -eo pipefail`, so a failing
+        # command in front of `| tee` fails the step.
+        shell: bash
+    steps:
+      - name: Guard - required secrets and input
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          PREVIEW_ALIAS: ${{ inputs.preview_alias }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing repository secrets::Set these repository secrets before running this workflow:$missing (Settings -> Secrets and variables -> Actions). Nothing was built or uploaded."
+            exit 1
+          fi
+          # The alias becomes the DNS label "<alias>-microns-site" (max 63 chars).
+          if ! printf '%s' "$PREVIEW_ALIAS" | grep -qE '^[a-z]([a-z0-9-]{0,48}[a-z0-9])?$'; then
+            echo "::error title=Invalid preview_alias::Use 1-50 lowercase letters, digits or dashes, starting with a letter and not ending with a dash."
+            exit 1
+          fi
+          echo "Secrets present; preview alias: $PREVIEW_ALIAS"
+
+      - uses: actions/checkout@v4
+
+      - name: Guard - KV namespace IDs filled in
+        run: |
+          if grep -nE '"id": *"<KV_ID_[A-Z_]+>"' workers/site/wrangler.jsonc; then
+            echo "::error title=KV placeholders::workers/site/wrangler.jsonc still has KV namespace ID placeholders. Create the namespaces (npx wrangler kv namespace create SEO_CACHE / FLAGS) and commit the IDs (they are not secrets)."
+            exit 1
+          fi
+
+      - name: Guard - Worker exists (versions upload cannot create it)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # Same read-only lookup wrangler makes before a version upload
+          # (GET /accounts/:id/workers/services/:name; code 10007 = not found).
+          name=$(sed -nE 's/^[[:space:]]*"name":[[:space:]]*"([^"]+)".*/\1/p' workers/site/wrangler.jsonc | head -n 1)
+          if [ -z "$name" ]; then
+            echo "::error title=No Worker name::Could not read \"name\" from workers/site/wrangler.jsonc."
+            exit 1
+          fi
+          # The token goes to curl on stdin (-H @-), never on the command line.
+          rc=0
+          resp=$(printf 'Authorization: Bearer %s\n' "$CLOUDFLARE_API_TOKEN" \
+            | curl -sS --max-time 30 -H @- \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/services/${name}") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Cloudflare API unreachable::curl exit $rc while checking that Worker $name exists."
+            exit 1
+          fi
+          verdict=$(printf '%s' "$resp" | python3 -c '
+          import json, sys
+          try:
+              r = json.load(sys.stdin)
+          except Exception:
+              print("error: response is not JSON"); sys.exit()
+          if not isinstance(r, dict):
+              print("error: unexpected response"); sys.exit()
+          errs = r.get("errors") or []
+          codes = {e.get("code") for e in errs if isinstance(e, dict)}
+          if r.get("success") is True:
+              print("exists")
+          elif codes & {10007, 10090}:
+              print("missing")
+          else:
+              print("error: " + "; ".join(str(e.get("code")) + " " + str(e.get("message")) for e in errs if isinstance(e, dict)))
+          ')
+          case "$verdict" in
+            exists)
+              echo "Worker $name exists." ;;
+            missing)
+              echo "::error title=Worker $name does not exist yet::wrangler versions upload cannot create a Worker. Run once in workers/site: npx wrangler secret put SUPABASE_ANON_KEY (creates $name as a draft Worker with no route). Then re-run this workflow."
+              exit 1 ;;
+            *)
+              echo "::error title=Cloudflare API check failed::Could not confirm that Worker $name exists ($verdict). Check CLOUDFLARE_API_TOKEN (Workers Scripts: Read/Edit) and CLOUDFLARE_ACCOUNT_ID."
+              exit 1 ;;
+          esac
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            workers/site/package-lock.json
+            scripts/seo-parity/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install Worker dependencies
+        working-directory: workers/site
+        run: npm ci
+
+      - name: Install seo-parity dependencies (route list for the prerender check)
+        working-directory: scripts/seo-parity
+        run: npm ci
+
+      - name: Build site (vite build, as on Vercel)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          npx vite build 2>&1 | tee "$RUNNER_TEMP/vite-build.log"
+          echo "index.html files in dist: $(find dist -name index.html | wc -l)"
+          # vite.config.ts swallows a prerender load failure (warns, exits 0).
+          if grep -q 'Prerendering skipped' "$RUNNER_TEMP/vite-build.log"; then
+            echo "::error title=Prerender skipped::vite build ran without the jsdom prerender, so dist lacks the prerendered */index.html files Vercel serves. Not uploading."
+            exit 1
+          fi
+
+      - name: Check prerendered pages (same set as the Vercel build)
+        env:
+          DIST_DIR: dist
+        run: |
+          # Every route of buildPrerenderRoutes() (vite.config.ts) must exist as
+          # <route>/index.html and must not be a copy of the SPA shell.
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync } from 'node:fs';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const root = process.cwd();
+          const dist = path.resolve(root, process.env.DIST_DIR || 'dist');
+          const { loadSources } = await import(pathToFileURL(path.join(root, 'scripts/seo-parity/lib/sources.mjs')).href);
+          const routes = (await loadSources(root)).buildPrerenderRoutes();
+          const shell = readFileSync(path.join(dist, 'index.html'));
+          const missing = [];
+          const shellCopies = [];
+          for (const route of routes) {
+            const file = path.join(dist, route, 'index.html');
+            if (!existsSync(file)) missing.push(route);
+            else if (readFileSync(file).equals(shell)) shellCopies.push(route);
+          }
+          console.log(`prerender routes: ${routes.length}, missing: ${missing.length}, identical to the shell: ${shellCopies.length}`);
+          if (routes.length === 0 || missing.length > 0 || shellCopies.length > 0) {
+            for (const r of missing) console.log(`  missing ${r}/index.html`);
+            for (const r of shellCopies) console.log(`  shell copy ${r}/index.html`);
+            console.log('::error title=Prerender incomplete::dist does not contain every prerendered page of the Vercel build. Not uploading.');
+            process.exit(1);
+          }
+          NODE
+
+      - name: Middleware + Worker smoke test
+        run: node tests/middleware/smoke.mjs
+
+      - name: Worker typecheck
+        working-directory: workers/site
+        run: npm run typecheck
+
+      - name: Worker unit tests
+        working-directory: workers/site
+        run: npm test
+
+      - name: Dry-run bundle and size report
+        working-directory: workers/site
+        run: |
+          npx wrangler deploy --dry-run --outdir .wrangler/dry 2>&1 | tee "$RUNNER_TEMP/wrangler-dry.log"
+          {
+            echo "### microns-site dry-run size"
+            echo '```'
+            grep -E 'Total Upload|gzip' "$RUNNER_TEMP/wrangler-dry.log" || true
+            ls -l .wrangler/dry
+            du -sh .wrangler/dry
+            echo "Static assets: $(find ../../dist -type f | wc -l) files, $(du -sh ../../dist | cut -f1)"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload preview version (no deploy)
+        working-directory: workers/site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW_ALIAS: ${{ inputs.preview_alias }}
+          RUN_MESSAGE: "cf-preview run ${{ github.run_id }} at ${{ github.sha }}"
+        run: |
+          npx wrangler versions upload \
+            --preview-alias "$PREVIEW_ALIAS" \
+            --message "$RUN_MESSAGE" 2>&1 | tee "$RUNNER_TEMP/wrangler-upload.log"
+          {
+            echo "### microns-site preview version"
+            echo '```'
+            grep -iE 'version id|preview|alias|workers\.dev' "$RUNNER_TEMP/wrangler-upload.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

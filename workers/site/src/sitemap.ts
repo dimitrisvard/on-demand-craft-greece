@@ -6,9 +6,19 @@
 //
 // Path mapping = the vercel.json rewrites (vercel.json:130-145), evaluated in file order, so the exact names win
 // over the /sitemap-:lang.xml pattern ("complete" and "index" match it too). /api/sitemap is the function path.
-// The original query is appended after the rewrite's own query (Vercel merges both; to confirm in the P0-3
-// baseline). api/sitemap.js:333-334 reads the language with /lang=([a-z]{2})/i over req.url, so
-// /sitemap-enx.xml serves the "en" blob and /sitemap-xx.xml answers 404 "Sitemap not found": preserved.
+// api/sitemap.js:333-334 reads the language with /lang=([a-z]{2})/i over req.url, so /sitemap-enx.xml serves
+// the "en" blob and /sitemap-xx.xml answers 404 "Sitemap not found": preserved.
+//
+// Query merge = Vercel's reference router (vercel CLI 62.0.0, `vercel dev`: devRouter and the Lambda branch of
+// the dev server; production to confirm in the P0-3 baseline with G5 probes that carry a query):
+//   1. the rewrite destination's query (with the raw ':lang' capture) is parsed, and the request's own query
+//      overrides it key by key (Object.assign(destQuery, reqQuery));
+//   2. the function's req.url keeps the request's keys first, then the rewrite-only keys;
+//   3. keys and values are percent-decoded and re-encoded with encodeURIComponent, so /sitemap-d%65.xml
+//      reaches the function as lang=de.
+// So /sitemap.xml?type=index serves the index and /sitemap-de.xml?lang=fr the fr blob, as in the reference.
+// Two deliberate differences from the reference parser, for robustness: a malformed escape is kept raw instead
+// of throwing, and a value is split at the first '=' only (the reference drops anything after a second '=').
 //
 // Configuration: api/sitemap.js hard-codes SUPABASE_URL and BASE_URL (api/sitemap.js:24-26) and reads
 // process.env.SUPABASE_ANON_KEY inside its fetch helpers. With nodejs_compat and compatibility_date >= 2025-04-01
@@ -33,25 +43,68 @@ const FUNCTION_PATH = '/api/sitemap';
 const CACHE_ADDED_HEADERS = ['cf-cache-status'];
 
 // vercel.json:131-145 in order. ':lang' compiles (path-to-regexp, strict, delimiter '/') to one or more
-// characters other than '/', '?' and '#'; the pathname never holds '?' or '#'.
+// characters other than '/', '?' and '#'; the pathname never holds '?' or '#'. Matched on the raw pathname.
 const LANG_SITEMAP = /^\/sitemap-([^/?#]+?)\.xml$/;
 
-// The '/api/sitemap?…' path + query that Vercel hands the function for a public path, or null.
+type Query = Record<string, Array<string | undefined>>;
+
+function decodeComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+// parseQueryString of the Vercel dev router: '?a=1&a=2&b' -> { a: ['1', '2'], b: [undefined] } (no '+' decoding).
+function parseQueryString(search: string): Query {
+  const query: Query = Object.create(null) as Query;
+  if (!search || !search.startsWith('?') || search === '?') return query;
+  for (const param of search.slice(1).split('&')) {
+    const eq = param.indexOf('=');
+    const key = decodeComponent(eq === -1 ? param : param.slice(0, eq));
+    const value = eq === -1 ? undefined : decodeComponent(param.slice(eq + 1));
+    (query[key] ??= []).push(value);
+  }
+  return query;
+}
+
+// formatQueryString of the Vercel dev router: '' when empty, else '?k=v&k2' with encodeURIComponent.
+function formatQueryString(query: Query): string {
+  let out = '';
+  let prefix = '?';
+  for (const [key, values] of Object.entries(query)) {
+    for (const value of values) {
+      out += prefix + encodeURIComponent(key) + (value === undefined ? '' : `=${encodeURIComponent(value)}`);
+      prefix = '&';
+    }
+  }
+  return out;
+}
+
+// The '/api/sitemap?...' path + query that Vercel hands the function for a public path, or null.
 export function rewriteSitemapPath(url: URL): string | null {
   const { pathname } = url;
-  let destination: string | null = null;
-  if (pathname === '/sitemap.xml') destination = '/api/sitemap?type=main-index';
-  else if (pathname === '/sitemap-complete.xml') destination = '/api/sitemap';
-  else if (pathname === '/sitemap-index.xml') destination = '/api/sitemap?type=index';
+  let destinationSearch: string | null = null;
+  if (pathname === '/sitemap.xml') destinationSearch = '?type=main-index';
+  else if (pathname === '/sitemap-complete.xml') destinationSearch = '';
+  else if (pathname === '/sitemap-index.xml') destinationSearch = '?type=index';
   else {
     const match = LANG_SITEMAP.exec(pathname);
-    if (match) destination = `/api/sitemap?type=lang&lang=${match[1]}`;
-    else if (pathname === FUNCTION_PATH) destination = FUNCTION_PATH;
+    if (match) destinationSearch = `?type=lang&lang=${match[1]}`;
+    else if (pathname === FUNCTION_PATH) destinationSearch = '';
   }
-  if (destination === null) return null;
-  const originalQuery = url.search.slice(1);
-  if (!originalQuery) return destination;
-  return destination + (destination.includes('?') ? '&' : '?') + originalQuery;
+  if (destinationSearch === null) return null;
+  // 1. Request keys override the rewrite's keys.
+  const routed = Object.assign(parseQueryString(destinationSearch), parseQueryString(url.search));
+  // 2. The function URL: the request's keys first (in their order), then the rewrite-only keys.
+  const functionQuery = Object.assign(parseQueryString(url.search), routed);
+  return FUNCTION_PATH + formatQueryString(functionQuery);
+}
+
+/** True for the public sitemap URLs (vercel.json rewrites), false for /api/sitemap and everything else. */
+export function isPublicSitemapPath(url: URL): boolean {
+  return url.pathname !== FUNCTION_PATH && rewriteSitemapPath(url) !== null;
 }
 
 function defaultCache(): Cache | null {
