@@ -1,7 +1,7 @@
 // Unit tests of the SEO handler: route decisions equal to middleware.ts, shell handling (env.ASSETS, loud failure),
 // Supabase configuration from env.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { transform } from 'esbuild';
 import middlewareSource from '../../../middleware.ts?raw';
 import { resolvePageType } from '../../../middleware/slugs';
@@ -75,7 +75,7 @@ describe('parseRoute', () => {
 });
 
 describe('handleSeo: shell and configuration', () => {
-  let errors: ReturnType<typeof vi.spyOn>;
+  let errors: MockInstance<(...args: unknown[]) => void>;
 
   beforeEach(() => {
     errors = vi.spyOn(console, 'error').mockImplementation(() => {});
