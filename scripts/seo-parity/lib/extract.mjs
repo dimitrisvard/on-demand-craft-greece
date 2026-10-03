@@ -5,7 +5,8 @@
 
 import { parse } from 'parse5';
 import { SaxesParser } from 'saxes';
-import { canonicalJson, canonicalJsonRaw, collapse, sha256 } from './util.mjs';
+import { canonicalJson, canonicalJsonRaw, collapse, parseJsonRaw, renderJsonRaw, sha256 } from './util.mjs';
+import { articleKey, isPrerenderTagScript, tagScriptLabel } from './volatile.mjs';
 
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 const ASSET_RE = /^(?:https?:\/\/[^/]+)?(\/assets\/[^?#\s]+)/;
@@ -79,12 +80,20 @@ export function normaliseHtmlDocument(text, normaliseAssetHashes = false) {
  * The pieces of the HTML F23 document. `render({ withoutHreflang })` leaves
  * the hreflang items out (snapshot-mode rule for blog articles: hreflang sets
  * are base ⊆ candidate, the rest of the document stays exact).
+ * `render({ withoutTagScripts })` leaves out the script elements of rule
+ * `prerender-tag-scripts` (volatile.mjs); by default they stay in place.
  */
 export function htmlF23Parts(text) {
   const document = parse(text, { sourceCodeLocationInfo: true });
   const cuts = [];
   for (const n of walk(document)) {
     if (!n.tagName || n.namespaceURI !== HTML_NS || !n.sourceCodeLocation) continue;
+    if (isPrerenderTagScript(n)) {
+      const loc = n.sourceCodeLocation;
+      const end = loc.endTag ? loc.endTag.endOffset : loc.endOffset;
+      if (Number.isInteger(loc.startOffset) && Number.isInteger(end)) cuts.push({ start: loc.startOffset, end, tagScript: tagScriptLabel(n.attrs.find((a) => a.name === 'src').value) });
+      continue;
+    }
     let cut = false;
     const isJsonLd = n.tagName === 'script' && (attr(n, 'type') || '').trim().toLowerCase() === 'application/ld+json';
     if (n.tagName === 'link' && attr(n, 'hreflang') !== null) cut = true;
@@ -109,24 +118,108 @@ export function htmlF23Parts(text) {
   }
   cuts.sort((a, b) => a.start - b.start);
   let doc = '';
+  let docSansTags = '';
   let pos = 0;
   const items = [];
+  const tagScripts = [];
   for (const c of cuts) {
     if (c.start < pos) continue; // nested inside a previous cut: already part of its source
-    doc += text.slice(pos, c.start);
+    const before = text.slice(pos, c.start);
+    doc += before;
+    docSansTags += before;
     pos = c.end;
-    items.push(c);
+    if (c.tagScript) {
+      doc += text.slice(c.start, c.end); // stays in place, byte for byte
+      tagScripts.push(c.tagScript);
+    } else items.push(c);
   }
   doc += text.slice(pos);
+  docSansTags += text.slice(pos);
   const sorted = (list) => list.map((c) => c.item).sort();
   return {
     hreflang: sorted(items.filter((c) => c.hreflang)),
-    render({ normaliseAssetHashes = false, withoutHreflang = false } = {}) {
+    tagScripts,
+    render({ normaliseAssetHashes = false, withoutHreflang = false, withoutTagScripts = false } = {}) {
       const list = sorted(withoutHreflang ? items.filter((c) => !c.hreflang) : items);
-      const out = list.length ? `${doc}\n<!-- seo-parity F23: order-insensitive elements, sorted -->\n${list.join('\n')}` : doc;
+      const base = withoutTagScripts ? docSansTags : doc;
+      const out = list.length ? `${base}\n<!-- seo-parity F23: order-insensitive elements, sorted -->\n${list.join('\n')}` : base;
       return normaliseDocument(out, normaliseAssetHashes);
     },
   };
+}
+
+/**
+ * Article list of a blog index page (rule `blog-index-article-list`,
+ * volatile.mjs), read with parse5 source offsets:
+ *  - the <article> elements inside the single article#seo-content (one per
+ *    listed article; key = its first a[href]);
+ *  - the itemListElement entries of the single ItemList JSON-LD block (each
+ *    must carry position i + 1; the entry without its position member, in raw
+ *    canonical form, is the item).
+ * The two lists must pair up item by item (same article URL), as the
+ * handler renders both from one query (middleware/renderers/blogIndex.ts).
+ * Returns { items: [{ key, html, jsonld }], reduced } where `reduced` is the
+ * document with the HTML items cut out and itemListElement emptied, or
+ * { error } when the page does not have that shape (then nothing is relaxed).
+ */
+export function blogIndexArticleList(text) {
+  const document = parse(text, { sourceCodeLocationInfo: true });
+  const seo = [];
+  const lists = [];
+  for (const n of walk(document)) {
+    if (!n.tagName || n.namespaceURI !== HTML_NS) continue;
+    if (n.tagName === 'article' && attr(n, 'id') === 'seo-content') seo.push(n);
+    if (n.tagName === 'script' && (attr(n, 'type') || '').trim().toLowerCase() === 'application/ld+json') {
+      let tree;
+      try { tree = parseJsonRaw(textOf(n)); } catch { continue; }
+      if (tree.t !== 'o') continue;
+      const type = tree.members.filter((m) => m.key === '@type');
+      if (type.length === 1 && type[0].value.t === 's' && JSON.parse(type[0].value.raw) === 'ItemList') lists.push({ n, tree });
+    }
+  }
+  if (seo.length !== 1) return { error: `${seo.length} article#seo-content elements` };
+  if (lists.length !== 1) return { error: `${lists.length} ItemList JSON-LD blocks` };
+  const html = [];
+  for (const n of walk(seo[0])) {
+    if (n === seo[0] || n.tagName !== 'article' || n.namespaceURI !== HTML_NS) continue;
+    const loc = n.sourceCodeLocation;
+    if (!loc?.endTag) return { error: 'a list item without its end tag' };
+    if (html.length && loc.startOffset < html[html.length - 1].end) return { error: 'nested list items' };
+    let href = null;
+    for (const d of walk(n)) if (d.tagName === 'a' && attr(d, 'href') !== null) { href = attr(d, 'href'); break; }
+    if (href === null) return { error: 'a list item without a link' };
+    html.push({ start: loc.startOffset, end: loc.endTag.endOffset, key: articleKey(href), html: collapse(text.slice(loc.startOffset, loc.endTag.endOffset)) });
+  }
+  const { n: block, tree } = lists[0];
+  const listMembers = tree.members.filter((m) => m.key === 'itemListElement');
+  if (listMembers.length !== 1 || listMembers[0].value.t !== 'a') return { error: 'ItemList without one itemListElement array' };
+  const json = [];
+  for (const [i, el] of listMembers[0].value.items.entries()) {
+    if (el.t !== 'o') return { error: `itemListElement ${i + 1} is not an object` };
+    const pos = el.members.filter((m) => m.key === 'position');
+    const url = el.members.filter((m) => m.key === 'url');
+    if (pos.length !== 1 || pos[0].value.t !== 'l' || JSON.parse(pos[0].value.raw) !== i + 1) return { error: `itemListElement ${i + 1} has no position ${i + 1}` };
+    if (url.length !== 1 || url[0].value.t !== 's') return { error: `itemListElement ${i + 1} has no url` };
+    json.push({ key: articleKey(JSON.parse(url[0].value.raw)), jsonld: renderJsonRaw({ t: 'o', members: el.members.filter((m) => m.key !== 'position') }) });
+  }
+  if (html.length !== json.length) return { error: `${html.length} HTML list items, ${json.length} ItemList entries` };
+  for (let i = 0; i < html.length; i++) {
+    if (!html[i].key || html[i].key !== json[i].key) return { error: `list item ${i + 1}: HTML link ${html[i].key} and ItemList url ${json[i].key} differ` };
+  }
+  const bl = block.sourceCodeLocation;
+  if (!bl?.startTag || !bl.endTag) return { error: 'ItemList block without source location' };
+  const emptied = renderJsonRaw({ t: 'o', members: tree.members.map((m) => (m.key === 'itemListElement' ? { ...m, value: { t: 'a', items: [] } } : m)) });
+  const ops = [...html.map((h) => ({ start: h.start, end: h.end, insert: '' })), { start: bl.startTag.endOffset, end: bl.endTag.startOffset, insert: emptied }]
+    .sort((a, b) => a.start - b.start);
+  let reduced = '';
+  let p = 0;
+  for (const o of ops) {
+    if (o.start < p) return { error: 'overlapping list ranges' };
+    reduced += text.slice(p, o.start) + o.insert;
+    p = o.end;
+  }
+  reduced += text.slice(p);
+  return { items: html.map((h, i) => ({ key: h.key, html: h.html, jsonld: json[i].jsonld })), reduced };
 }
 
 /** Assets referenced by the document and the Link header (F25). */
@@ -303,6 +396,14 @@ export function extractForHop(hop, body) {
         hashless_sha256: sha256(parts.render({ withoutHreflang: true, normaliseAssetHashes: true })),
       };
       out.F23_hreflang = parts.hreflang;
+      // Rule prerender-tag-scripts (volatile.mjs): F23 without the tag
+      // runtime's script elements, used only for documents served without
+      // X-Seo-Source on both sides.
+      out.F23_sans_tag_scripts = {
+        sha256: sha256(parts.render({ withoutTagScripts: true })),
+        hashless_sha256: sha256(parts.render({ withoutTagScripts: true, normaliseAssetHashes: true })),
+        removed: parts.tagScripts,
+      };
     }
     if (hop.family === 'html') Object.assign(out, extractHtml(text, { linkHeader: hop.headers.link || null }));
     if (hop.family === 'xml') {

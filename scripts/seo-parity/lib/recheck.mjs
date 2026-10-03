@@ -15,8 +15,9 @@ export function eligibleForRecheck(unexplained, seoSourceDb) {
 
 /**
  * @param items array of { id, ... } eligible entries
- * @param o { delayS, redo: async (item) => { unexplained: [] , diffs: [] }, log }
- * @returns Map id → { equal: boolean, diffs }
+ * @param o { delayS, redo: async (item) => { unexplained: [], diffs: [], volatile: [], newUrls: [] }, log }
+ * @returns Map id → { equal: boolean, diffs, volatile, newUrls, error } (volatile rules applied
+ *   and new URLs listed on the re-fetched pair: they are what made it equal)
  */
 export async function runRecheck(items, o) {
   const out = new Map();
@@ -25,7 +26,7 @@ export async function runRecheck(items, o) {
   await sleep(o.delayS * 1000);
   for (const item of items) {
     const r = await o.redo(item);
-    out.set(item.id, { equal: r.unexplained.length === 0, diffs: r.diffs, error: r.error || null });
+    out.set(item.id, { equal: r.unexplained.length === 0, diffs: r.diffs, volatile: r.volatile || [], newUrls: r.newUrls || [], error: r.error || null });
   }
   return out;
 }

@@ -54,7 +54,7 @@ ${extra}</urlset>
  * Start a fixture site.
  * @param opts { title, canonical, hreflangReversed, jsonldReordered, dropHeader, extraHeader, enStatus,
  *   redirectTo, headBody, robotsTag, cfBm, challenge, sitemapExtra, offsiteRedirect, x-frame-options, titleSequence, seoSource,
- *   bodyTransform(html) → html for /en, headRedirectTo (Location of HEAD /old), clientOnlyRedirectMethods }
+ *   bodyTransform(html) → html for /en, headRedirectTo (Location of HEAD /old), clientOnlyRedirectMethods, routes }
  */
 export function startSite(opts = {}) {
   const requests = [];
@@ -86,6 +86,13 @@ export function startSite(opts = {}) {
       res.end(req.method === 'HEAD' ? undefined : body);
     };
     const u = new URL(req.url, 'http://x');
+    // opts.routes: { '/path': { status, headers, body } | () => same } (HTML by default).
+    const route = opts.routes?.[u.pathname];
+    if (route) {
+      const r = typeof route === 'function' ? route() : route;
+      send(r.status ?? 200, { 'content-type': 'text/html; charset=utf-8', ...(r.headers || {}) }, r.body);
+      return;
+    }
     if (u.pathname.startsWith('/api/')) {
       if (req.method !== 'OPTIONS') { res.writeHead(405); res.end(); return; }
       send(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,OPTIONS,PATCH,DELETE,POST,PUT' }, '');

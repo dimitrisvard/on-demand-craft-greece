@@ -38,11 +38,19 @@
  * off while the credentials are set; never record a HAR or upload
  * test-results/ as a CI artifact from a run with the credentials.
  *
+ * Errors. Playwright's error text for a failed route call can list the
+ * request headers, so the route never lets such an error escape: a failure
+ * is logged as one line with the credential values masked, and the request
+ * is answered as a network error (a failed document load still fails its
+ * test). When the test ends, the fixture removes the route before the
+ * context closes, so requests still in flight (late images, chunks) end
+ * quietly instead of failing a test that already passed.
+ *
  * Usage in a spec:
  *   import { test, expect } from './fixtures/access';
  */
 import { test as base, expect } from '@playwright/test';
-import type { APIResponse, BrowserContext } from '@playwright/test';
+import type { APIResponse, BrowserContext, Route } from '@playwright/test';
 
 export interface AccessCredentials {
   id: string;
@@ -96,55 +104,102 @@ function redirectTarget(response: APIResponse, from: string): string | null {
 }
 
 /**
+ * One line describing a failed route call: the first line of the error text
+ * (the reason, without Playwright's call log, which can list the request
+ * headers), with both credential values masked.
+ */
+export function describeRouteError(err: unknown, credentials: AccessCredentials): string {
+  let line = (err instanceof Error ? err.message : String(err)).split('\n', 1)[0];
+  for (const value of [credentials.secret, credentials.id]) {
+    if (value !== '') line = line.split(value).join('<redacted>');
+  }
+  return line;
+}
+
+async function routeWithAccess(route: Route, origin: string, credentials: AccessCredentials): Promise<void> {
+  const request = route.request();
+  const headers = withAccessHeaders(request.headers(), credentials);
+  const first = await route.fetch({ headers, maxRedirects: 0 });
+  let next = redirectTarget(first, request.url());
+  if (next === null) {
+    await route.fulfill({ response: first });
+    return;
+  }
+  const method = request.method();
+  if (method === 'GET' || method === 'HEAD') {
+    let hops = 0;
+    while (next !== null && new URL(next).origin === origin && hops < MAX_HOPS) {
+      const hop = await route.fetch({ url: next, method, headers, maxRedirects: 0 });
+      hops += 1;
+      next = redirectTarget(hop, next);
+    }
+    if (next === null) {
+      // Every hop stays on the origin: let the browser follow it natively.
+      await route.continue({ headers });
+      return;
+    }
+  }
+  // The chain leaves the origin (or is too long, or not GET/HEAD): the
+  // browser follows the fulfilled 3xx without the Access headers.
+  await route.fulfill({ response: first });
+}
+
+/**
  * Adds the Access headers to every request of `context` whose origin equals
  * the origin of `baseURL`, without ever letting them reach another origin
  * through a redirect (see the file header).
+ *
+ * Returns a function to call once the test is over: it removes every route of
+ * the context and ignores route calls still in flight (see "Errors" above).
  */
 export async function installAccessRoute(
   context: BrowserContext,
   baseURL: string,
   credentials: AccessCredentials,
-): Promise<void> {
+): Promise<() => Promise<void>> {
   const origin = new URL(baseURL).origin;
+  let removed = false;
   await context.route(
     (url) => url.origin === origin,
     async (route) => {
-      const request = route.request();
-      const headers = withAccessHeaders(request.headers(), credentials);
-      const first = await route.fetch({ headers, maxRedirects: 0 });
-      let next = redirectTarget(first, request.url());
-      if (next === null) {
-        await route.fulfill({ response: first });
-        return;
+      try {
+        await routeWithAccess(route, origin, credentials);
+      } catch (err) {
+        if (removed) return; // the test is over and the context is closing
+        const request = route.request();
+        console.error(
+          `[access fixture] ${request.method()} ${request.url()} answered as a network error: ` +
+            describeRouteError(err, credentials),
+        );
+        await route.abort('failed').catch(() => {});
       }
-      const method = request.method();
-      if (method === 'GET' || method === 'HEAD') {
-        let hops = 0;
-        while (next !== null && new URL(next).origin === origin && hops < MAX_HOPS) {
-          const hop = await route.fetch({ url: next, method, headers, maxRedirects: 0 });
-          hops += 1;
-          next = redirectTarget(hop, next);
-        }
-        if (next === null) {
-          // Every hop stays on the origin: let the browser follow it natively.
-          await route.continue({ headers });
-          return;
-        }
-      }
-      // The chain leaves the origin (or is too long, or not GET/HEAD): the
-      // browser follows the fulfilled 3xx without the Access headers.
-      await route.fulfill({ response: first });
     },
   );
+  return async () => {
+    removed = true;
+    await context.unrouteAll({ behavior: 'ignoreErrors' });
+  };
 }
 
-export const test = base.extend({
-  context: async ({ context, baseURL }, use) => {
-    const credentials = accessCredentialsFromEnv();
-    if (credentials && baseURL) {
-      await installAccessRoute(context, baseURL, credentials);
-    }
+export interface AccessFixtures {
+  /** Credentials for BASE_URL requests: from the environment unless a spec overrides them. */
+  accessCredentials: AccessCredentials | null;
+}
+
+export const test = base.extend<AccessFixtures>({
+  accessCredentials: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      await use(accessCredentialsFromEnv());
+    },
+    { option: true },
+  ],
+  context: async ({ context, baseURL, accessCredentials }, use) => {
+    const remove =
+      accessCredentials && baseURL ? await installAccessRoute(context, baseURL, accessCredentials) : null;
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- Playwright fixture callback, not a React hook
     await use(context);
+    if (remove) await remove();
   },
 });
 

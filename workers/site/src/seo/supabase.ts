@@ -6,7 +6,8 @@
 // returns on a miss or failure.
 //
 // Adapted: SUPABASE_URL and the anon key come from env (middleware.ts:43, :103-109); the per-isolate Map caches
-// sit in front of KV SEO_CACHE (./cache.ts), which holds positives only (cacheLookup); a failed lookup is
+// sit in front of KV SEO_CACHE (./cache.ts), which holds positives only (cacheLookup), and for content pages only
+// under the row's own slug or localized_slug (fetchContentPage); a failed lookup is
 // reported to the request state so the strict-404 path never answers 404 because Supabase was down. For the three
 // lookups middleware.ts bounds with its 2.5 s Promise.race (service page, service page list, content page) the KV
 // read runs INSIDE the same 2.5 s budget, so the answer time of middleware.ts holds whatever KV does.
@@ -371,13 +372,16 @@ async function fetchContentPageRaw(io: SupabaseIo, lang: string, slug: string): 
   }
 }
 
-// middleware.ts:318-330
+// middleware.ts:318-330. KV keys stay bounded by the rows, not by the URLs requested: a row is shared through KV
+// only under its own slug or localized_slug. A row Supabase returns for any other segment is cached as
+// middleware.ts caches it (this isolate's Map, CACHE_TTL) and never written to KV, so the bytes served are the same.
 export async function fetchContentPage(c: SeoCaches, io: SupabaseIo, lang: string, slug: string): Promise<ContentPageRow | null> {
   const parts = [lang, slug];
   const { data: row, failed, cached } = await boundedLookup(c.cp, parts, io, null, () => fetchContentPageRaw(io, lang, slug));
   if (failed) io.state.degraded = true;
   if (cached) return row;
-  cacheLookup(c.cp, parts, row, !!row, io, failed);
+  if (row && slug !== row.slug && slug !== row.localized_slug) c.cp.setLocal(parts, row, CACHE_TTL);
+  else cacheLookup(c.cp, parts, row, !!row, io, failed);
   return row;
 }
 

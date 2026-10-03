@@ -2,6 +2,12 @@ import { createHash, randomBytes } from 'node:crypto';
 
 export const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 
+/** Percent-encode a path the way a browser does (WHATWG URL parser). */
+export function encPath(p) {
+  const u = new URL(p, 'https://parity.invalid');
+  return `${u.pathname}${u.search}`;
+}
+
 // ASCII whitespace only (HTML spec: TAB, LF, FF, CR, SPACE). JavaScript's \s
 // would also fold U+00A0, U+FEFF (BOM), U+2028/2029, U+202F, U+3000 and the
 // other Unicode spaces, hiding byte-level differences in F14, F21 and F23.
@@ -15,6 +21,16 @@ export const collapse = (s) => String(s ?? '').replace(/[\t\n\f\r ]+/g, ' ').rep
  * Throws SyntaxError on invalid JSON.
  */
 export function canonicalJsonRaw(text) {
+  return renderJsonRaw(parseJsonRaw(text));
+}
+
+/**
+ * Parse a JSON text into a tree that keeps every string, number and literal
+ * token as written: { t: 'o', members: [{ key, raw, value }] } (key decoded,
+ * raw as written), { t: 'a', items: [...] }, { t: 's', raw } or { t: 'l', raw }.
+ * Throws SyntaxError on invalid JSON.
+ */
+export function parseJsonRaw(text) {
   const s = String(text);
   let i = 0;
   const fail = () => { throw new SyntaxError(`invalid JSON at offset ${i}`); };
@@ -39,7 +55,7 @@ export function canonicalJsonRaw(text) {
     if (ch === '{') {
       i++; ws();
       const members = [];
-      if (s[i] === '}') { i++; return '{}'; }
+      if (s[i] === '}') { i++; return { t: 'o', members }; }
       for (;;) {
         ws();
         if (s[i] !== '"') fail();
@@ -47,19 +63,18 @@ export function canonicalJsonRaw(text) {
         ws();
         if (s[i] !== ':') fail();
         i++;
-        members.push([JSON.parse(k), k, val()]);
+        members.push({ key: JSON.parse(k), raw: k, value: val() });
         ws();
         if (s[i] === ',') { i++; continue; }
         if (s[i] === '}') { i++; break; }
         fail();
       }
-      members.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0));
-      return `{${members.map((m) => `${m[1]}:${m[2]}`).join(',')}}`;
+      return { t: 'o', members };
     }
     if (ch === '[') {
       i++; ws();
       const items = [];
-      if (s[i] === ']') { i++; return '[]'; }
+      if (s[i] === ']') { i++; return { t: 'a', items }; }
       for (;;) {
         items.push(val());
         ws();
@@ -67,19 +82,30 @@ export function canonicalJsonRaw(text) {
         if (s[i] === ']') { i++; break; }
         fail();
       }
-      return `[${items.join(',')}]`;
+      return { t: 'a', items };
     }
-    if (ch === '"') return str();
+    if (ch === '"') return { t: 's', raw: str() };
     LIT.lastIndex = i;
     const m = LIT.exec(s);
     if (!m) fail();
     i += m[0].length;
-    return m[0];
+    return { t: 'l', raw: m[0] };
   };
   const out = val();
   ws();
   if (i !== s.length) fail();
   return out;
+}
+
+/** Canonical text of a parseJsonRaw tree: object keys sorted, tokens as written, no whitespace. */
+export function renderJsonRaw(node) {
+  if (node.t === 'o') {
+    const members = node.members.map((m) => [m.key, m.raw, renderJsonRaw(m.value)]);
+    members.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0));
+    return `{${members.map((m) => `${m[1]}:${m[2]}`).join(',')}}`;
+  }
+  if (node.t === 'a') return `[${node.items.map(renderJsonRaw).join(',')}]`;
+  return node.raw;
 }
 
 /** JSON with object keys sorted recursively; arrays keep their order (F20). */

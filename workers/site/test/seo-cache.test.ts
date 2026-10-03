@@ -3,15 +3,86 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { KV_GET_TIMEOUT_MS, MAP_MAX_ENTRIES, TieredCache, kvKey, kvTtlSeconds, type CacheIo, type CacheKind } from '../src/seo/cache';
 import { CACHE_TTL, NEGATIVE_CACHE_TTL, SERVICE_FETCH_TIMEOUT_MS, cacheShape, createCaches } from '../src/seo/supabase';
-import { createSeoHandler } from '../src/seo/handler';
+import { createSeoHandler, type SeoHandler } from '../src/seo/handler';
 import { MemoryKV, TestContext } from './helpers/kv';
-import { runMiddleware, runWorker, type Failure } from './helpers/seo-harness';
+import {
+  AssetsStub, DUMMY_KEY, FixtureFetch, ORIGIN, REST_PREFIX, loadMiddleware, makeEnv, outcomeOf, runMiddleware, runWorker,
+  type Failure, type Outcome,
+} from './helpers/seo-harness';
 
 function kindOf(key: string): CacheKind {
   return key.split(':')[2] as CacheKind;
 }
 
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
+
+// ─── Supabase answering a content-page lookup with a row that is not keyed by the requested segment ──────────
+// The recorded fixture, except that the en content_pages lookup of each of `segments` is answered with the recorded
+// en "about" row, although none of the segments is that row's slug or localized_slug. Unrecorded URLs answer [].
+
+const ABOUT_EN_LOOKUP = 'content_pages?or=(slug.eq.about,localized_slug.eq.about)&language=eq.en&';
+
+interface AliasRun {
+  outcome: Outcome | null;
+  calls: string[]; // REST URLs requested, sorted
+}
+
+function aliasFetch(segments: readonly string[], allowShellFetch: boolean) {
+  const fixture = new FixtureFetch({ emptyForUnknown: true, allowShellFetch });
+  const calls: string[] = [];
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.startsWith(REST_PREFIX)) calls.push(url);
+    for (const segment of segments) {
+      const e = encodeURIComponent(segment);
+      url = url.replace(`content_pages?or=(slug.eq.${e},localized_slug.eq.${e})&language=eq.en&`, ABOUT_EN_LOOKUP);
+    }
+    return fixture.fetch(url, init);
+  };
+  return { fetch, calls };
+}
+
+async function workerAliased(path: string, segments: readonly string[], handler: SeoHandler, seoCache: MemoryKV): Promise<AliasRun> {
+  const f = aliasFetch(segments, false);
+  const ctx = new TestContext();
+  const env = makeEnv({ seoCache, flags: new MemoryKV(), assets: new AssetsStub() });
+  vi.stubGlobal('fetch', f.fetch);
+  try {
+    const res = await handler.handleSeo(new Request(ORIGIN + path), env, ctx.asContext());
+    const outcome = res ? await outcomeOf(res) : null;
+    await ctx.settle();
+    return { outcome, calls: [...f.calls].sort() };
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
+// middleware.ts on `paths` in order, in ONE module instance (one isolate, one set of Map caches).
+async function middlewareAliased(paths: readonly string[], segments: readonly string[]): Promise<AliasRun[]> {
+  const processEnv = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+  const middleware = await loadMiddleware();
+  const saved = { key: processEnv.SUPABASE_ANON_KEY, vite: processEnv.VITE_SUPABASE_ANON_KEY };
+  processEnv.SUPABASE_ANON_KEY = DUMMY_KEY;
+  delete processEnv.VITE_SUPABASE_ANON_KEY;
+  try {
+    const runs: AliasRun[] = [];
+    for (const path of paths) {
+      const f = aliasFetch(segments, true);
+      vi.stubGlobal('fetch', f.fetch);
+      try {
+        const res = await middleware(new Request(ORIGIN + path));
+        runs.push({ outcome: res ? await outcomeOf(res) : null, calls: [...f.calls].sort() });
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+    return runs;
+  } finally {
+    if (saved.key === undefined) delete processEnv.SUPABASE_ANON_KEY;
+    else processEnv.SUPABASE_ANON_KEY = saved.key;
+    if (saved.vite !== undefined) processEnv.VITE_SUPABASE_ANON_KEY = saved.vite;
+  }
+}
 
 function io(kv: MemoryKV | undefined, ctx = new TestContext()): CacheIo {
   return { kv: kv?.asBinding(), waitUntil: (p) => ctx.waitUntil(p) };
@@ -275,6 +346,75 @@ describe('handleSeo with KV SEO_CACHE', () => {
       expect(p.expirationTtl).toBe(3600);
       expect(JSON.parse(p.value)).toMatchObject({ expires: NOW + CACHE_TTL, v: cacheShape(kindOf(p.key)) });
     }
+  });
+
+  it('service page and service list lookups answered with no row stay in the isolate Map; KV is read, never written', async () => {
+    const handler = createSeoHandler();
+    const seoCache = new MemoryKV();
+    const options = { handler, seoCache, emptyForUnknown: true, overrides: [{ match: 'service_pages?', body: [] }] };
+    // Service index (sp <lang>:index + splist <lang>) and service detail (sp <lang>:<service id>) URLs.
+    const paths = ['/en/services', '/de/dienstleistungen', '/en/services/cnc-machining', '/fr/services/usinage-cnc', '/fi/palvelut/cnc-ty%C3%B6st%C3%B6'];
+    for (const path of paths) {
+      const run = await runWorker(path, options);
+      expect(run.fixture.calls.some((c) => c.includes('service_pages?')), path).toBe(true); // Supabase answered "no row"
+    }
+    expect(seoCache.puts).toEqual([]);
+    const spGets = seoCache.gets.filter((k) => kindOf(k) === 'sp' || kindOf(k) === 'splist').sort();
+    expect(spGets).toEqual([
+      'seo:v1:sp:de:index', 'seo:v1:sp:en:cnc-machining', 'seo:v1:sp:en:index', 'seo:v1:sp:fi:cnc-machining', 'seo:v1:sp:fr:cnc-machining',
+      'seo:v1:splist:de', 'seo:v1:splist:en',
+    ]);
+    for (const parts of [['en', 'index'], ['de', 'index'], ['en', 'cnc-machining'], ['fr', 'cnc-machining'], ['fi', 'cnc-machining']]) {
+      expect(handler.caches.sp.peek(parts), parts.join(':')).toEqual({ data: null, failed: false });
+    }
+    expect(handler.caches.splist.peek(['en'])).toEqual({ data: [], failed: false });
+    expect(handler.caches.splist.peek(['de'])).toEqual({ data: [], failed: false });
+    vi.setSystemTime(NOW + NEGATIVE_CACHE_TTL);
+    expect(handler.caches.sp.peek(['en', 'index'])).toBeUndefined();
+    expect(handler.caches.splist.peek(['en'])).toBeUndefined();
+  });
+
+  it('a content row found under a URL segment that is neither its slug nor its localized_slug stays in the isolate Map (1 h), as in middleware.ts; no KV write per segment', async () => {
+    const N = 20;
+    const segments = Array.from({ length: N }, (_, i) => `zz-alias-${i}`);
+    const handler = createSeoHandler();
+    const seoCache = new MemoryKV();
+    const runs: AliasRun[] = [];
+    for (const segment of segments) runs.push(await workerAliased(`/en/${segment}`, segments, handler, seoCache));
+    for (const run of runs) {
+      expect(run.outcome!.status).toBe(200);
+      expect(run.outcome!.headers).toContainEqual(['x-seo-source', 'db']); // Supabase found the row every time
+    }
+    // No cp key per segment in KV; the one write is the row's own alternates cluster, keyed by its slug.
+    expect(seoCache.puts.map((p) => p.key)).toEqual(['seo:v1:cpalt:about']);
+    expect(seoCache.gets.filter((k) => kindOf(k) === 'cp')).toHaveLength(N); // KV is still read
+    expect(handler.caches.cp.isolateSize).toBe(N);
+    expect(handler.caches.cp.peek(['en', 'zz-alias-3'])).toMatchObject({ data: { slug: 'about' }, failed: false });
+
+    // Same isolate: answered from the Map, no REST call, same document.
+    const again = await workerAliased('/en/zz-alias-0', segments, handler, seoCache);
+    expect(again.calls).toEqual([]);
+    expect(again.outcome).toEqual(runs[0].outcome);
+    // middleware.ts on the same sequence: same bytes and the same REST calls, request by request.
+    const mw = await middlewareAliased(['/en/zz-alias-0', '/en/zz-alias-1', '/en/zz-alias-0'], segments);
+    expect(mw).toEqual([runs[0], runs[1], again]);
+
+    // Lookups under a row's own slug or localized_slug still write KV (1 h).
+    await runWorker('/en/about', { handler, seoCache });
+    await runWorker('/cs/vzdelavani', { handler, seoCache });
+    expect(seoCache.puts.map((p) => p.key).sort()).toEqual([
+      'seo:v1:cp:cs:vzdelavani', 'seo:v1:cp:en:about', 'seo:v1:cpalt:about', 'seo:v1:cpalt:education',
+    ]);
+    for (const p of seoCache.puts) {
+      expect(p.expirationTtl).toBe(3600);
+      expect(JSON.parse(p.value)).toMatchObject({ expires: NOW + CACHE_TTL, v: cacheShape(kindOf(p.key)) });
+    }
+
+    // The Map entry lives as long as a positive (CACHE_TTL), not NEGATIVE_CACHE_TTL.
+    vi.setSystemTime(NOW + CACHE_TTL - 1);
+    expect(handler.caches.cp.peek(['en', 'zz-alias-0'])).toMatchObject({ data: { slug: 'about' }, failed: false });
+    vi.setSystemTime(NOW + CACHE_TTL);
+    expect(handler.caches.cp.peek(['en', 'zz-alias-0'])).toBeUndefined();
   });
 
   it('article lookups use kinds article and translations', async () => {

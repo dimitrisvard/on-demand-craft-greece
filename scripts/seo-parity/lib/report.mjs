@@ -96,6 +96,13 @@ export function renderMarkdown(r) {
     : r.summary.fail > 0 ? `FAIL (${fmtN(r.summary.fail)} entr${r.summary.fail === 1 ? 'y' : 'ies'} with unexplained differences)` : 'PASS (0 unexplained differences)';
   L.push(`Result: ${verdict} · exit ${r.exit_code}`);
   L.push(`Signable: ${r.signable ? 'yes' : `NO (${r.unsignable_reasons.join('; ')})`}`);
+  if (r.changed_since_capture) L.push(`Changed since the capture (--changed-since-capture): ${cell(r.changed_since_capture)}`);
+  const olderSnaps = Object.entries(r.snapshots || {}).filter(([, s]) => s && s.tool_version !== r.tool_version);
+  if (olderSnaps.length) L.push(`Tool ${r.tool_version}; ${olderSnaps.map(([k, s]) => `${k} snapshot captured by ${s.tool_version ?? 'an unknown version'}`).join(', ')}`);
+  for (const b of r.evidence_banners || []) {
+    L.push('');
+    L.push(`> **${b}**`);
+  }
   if (r.window.override) {
     L.push('');
     L.push('> **PARITY_IGNORE_WINDOW=1 was set: the volatile-window rule was not enforced. This run is NOT SIGNABLE.**');
@@ -150,6 +157,23 @@ export function renderMarkdown(r) {
     L.push('|---|---|---|---|');
     for (const t of transient) L.push(`| ${t.id} | ${cell(t.url)} | ${[...new Set(t.diffs.map((d) => d.field))].join(', ')} | ${cell(t.recheck)} |`);
   }
+  const relaxed = r.results.filter((x) => (x.volatile || []).some((v) => v.applied !== false));
+  if (relaxed.length) {
+    L.push('');
+    L.push('## Volatile rules applied (§2.4)');
+    L.push('| Entry | URL | Rule | Detail |');
+    L.push('|---|---|---|---|');
+    for (const x of relaxed) {
+      for (const v of x.volatile.filter((y) => y.applied !== false)) {
+        const detail = v.rule === 'blog-index-article-list'
+          ? `${v.fields.join('/')}: ${v.added.length} new article${v.added.length === 1 ? '' : 's'} listed first, ${v.dropped.length} dropped off the end`
+          : v.rule === 'prerender-tag-scripts'
+            ? `F23 without tag scripts (base ${v.base_removed.length}, candidate ${v.candidate_removed.length})`
+            : '';
+        L.push(`| ${x.id} | ${cell(x.url)} | ${v.rule} | ${cell(detail)} |`);
+      }
+    }
+  }
   const na = r.results.filter((x) => x.outcome === 'not-applicable');
   if (na.length) {
     L.push('');
@@ -176,6 +200,7 @@ export function renderMarkdown(r) {
       const note = [d.rule, d.allow_status === 'expired' ? `allow-list ${d.allow} expired` : null, d.flag, d.examples ? `examples: ${display(d.examples, 200)}` : null].filter(Boolean).join('; ');
       L.push(`| ${cell(name)} | ${cell(display(d.base))}${len('base')} | ${cell(display(d.candidate))}${len('candidate')} | ${cell(note)} |`);
     }
+    for (const v of (f.volatile || []).filter((y) => y.applied === false)) L.push(`Volatile rule ${v.rule} not applied: ${cell(v.reason)}`);
     if (f.recheck) L.push(`Re-check: ${f.recheck}`);
     if (f.diff_file) L.push(`Diff: \`${f.diff_file}\``);
   }

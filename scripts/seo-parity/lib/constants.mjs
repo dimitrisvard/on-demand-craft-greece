@@ -2,7 +2,13 @@
 // Changing IGNORED_HEADERS or the field rules is a reviewed change (§2.2).
 
 export const TOOL_NAME = 'micronshub-seo-parity';
-export const TOOL_VERSION = '1.0.0';
+// Written to every manifest.json, urls.json and report.json. Bump it whenever
+// the stored record, a field rule, a volatile rule or the signable rules
+// change, so that outputs of different semantics can be told apart. 1.1.0:
+// gate-evidence rules (evidence.mjs), the blog-index-article-list and
+// prerender-tag-scripts rules, F23_sans_tag_scripts in stored HTML records.
+// USER_AGENT is fixed by SEO_PARITY.md §2.3 and does not follow this number.
+export const TOOL_VERSION = '1.1.0';
 export const USER_AGENT = 'micronshub-seo-parity/1.0 (owner-run parity check)';
 export const DEFAULT_SEED = 'micronshub-parity-v1';
 export const DEFAULT_CONCURRENCY = 8;

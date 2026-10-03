@@ -14,6 +14,7 @@ import {
 } from './constants.mjs';
 import { applyAllow, loadAllowList } from './allow.mjs';
 import { compareEntry, fieldValue, originNormaliser } from './compare.mjs';
+import { evidenceCheck, sidePlatforms } from './evidence.mjs';
 import { accessTransportOk, HttpClient, isChallenge } from './fetch.mjs';
 import { writeDiffFile, writeReport } from './report.mjs';
 import { eligibleForRecheck, runRecheck } from './recheck.mjs';
@@ -22,6 +23,7 @@ import { BodyStore, loadSnapshot, SnapshotWriter } from './snapshot.mjs';
 import { loadSources } from './sources.mjs';
 import { buildUrlSet, entryInProfile, fetchInputs, GeneratorError } from './urls.mjs';
 import { InvalidRunError, isoDate, pool, runId, sha256, UsageError } from './util.mjs';
+import { blogIndexPaths, VOLATILE_RULES } from './volatile.mjs';
 import { checkEnd, checkStart, OVERRIDE_BANNER } from './window.mjs';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
@@ -52,6 +54,7 @@ const OPTIONS = {
   'shell-file': { type: 'string' },
   vantage: { type: 'string' },
   'bypass-method': { type: 'string' },
+  'changed-since-capture': { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 };
 
@@ -78,12 +81,19 @@ Flags
   --normalise-asset-hashes  F25
   --max-hops <n>            default ${DEFAULT_MAX_HOPS}
   --timeout <ms>            default ${DEFAULT_TIMEOUT_MS}
+  --changed-since-capture <text>
+                            snapshot vs live only: what changed on the platform since the capture
+                            (e.g. the Phase 7 data backend switch); recorded in the report
 
 Environment
   SUPABASE_URL, SUPABASE_ANON_KEY   URL generator (G2, G3)
   PARITY_IGNORE_WINDOW=1            ignore the 06:55–10:05 / 09:00 / 00:00 UTC window rule; run NOT SIGNABLE
 
-Exit codes: 0 pass · 1 fail · 2 usage/input error · 3 invalid run`;
+Exit codes: 0 pass · 1 fail · 2 usage/input error · 3 invalid run
+Never signable (the run still executes; report.json "signable": false): a self-diff (same origin
+live vs live; the same snapshot or a copy; a Vercel snapshot vs its own origin still on Vercel),
+every snapshot-vs-snapshot run (B6 noise floor, or captures of two origins), and a snapshot vs its
+own origin on the same non-Vercel platform unless --changed-since-capture states what changed.`;
 
 function intFlag(v, name, def, min = 0) {
   if (v === undefined) return def;
@@ -156,7 +166,7 @@ function snapshotState(snap, label) {
     const why = Array.isArray(m.invalid_reasons) && m.invalid_reasons.length ? m.invalid_reasons.join('; ') : 'manifest.valid is not true';
     throw new InvalidRunError(`the ${label} snapshot ${snap.dir} is from an invalid capture (${why}); an invalid capture is repeated, never used`);
   }
-  return { dir: snap.dir, valid: true, window_override: Boolean(m.window?.override), started_at: m.started_at ?? null, finished_at: m.finished_at ?? null, base: m.base ?? null };
+  return { dir: snap.dir, valid: true, tool_version: m.tool_version ?? null, window_override: Boolean(m.window?.override), started_at: m.started_at ?? null, finished_at: m.finished_at ?? null, base: m.base ?? null };
 }
 
 function readUrls(file) {
@@ -177,6 +187,8 @@ function accessFromArgs(a, env, log) {
   if ((id && !secret) || (!id && secret)) throw new UsageError('Access needs both the client id and the client secret');
   return id && secret ? { id, secret } : null;
 }
+
+const CHANGED_ONLY = '--changed-since-capture applies only to snapshot vs live (--snapshot <dir> --candidate <origin>)';
 
 /** Main entry; returns the exit code. */
 export async function main(argv = process.argv.slice(2), env = process.env, io = { log: console.log, err: console.error }) {
@@ -205,6 +217,7 @@ async function mainInner(argv, env, io) {
     recheckAfter: intFlag(a['recheck-after'], 'recheck-after', DEFAULT_RECHECK_AFTER_S, 0),
     retryBaseMs: env.PARITY_RETRY_BASE_MS ? Number(env.PARITY_RETRY_BASE_MS) : 1000,
   };
+  if (a['changed-since-capture'] !== undefined && (a['generate-urls'] || a.capture)) throw new UsageError(CHANGED_ONLY);
   if (a['generate-urls']) return generate(a, common, env, io);
   if (a.capture) return capture(a, common, env, io);
   return compare(a, common, env, io);
@@ -301,6 +314,12 @@ async function compare(a, c, env, io) {
   const candOrigin = candSnap ? origin(candSnap.manifest.base, 'candidate snapshot base') : origin(a.candidate, 'candidate');
   const mode = baseSnap ? (candSnap ? 'snapshot-vs-snapshot' : 'snapshot-vs-live') : (candSnap ? null : 'live-vs-live');
   if (!mode) throw new UsageError('a snapshot candidate needs a snapshot base (--snapshot)');
+  let changedSinceCapture = null;
+  if (a['changed-since-capture'] !== undefined) {
+    if (mode !== 'snapshot-vs-live') throw new UsageError(CHANGED_ONLY);
+    changedSinceCapture = a['changed-since-capture'].replace(/\s+/g, ' ').trim();
+    if (!changedSinceCapture) throw new UsageError('--changed-since-capture needs a description of what changed since the capture');
+  }
   let role = a['candidate-role'] ?? autoRole(candOrigin, env);
   if (!['preview', 'production'].includes(role)) throw new UsageError('--candidate-role must be preview or production');
   const urlsDoc = a.urls ? readUrls(a.urls) : baseSnap ? baseSnap.urls : null;
@@ -324,7 +343,13 @@ async function compare(a, c, env, io) {
   const candClient = candSnap ? null : new HttpClient({ side: 'candidate', timeoutMs: c.timeoutMs, retryBaseMs: c.retryBaseMs, access: access ? { origin: candOrigin, ...access } : null });
   const invalid = [];
   const assetPairs = [];
-  const ctx = { role, baseOrigin, candOrigin, snapshotMode: Boolean(baseSnap), normaliseAssetHashes: Boolean(a['normalise-asset-hashes']), bodies: stores, assetPairs };
+  // Rule blog-index-article-list (volatile.mjs) applies in snapshot mode to
+  // the blog index URLs of the handler's slug table only.
+  let blogPaths = null;
+  if (baseSnap && entries.some((e) => e.kind === 'blog-index')) {
+    try { blogPaths = blogIndexPaths(await loadSources(REPO_ROOT)); } catch (e) { io.err(`warning: slug table not loaded (${e.message}); blog index pages compare exactly`); }
+  }
+  const ctx = { role, baseOrigin, candOrigin, snapshotMode: Boolean(baseSnap), normaliseAssetHashes: Boolean(a['normalise-asset-hashes']), bodies: stores, assetPairs, blogIndexPaths: blogPaths };
 
   const captureBase = async (entry) => (baseSnap
     ? baseSnap.records.get(entry.id) || { methods: {}, missing: true, issues: [] }
@@ -388,7 +413,7 @@ async function compare(a, c, env, io) {
     const r = evaluate(it);
     newUrls.push(...r.newUrls);
     const outcome = r.diffs.length === 0 ? 'pass' : r.unexplained.length === 0 ? 'allowed' : 'fail';
-    results.push({ id: it.entry.id, group: it.entry.group, url: it.entry.url, outcome, diffs: r.diffs, attempts, _it: it, _seoDb: r.seoSourceDb, _unexplained: r.unexplained });
+    results.push({ id: it.entry.id, group: it.entry.group, url: it.entry.url, outcome, diffs: r.diffs, ...(r.volatile.length ? { volatile: r.volatile } : {}), attempts, _it: it, _seoDb: r.seoSourceDb, _unexplained: r.unexplained });
   }
 
   // Re-check database-backed differences (§2.4).
@@ -405,15 +430,25 @@ async function compare(a, c, env, io) {
         it2.c = await captureCand(x._it.entry);
         noteIssues(it2.c);
         const err = recordError(it2.b) || recordError(it2.c);
-        if (err) return { unexplained: [{ field: 'error' }], diffs: [], error: err };
+        if (err) return { unexplained: [{ field: 'error' }], diffs: [], volatile: [], newUrls: [], error: err };
         return evaluate(it2);
       },
     });
     for (const x of eligible) {
       const r = rc.get(x.id);
       if (!r) continue;
-      if (r.equal) { x.outcome = 'transient'; x.recheck = `equal after ${c.recheckAfter} s`; for (const d of x.diffs) d.recheck = `equal after ${c.recheckAfter} s`; }
-      else { x.recheck = r.error ? `error on re-check: ${r.error}` : `still different after ${c.recheckAfter} s`; x.recheck_diffs = r.diffs; }
+      if (r.equal) {
+        x.outcome = 'transient'; x.recheck = `equal after ${c.recheckAfter} s`;
+        for (const d of x.diffs) d.recheck = `equal after ${c.recheckAfter} s`;
+        // The re-fetched pair decided the outcome: report its volatile rules
+        // and the new URLs they listed (first fetch kept for the record).
+        if (x.volatile) x.volatile_first_fetch = x.volatile;
+        if (r.volatile.length) x.volatile = r.volatile; else delete x.volatile;
+        newUrls.push(...r.newUrls);
+      } else {
+        x.recheck = r.error ? `error on re-check: ${r.error}` : `still different after ${c.recheckAfter} s`; x.recheck_diffs = r.diffs;
+        if (r.volatile.length) x.recheck_volatile = r.volatile;
+      }
     }
   }
 
@@ -439,7 +474,11 @@ async function compare(a, c, env, io) {
   const pendingUsed = [...new Set(results.flatMap((r) => (r.diffs || []).filter((d) => d.allow_status === 'pending').map((d) => d.allow)))];
   const valid = invalid.length === 0;
   const exitCode = !valid ? 3 : summary.fail > 0 ? 1 : 0;
-  const unsignable = [];
+  // Gate evidence (evidence.mjs): a self-diff or a snapshot-vs-snapshot run
+  // is never signable; the run itself still executes and reports.
+  const platforms = { base: sidePlatforms(items, 'b'), candidate: sidePlatforms(items, 'c') };
+  const evidence = evidenceCheck({ mode, baseOrigin, candOrigin, baseDir: baseSnap?.dir, candDir: candSnap?.dir, platforms, changedSinceCapture });
+  const unsignable = [...evidence.reasons];
   if (!valid) unsignable.push('invalid run');
   if (override) unsignable.push('PARITY_IGNORE_WINDOW=1');
   for (const [label, st] of Object.entries(snapshots)) if (st?.window_override) unsignable.push(`${label} snapshot captured with PARITY_IGNORE_WINDOW=1`);
@@ -468,6 +507,10 @@ async function compare(a, c, env, io) {
     invalid_reasons: invalid,
     signable: unsignable.length === 0,
     unsignable_reasons: unsignable,
+    self_diff: evidence.selfDiff,
+    changed_since_capture: changedSinceCapture,
+    evidence_banners: evidence.banners,
+    platforms,
     exit_code: exitCode,
     summary,
     requests_per_host: rph,
@@ -483,11 +526,13 @@ async function compare(a, c, env, io) {
     normalise_asset_hashes: ctx.normaliseAssetHashes,
     asset_hash_pairs: [...new Map(assetPairs.map((p) => [p.join(' '), p])).values()],
     new_urls: [...new Set(newUrls)],
+    volatile_rules: VOLATILE_RULES.map(({ id, mode: m, fields }) => ({ id, mode: m, fields })),
     results: results.map(({ _it, _seoDb, _unexplained, ...r }) => r),
   };
   writeReport(outDir, report);
   log(`report: ${path.join(outDir, 'report.md')}`);
   log(`summary: ${JSON.stringify(summary)} · valid ${valid} · signable ${report.signable} · exit ${exitCode}`);
+  for (const b of evidence.banners) io.err(`!!! ${b}`);
   if (!valid) io.err(`INVALID RUN: ${invalid.join('; ')}`);
   return exitCode;
 }

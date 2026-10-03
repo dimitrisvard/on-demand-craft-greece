@@ -20,7 +20,8 @@
     "cf:dev": "npm --prefix workers/site run dev",
     "cf:dry": "npm --prefix workers/site run build:dry",
     "cf:parity": "node scripts/seo-parity.mjs",
-    "cf:smoke": "node tests/middleware/smoke.mjs"
+    "cf:smoke": "node tests/middleware/smoke.mjs",
+    "cf:e2e": "npm install --no-save --no-audit --no-fund --loglevel=error @playwright/test@1.56.1 && playwright test tests/e2e/seo.spec.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.864.0",

@@ -11,13 +11,9 @@ import path from 'node:path';
 import { parse } from 'parse5';
 import { ARTICLES_PER_LANGUAGE, PRODUCTION_ORIGIN, TOOL_VERSION } from './constants.mjs';
 import { parseSitemap } from './extract.mjs';
-import { sha256 } from './util.mjs';
+import { encPath, sha256 } from './util.mjs';
 
-/** Percent-encode a path the way a browser does (WHATWG URL parser). */
-export function encPath(p) {
-  const u = new URL(p, 'https://parity.invalid');
-  return `${u.pathname}${u.search}`;
-}
+export { encPath };
 
 export class GeneratorError extends Error {
   constructor(msg) { super(msg); this.name = 'GeneratorError'; }

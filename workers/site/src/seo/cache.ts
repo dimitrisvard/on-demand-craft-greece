@@ -16,7 +16,9 @@
 //   - setLocal(): a "negative" (Supabase answered with no row, cached 30 s) or a failed lookup. THIS isolate's
 //     Map only, exactly as middleware.ts caches it. KV holds positives only, so a URL that matches nothing
 //     costs no KV write, however many distinct unknown URLs are requested. KV is still read for such a key
-//     (another isolate may have written a positive for it).
+//     (another isolate may have written a positive for it). supabase.ts also uses it for a content-page row
+//     found under a URL segment that is not one of the row's own keys (1 h, Map only), so the number of KV
+//     keys follows the number of rows, not the number of distinct URLs requested.
 //
 // Differences from the plain Map of middleware.ts. None of them changes a byte that is served; they only change
 // how often KV or Supabase is asked:
@@ -173,7 +175,8 @@ export class TieredCache<T> {
     io.waitUntil(put.catch((err: unknown) => logKvError('put', key, err)));
   }
 
-  // A negative or a failed lookup: this isolate's Map only, never KV (see header). Same TTL as middleware.ts.
+  // This isolate's Map only, never KV (see header): a negative, a failed lookup, or a row that must not be shared
+  // under this key. Same TTL as middleware.ts.
   setLocal(parts: readonly string[], data: T, ttlMs: number, failed = false): void {
     if (this.cacheableKey(parts) === null) return;
     const entry: CacheEntry<T> = { data, expires: Date.now() + ttlMs };

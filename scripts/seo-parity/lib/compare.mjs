@@ -6,8 +6,9 @@
 // Each diff is { field, sub?, hop?, base, candidate, rule? }.
 
 import { IGNORED_HEADER_PREFIXES, IGNORED_HEADERS, OWN_RULE_HEADERS } from './constants.mjs';
-import { parseSitemap } from './extract.mjs';
-import { canonicalJson, deepEqual, multisetSubset } from './util.mjs';
+import { blogIndexArticleList, extractHtml, htmlF23Parts, parseSitemap } from './extract.mjs';
+import { canonicalJson, deepEqual, multisetSubset, sha256 } from './util.mjs';
+import { articleListShift } from './volatile.mjs';
 
 const ignored = (name) => IGNORED_HEADERS.has(name) || IGNORED_HEADER_PREFIXES.some((p) => name.startsWith(p));
 
@@ -105,10 +106,9 @@ function compareDocument(be, ce, ctx, n, entry) {
   }
   const b22 = be.F22 || [];
   const c22 = (ce.F22 || []).map((x) => { const i = x.indexOf(' '); return x.slice(0, i + 1) + n('candidate', x.slice(i + 1)); }).sort();
-  if (!deepEqual(b22, c22)) {
-    const volatile = ctx.snapshotMode && entry.kind === 'blog-index';
-    if (!(volatile && multisetSubset(b22, c22))) add('F22', b22, c22, volatile ? { rule: 'snapshot mode: base ⊆ candidate' } : {});
-  }
+  // Blog index pages in snapshot mode: see the blog-index-article-list rule
+  // in compareEntry (the article list as a whole, not F22 alone).
+  if (!deepEqual(b22, c22)) add('F22', b22, c22);
   const assets = (a) => (ctx.normaliseAssetHashes ? a.map((x) => x.replace(/-[A-Za-z0-9_-]{8}\.([A-Za-z0-9]+)$/, '-[hash].$1')) : a);
   if (!deepEqual(assets(be.F25 || []), assets(ce.F25 || []))) add('F25', be.F25 || [], ce.F25 || []);
   if (ctx.normaliseAssetHashes) {
@@ -118,6 +118,39 @@ function compareDocument(be, ce, ctx, n, entry) {
     if (pairs.length) ctx.assetPairs?.push(...pairs);
   }
   return diffs;
+}
+
+// Fields the blog index article list feeds (ItemList JSON-LD, #seo-content
+// text and links, the normalised document).
+const ARTICLE_LIST_FIELDS = new Set(['F20', 'F21', 'F22', 'F23']);
+
+const hasSeoSource = (hop) => Object.prototype.hasOwnProperty.call(hop.headers || {}, 'x-seo-source');
+
+/**
+ * Rule blog-index-article-list (volatile.mjs), snapshot mode only: the
+ * article list changed only by new articles first, and the documents without
+ * the list are equal in every field.
+ * @returns { ok, added, dropped } or { ok: false, reason }
+ */
+function blogIndexListRule(bl, cl, ctx, n, entry) {
+  const bb = ctx.bodies.base.get(bl.body_sha256);
+  const cb = ctx.bodies.candidate.get(cl.body_sha256);
+  if (!bb || !cb) return { ok: false, reason: 'body not stored' };
+  const lb = blogIndexArticleList(bb.toString('utf8'));
+  const lc = blogIndexArticleList(cb.toString('utf8'));
+  if (lb.error || lc.error) return { ok: false, reason: `article list not recognised (base: ${lb.error || 'ok'}; candidate: ${lc.error || 'ok'})` };
+  const shift = articleListShift(lb.items, lc.items, entry.url);
+  if (!shift.ok) return { ok: false, reason: `article list: ${shift.reason}` };
+  const reduced = (text, hop) => ({
+    ...extractHtml(text, { linkHeader: hop.headers?.link || null }),
+    F23_list_free: sha256(htmlF23Parts(text).render({ normaliseAssetHashes: ctx.normaliseAssetHashes })),
+  });
+  const rb = reduced(lb.reduced, bl);
+  const rc = reduced(lc.reduced, cl);
+  const rest = compareDocument(rb, rc, { ...ctx, assetPairs: null }, n, entry).map((d) => d.field);
+  if (rb.F23_list_free !== rc.F23_list_free) rest.push('F23');
+  if (rest.length) return { ok: false, reason: `the document outside the article list differs (${[...new Set(rest)].join(', ')})` };
+  return { ok: true, added: shift.added, dropped: shift.dropped };
 }
 
 function compareSitemaps(bodyB, bodyC, ctx, newUrls) {
@@ -158,13 +191,15 @@ function compareSitemaps(bodyB, bodyC, ctx, newUrls) {
 
 /**
  * Compare one entry.
- * @param ctx { role, baseOrigin, candOrigin, snapshotMode, normaliseAssetHashes, bodies: { base: BodyStore, candidate: BodyStore }, assetPairs: [] }
- * @returns { diffs, newUrls, seoSourceDb }
+ * @param ctx { role, baseOrigin, candOrigin, snapshotMode, normaliseAssetHashes, bodies: { base: BodyStore, candidate: BodyStore }, assetPairs: [],
+ *   blogIndexPaths: Set of the blog index URLs (rule blog-index-article-list) }
+ * @returns { diffs, newUrls, seoSourceDb, volatile: [{ rule, ... }] }
  */
 export function compareEntry(entry, b, c, ctx) {
   const n = originNormaliser(ctx.baseOrigin, ctx.candOrigin);
   const diffs = [];
   const newUrls = [];
+  const volatile = [];
   let seoSourceDb = false;
   const bm = b.methods; const cm = c.methods;
 
@@ -185,7 +220,8 @@ export function compareEntry(entry, b, c, ctx) {
       const be = bl.extracted; const ce = cl.extracted;
       const bothHtml = be.family === 'html' && ce.family === 'html';
       const eitherHtml = be.family === 'html' || ce.family === 'html';
-      if (bothHtml) diffs.push(...compareDocument(be, ce, ctx, n, entry));
+      const docDiffs = [];
+      if (bothHtml) docDiffs.push(...compareDocument(be, ce, ctx, n, entry));
       if (eitherHtml) {
         const key = ctx.normaliseAssetHashes ? 'F23_hashless' : 'F23';
         const bv = be[key]?.sha256 ?? null; const cv = ce[key]?.sha256 ?? null;
@@ -195,8 +231,36 @@ export function compareEntry(entry, b, c, ctx) {
         const volatileOk = bv !== cv && ctx.snapshotMode && entry.kind === 'blog-article' && bothHtml
           && be.F23_sans_hreflang && ce.F23_sans_hreflang && be.F23_sans_hreflang[k2] === ce.F23_sans_hreflang[k2]
           && multisetSubset(be.F23_hreflang || [], ce.F23_hreflang || []);
-        if (bv !== cv && !volatileOk) diffs.push({ field: 'F23', base: bv, candidate: cv, base_length: be[key]?.length ?? null, candidate_length: ce[key]?.length ?? null });
+        // Rule prerender-tag-scripts (volatile.mjs): documents served without
+        // X-Seo-Source on both sides compare without the tag runtime's script
+        // elements; all other bytes stay exact.
+        const bs = be.F23_sans_tag_scripts; const cs = ce.F23_sans_tag_scripts;
+        const tagCase = bv !== cv && !volatileOk && bothHtml && !hasSeoSource(bl) && !hasSeoSource(cl);
+        const tagOk = tagCase && bs && cs && bs[k2] === cs[k2];
+        if (tagOk) volatile.push({ rule: 'prerender-tag-scripts', field: 'F23', base_removed: bs.removed, candidate_removed: cs.removed });
+        else if (tagCase && (!bs || !cs)) {
+          // A snapshot record from a tool before 1.1.0 has no such variant: say
+          // so instead of failing F23 without a reason.
+          const sides = [!bs && 'base', !cs && 'candidate'].filter(Boolean);
+          volatile.push({ rule: 'prerender-tag-scripts', applied: false, reason: `the ${sides.join(' and ')} record${sides.length > 1 ? 's have' : ' has'} no F23 variant without tag scripts (captured by a tool before 1.1.0)` });
+        }
+        if (bv !== cv && !volatileOk && !tagOk) docDiffs.push({ field: 'F23', base: bv, candidate: cv, base_length: be[key]?.length ?? null, candidate_length: ce[key]?.length ?? null });
       }
+      // Rule blog-index-article-list (volatile.mjs): snapshot mode, the 14
+      // blog index URLs only.
+      if (bothHtml && ctx.snapshotMode && entry.kind === 'blog-index' && ctx.blogIndexPaths?.has(entry.url)
+        && docDiffs.some((d) => ARTICLE_LIST_FIELDS.has(d.field))) {
+        const r = blogIndexListRule(bl, cl, ctx, n, entry);
+        if (r.ok) {
+          const relaxed = [...new Set(docDiffs.filter((d) => ARTICLE_LIST_FIELDS.has(d.field)).map((d) => d.field))];
+          for (let i = docDiffs.length - 1; i >= 0; i--) if (ARTICLE_LIST_FIELDS.has(docDiffs[i].field)) docDiffs.splice(i, 1);
+          volatile.push({ rule: 'blog-index-article-list', fields: relaxed, added: r.added, dropped: r.dropped });
+          newUrls.push(...r.added);
+        } else {
+          volatile.push({ rule: 'blog-index-article-list', applied: false, reason: r.reason });
+        }
+      }
+      diffs.push(...docDiffs);
       if (!bothHtml && be.F24 !== ce.F24) {
         const bothXml = be.family === 'xml' && ce.family === 'xml';
         let sitemapDiffs = [];
@@ -233,7 +297,7 @@ export function compareEntry(entry, b, c, ctx) {
     for (const d of compareHeaders(bh, ch, ctx)) diffs.push({ ...d, field: 'F12', sub: d.sub ? `${d.field}:${d.sub}` : d.field });
   }
 
-  return { diffs, newUrls, seoSourceDb };
+  return { diffs, newUrls, seoSourceDb, volatile };
 }
 
 /** Values another entry has for a field, for allow-list `same_as_url` references. */
