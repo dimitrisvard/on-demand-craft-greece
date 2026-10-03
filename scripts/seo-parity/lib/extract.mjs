@@ -148,6 +148,9 @@ export function htmlF23Parts(text) {
   };
 }
 
+/** Stands in for the article list in the reduced blog index document (one per document). */
+export const ARTICLE_LIST_MARKER = '<!-- seo-parity: article list -->';
+
 /**
  * Article list of a blog index page (rule `blog-index-article-list`,
  * volatile.mjs), read with parse5 source offsets:
@@ -158,11 +161,16 @@ export function htmlF23Parts(text) {
  *    canonical form, is the item).
  * The two lists must pair up item by item (same article URL), as the
  * handler renders both from one query (middleware/renderers/blogIndex.ts).
+ * The HTML items must be adjacent siblings under one parent with only ASCII
+ * whitespace between them (the renderer joins them with a newline), so that
+ * the list is one span of the document.
  * Returns { items: [{ key, html, jsonld }], reduced } where `reduced` is the
- * document with the HTML items cut out and itemListElement emptied, or
+ * document with that span replaced by ARTICLE_LIST_MARKER (the list's
+ * position and parent stay in the document) and itemListElement emptied, or
  * { error } when the page does not have that shape (then nothing is relaxed).
  */
 export function blogIndexArticleList(text) {
+  if (text.includes(ARTICLE_LIST_MARKER)) return { error: 'the document already contains the article list marker' };
   const document = parse(text, { sourceCodeLocationInfo: true });
   const seo = [];
   const lists = [];
@@ -188,7 +196,12 @@ export function blogIndexArticleList(text) {
     let href = null;
     for (const d of walk(n)) if (d.tagName === 'a' && attr(d, 'href') !== null) { href = attr(d, 'href'); break; }
     if (href === null) return { error: 'a list item without a link' };
-    html.push({ start: loc.startOffset, end: loc.endTag.endOffset, key: articleKey(href), html: collapse(text.slice(loc.startOffset, loc.endTag.endOffset)) });
+    html.push({ node: n, start: loc.startOffset, end: loc.endTag.endOffset, key: articleKey(href), html: collapse(text.slice(loc.startOffset, loc.endTag.endOffset)) });
+  }
+  if (!html.length) return { error: 'no article list items' };
+  for (let i = 1; i < html.length; i++) {
+    if (html[i].node.parentNode !== html[0].node.parentNode) return { error: `list item ${i + 1} has another parent than list item 1` };
+    if (!/^[\t\n\f\r ]*$/.test(text.slice(html[i - 1].end, html[i].start))) return { error: `list items ${i} and ${i + 1} are not adjacent (only ASCII whitespace may separate them)` };
   }
   const { n: block, tree } = lists[0];
   const listMembers = tree.members.filter((m) => m.key === 'itemListElement');
@@ -209,7 +222,7 @@ export function blogIndexArticleList(text) {
   const bl = block.sourceCodeLocation;
   if (!bl?.startTag || !bl.endTag) return { error: 'ItemList block without source location' };
   const emptied = renderJsonRaw({ t: 'o', members: tree.members.map((m) => (m.key === 'itemListElement' ? { ...m, value: { t: 'a', items: [] } } : m)) });
-  const ops = [...html.map((h) => ({ start: h.start, end: h.end, insert: '' })), { start: bl.startTag.endOffset, end: bl.endTag.startOffset, insert: emptied }]
+  const ops = [{ start: html[0].start, end: html[html.length - 1].end, insert: ARTICLE_LIST_MARKER }, { start: bl.startTag.endOffset, end: bl.endTag.startOffset, insert: emptied }]
     .sort((a, b) => a.start - b.start);
   let reduced = '';
   let p = 0;

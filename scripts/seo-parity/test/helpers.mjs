@@ -188,6 +188,64 @@ export function diffsOf(report, id) {
   return report.results.find((r) => r.id === id)?.diffs || [];
 }
 
+// ------------------------------------------------------------ blog index fixtures
+
+export const blogArticle = (lang, blog, slug, title = `Title ${slug}`, excerpt = `Excerpt ${slug}`) => ({ slug, title, excerpt, lang, blog });
+
+/**
+ * A blog index page shaped like middleware/renderers/blogIndex.ts output inside the shell.
+ * `linkOf(a)` overrides the article link (default /<lang>/<blog>/<slug>), `jsonExtra(a, i)` adds
+ * members to an ItemList entry, `position(i)` sets its position, `rootAttr` goes on <div id="root">.
+ * `layout` places the list inside article#seo-content: 'section' (the renderer's place, default),
+ * 'after-nav' (after the site nav) or 'before-h1'; `separator` goes between two list items (the
+ * renderer joins them with a newline).
+ */
+export function blogIndexDoc({ lang = 'en', blog = 'blog', articles, jsonArticles, h1 = 'Blog', linkOf, jsonExtra = () => ({}), position = (i) => i + 1, rootAttr = '', layout = 'section', separator = '\n' }) {
+  const link = linkOf || ((a) => `/${lang}/${blog}/${a.slug}`);
+  const abs = (h) => (/^https?:\/\//.test(h) ? h : `https://www.micronshub.eu${h}`);
+  const items = articles.map((a) => `    <article>\n      <h2><a href="${link(a)}">${a.title}</a></h2>\n      <p>${a.excerpt}</p>\n    </article>`).join(separator);
+  const itemList = JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: (jsonArticles ?? articles).map((a, i) => ({ '@type': 'ListItem', position: position(i), name: a.title, url: abs(link(a)), ...jsonExtra(a, i) })) });
+  const crumbs = JSON.stringify({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Home', item: `https://www.micronshub.eu/${lang}` }] });
+  return `<!DOCTYPE html>
+<html lang="${lang}">
+<head>
+<meta charset="utf-8">
+<title>Blog | Microns Hub</title>
+<meta name="description" content="Insights">
+<link rel="canonical" href="https://www.micronshub.eu/${lang}/${blog}"/>
+<link rel="alternate" hreflang="${lang}" href="https://www.micronshub.eu/${lang}/${blog}"/>
+<script type="application/ld+json">${itemList}</script>
+<script type="application/ld+json">${crumbs}</script>
+</head>
+<body><div id="root"${rootAttr}></div>
+<article id="seo-content" lang="${lang}">
+  <header>
+${layout === 'before-h1' ? `${items}\n` : ''}    <h1>${h1}</h1>
+    <p>Insights</p>
+  </header>
+  <nav aria-label="breadcrumb"><p><a href="/${lang}">Home</a> &rsaquo; <span aria-current="page">Blog</span></p></nav>
+  <section>
+${layout === 'section' ? items : ''}
+  </section>
+  <nav aria-label="site"><ul><li><a href="/${lang}/services">Services</a></li></ul></nav>
+${layout === 'after-nav' ? `${items}\n` : ''}</article>
+</body></html>`;
+}
+
+/**
+ * A sitemap urlset listing blog articles (as /sitemap-<lang>.xml or /sitemap-complete.xml serve
+ * them); `escape(slug)` writes the slug into <loc> (default encodeURIComponent, as api/sitemap.js).
+ */
+export function blogSitemap(articles, escape = encodeURIComponent) {
+  const locs = articles.map((a) => `  <url><loc>https://www.micronshub.eu/${a.lang}/${a.blog}/${escape(a.slug)}</loc></url>`);
+  return {
+    headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600, s-maxage=3600' },
+    body: `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${locs.join('\n')}\n</urlset>\n`,
+  };
+}
+
+export const sitemapEntry = (id, url) => ({ id, group: 'G5', url, methods: ['GET', 'HEAD'], expect: { status: 200 }, kind: 'sitemap', profiles: ['gate', 'full'] });
+
 /** Every file under dir, recursively, gunzipped when .gz. */
 export function allFileContents(dir) {
   const out = [];

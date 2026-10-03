@@ -8,7 +8,7 @@
 import { IGNORED_HEADER_PREFIXES, IGNORED_HEADERS, OWN_RULE_HEADERS } from './constants.mjs';
 import { blogIndexArticleList, extractHtml, htmlF23Parts, parseSitemap } from './extract.mjs';
 import { canonicalJson, deepEqual, multisetSubset, sha256 } from './util.mjs';
-import { articleListShift } from './volatile.mjs';
+import { articleListShift, publishedKey } from './volatile.mjs';
 
 const ignored = (name) => IGNORED_HEADERS.has(name) || IGNORED_HEADER_PREFIXES.some((p) => name.startsWith(p));
 
@@ -127,9 +127,50 @@ const ARTICLE_LIST_FIELDS = new Set(['F20', 'F21', 'F22', 'F23']);
 const hasSeoSource = (hop) => Object.prototype.hasOwnProperty.call(hop.headers || {}, 'x-seo-source');
 
 /**
+ * What the base snapshot shows as published at capture time for one language
+ * (rule blog-index-article-list): the <loc> values of its /sitemap-<lang>.xml,
+ * /sitemap-complete.xml and /api/sitemap records (the whole snapshot, not only
+ * the selected entries; final response 200 with a parsable urlset), and the
+ * URLs of its URL set. Cached per language on ctx.
+ * @returns { sitemapHas, where, source } or { error }
+ */
+export function publishedAtCapture(ctx, lang) {
+  ctx.publishedCache ||= new Map();
+  if (ctx.publishedCache.has(lang)) return ctx.publishedCache.get(lang);
+  const wanted = [`/sitemap-${lang}.xml`, '/sitemap-complete.xml', '/api/sitemap'];
+  const sitemaps = new Map();
+  for (const rec of ctx.baseCapture?.records?.values() || []) {
+    if (!wanted.includes(rec.url) || sitemaps.has(rec.url)) continue;
+    const last = rec.methods?.GET?.hops?.at(-1);
+    if (!last || last.status !== 200 || last.extracted?.family !== 'xml') continue;
+    const body = ctx.bodies.base.get(last.body_sha256);
+    if (!body) continue;
+    const sm = parseSitemap(body.toString('utf8'));
+    if (sm.error || sm.root !== 'urlset') continue;
+    sitemaps.set(rec.url, new Set([...sm.entries.keys()].map(publishedKey)));
+  }
+  let out;
+  if (!sitemaps.size) {
+    out = { error: `the base snapshot holds no usable sitemap record (${wanted.join(', ')}: final response 200 with a urlset) to tell articles published since the capture from older ones` };
+  } else {
+    const urlSet = new Set((ctx.baseCapture.urls?.entries || []).map((e) => publishedKey(e.url)));
+    const listed = [...sitemaps.entries()];
+    const sitemapOf = (k) => listed.find(([, s]) => s.has(k))?.[0] ?? null;
+    out = {
+      source: listed.map(([u]) => u).join(', '),
+      sitemapHas: (k) => sitemapOf(k) !== null,
+      where: (k) => sitemapOf(k) ?? (urlSet.has(k) ? 'the base URL set' : null),
+    };
+  }
+  ctx.publishedCache.set(lang, out);
+  return out;
+}
+
+/**
  * Rule blog-index-article-list (volatile.mjs), snapshot mode only: the
- * article list changed only by new articles first, and the documents without
- * the list are equal in every field.
+ * article list changed only by articles published since the capture, listed
+ * first, and the documents with the list replaced by a marker are equal in
+ * every field.
  * @returns { ok, added, dropped } or { ok: false, reason }
  */
 function blogIndexListRule(bl, cl, ctx, n, entry) {
@@ -139,7 +180,9 @@ function blogIndexListRule(bl, cl, ctx, n, entry) {
   const lb = blogIndexArticleList(bb.toString('utf8'));
   const lc = blogIndexArticleList(cb.toString('utf8'));
   if (lb.error || lc.error) return { ok: false, reason: `article list not recognised (base: ${lb.error || 'ok'}; candidate: ${lc.error || 'ok'})` };
-  const shift = articleListShift(lb.items, lc.items, entry.url);
+  const shift = articleListShift(lb.items, lc.items, entry.url, publishedAtCapture(ctx, entry.url.split('/')[1]));
+  // An unchanged list explains nothing: the differences are elsewhere.
+  if (shift.ok && shift.unchanged) return { ok: false, reason: 'the article list is unchanged; the differences are outside it' };
   if (!shift.ok) return { ok: false, reason: `article list: ${shift.reason}` };
   const reduced = (text, hop) => ({
     ...extractHtml(text, { linkHeader: hop.headers?.link || null }),
@@ -192,7 +235,7 @@ function compareSitemaps(bodyB, bodyC, ctx, newUrls) {
 /**
  * Compare one entry.
  * @param ctx { role, baseOrigin, candOrigin, snapshotMode, normaliseAssetHashes, bodies: { base: BodyStore, candidate: BodyStore }, assetPairs: [],
- *   blogIndexPaths: Set of the blog index URLs (rule blog-index-article-list) }
+ *   blogIndexPaths: Set of the blog index URLs, baseCapture: { records, urls } of the base snapshot (rule blog-index-article-list) }
  * @returns { diffs, newUrls, seoSourceDb, volatile: [{ rule, ... }] }
  */
 export function compareEntry(entry, b, c, ctx) {

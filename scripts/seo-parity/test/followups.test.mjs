@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { cpSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { startSite, tmpDir, writeUrls, writeAllow, run, diffsOf, FIXTURE_ENTRIES } from './helpers.mjs';
+import { startSite, tmpDir, writeUrls, writeAllow, run, diffsOf, FIXTURE_ENTRIES, blogArticle, blogIndexDoc, blogSitemap, sitemapEntry } from './helpers.mjs';
 import { TOOL_VERSION } from '../lib/constants.mjs';
 import { evidenceCheck, hopPlatform } from '../lib/evidence.mjs';
 import * as volatileLib from '../lib/volatile.mjs';
@@ -210,68 +210,39 @@ test('platform of a response: cf-ray wins, then x-vercel-id or server: Vercel', 
 
 // ======================================================= 2. blog index article list (snapshot mode)
 
-const art = (lang, blog, slug, title = `Title ${slug}`, excerpt = `Excerpt ${slug}`) => ({ slug, title, excerpt, lang, blog });
+const art = blogArticle;
 const BASE_ARTICLES = (lang, blog) => Array.from({ length: 10 }, (_, i) => art(lang, blog, `article-${9 - i}`));
-
-/**
- * A blog index page shaped like middleware/renderers/blogIndex.ts output inside the shell.
- * `linkOf(a)` overrides the article link (default /<lang>/<blog>/<slug>), `jsonExtra(a, i)` adds
- * members to an ItemList entry, `position(i)` sets its position, `rootAttr` goes on <div id="root">.
- */
-function blogIndexDoc({ lang = 'en', blog = 'blog', articles, jsonArticles, h1 = 'Blog', linkOf, jsonExtra = () => ({}), position = (i) => i + 1, rootAttr = '' }) {
-  const link = linkOf || ((a) => `/${lang}/${blog}/${a.slug}`);
-  const abs = (h) => (/^https?:\/\//.test(h) ? h : `https://www.micronshub.eu${h}`);
-  const items = articles.map((a) => `    <article>\n      <h2><a href="${link(a)}">${a.title}</a></h2>\n      <p>${a.excerpt}</p>\n    </article>`).join('\n');
-  const itemList = JSON.stringify({ '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: (jsonArticles ?? articles).map((a, i) => ({ '@type': 'ListItem', position: position(i), name: a.title, url: abs(link(a)), ...jsonExtra(a, i) })) });
-  const crumbs = JSON.stringify({ '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Home', item: `https://www.micronshub.eu/${lang}` }] });
-  return `<!DOCTYPE html>
-<html lang="${lang}">
-<head>
-<meta charset="utf-8">
-<title>Blog | Microns Hub</title>
-<meta name="description" content="Insights">
-<link rel="canonical" href="https://www.micronshub.eu/${lang}/${blog}"/>
-<link rel="alternate" hreflang="${lang}" href="https://www.micronshub.eu/${lang}/${blog}"/>
-<script type="application/ld+json">${itemList}</script>
-<script type="application/ld+json">${crumbs}</script>
-</head>
-<body><div id="root"${rootAttr}></div>
-<article id="seo-content" lang="${lang}">
-  <header>
-    <h1>${h1}</h1>
-    <p>Insights</p>
-  </header>
-  <nav aria-label="breadcrumb"><p><a href="/${lang}">Home</a> &rsaquo; <span aria-current="page">Blog</span></p></nav>
-  <section>
-${items}
-  </section>
-  <nav aria-label="site"><ul><li><a href="/${lang}/services">Services</a></li></ul></nav>
-</article>
-</body></html>`;
-}
 
 const page = (body) => ({ headers: { 'x-seo-source': 'none', 'cache-control': 'public, max-age=0, must-revalidate' }, body });
 const BLOG_ENTRIES = [
   { id: 'G1-024', group: 'G1', url: '/en/blog', methods: ['GET', 'HEAD'], expect: { status: 200 }, kind: 'blog-index', profiles: ['gate', 'full'] },
   { id: 'G1-178', group: 'G1', url: '/fi/blogi', methods: ['GET', 'HEAD'], expect: { status: 200 }, kind: 'blog-index', profiles: ['gate', 'full'] },
 ];
+// The base capture also holds the per-language sitemaps (G5): they show which
+// articles were already published at capture time.
+const SITEMAP_ENTRIES = [sitemapEntry('G5-004', '/sitemap-en.xml'), sitemapEntry('G5-014', '/sitemap-fi.xml')];
 const enBase = BASE_ARTICLES('en', 'blog');
 const fiBase = BASE_ARTICLES('fi', 'blogi');
+const OLDER_EN = Array.from({ length: 5 }, (_, i) => art('en', 'blog', `older-${i}`));
+const OLDER_FI = [art('fi', 'blogi', 'työstö-vanha')];
 const NEW_EN = art('en', 'blog', 'article-10');
 const NEW_FI = art('fi', 'blogi', 'cnc-työstö-uutuus', 'CNC-työstö: uutuus');
 const blogRoutes = (en, fi = { articles: fiBase }) => ({
   '/en/blog': page(blogIndexDoc({ articles: enBase, ...en })),
   '/fi/blogi': page(blogIndexDoc({ lang: 'fi', blog: 'blogi', ...fi })),
+  '/sitemap-en.xml': blogSitemap([...enBase, ...OLDER_EN]),
+  '/sitemap-fi.xml': blogSitemap([...fiBase, ...OLDER_FI]),
 });
 
-async function blogRun(candEn, candFi, { live = false, entries = BLOG_ENTRIES, baseRoutes = blogRoutes({}) } = {}) {
+/** Live: compare `entries`. Snapshot: capture `entries` and `sitemaps`, then compare `entries` only. */
+async function blogRun(candEn, candFi, { live = false, entries = BLOG_ENTRIES, baseRoutes = blogRoutes({}), sitemaps = SITEMAP_ENTRIES } = {}) {
   const base = await startSite({ routes: baseRoutes });
   const cand = await startSite({ routes: blogRoutes(candEn, candFi) });
   const dir = tmpDir();
   try {
     if (live) return { ...await run(['--base', base.origin, '--candidate', cand.origin, '--urls', writeUrls(dir, entries), ...compareArgs(dir, 'o')]), out: path.join(dir, 'o') };
-    const A = await capture(base, dir, 'A', entries);
-    return { ...await run(['--snapshot', A, '--candidate', cand.origin, ...compareArgs(dir, 'o')]), out: path.join(dir, 'o') };
+    const A = await capture(base, dir, 'A', [...entries, ...sitemaps]);
+    return { ...await run(['--snapshot', A, '--candidate', cand.origin, '--urls', writeUrls(dir, entries), ...compareArgs(dir, 'o')]), out: path.join(dir, 'o') };
   } finally { await base.close(); await cand.close(); }
 }
 
@@ -368,13 +339,13 @@ test('snapshot vs live: when the blog index rule applies only on the database re
   const dbPage = (body) => ({ headers: { 'x-seo-source': 'db' }, body });
   const stale = enBase.map((a, i) => (i === 3 ? { ...a, title: 'Stale title' } : a));
   let n = 0;
-  const base = await startSite({ routes: { '/en/blog': dbPage(blogIndexDoc({ articles: enBase })) } });
+  const base = await startSite({ routes: { '/en/blog': dbPage(blogIndexDoc({ articles: enBase })), '/sitemap-en.xml': blogSitemap(enBase) } });
   // First answer: a stale cached list; on the re-check: one new article first.
   const cand = await startSite({ routes: { '/en/blog': () => dbPage(blogIndexDoc({ articles: n++ === 0 ? stale : [NEW_EN, ...enBase.slice(0, 9)] })) } });
   const dir = tmpDir();
   try {
-    const A = await capture(base, dir, 'A', entries);
-    const r = await run(['--snapshot', A, '--candidate', cand.origin, '--out', path.join(dir, 'o'), '--allow', writeAllow(dir), '--recheck-after', '1']);
+    const A = await capture(base, dir, 'A', [...entries, SITEMAP_ENTRIES[0]]);
+    const r = await run(['--snapshot', A, '--candidate', cand.origin, '--urls', writeUrls(dir, entries), '--out', path.join(dir, 'o'), '--allow', writeAllow(dir), '--recheck-after', '1']);
     const res = resultOf(r.report, 'G1-024');
     assert.equal(r.code, 0, JSON.stringify(res));
     assert.equal(res.outcome, 'transient');
@@ -430,22 +401,35 @@ test('article list extraction and the shift rule (unit)', () => {
   assert.equal(l.items[0].key, 'https://www.micronshub.eu/en/blog/article-9');
   assert.ok(!l.reduced.includes('article-9') && l.reduced.includes('"itemListElement":[]') && l.reduced.includes('BreadcrumbList'));
   assert.match(blogIndexArticleList('<html><body><p>x</p></body></html>').error, /article#seo-content/);
-  const { articleListShift } = volatileLib;
+  const { articleListShift, publishedKey } = volatileLib;
   const key = (s) => `https://www.micronshub.eu/en/blog/${s}`;
   const it = (s) => ({ key: key(s), html: `h${s}`, jsonld: `j${s}` });
   const base = ['a', 'b', 'c'].map(it);
-  const shift = (cand) => articleListShift(base, cand, '/en/blog');
+  // Published at capture time: the base list and the older article 'o' (sitemap), 'g' (URL set only).
+  const sitemap = new Set(['a', 'b', 'c', 'o'].map((s) => publishedKey(key(s))));
+  const published = { source: '/sitemap-en.xml', sitemapHas: (k) => sitemap.has(k), where: (k) => (sitemap.has(k) ? '/sitemap-en.xml' : k === publishedKey(key('g')) ? 'the base URL set' : null) };
+  const shift = (cand, p = published) => articleListShift(base, cand, '/en/blog', p);
   assert.equal(shift(['n', 'a', 'b'].map(it)).ok, true);
   assert.deepEqual(shift(['n', 'a', 'b'].map(it)).dropped, [key('c')]);
-  assert.equal(shift(['a', 'b', 'c'].map(it)).ok, true);
-  assert.equal(shift(['n1', 'n2', 'n3'].map(it)).ok, true, 'a whole list of new articles (10 days of publishing) is accepted');
+  assert.deepEqual(shift(['a', 'b', 'c'].map(it)), { ok: true, added: [], dropped: [], unchanged: true, reason: null });
+  assert.equal(shift(['n1', 'n2', 'n3'].map(it)).ok, true, 'a whole list of articles published since the capture (10 days of publishing) is accepted');
   assert.equal(shift(['a', 'b'].map(it)).ok, false);
   assert.equal(shift(['a', 'n', 'b'].map(it)).ok, false);
   assert.equal(shift(['n', 'n', 'a'].map(it)).ok, false);
   assert.equal(shift([it('n'), { ...it('a'), html: 'changed' }, it('b')]).ok, false);
   assert.equal(shift([it('n'), { ...it('a'), jsonld: 'changed' }, it('b')]).ok, false);
   const other = { key: 'https://www.micronshub.eu/de/blog/n', html: 'h', jsonld: 'j' };
-  assert.deepEqual(shift([other, it('a'), it('b')]), { ok: false, added: [other.key], dropped: [], reason: `item 1 (${other.key}) is not an article of /en/blog` });
+  assert.deepEqual(shift([other, it('a'), it('b')]), { ok: false, added: [other.key], dropped: [], unchanged: false, reason: `item 1 (${other.key}) is not an article of /en/blog` });
+  // Articles that already existed at capture time are not new.
+  assert.equal(shift(['o', 'a', 'b'].map(it)).reason, `item 1 (${key('o')}) was already published when the base was captured (listed in /sitemap-en.xml)`);
+  assert.equal(shift(['n', 'g', 'a'].map(it)).reason, `item 2 (${key('g')}) was already published when the base was captured (listed in the base URL set)`);
+  // Without a record of what was published, or with a sitemap that misses a base article, nothing is new.
+  assert.equal(shift(['n', 'a', 'b'].map(it), null).reason, 'no record of the articles published at capture time');
+  assert.equal(shift(['n', 'a', 'b'].map(it), { error: 'no sitemap' }).reason, 'no sitemap');
+  const stale = { ...published, sitemapHas: (k) => k !== publishedKey(key('c')) && sitemap.has(k) };
+  assert.match(shift(['n', 'a', 'b'].map(it), stale).reason, /^the base snapshot's sitemaps \(\/sitemap-en\.xml\) do not list base article https:\/\/www\.micronshub\.eu\/en\/blog\/c, so/);
+  // An unchanged list needs no record.
+  assert.equal(shift(['a', 'b', 'c'].map(it), null).unchanged, true);
   // HTML and ItemList entries are paired item by item.
   const swapped = blogIndexArticleList(blogIndexDoc({ articles: enBase, jsonArticles: [enBase[0], enBase[2], enBase[1], ...enBase.slice(3)] }));
   assert.equal(swapped.error, `list item 2: HTML link ${key('article-8')} and ItemList url ${key('article-7')} differ`);

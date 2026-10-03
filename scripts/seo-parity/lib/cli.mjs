@@ -92,8 +92,9 @@ Environment
 Exit codes: 0 pass · 1 fail · 2 usage/input error · 3 invalid run
 Never signable (the run still executes; report.json "signable": false): a self-diff (same origin
 live vs live; the same snapshot or a copy; a Vercel snapshot vs its own origin still on Vercel),
-every snapshot-vs-snapshot run (B6 noise floor, or captures of two origins), and a snapshot vs its
-own origin on the same non-Vercel platform unless --changed-since-capture states what changed.`;
+every snapshot-vs-snapshot run (B6 noise floor, or captures of two origins), a snapshot vs its
+own origin on the same non-Vercel platform unless --changed-since-capture states what changed, and
+a live candidate that answers from Vercel only (every §1 candidate is a Cloudflare deployment).`;
 
 function intFlag(v, name, def, min = 0) {
   if (v === undefined) return def;
@@ -349,7 +350,10 @@ async function compare(a, c, env, io) {
   if (baseSnap && entries.some((e) => e.kind === 'blog-index')) {
     try { blogPaths = blogIndexPaths(await loadSources(REPO_ROOT)); } catch (e) { io.err(`warning: slug table not loaded (${e.message}); blog index pages compare exactly`); }
   }
-  const ctx = { role, baseOrigin, candOrigin, snapshotMode: Boolean(baseSnap), normaliseAssetHashes: Boolean(a['normalise-asset-hashes']), bodies: stores, assetPairs, blogIndexPaths: blogPaths };
+  // The whole base snapshot (records and URL set, not only the selected
+  // entries) tells that rule which articles were already published at capture.
+  const baseCapture = baseSnap ? { records: baseSnap.records, urls: baseSnap.urls } : null;
+  const ctx = { role, baseOrigin, candOrigin, snapshotMode: Boolean(baseSnap), normaliseAssetHashes: Boolean(a['normalise-asset-hashes']), bodies: stores, assetPairs, blogIndexPaths: blogPaths, baseCapture };
 
   const captureBase = async (entry) => (baseSnap
     ? baseSnap.records.get(entry.id) || { methods: {}, missing: true, issues: [] }

@@ -25,13 +25,19 @@ export const VOLATILE_RULES = [
     id: 'blog-index-article-list',
     mode: 'snapshot',
     fields: ['F20', 'F21', 'F22', 'F23'],
-    rule: 'Blog index pages (the 14 localizedPath(lang, "blog-index") URLs of middleware/slugs.ts) only: the article list (the <article> items inside '
-      + 'article#seo-content and the itemListElement entries of the ItemList JSON-LD block, paired item by item) may start with articles that are not in the '
-      + 'base list; each of them must be an article of that blog index (https://www.micronshub.eu<blog index path>/<one non-empty path segment>, no '
-      + 'query or fragment). After them the candidate must repeat the base list from its first item, byte for byte and in order, and must be at least '
-      + 'as long as the base list. So the only accepted change is "new articles first, the oldest fall off the end" (the handler lists the 10 newest, '
-      + 'middleware.ts fetchRecentArticles). The number of new articles is not capped: at one article per language per day the list turns over within '
-      + 'the C+1 … C+14 window. With the list removed, the two documents must be equal in every field (F13–F25). New article URLs are listed.',
+    rule: 'Blog index pages (the 14 localizedPath(lang, "blog-index") URLs of middleware/slugs.ts) only, and only when the article list changed: the '
+      + 'article list (the <article> items inside article#seo-content, which must be adjacent siblings separated by ASCII whitespace only, and the '
+      + 'itemListElement entries of the ItemList JSON-LD block, paired item by item) may start with articles that are not in the base list. Each of '
+      + 'them must be an article of that blog index (https://www.micronshub.eu<blog index path>/<one non-empty path segment>, no query or fragment) '
+      + 'that was not yet published when the base was captured: its URL is in no <loc> of the base snapshot\'s /sitemap-<lang>.xml, '
+      + '/sitemap-complete.xml or /api/sitemap record and in no entry of the base URL set. The base snapshot must hold at least one of those sitemap '
+      + 'records (HTTP 200, a parsable urlset) and it must list every article of the base list; otherwise new and older articles cannot be told '
+      + 'apart and the rule does not apply. After the new articles the candidate must repeat the base list from its first item, byte for byte and '
+      + 'in order, and must be at least as long as the base list. So the only accepted change is "articles published since the capture first, the '
+      + 'oldest fall off the end" (the handler lists the 10 newest, middleware.ts fetchRecentArticles). The number of new articles is not capped: at '
+      + 'one article per language per day the list turns over within the C+1 … C+14 window. The list is then replaced by one fixed marker in both '
+      + 'documents (so its position and parent stay compared) and the ItemList is emptied; the two documents must be equal in every field '
+      + '(F13–F25). A list that did not change relaxes nothing. New article URLs are listed.',
   },
   {
     id: 'prerender-tag-scripts',
@@ -109,28 +115,57 @@ export function isBlogArticleKey(key, blogIndexPath) {
 }
 
 /**
+ * Form of a www URL used to look it up among the base snapshot's sitemap
+ * <loc> values: every path segment percent-decoded and re-encoded with
+ * encodeURIComponent, as api/sitemap.js encodeSitemapUrl writes them, so that
+ * a link and a <loc> naming the same article compare equal however each was
+ * escaped. null for anything that does not parse.
+ */
+export function publishedKey(href) {
+  let u;
+  try { u = new URL(href, PRODUCTION_ORIGIN); } catch { return null; }
+  const seg = (s) => { try { return encodeURIComponent(decodeURIComponent(s)); } catch { return s; } };
+  return `${u.origin}${u.pathname.split('/').map(seg).join('/')}${u.search}`;
+}
+
+/**
  * Rule `blog-index-article-list`, list part. `base` and `cand` are arrays of
  * { key, html, jsonld } in page order. Accepted: cand = N ++ base[0..m) where
  * every item of N has a key not in base that is an article of the blog index
- * at `blogIndexPath` (isBlogArticleKey), and cand.length >= base.length.
- * @returns { ok, added: [key], dropped: [key], reason }
+ * at `blogIndexPath` (isBlogArticleKey) and cand.length >= base.length.
+ * When N is not empty, `published` (what the base snapshot shows as published
+ * at capture time: { sitemapHas(publishedKey), where(publishedKey) → the
+ * sitemap or URL set that lists it, or null; source }) must list every base
+ * item in its sitemaps and none of N; without it (null, or { error }) the
+ * rule fails closed. N empty means the list did not change (`unchanged: true`).
+ * @returns { ok, added: [key], dropped: [key], unchanged, reason }
  */
-export function articleListShift(base, cand, blogIndexPath) {
+export function articleListShift(base, cand, blogIndexPath, published = null) {
+  const fail = (added, reason) => ({ ok: false, added, dropped: [], unchanged: false, reason });
   const baseKeys = new Set(base.map((x) => x.key));
   let k = 0;
   while (k < cand.length && !baseKeys.has(cand[k].key)) k++;
   const added = cand.slice(0, k).map((x) => x.key);
   const foreign = added.findIndex((key) => !isBlogArticleKey(key, blogIndexPath));
-  if (foreign !== -1) return { ok: false, added, dropped: [], reason: `item ${foreign + 1} (${added[foreign]}) is not an article of ${blogIndexPath}` };
-  if (new Set(added).size !== added.length) return { ok: false, added, dropped: [], reason: 'a new article is listed twice' };
+  if (foreign !== -1) return fail(added, `item ${foreign + 1} (${added[foreign]}) is not an article of ${blogIndexPath}`);
+  if (new Set(added).size !== added.length) return fail(added, 'a new article is listed twice');
   const rest = cand.slice(k);
-  if (cand.length < base.length) return { ok: false, added, dropped: [], reason: `the candidate lists ${cand.length} articles, the base ${base.length}` };
+  if (cand.length < base.length) return fail(added, `the candidate lists ${cand.length} articles, the base ${base.length}`);
   for (let i = 0; i < rest.length; i++) {
     const b = base[i]; const c = rest[i];
-    if (!b) return { ok: false, added, dropped: [], reason: `item ${k + i + 1} (${c.key}) is not where the base list continues` };
-    if (b.key !== c.key) return { ok: false, added, dropped: [], reason: `item ${k + i + 1} is ${c.key}, the base list continues with ${b.key}` };
-    if (b.html !== c.html) return { ok: false, added, dropped: [], reason: `item ${k + i + 1} (${c.key}): the HTML list item differs` };
-    if (b.jsonld !== c.jsonld) return { ok: false, added, dropped: [], reason: `item ${k + i + 1} (${c.key}): the ItemList entry differs` };
+    if (!b) return fail(added, `item ${k + i + 1} (${c.key}) is not where the base list continues`);
+    if (b.key !== c.key) return fail(added, `item ${k + i + 1} is ${c.key}, the base list continues with ${b.key}`);
+    if (b.html !== c.html) return fail(added, `item ${k + i + 1} (${c.key}): the HTML list item differs`);
+    if (b.jsonld !== c.jsonld) return fail(added, `item ${k + i + 1} (${c.key}): the ItemList entry differs`);
   }
-  return { ok: true, added, dropped: base.slice(rest.length).map((x) => x.key), reason: null };
+  if (!added.length) return { ok: true, added, dropped: [], unchanged: true, reason: null };
+  // "Published since the capture" needs evidence from the capture itself.
+  if (!published || published.error) return fail(added, published?.error || 'no record of the articles published at capture time');
+  const unlisted = base.find((x) => !published.sitemapHas(publishedKey(x.key)));
+  if (unlisted) return fail(added, `the base snapshot's sitemaps (${published.source}) do not list base article ${unlisted.key}, so they cannot tell articles published since the capture from older ones`);
+  for (const [i, key] of added.entries()) {
+    const where = published.where(publishedKey(key));
+    if (where) return fail(added, `item ${i + 1} (${key}) was already published when the base was captured (listed in ${where})`);
+  }
+  return { ok: true, added, dropped: base.slice(rest.length).map((x) => x.key), unchanged: false, reason: null };
 }

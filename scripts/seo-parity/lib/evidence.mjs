@@ -23,7 +23,11 @@
 //    www before the flip; no §1 stage compares Vercel with its own capture,
 //    so --changed-since-capture does not lift it);
 //  - snapshot vs live, same origin and the same non-Vercel platform set as at
-//    capture, without --changed-since-capture.
+//    capture, without --changed-since-capture;
+//  - live vs live or snapshot vs live where the live candidate answers from
+//    Vercel and never from Cloudflare (every §1 candidate is a Cloudflare
+//    deployment; Vercel against Vercel under two host names may be one
+//    deployment, which the origins cannot show).
 
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -104,6 +108,17 @@ export function evidenceCheck(o) {
         banners.push(`Same origin and platform as the capture (${shown}); changed since the capture, as stated by the operator: ${o.changedSinceCapture}`);
       }
     }
+  }
+  // Every §1 candidate is a Cloudflare deployment. A live candidate that
+  // answers from Vercel only (Vercel against Vercel under two host names, such
+  // as www and a *.vercel.app alias of the same deployment, or a candidate
+  // left on Vercel by mistake) is no §1 stage, whatever the origins.
+  const cand = o.platforms?.candidate || [];
+  if (!selfDiff && o.mode !== 'snapshot-vs-snapshot' && cand.includes('vercel') && !cand.includes('cloudflare')) {
+    const base = o.platforms?.base || [];
+    const both = base.includes('vercel') && !base.includes('cloudflare');
+    reasons.push(`the candidate answers from Vercel (${cand.join(', ')}): every SEO_PARITY.md §1 candidate is a Cloudflare deployment; not gate evidence`);
+    banners.push(`VERCEL CANDIDATE: ${o.candOrigin} answers from Vercel (${cand.join(', ')}); every SEO_PARITY.md §1 candidate is a Cloudflare deployment.${both ? ' The base answers from Vercel too, so this may be one deployment under two host names (a self-diff the origins cannot show).' : ''} NOT gate evidence, NOT SIGNABLE.`);
   }
   if (selfDiff) {
     reasons.unshift(`self-diff (${selfDiff.kind}): ${selfDiff.detail}; not gate evidence`);
