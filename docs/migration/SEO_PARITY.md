@@ -4,7 +4,7 @@ Status: Phase 0 planning deliverable · 2026-09-30 · nothing here is deployed.
 
 Related: [README.md](README.md) · [PLAN.md](PLAN.md) · [INVENTORY.md](INVENTORY.md) · [inventory.csv](inventory.csv) · [ARCHITECTURE.md](ARCHITECTURE.md) · [wrangler.jsonc.draft](wrangler.jsonc.draft) · [AGENTS.md](AGENTS.md) · [RISKS.md](RISKS.md) · [COSTS.md](COSTS.md)
 
-This file specifies the SEO parity gate the brief asks for (brief §2 item 2, §6, §7 item 5): what is compared, on which URLs, how the Vercel baseline is captured, the tool `scripts/seo-parity.mjs`, the Cloudflare zone settings that keep HTML untouched, and the Google Search Console (GSC) watch after the cutover. Nothing here has been built or run.
+This file specifies the SEO parity gate the brief asks for (brief §2 item 2, §6, §7 item 5): what is compared, on which URLs, how the Vercel baseline is captured, the tool `scripts/seo-parity.mjs`, the Cloudflare zone settings that keep HTML untouched, and the Google Search Console (GSC) watch after the cutover. Phase 1 built the tool and the `verify-ssr.sh`, Playwright and smoke-test changes of §6 (described here as built, 2026-10-03); no run against production exists yet (Q1).
 
 | Evidence tag | Meaning |
 |---|---|
@@ -28,6 +28,8 @@ This file specifies the SEO parity gate the brief asks for (brief §2 item 2, §
 | `error` | Network error, timeout, or no response after 3 attempts | Yes, if more than 0.5 % of entries; otherwise listed and re-run |
 
 A run is **invalid** (exit code 3, no verdict) when: the base answers with a challenge (`429` or `x-vercel-mitigated: challenge`, H-1); the candidate answers with a Cloudflare Access login redirect; errors exceed 0.5 %; or the run crosses a volatile window (§2.4). An invalid run is repeated, never signed.
+
+A run is **signable** (gate evidence; `report.json` `"signable": true`) only when it is valid and none of the following holds: it uses `PARITY_IGNORE_WINDOW=1`, or compares a snapshot captured with it; it uses an allow-list entry still pending approval; it has `error` entries; it is a self-diff (live vs live with one origin on both sides; a snapshot against the same snapshot directory or a copy of it; a Vercel snapshot against its own origin still answering from Vercel); it is any snapshot-vs-snapshot run (the §4 B6 noise floor, or captures of two origins); it compares a snapshot with its own origin on the same non-Vercel platform without `--changed-since-capture` stating what changed (the S17 reference against a Phase 7 change); or the live candidate answers from Vercel only (every candidate in the table below is a Cloudflare deployment). The platform is read from the first response of each entry at that origin: `cf-ray` means Cloudflare; `x-vercel-id` or `server: Vercel` means Vercel. Such a run still executes, reports and keeps its exit code; `unsignable_reasons` lists why, and `report.md` and stderr carry a banner. The S11 snapshot against `https://www.micronshub.eu` after the flip (same origin, Vercel at capture, Cloudflare now) stays signable.
 
 Where the gate applies (phase numbers per [PLAN.md](PLAN.md) §3):
 
@@ -103,11 +105,15 @@ The renderers read no clock (no `Date` use in middleware/): the only `Date.now()
 
 | Source | Effect | Rule |
 |---|---|---|
-| Content pipeline 07:00–09:00 UTC (article 07:00, `process-article-queue` every 5 min, translation 08:00, link fixing 08:30, sitemap 09:00; live 2026-09-30) | New articles, changed bodies, new hreflang entries, new sitemap blob | Runs happen between 10:05 and 06:55 UTC; the tool refuses to start inside the window and marks the run invalid if it crosses 09:00 or 00:00 UTC |
-| Per-isolate caches of 1 h (30 s negative) on Vercel (middleware.ts:44, :193) and Map + KV `SEO_CACHE` 1 h on the Worker | A row edited within the last hour can differ between hosts | A database-backed field difference (F9, F14–F22 with `X-Seo-Source: db` on either side) is re-checked after 65 min (`--recheck-after 3900`); gone = `transient`, still there = `fail` |
+| Content pipeline 07:00–09:00 UTC (article 07:00, `process-article-queue` every 5 min, translation 08:00, link fixing 08:30, sitemap 09:00; live 2026-09-30) | New articles, changed bodies, new hreflang entries, new sitemap blob | Runs start between 10:05 and 06:55 UTC: the tool refuses to start from 06:55 to 10:05 UTC and marks the run invalid if it crosses 00:00, 06:55 or 09:00 UTC (scripts/seo-parity/lib/window.mjs). `PARITY_IGNORE_WINDOW=1` lifts both checks, prints a banner and makes the run, and every compare that uses a snapshot captured that way, not signable (§1) |
+| Per-isolate caches of 1 h (30 s negative) on Vercel (middleware.ts:44, :193) and the same `Map` plus KV `SEO_CACHE` (1 h, positives only) on the Worker | A row edited within the last hour can differ between hosts | A database-backed field difference (F9, F14–F22 with `X-Seo-Source: db` on either side) is re-checked after 65 min (`--recheck-after 3900`); gone = `transient`, still there = `fail` |
 | Supabase fetch timeout 2.5 s (middleware.ts:194) | One side falls back to `i18n` | Same re-check |
 | `/sitemap.xml` `<lastmod>` = request date (api/sitemap.js:378) | Differs across midnight UTC | Same-day window rule above |
-| Snapshot mode (candidate compared with a stored snapshot) | Articles published since the capture | "Volatile" fields compare as base ⊆ candidate: sitemap `<loc>` set, `lastmod` values, blog index article list, blog hreflang sets; all other fields exact. New URLs are listed, not compared |
+| Snapshot mode (candidate compared with a stored snapshot) | Articles published since the capture | "Volatile" fields compare as base ⊆ candidate: sitemap `<loc>` set, sitemap alternates per `<loc>`, blog article hreflang sets; sitemap `lastmod` values may only move forward; the blog index article list follows the next row; all other fields exact. New URLs are listed, not compared |
+| Blog index article list (snapshot mode; rule `blog-index-article-list`) | The handler lists the 10 newest articles (middleware.ts `fetchRecentArticles`), so each new article pushes the oldest out and base ⊆ candidate cannot hold | Only on the 14 blog index URLs (`localizedPath(lang, 'blog-index')` of middleware/slugs.ts) and only when the list changed. The list is the `<article>` items inside `article#seo-content` (adjacent siblings, ASCII whitespace between them) paired item by item with the `itemListElement` entries of the ItemList JSON-LD. Accepted: articles of that blog index published after the capture first (in no `<loc>` of the base snapshot's `/sitemap-<lang>.xml`, `/sitemap-complete.xml` or `/api/sitemap` record and in no base URL entry), then the base list from its first item, byte for byte, at least as long as the base list. The base snapshot must hold one of those sitemap records and it must list every base article, otherwise the rule does not apply. The list is then replaced by one fixed marker in both documents (position and parent stay compared) and the ItemList emptied; every field F13–F25 must then be equal. New article URLs are listed. Live mode stays exact |
+| Prerender tag scripts (all modes; rule `prerender-tag-scripts`) | The jsdom prerender captures `<script>` elements that the Google tag runtime adds; their presence and query (random values, timestamps, per-build IDs) differ between builds: two local builds of one tree differed in 83 prerendered `index.html` files, only there | Only for documents without `X-Seo-Source` on both sides (the handler declined, so a prerendered or static file answered: G9 #8–9). Left out of F23: a direct child of `<head>` with exactly the attributes `type="text/javascript"` and `src`, no content, and a `src` starting with `https://www.googletagmanager.com/gtag/js?` or `https://googleads.g.doubleclick.net/pagead/viewthroughconversion/`. The gtag loader of index.html (no `type`) and every other byte stay in F23; F13–F22 use the full document. Snapshots from a tool before 1.1.0 lack the reduced form, so F23 stays exact for them |
+
+Every rule that applies is recorded on the entry (`volatile` in `report.json`) and listed under "Volatile rules applied" in `report.md`, with the reason when a rule did not apply. The registry is `scripts/seo-parity/lib/volatile.mjs`.
 
 ## 3. URL set
 
@@ -117,7 +123,7 @@ The renderers read no clock (no `Date` use in middleware/): the only `Date.now()
 |---|---|---|---|
 | G1 Prerender routes | 210 | The 15 route shapes of vite.config.ts:29-50 built from the `SLUGS` map at vite.config.ts:10-25 (14 languages); the generator asserts 210 unique paths | All shadowed by the SEO handler in production (H-8); all 210 are in the live sitemap |
 | G2 `service_pages` | 98 → 0 new | Supabase REST with the anon key: `service_pages?select=language,slug&status=eq.published`; URL = `localizedPath()` of middleware/slugs.ts:186 (`index` → services index, else service detail) | 7 slugs × 14 (live 2026-09-30); all 98 URLs are already in G1, the generator fails if one is not |
-| G3 `content_pages` | 126 → 42 new | `content_pages?select=language,slug,localized_slug&status=eq.published`; `home` → `/{lang}`, `blog` → `/{lang}/{blog}`, otherwise `/{lang}/` + `localizedContentSlug()` (middleware/slugs.ts:169); the sitemap rule "`localized_slug`, else `slug`" (api/sitemap.js:126) is applied too and both URLs are kept if they differ | 9 slugs × 14 (live 2026-09-30). New: `education`, `legal-notice`, `privacy-policy` × 14, `cs` with localised slugs `vzdelavani`, `pravni-informace`, `zasady-ochrany-osobnich-udaju` (live sitemap) |
+| G3 `content_pages` | 126 → 42 new | `content_pages?select=language,slug,localized_slug&status=eq.published`; `home` → `/{lang}`, `blog` → `/{lang}/{blog}`, otherwise `/{lang}/` + `localizedContentSlug()` (middleware/slugs.ts:169); the sitemap rule "`localized_slug`, else `slug`" (api/sitemap.js:126) is applied too and both URLs are kept if they differ | 9 slugs × 14 (live 2026-09-30). New: `education`, `legal-notice`, `privacy-policy` × 14, `cs` with localised slugs `vzdelavani`, `pravni-informace`, `zasady-ochrany-osobnich-udaju` (live sitemap). Generated on 2026-10-03: 44 new, the 42 plus `/cs/odvetvi` and `/cs/projekty`, whose `localized_slug` differs from the G1 slugs `prumysl` and `nase-prace` (PLAN.md Q24); `gate` total 1,088 |
 | G4 Articles | 700 (`full`: 2,344) | From `/sitemap-complete.xml` of the base: per language, sort the article `<loc>` values by SHA-256 of `seed + "\n" + loc` and take the first 50; seed `micronshub-parity-v1`, recorded in `urls.json` | Every language has at least 158 published articles (live 2026-09-30); the sample only changes where articles were added or removed |
 | G5 Sitemaps | 20 | 17 public URLs from the rewrites at vercel.json:130-145 and the handler switch at api/sitemap.js:401-410: `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, `/sitemap-{lang}.xml` × 14; plus `/api/sitemap` (direct function path); plus 2 probes: `/sitemap-xx.xml` (unsupported language → 404, api/sitemap.js:337-339) and `/sitemap-enx.xml` (the language is read with `/lang=([a-z]{2})/i`, api/sitemap.js:334, so today it serves the `en` blob) | §9 |
 | G6 Redirects | 32 | 25 sources of vercel.json:2-128; 3 client-only entries (`/csoffert`, `/enoffert`, `/pl/wyko%C5%84czenie-powierzchni`; src/components/SEORedirects.tsx:39-43, :57); 2 samples per client regex (src/components/SEORedirects.tsx:66, :73): `/frdevis`, `/ESorcamento`, `/en/frdevis`, `/de/PLwycena` | The mojibake source RD-12 (vercel.json:59) is sent as the percent-encoded bytes of its source string; its baseline status decides the expectation. Client-only entries and pattern samples: baseline 200 (SPA shell) |
@@ -194,8 +200,8 @@ Excluded on purpose: `on-demand-craft-greece.vercel.app` (duplicate Vercel host,
 | B3 | Content freeze for the window: no dashboard edits to `service_pages`, `content_pages` or articles; start after 10:05 UTC | Dimitris | Window agreed |
 | B4 | `node scripts/seo-parity.mjs --generate-urls --base https://www.micronshub.eu --profile full --out urls.json` with `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the environment | Claude supplies, Dimitris runs | `urls.json` holds 2,730 entries, the 700-article sample flagged for the `gate` profile; generator assertions pass |
 | B5 | Capture A: `--capture --base https://www.micronshub.eu --urls urls.json --snapshot <dir>/A --concurrency 8` (GET + HEAD, OPTIONS on `/api/*`, manual redirects, all headers, raw HTML/XML/TXT) | Dimitris | Exit 0; error rate < 0.5 %; no challenge responses |
-| B6 | Capture B, at least 65 min after A; then `--snapshot <dir>/A --candidate snapshot:<dir>/B` (self-diff) | Dimitris | The self-diff lists the noise floor: every field that differs between two captures of the same production. Any such field outside §2.4 is investigated before Phase 1 relies on it |
-| B7 | Store A, B and the self-diff outside git (private storage), record the date and the SHA-256 of `A/manifest.json` in the PLAN.md §2 gate log; remove the Vercel exemption | Dimitris | Phase 0 gate item 4 |
+| B6 | Capture B, at least 65 min after A; then `--snapshot <dir>/A --candidate snapshot:<dir>/B` (noise-floor run; never signable, §1) | Dimitris | The noise-floor report lists every field that differs between two captures of the same production. Any such field outside §2.4 is investigated before Phase 1 relies on it |
+| B7 | Store A, B and the noise-floor report outside git (private storage), record the date and the SHA-256 of `A/manifest.json` in the PLAN.md §2 gate log; remove the Vercel exemption | Dimitris | Phase 0 gate item 4 |
 | B8 | Re-capture at S11 (`full`) and, immediately before S12, a `gate` capture | Both | Snapshots dated; the S12 comparison uses the latest |
 
 The baseline answers these open points; each answer is copied into [PLAN.md](PLAN.md) §2 evidence:
@@ -221,7 +227,7 @@ Node script (Node version per P0-7), no browser. It parses HTML with an HTML5 pa
 | Capture | `--capture --base <origin> --urls <file> --snapshot <dir>` | Snapshot directory |
 | Live vs live | `--base <origin> --candidate <origin> --urls <file> --out <dir>` | Report |
 | Snapshot vs live | `--snapshot <dir> --candidate <origin> --out <dir>` (the URL list comes from the snapshot) | Report |
-| Snapshot vs snapshot | `--snapshot <dir> --candidate snapshot:<dir> --out <dir>` | Report (self-diff, CI without network access to the base) |
+| Snapshot vs snapshot | `--snapshot <dir> --candidate snapshot:<dir> --out <dir>` | Report (noise-floor run, §4 B6; CI without network access to the base). Never signable (§1) |
 
 ### 5.2 Flags
 
@@ -241,6 +247,8 @@ Node script (Node version per P0-7), no browser. It parses HTML with an HTML5 pa
 | `--recheck-after <s>` | 3900 | Re-check delay for database-backed differences (§2.4); `0` disables |
 | `--normalise-asset-hashes` | off | F25 |
 | `--max-hops <n>`, `--timeout <ms>` | 5, 30000 | Redirect chain limit, per-request timeout |
+| `--changed-since-capture <text>` | — | Snapshot vs live only: what changed on the platform since the capture; recorded in the report; required for a same-origin, same-platform (non-Vercel) run to be signable (§1) |
+| env `PARITY_IGNORE_WINDOW=1` | unset | Lifts the §2.4 window checks; the run is not signable |
 
 ### 5.3 Inputs and outputs
 
@@ -248,8 +256,8 @@ Node script (Node version per P0-7), no browser. It parses HTML with an HTML5 pa
 |---|---|
 | `urls.json` | `{ "version", "generated_at", "seed", "profile", "sources": { "sitemap_sha256", "service_pages", "content_pages" }, "entries": [ { "id", "group", "url", "methods", "expect" } ] }` |
 | Snapshot | `manifest.json` (tool version, run times, base, user agent, vantage type, bypass method, URL-list SHA-256), `urls.json`, `results.ndjson` (one line per request: URL, method, status, chain, response headers, body SHA-256 and length, extracted F13–F26), `raw/<sha256>.gz` (HTML, XML, TXT bodies, content-addressed). No request headers and no Access values are stored |
-| `report.json` | Run metadata, summary counts, one result per entry with its differences |
-| `report.md` | Human summary for the gate log (§5.5) |
+| `report.json` | Run metadata, summary counts, one result per entry with its differences. Evidence keys: `valid`, `invalid_reasons`, `signable`, `unsignable_reasons` (§1), `self_diff` (kind and detail, or `null`), `evidence_banners`, `platforms` (per side), `changed_since_capture`, `new_urls`, `volatile_rules` (the §2.4 registry); per result, `volatile` lists the rules applied or why one did not apply |
+| `report.md` | Human summary for the gate log (§5.5), with a `Signable:` line, the evidence banners and a "Volatile rules applied (§2.4)" section |
 | `diffs/<id>.diff` | Unified diff of the normalised documents (F23) for failures, first 200 lines |
 
 `report.json` excerpt (shape only; values are illustrative):
@@ -281,6 +289,8 @@ Node script (Node version per P0-7), no browser. It parses HTML with an HTML5 pa
 | 1 | Valid run, at least one `fail` (including an expired allow-list entry) |
 | 2 | Usage or input error: bad flags, unreadable URL list or snapshot, allow-list that does not validate |
 | 3 | Invalid run: challenge from the base, Access login redirect from the candidate, error rate above 0.5 %, or a volatile window crossed (§1, §2.4) |
+
+Signability (§1) never changes the exit code: a self-diff or noise-floor run that passes exits 0 and is still not signable.
 
 ### 5.5 Markdown report excerpt
 
@@ -357,14 +367,30 @@ Initial entries (Phase 1):
 | AL-005 (only if P1-5 ports the patterns) | the 4 pattern samples | `response` | 200 → 308 | INVENTORY.md RD-P1, RD-P2 |
 | AL-1xx (after Q5) | soft-404 probes S-01…S-09 | `response` | 200 → 404 | §7 |
 
+### 5.7 Tool tests
+
+`npm --prefix scripts/seo-parity test` from the repository root (the package script is `node --test test/*.test.mjs`; `node --test scripts/seo-parity/test/*.test.mjs` is equivalent). Node 22 rejects the directory form `node --test scripts/seo-parity/test/`. The tests run offline against local fixture servers on `127.0.0.1`: no Supabase, no production traffic. 94 tests on 2026-10-03, covering the field rules, the allow-list, the window, signability and the §2.4 rules.
+
 ## 6. Extensions to existing checks
 
 | Check | Change (Phase 1) | Gate use |
 |---|---|---|
-| `scripts/verify-ssr.sh` | One request wrapper replaces the 11 `curl` calls (scripts/verify-ssr.sh:41, :75, :234, :266, :275, :283, :293, :316, :329, :362, :373). When `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are set and the target host equals the host under test, it adds the two Access headers and drops `-L`, so the headers can never be forwarded to another host on a redirect. New `HOST_B`: every check runs against `HOST` and `HOST_B`, the per-check result lines are written to two files and compared with `diff`; any failed check or differing line exits 1. `HOST` default stays `https://www.micronshub.eu` (scripts/verify-ssr.sh:22); user agent unchanged (:21); the script never echoes headers | `HOST=<preview> scripts/verify-ssr.sh` green (PLAN.md §5.1 item 3); `HOST_B` pairing at S11 |
-| `tests/e2e/seo.spec.ts` + `playwright.config.ts` | `BASE_URL` selects the host (playwright.config.ts:8). Access headers are added by a fixture with `context.route()` only for requests to the `BASE_URL` host. `extraHTTPHeaders` is not used, because it sends the headers with every request, including third-party hosts the shell loads (fonts, tag manager; index.html:42-84). The test at tests/e2e/seo.spec.ts:37-42 expects `<urlset` from `/sitemap.xml`, but `/sitemap.xml` serves a `<sitemapindex>` (api/sitemap.js:377-389), so it fails against production today; change it to expect `<sitemapindex` and add the `<urlset` assertion for `/sitemap-complete.xml` (test-only change) | Green on production and on the preview (PLAN.md §5.1 item 4) |
-| `tests/middleware/smoke.mjs` | Add the Worker modules to the esbuild bundle (same pattern as smoke.mjs:47-65): (a) redirect table has 28 entries, all 308, RD-12 source byte-identical to vercel.json:59; (b) route decisions for every G7 probe equal between `parseRoute` in middleware.ts:334-346 and the Worker copy; (c) offline document parity: `middleware.ts` and `workers/site/src/seo/handler.ts` run against the same shell (`dist/index.html`) and the same recorded Supabase REST responses (captured once with the anon key for the fixture URLs; stubbed `fetch` and `env.ASSETS`) and must return byte-identical HTML and headers for 30 fixture URLs | Green (PLAN.md §5.1 item 6); runs in CI without network |
+| `scripts/verify-ssr.sh` | One request wrapper replaces the 11 `curl` calls (scripts/verify-ssr.sh:41, :75, :234, :266, :275, :283, :293, :316, :329, :362, :373). When `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are set and the target host equals the host under test, it adds the two Access headers and drops `-L`, so the headers can never be forwarded to another host on a redirect. New `HOST_B`: every check runs against `HOST` and `HOST_B`, the per-check result lines are written to two files and compared with `diff`; any failed check or differing line exits 1. `HOST` default stays `https://www.micronshub.eu` (scripts/verify-ssr.sh:22); user agent unchanged (:21); the script never echoes headers. Every `grep -q` check reads the page through a here-string (`grep -q … <<<"$html"`): under `set -o pipefail`, `echo "$html" \| grep -q` let the writer die of SIGPIPE when `grep` stopped at its first match, which reported random passing checks as `[FAIL]` and could hide a regression (fixed in Phase 1; 3,000 replayed runs without a random result) | `HOST=<preview> scripts/verify-ssr.sh` green (PLAN.md §5.1 item 3); `HOST_B` pairing at S11 |
+| `tests/e2e/seo.spec.ts` + `playwright.config.ts` | `BASE_URL` selects the host (playwright.config.ts:8). Access headers are added by a fixture with `context.route()` only for requests to the `BASE_URL` host. `extraHTTPHeaders` is not used, because it sends the headers with every request, including third-party hosts the shell loads (fonts, tag manager; index.html:42-84). The test at tests/e2e/seo.spec.ts:37-42 expects `<urlset` from `/sitemap.xml`, but `/sitemap.xml` serves a `<sitemapindex>` (api/sitemap.js:377-389), so it fails against production today; change it to expect `<sitemapindex` and add the `<urlset` assertion for `/sitemap-complete.xml` (test-only change). Gate item 4 runs as `BASE_URL=<preview> npm run cf:e2e` from the repository root, with `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the environment for a preview behind Access: the script installs the pinned `@playwright/test@1.56.1` with `--no-save` (no `package.json` or lockfile change) and runs `tests/e2e/seo.spec.ts` only. Without `BASE_URL` it targets production. A new machine first needs `npx playwright install chromium` | Green on production and on the preview (PLAN.md §5.1 item 4) |
+| `tests/middleware/smoke.mjs` | Add the Worker modules to the esbuild bundle (same pattern as smoke.mjs:47-65): (a) redirect table has 28 entries, all 308, RD-12 source byte-identical to vercel.json:59; (b) route decisions for every G7 probe equal between `parseRoute` in middleware.ts:334-346 and the Worker copy; (c) offline document parity: `middleware.ts` and `workers/site/src/seo/handler.ts` run against the same shell (`dist/index.html`) and the same recorded Supabase REST responses (captured once with the anon key for the fixture URLs; stubbed `fetch` and `env.ASSETS`) and must return byte-identical HTML and headers for 30 fixture URLs. As built: (a) and (b) are in smoke.mjs (323 route decisions, including the 210 prerender routes and the G9 paths); (c) is the vitest suite `workers/site/test/seo-parity.test.ts` (51 cases, `npm run cf:test`) | Green (PLAN.md §5.1 item 6); runs in CI without network |
 | Lighthouse | 5 URLs, mobile preset, 3 runs per host interleaved from the same machine; score = median; candidate ≥ base on each URL (PLAN.md §5.1 item 5); a URL that misses by 3 points or less is re-run 5 times and the median of 5 decides; LCP, CLS, TBT and TTFB are reported alongside. Access: a temporary Access Bypass policy for the runner's single IP during the run, because `--extra-headers` would send the service token to third-party origins too | Gate item 5 |
+
+Pre-existing `verify-ssr.sh` failures. Against the local Worker (`wrangler dev`, 2026-10-03) the script reports 157 checks ok and fails the same 7 in every run. For each of these URLs the Worker's output is byte-identical to middleware.ts on the same shell and data, so they are assertions or thresholds that today's content does not meet, not Worker differences. They are listed as pre-existing, to be confirmed by the owner's baseline run against production (P0-3, Q1); gate item 3 needs them fixed or the assertions changed:
+
+| # | URL | Check (scripts/verify-ssr.sh) | Local result |
+|---|---|---|---|
+| 1 | `/nb/tjenester/platarbeid` | Body contains `platarbeid` (:300) | No; `#seo-content`, canonical and JSON-LD present |
+| 2 | `/it/blog` | Body contains `blog\|articolo` (:330) | No; the same three present |
+| 3 | `/sv/blogg` | Body contains `blog\|artikel` (:334) | No; the same three present |
+| 4 | `/da/blog` | Body contains `blog\|artikel` (:335) | No; the same three present |
+| 5 | `/nb/blogg` | Body contains `blog\|artikkel` (:337) | No; the same three present |
+| 6 | `/en/contact` | Raw size ≥ 22,000 B (content-pages loop, :390) | 21,444 B |
+| 7 | `/en/legal-notice` | Raw size ≥ 20,000 B (content-pages loop, :388) | 16,822 B |
 
 Lighthouse URLs:
 

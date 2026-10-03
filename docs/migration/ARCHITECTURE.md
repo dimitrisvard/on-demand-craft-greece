@@ -208,8 +208,18 @@ Rules that follow from the split:
 | 2 | `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, then `/sitemap-{lang}.xml`, and `/api/sitemap` | Port of `api/sitemap.js` (`type` = `main-index`, default, `index`, `lang`; api/sitemap.js:402-409); headers as api/sitemap.js:392-396; Cache API 1 h | Exact names are checked before the `{lang}` pattern because `index` and `complete` also match it (Vercel evaluates the rewrites in order, vercel.json:131-145); H-12 |
 | 3 | `/api/*` | Local handler, `OPS` forward, or Vercel forward when flag `api.forward_to_vercel` is on (§6.4) | Independent of HTML rendering; `/api/track` and `/api/connector-status` aliases resolved here (vercel.json:151-157) |
 | 4 | `/{lang}` and `/{lang}/*` for the 14 languages (middleware.ts:682-687) | SEO handler: copy of the `middleware.ts` orchestrator; `middleware/*` imported unchanged | H-8: the 210 prerendered files differ from the injected shell (Helmet head, `og:locale` `en`, no `#seo-content`) and must never be served for language routes; `src/main.tsx:7` renders without hydration |
-| 5 | `/laserkritis/`, `/zohoverify/` (only if the P0-3 baseline shows Vercel serving the directory index) | `env.ASSETS.fetch` of `<path>index.html` | `html_handling: "none"` serves exact file paths only |
+| 5 | `/laserkritis/`, `/zohoverify/` (only if the P0-3 baseline shows Vercel serving the directory index; var `DIRECTORY_INDEX_EMULATION`, `"true"` in Phase 1) | `env.ASSETS.fetch` of `<path>index.html` | `html_handling: "none"` serves exact file paths only |
 | 6 | Everything else | `env.ASSETS.fetch(request)`: asset, or SPA shell 200 | Same as Vercel's filesystem + `/(.*)` fallback; `/` and unprefixed legacy routes stay 200 shells (H-9) |
+
+Router rules (as built in Phase 1: `workers/site/src/index.ts`, `src/sitemap.ts`, `src/compat/vercel-shim.ts`):
+
+| Rule | Detail | Why |
+|---|---|---|
+| Error policy | A throw in any step answers `500` `text/plain` (`Internal Server Error`), logged with the step and the path. One exception: a throw in step 2 on `/api/sitemap` is logged and the request continues to step 3 (Phase 1: the forward to Vercel). A `null` from step 4 is not an error: it continues to steps 5–6 exactly where middleware.ts returns `undefined`, including after a logged shell failure | Vercel answers a crashing Function (the `/sitemap*.xml` rewrites) or Middleware with a 5xx (`FUNCTION_INVOCATION_FAILED`, `MIDDLEWARE_INVOCATION_FAILED`), never the shell or the prerendered file (H-8; a non-XML `/sitemap*.xml` answer is a rollback trigger, [SEO_PARITY.md](SEO_PARITY.md) §10.3) |
+| HEAD on static files | Steps 5–6 fetch the asset as GET, count the bytes as they stream (not buffered) and set `Content-Length`; `finalise()` drops the body. An answer without a body, or one that already has `Content-Length`, passes unchanged. SEO documents (step 4) get no `Content-Length` on HEAD: it is not compared, and Vercel's value is unknown | Under `wrangler dev` 4.145.0 workerd sends no `Content-Length` on HEAD, not even for `env.ASSETS`' own HEAD answer; Vercel sends the file size and the parity tool compares it on G8 #10 (`/occt-import-js.wasm`, 7,604,031 B). Re-check on the preview |
+| Sitemap query merge | The rewrite destination's query (with the raw `:lang` capture) is overridden key by key by the request's query; the function's `req.url` lists the request's keys first, then the rewrite-only keys; keys and values are percent-decoded and re-encoded with `encodeURIComponent` (so `/sitemap-d%65.xml` reaches the function as `lang=de`). Two deliberate differences: a malformed escape stays raw instead of throwing, and a value splits at the first `=` only | Follows Vercel's reference router (`vercel dev`, vercel CLI 62.0.0); production behaviour is confirmed with G5 probes that carry a query in the P0-3 baseline |
+| Function deadline | `api/sitemap.js` runs unchanged through a `(req, res)` shim with one 30 s deadline per invocation; a handler that has not called `res.end()` by then gets `504` `text/plain`. Work that continues after `res.end()` is not awaited; a later rejection is only logged | Vercel answers `FUNCTION_INVOCATION_TIMEOUT`; vercel.json sets no `maxDuration`, so the project's real limit is confirmed in the baseline |
+| Sitemap edge cache | Cache API, 1 h, status 200 only, GET and HEAD share one entry (HEAD runs the GET logic); other methods skip the cache. A no-op on `*.workers.dev` | Vercel's `s-maxage=3600` (api/sitemap.js:392-396) |
 
 SEO handler rules (step 4):
 
@@ -223,7 +233,7 @@ SEO handler rules (step 4):
 | Supabase config | `SUPABASE_URL` var and `SUPABASE_ANON_KEY` secret; a missing key is logged as an error on every request, never replaced by an empty string | today middleware.ts:43, :103-109 |
 | Soft 404 | 200 for unknown slugs through cutover; `SEO_STRICT_404` / flag `seo.strict_404` later | H-9; PLAN.md Q5 |
 | Preview | `X-Robots-Tag: noindex` on `*.workers.dev` and `PREVIEW_HOSTNAMES`; never on hosts in the zone | §5; brief §6 |
-| HEAD | Same status and headers as GET, no body; compared by the parity tool | H-28 |
+| HEAD | Same status and headers as GET, no body, no `Content-Length`; compared by the parity tool | H-28 |
 
 ### 6.3 Request sequence for `/{lang}/…`
 
@@ -268,15 +278,17 @@ sequenceDiagram
     S->>H: 4. SEO handler (ported middleware.ts)
     H->>A: fetch /index.html (never self-fetch)
     A-->>H: 200 shell (non-2xx is logged as an error)
-    H->>M: get row
+    H->>M: get row (1 h, no-row result 30 s)
     alt isolate miss
-      H->>K: get row (1 h, 30 s negative)
+      H->>K: get row (positives only, 1 h, 500 ms read limit)
       alt KV miss
-        H->>D: service_pages, content_pages (2.5 s timeout), articles
+        H->>D: service_pages, content_pages (2.5 s timeout, KV read included), articles
         D-->>H: rows
-        H->>K: put row
+        opt row found
+          H->>K: put row (1 h)
+        end
       end
-      H->>M: set row
+      H->>M: set row, or the no-row result for 30 s
     end
     H-->>C: 200 HTML, Cache-Control max-age=0, X-Seo-Source
   else directory index path
@@ -597,12 +609,12 @@ H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate 
 
 | Layer | Content | TTL | Invalidation | Evidence |
 |---|---|---|---|---|
-| Isolate `Map` (7 caches) | SEO rows: article, translations, lists, service pages, content pages, alternates | 1 h; 30 s for misses | Isolate recycling (as on Vercel) | middleware.ts:44, :94-99, :193, :375 |
-| KV `SEO_CACHE` | Same rows, keyed `seo:v1:<kind>:<lang>:<slug>` | 1 h; 30 s negative stored as an `expires` field in the value, because KV `expirationTtl` has a 60 s minimum (CF docs, re-check at execution) | `microns-ops` deletes keys on content publish; KV propagation is eventually consistent | [PLAN.md](PLAN.md) P1-4 |
+| Isolate `Map` (7 caches) | SEO rows: article, translations, lists, service pages, content pages, alternates | 1 h; 30 s for misses ("no row", and a failed service page, service page list or content page lookup, which middleware.ts also caches 30 s; the Worker tags it failed so the strict-404 path never turns it into a 404). Other failed lookups are not cached, as in middleware.ts | Isolate recycling (as on Vercel). The Worker bounds each `Map` at 1,000 entries per kind (300 for articles): expired entries go first, then the oldest written; keys over 512 B are not cached | middleware.ts:44, :94-99, :193, :375; workers/site/src/seo/cache.ts |
+| KV `SEO_CACHE` | Same rows, positives only, keyed `seo:v1:<kind>:<lang>:<slug>`; value `{data, expires, v}`, where `v` fingerprints the query and normalisation that produced `data` (another `v` is a miss; bumping `CACHE_SHAPE_VERSION` in `workers/site/src/seo/supabase.ts` flushes). "No row" results and failed lookups (non-2xx, network error, timeout, missing key) are never written to KV (where they are cached at all, it is in the isolate `Map`), so unknown URLs cost no KV write; KV is still read for them. A content-page row is written only under its own `slug` or `localized_slug`; found under any other URL segment it stays in the isolate `Map` for 1 h | 1 h (`expirationTtl` 3600; the `expires` field is the logical expiry). A read waits at most 500 ms, then counts as a miss; for service pages, the service page list and content pages it runs inside middleware.ts's single 2.5 s budget. Writes run through `ctx.waitUntil` | `microns-ops` deletes keys on content publish; KV propagation is eventually consistent | [PLAN.md](PLAN.md) P1-4; workers/site/src/seo/cache.ts, supabase.ts |
 | Cache API | Sitemap responses | 1 h, matching `s-maxage=3600` today | Expiry; per data centre | api/sitemap.js:392-396; H-12 |
 | HTML | Not cached at the edge | `Cache-Control: public, max-age=0, must-revalidate` | — (no Cache Rule; HTML, JSON and XML are not cached by default) | middleware.ts:674; CF docs (verified 2026-09-27) |
 | Static assets | Served by Workers Static Assets; hashed `/assets/*` | Platform defaults; `_headers` only if the baseline needs immutable caching or the `Content-Type` values of vercel.json:173-184 | New version on deploy | H-28 |
-| KV `FLAGS` | Flag values | Read with a short `cacheTtl`; synced every minute from `feature_flags` | Sync job | PLAN.md P4-2 |
+| KV `FLAGS` | Flag values | Read with a short `cacheTtl` (60 s in Phase 1); synced every minute from `feature_flags`. The SEO handler waits at most 500 ms for `seo.strict_404`, then uses var `SEO_STRICT_404` | Sync job | PLAN.md P4-2; workers/site/src/flags.ts |
 
 ## 18. Observability
 

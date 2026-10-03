@@ -19,15 +19,16 @@ Every method takes the same path (`src/index.ts`). Every response passes through
 | 1 | `src/redirects.ts` | 28 redirects, all 308. RD-01…RD-25 come from vercel.json:2-128, byte-exact (RD-12 keeps its mojibake source). RD-26…RD-28 are client-only entries of SEORedirects.tsx, served as 308 (documented deviation AL-001…AL-003). Matches the raw pathname and the NFC-decoded pathname. |
 | 2 | `src/sitemap.ts` + `src/compat/vercel-shim.ts` | `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, `/sitemap-:lang.xml` and `/api/sitemap` run `api/sitemap.js` unchanged through a `(req, res)` shim. Cache API 1 h, status 200 only. |
 | 3 | `src/api/forward.ts` | Every other `/api/*` request is proxied to `API_FORWARD_ORIGIN` (Vercel production). `cf-*` headers, including the Access token, are stripped. |
-| 4 | `src/seo/handler.ts` (+ `supabase.ts`, `cache.ts`, `clientRoutes.ts`) | Copy of the `middleware.ts` orchestrator. It reads the shell with `env.ASSETS.fetch('/index.html')` and uses a per-isolate `Map` plus KV `SEO_CACHE` (1 h positive, 30 s negative). It returns `null` exactly where middleware.ts returns `undefined`. `seo.strict_404` is wired but off; while off, misses are logged as `would_404`. |
+| 4 | `src/seo/handler.ts` (+ `supabase.ts`, `cache.ts`, `clientRoutes.ts`) | Copy of the `middleware.ts` orchestrator. It reads the shell with `env.ASSETS.fetch('/index.html')` and uses a per-isolate `Map` (1 h; 30 s for "no row") plus KV `SEO_CACHE` (positives only, 1 h). It returns `null` exactly where middleware.ts returns `undefined`. `seo.strict_404` is wired but off; while off, misses are logged as `would_404`. |
 | 5 | `src/static.ts` | Directory-index emulation for `/laserkritis[/]` and `/zohoverify[/]`, when `DIRECTORY_INDEX_EMULATION` is `"true"`. |
 | 6 | `env.ASSETS.fetch` | Serves the file, or the SPA shell with 200 (`not_found_handling: single-page-application`). HEAD reads the asset as GET so it can send `Content-Length` (see deviations). |
 | all | `src/preview.ts` | Applies the vercel.json `headers` rules (CORS on `/api/*`, Content-Type on `/assets/*`). Adds `X-Robots-Tag: noindex` on `*.workers.dev`, localhost and `PREVIEW_HOSTNAMES`, never on the production zone. Sends HSTS only on `SITE_ORIGIN` when `HSTS_VALUE` is set. Strips the body on HEAD. |
 
-Errors: a throw in step 4, or in step 2 on a public `/sitemap*.xml` URL, answers `500 text/plain`. Vercel answers
-`MIDDLEWARE_INVOCATION_FAILED` / `FUNCTION_INVOCATION_FAILED` in these cases, never the prerendered file or the
-shell. On `/api/sitemap` a throw is logged and falls through to the step 3 forward. A handler that runs past the
-30 s budget gets a 504.
+Errors: a throw in any step answers `500 text/plain`, logged with the step and path. For step 4 and the public
+`/sitemap*.xml` URLs, Vercel answers `MIDDLEWARE_INVOCATION_FAILED` / `FUNCTION_INVOCATION_FAILED`, never the
+prerendered file or the shell. The one exception is `/api/sitemap`: a throw there is logged and falls through to the
+step 3 forward. A sitemap handler that has not ended its response within the 30 s budget gets a 504. A `null` from
+step 4 is not an error and continues to steps 5–6 (ARCHITECTURE.md §6.2).
 
 ## Files
 
@@ -72,13 +73,14 @@ Flags are set in local KV with
 | Command (repo root unless noted) | What it checks |
 |---|---|
 | `npm run cf:typecheck` | Strict `tsc` over `src/` and `test/`. middleware.ts is not imported: it is not strict-clean, so the harness loads it through a computed path. |
-| `npm run cf:test` | vitest: 336 tests in 7 files. Includes **offline document parity**, which runs middleware.ts and `handleSeo` on the same shell and recorded REST answers for 51 cases and requires byte-identical HTML, status and headers (SEO_PARITY.md §6 row 3 (c)). |
-| `npm run cf:smoke` (`node tests/middleware/smoke.mjs`) | Renderer smoke checks. Redirect table: 28 entries, all 308, RD-01…RD-25 equal to vercel.json, RD-12 byte-identical to vercel.json:59, RD-26…RD-28 present in SEORedirects.tsx. Route decisions: middleware.ts `parseRoute` equals the Worker `parseRoute` for the 22 G7 probes, the 51 fixture paths, the 210 prerender routes and the G9/edge paths (322 decisions). No network needed. |
-| `node --test scripts/seo-parity/test/*.test.mjs` | Parity tool unit tests (59). Node 22 does not accept a directory argument here; use the glob. |
+| `npm run cf:test` | vitest: 340 tests in 7 files. Includes **offline document parity**, which runs middleware.ts and `handleSeo` on the same shell and recorded REST answers for 51 cases and requires byte-identical HTML, status and headers (SEO_PARITY.md §6 row 3 (c)). |
+| `npm run cf:smoke` (`node tests/middleware/smoke.mjs`) | Renderer smoke checks. Redirect table: 28 entries, all 308, RD-01…RD-25 equal to vercel.json, RD-12 byte-identical to vercel.json:59, RD-26…RD-28 present in SEORedirects.tsx. Route decisions: middleware.ts `parseRoute` equals the Worker `parseRoute` for the 22 G7 probes, the 51 fixture paths, the 210 prerender routes and the G9/edge paths (323 decisions). No network needed. |
+| `npm --prefix scripts/seo-parity test` (or `node --test scripts/seo-parity/test/*.test.mjs`) | Parity tool unit tests (94), offline. Node 22 does not accept a directory argument here; use the npm script or the glob. |
 | `bash -n scripts/verify-ssr.sh` | Syntax check |
 | `npm run cf:dry` (`wrangler deploy --dry-run --outdir .wrangler/dry`) | Bundle and size report |
 | `npx wrangler check startup` (in `workers/site`) | Local startup CPU profile |
 | `HOST=<preview> bash scripts/verify-ssr.sh` | Gate item 3 |
+| `BASE_URL=<preview> npm run cf:e2e` | Gate item 4: installs `@playwright/test@1.56.1` with `--no-save` (no `package.json` or lockfile change) and runs `tests/e2e/seo.spec.ts`. Set `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` for a preview behind Access. Without `BASE_URL` it targets production. First run on a machine: `npx playwright install chromium` |
 | `node scripts/seo-parity.mjs --generate-urls ...` then `--base https://www.micronshub.eu --candidate <preview> --urls urls.json` | Gate item 1 (SEO_PARITY.md §5) |
 
 Fixture refresh after content edits, from the repo root:
@@ -97,8 +99,9 @@ Each one is either on the allow-list or a defensive change that does not change 
 - **`/_redirects`.** The file is deleted (P1-2) and the URL answers the shell (AL-004, pending). After the merge,
   Vercel production will also serve the shell there, so capture the P0-3 baseline before merging or mark AL-004
   as pre-merge only.
-- **Router error policy.** 500 `text/plain` (not Vercel's error page) on a throw in the SEO step or on a public
-  sitemap URL. 504 after a 30 s function budget (Vercel's maxDuration is to be confirmed).
+- **Router error policy.** 500 `text/plain` (not Vercel's error page) on a throw in any step, except
+  `/api/sitemap`, which falls through to the forward. 504 after a 30 s function budget (Vercel's maxDuration is
+  to be confirmed).
 - **Sitemap query merge.** Follows the `vercel dev` reference router (vercel CLI 62.0.0): the request's keys win
   and come first, and components are decoded and re-encoded. Two robustness differences: a malformed escape is
   kept raw, and values split at the first `=`. Production merge behaviour is to be confirmed with G5 probes that
@@ -111,8 +114,10 @@ Each one is either on the allow-list or a defensive change that does not change 
   - A shell failure or missing configuration is logged, not silent.
   - KV reads have a 500 ms limit. For service pages, the service page list and content pages, the KV read runs
     inside middleware.ts's single 2.5 s race.
-  - Failure negatives (5xx, network error, timeout, missing key) stay in the isolate. Only "no row" negatives
-    go to KV, for 30 s.
+  - KV holds positives only (1 h). "No row" negatives (30 s) and failed lookups (5xx, network error, timeout,
+    missing key) never reach KV; where middleware.ts caches them, they stay in the isolate `Map`. Unknown URLs
+    therefore cost no KV write. A content-page
+    row found under a segment that is neither its `slug` nor its `localized_slug` also stays in the isolate (1 h).
   - KV values are `{data, expires, v}`; a `v` mismatch is a miss. Bump `CACHE_SHAPE_VERSION` in
     `src/seo/supabase.ts` to flush.
   - Isolate Maps are capped (1000 entries per kind, 300 for articles). Keys over 512 bytes are not cached.
@@ -148,8 +153,8 @@ Each one is either on the allow-list or a defensive change that does not change 
    - the function maxDuration;
    - the HSTS value.
 3. **Allow-list.** Set `approved_on` for AL-001…AL-004. Runs that use a pending entry are valid but not signable.
-4. **verify-ssr.sh content assertions** (`scripts/verify-ssr.sh`, not changed here). Against the local Worker it
-   fails 7 checks deterministically, and it can fail 1 more at random:
+4. **verify-ssr.sh content assertions** (`scripts/verify-ssr.sh`). Against the local Worker it fails the same
+   7 checks in every run (listed in SEO_PARITY.md §6):
    - The 7 failures are `/nb/tjenester/platarbeid` (the heading is "Platebearbeidings­tjenester"),
      `/it/blog`, `/sv/blogg`, `/da/blog` and `/nb/blogg` (no `blog|articolo|artikel|artikkel` word in the
      body), `/en/contact` raw size 21,444 < 22,000, and `/en/legal-notice` 16,822 < 20,000.
@@ -157,33 +162,38 @@ Each one is either on the allow-list or a defensive change that does not change 
      same `dist/index.html` and live Supabase. They are therefore properties of today's code and content, not
      Worker bugs, and production most likely fails them too. The raw-size checks also depend on the shell size
      (5,446 B locally). Not confirmable live (Q1).
-   - The random failure is a race in the script: `set -o pipefail` with `echo "$html" | grep -q` sometimes reads
-     a match as a miss (7 in 2,000 runs, measured). It already exists at HEAD.
-   - Decide whether to update the assertions and the pipe pattern (for example `grep -q ... <<<"$html"`).
-5. **SEO_CACHE negative writes** (robustness-3, open). Each unknown `/{lang}/<seg>` writes 2 KV negatives and
-   each unknown blog slug writes 1. The exact change is in the seo-handler report.
-6. **Content.** The cs `localized_slug` values `odvetvi`/`projekty` differ from the static slugs
-   `prumysl`/`nase-prace`.
-7. **Docs** (owned by the orchestrator). Record the router error policy, the KV `v` field and limits, the HEAD
-   `Content-Length` rule and the stricter parity window (06:55 UTC) in ARCHITECTURE.md §6.2/§17 and
-   SEO_PARITY.md.
+   - The script's `grep -q` checks read the page through here-strings (`grep -q ... <<<"$html"`), so they no
+     longer fail at random under `pipefail` (the earlier SIGPIPE race is fixed).
+   - The owner's baseline run against production confirms them; then decide whether to update the assertions.
+5. **SEO_CACHE negative writes** (robustness-3): resolved 2026-10-03, nothing to decide. KV holds positives
+   only; unknown URLs cost no KV write (see the SEO handler deviations above).
+6. **Content (PLAN.md Q24).** The cs `content_pages.localized_slug` values `odvetvi` (industries) and `projekty`
+   (our work) differ from the static slugs `prumysl` and `nase-prace` (middleware/slugs.ts:64), which the
+   prerender and the published sitemap use; the other 13 languages match. All 9 cs content rows link to the
+   database forms, which answer 200 with their own canonical. Vercel serves the same; the parity URL set covers
+   both forms.
+7. **Docs.** Done 2026-10-03: ARCHITECTURE.md §6.2 and §17, SEO_PARITY.md §1, §2.4, §5 and §6, PLAN.md P1-3,
+   P1-4 and the Phase 1 file list, RISKS.md R-42.
 8. **Prerender is not deterministic.** jsdom captures third-party tag-manager `<script>` tags with `random=`
    timestamps. Two local builds of the same tree differ in 83 prerendered `index.html` files; the shell and
    assets are identical. The prerendered files are served only where the SEO handler returns nothing
-   (G9 #8–9 `/en/index.html`, `/fi/palvelut/index.html`). There, F23 will differ between any two builds, the
-   Vercel build and the Cloudflare build included. This needs a rule in the parity tool or a deterministic
-   prerender before gate item 1.
+   (G9 #8–9 `/en/index.html`, `/fi/palvelut/index.html`). The parity tool now leaves exactly those elements out
+   of F23 there (rule `prerender-tag-scripts`, SEO_PARITY.md §2.4): a run over the 212 prerendered routes of the
+   two builds went from 83 failures to 0. A deterministic prerender remains an option.
 
-## Phase 1 exit gate (PLAN.md §5.1), status 2026-10-02
+## Phase 1 exit gate (PLAN.md §5.1), status 2026-10-03
+
+"Local" means against `wrangler dev --local` in the build container, never the preview. Every local result is
+repeated on the preview once owner item 1 is done.
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 1 | Parity diff preview vs Vercel production, 0 differences outside the allow-list | **blocked** | Production answers 429 to this container (Q1), and no preview exists yet (owner item 1). The tool works end to end against the real Worker: a local self-diff (`wrangler dev`, gate profile without G10, 1,074 entries, 4,316 requests per host) gave 1,065 pass, 9 not-applicable, 0 fail (exit 0). With G10, the run is invalid because the `/api/*` OPTIONS forward reaches Vercel, which answers 429 (Q1). Offline document parity: 51/51 cases byte-identical to middleware.ts. Known risks for the real run: AL-001…004 pending; G9 #8–9 non-deterministic prerender (owner item 8); HEAD `Content-Length` to re-check. |
+| 1 | Parity diff preview vs Vercel production, 0 differences outside the allow-list | **blocked** | Production answers 429 to this container (Q1), and no preview exists yet (owner item 1). The tool works end to end against the real Worker: a local self-diff (`wrangler dev`, gate profile without G10, 1,074 entries, 4,316 requests per host) gave 1,065 pass, 9 not-applicable, 0 fail (exit 0); the tool now marks such a run as a self-diff, never signable. With G10, the run is invalid because the `/api/*` OPTIONS forward reaches Vercel, which answers 429 (Q1). Offline document parity: 51/51 cases byte-identical to middleware.ts. Known risks for the real run: AL-001…004 pending; HEAD `Content-Length` to re-check on the preview. G9 #8–9 prerender tag scripts are handled by rule `prerender-tag-scripts` (owner item 8). |
 | 2 | `dist/` file list identical to the Vercel production build, except the two deleted files | **partial** | A local `npx vite build` of this tree gives 638 files, 213 `index.html`, no "Prerendering skipped". Against the previous local build the list is identical except `_redirects` (`public/index.html` never reached `dist/`: the built shell overwrites it). The shell and all assets are byte-identical; 83 prerendered pages differ only in third-party script tags (owner item 8). The production file list cannot be listed: the Vercel API returns "File tree not found" for git deployment `dpl_6EWQ2aRCJcFtVEYtNXFpPsW67bKq`. Its commit `9afcba8` is an ancestor of this branch, and the build inputs differ from it only in `package.json` scripts and the two deletions. |
-| 3 | `HOST=<preview> scripts/verify-ssr.sh` exits 0 | **fail (blocked on preview)** | Against `wrangler dev` on localhost: exit 1, with 156 checks ok and 7 deterministic failures that are byte-identical to middleware.ts output (owner item 4), plus a random race in the script. Not yet run against a preview. |
-| 4 | Playwright `seo.spec.ts` green against the preview | **blocked** | No preview. `@playwright/test` is not a root devDependency; the specs and the Access fixture were only run against local stubs. |
+| 3 | `HOST=<preview> scripts/verify-ssr.sh` exits 0 | **fail (local: the 7 pre-existing checks only)** | `HOST=http://127.0.0.1:8796 bash scripts/verify-ssr.sh`: exit 1, with 157 checks ok and 7 deterministic failures that are byte-identical to middleware.ts output (owner item 4; SEO_PARITY.md §6). Listed as pre-existing, to be confirmed by the owner's baseline run against production. Not yet run against a preview. |
+| 4 | Playwright `seo.spec.ts` green against the preview | **pass (local)** | `BASE_URL=http://127.0.0.1:8796 npm run cf:e2e -- --retries=0`: 8 passed, 0 failed; the same with `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set (dummy values, which never appear in the output). `package.json` and `package-lock.json` unchanged (`--no-save`). Not yet run against a preview (owner item 1). |
 | 5 | Lighthouse on 5 URLs ≥ Vercel | **blocked** | Needs the preview and access to production (Q1). |
-| 6 | `tests/middleware/smoke.mjs` green | **pass** | Exit 0: 1,259 assertions ok, 0 fail. Includes the redirect table and the 322 route-decision comparisons; mutation-checked (a changed RD-12 source and a case-insensitive language matcher each fail it). |
+| 6 | `tests/middleware/smoke.mjs` green | **pass** | Exit 0: 1,259 assertions ok, 0 fail. Includes the redirect table and the 323 route-decision comparisons; mutation-checked (a changed RD-12 source and a case-insensitive language matcher each fail it). |
 | 7 | Size within Workers Paid limits; startup under 1 s | **pass (local)** | `wrangler deploy --dry-run`: 1,897.59 KiB, gzip 476.47 KiB. The Paid limit is 10 MB after compression and the Free limit is 3 MB. Assets: 852 files read from `dist/`; the largest is `occt-import-js.wasm` at 7.6 MB, under the 25 MiB per-file limit. `wrangler check startup`: 16.0 ms active CPU in a 50.3 ms profile window, locally. Re-check startup on the first upload. |
 | 8 | Preview hosts send `X-Robots-Tag: noindex` and refuse requests without Access | **partial** | `noindex` is on every response sampled from the local Worker (HTML, 308, XML, assets, HEAD). `preview.ts` treats `*.workers.dev` the same way and is unit-tested. Access is not configured yet (owner item 1). |
 | 9 | Vercel production build of the same commit succeeds | **blocked** | The commit is not pushed or built on Vercel yet (git state is owned by the orchestrator). The local `vite build` of this tree succeeds, and the last production deployment (`9afcba8`) is READY. |

@@ -42,9 +42,12 @@
  * request headers, so the route never lets such an error escape: a failure
  * is logged as one line with the credential values masked, and the request
  * is answered as a network error (a failed document load still fails its
- * test). When the test ends, the fixture removes the route before the
- * context closes, so requests still in flight (late images, chunks) end
- * quietly instead of failing a test that already passed.
+ * test). When the test ends, the fixture marks the route as finished before
+ * the context closes, so requests still in flight (late images, chunks) end
+ * quietly as network errors, with no log line, instead of failing a test that
+ * already passed. The route is not removed (no unroute): removing it would
+ * let the browser re-send such a request on its own, without the headers,
+ * and make the context close wait for that response.
  *
  * Usage in a spec:
  *   import { test, expect } from './fixtures/access';
@@ -149,8 +152,10 @@ async function routeWithAccess(route: Route, origin: string, credentials: Access
  * the origin of `baseURL`, without ever letting them reach another origin
  * through a redirect (see the file header).
  *
- * Returns a function to call once the test is over: it removes every route of
- * the context and ignores route calls still in flight (see "Errors" above).
+ * Returns a function to call once the test is over, before the context
+ * closes: route calls still in flight then end silently as network errors
+ * (see "Errors" above). The route itself stays installed until the context
+ * closes.
  */
 export async function installAccessRoute(
   context: BrowserContext,
@@ -165,7 +170,12 @@ export async function installAccessRoute(
       try {
         await routeWithAccess(route, origin, credentials);
       } catch (err) {
-        if (removed) return; // the test is over and the context is closing
+        if (removed) {
+          // The test is over and the context is closing: settle the route
+          // silently (never let it go out again without the headers).
+          await route.abort('failed').catch(() => {});
+          return;
+        }
         const request = route.request();
         console.error(
           `[access fixture] ${request.method()} ${request.url()} answered as a network error: ` +
@@ -177,7 +187,6 @@ export async function installAccessRoute(
   );
   return async () => {
     removed = true;
-    await context.unrouteAll({ behavior: 'ignoreErrors' });
   };
 }
 

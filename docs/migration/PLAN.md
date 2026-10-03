@@ -13,7 +13,7 @@ Conventions:
 | Evidence tags | `path:line` = this repository at commit `9afcba8`; "live 2026-09-30" = read-only re-capture on that date; "CF docs (verified 2026-09-27)" = Cloudflare documentation checked during planning; "CF docs, re-check at execution" = platform behaviour not yet verified; "list price, re-check at execution" = prices |
 | Owners | `Claude` (code, docs, scripts, verification) · `Dimitris` (dashboards, accounts, registrar, decisions) · `Both` |
 | Effort | `d` = one focused working day; figures are estimates. Phase totals are compared with the approved plan of 2026-09-27 |
-| IDs | Pre-flight `P0-n`; phase tasks `Pn-m`; hazards `H-1`…`H-30` (index in [README.md](README.md) §10, register in [RISKS.md](RISKS.md)); questions `Q1`…`Q23` (§9 of this file) |
+| IDs | Pre-flight `P0-n`; phase tasks `Pn-m`; hazards `H-1`…`H-30` (index in [README.md](README.md) §10, register in [RISKS.md](RISKS.md)); questions `Q1`…`Q24` (§9 of this file) |
 | Security wording | Security findings appear at summary level only. Details: private security note (delivered to the owner out of band, not in this public repo) |
 
 ## 1. Summary of decisions
@@ -105,8 +105,8 @@ Goal: `microns-site` on `*.workers.dev` serves every public URL exactly as Verce
 |---|---|---|---|---|
 | P1-1 | Scaffold `workers/site` from [wrangler.jsonc.draft](wrangler.jsonc.draft): `ASSETS` (`directory` `../../dist`), KV `SEO_CACHE` and `FLAGS`, vars (`SUPABASE_URL`, `SITE_ORIGIN`, `PREVIEW_HOSTNAMES`, `SEO_STRICT_404`), secret `SUPABASE_ANON_KEY`, `nodejs_compat`; add `wrangler`, `@cloudflare/workers-types`, `cf:*` scripts | Claude | 0.25 d | H-20 |
 | P1-2 | Delete `public/_redirects` and `public/index.html`; record `/_redirects` as a documented parity deviation (it is a Worker-config file on Cloudflare) | Claude | 0.1 d | H-3, H-21 |
-| P1-3 | Router `workers/site/src/index.ts` in this order: redirect table → sitemap routes → `/api/*` → SEO handler for `/{lang}` and `/{lang}/*` → directory-index emulation for `/laserkritis/` and `/zohoverify/` if the baseline shows it → `env.ASSETS.fetch(request)`. In Phase 1, `/api/*` is forwarded to Vercel production (flag `api.forward_to_vercel` on); parity runs exclude write actions | Claude | 0.25 d | H-8, H-14 |
-| P1-4 | SEO handler `workers/site/src/seo/handler.ts`: copy of the `middleware.ts` orchestrator; shell via `env.ASSETS.fetch`, non-2xx is a logged error (not a silent fall-through, cf. middleware.ts:424-428); anon key and Supabase URL from `env` with a loud failure (today middleware.ts:43, :102-108); per-isolate `Map` caches plus KV `SEO_CACHE` 1 h / 30 s negative; trailing and double slash normalisation as in middleware.ts:334-346; `seo.strict_404` wired but off | Claude | 0.75 d | H-4, H-8, H-9, H-10, H-13 |
+| P1-3 | Router `workers/site/src/index.ts` in this order: redirect table → sitemap routes → `/api/*` → SEO handler for `/{lang}` and `/{lang}/*` → directory-index emulation for `/laserkritis/` and `/zohoverify/` if the baseline shows it → `env.ASSETS.fetch(request)`. In Phase 1, `/api/*` is forwarded to Vercel production (flag `api.forward_to_vercel` on); parity runs exclude write actions. A throw in any step answers 500, except on `/api/sitemap`, which continues to the forward (error policy, HEAD `Content-Length` and sitemap rules: ARCHITECTURE.md §6.2) | Claude | 0.25 d | H-8, H-14 |
+| P1-4 | SEO handler `workers/site/src/seo/handler.ts`: copy of the `middleware.ts` orchestrator; shell via `env.ASSETS.fetch`, non-2xx is a logged error (not a silent fall-through, cf. middleware.ts:424-428); anon key and Supabase URL from `env` with a loud failure (today middleware.ts:43, :102-108); per-isolate `Map` caches with the middleware.ts TTLs (1 h; 30 s for "no row") plus KV `SEO_CACHE` for positives only (1 h, 500 ms read limit; negatives and failed lookups never reach KV; ARCHITECTURE.md §17); trailing and double slash normalisation as in middleware.ts:334-346; `seo.strict_404` wired but off | Claude | 0.75 d | H-4, H-8, H-9, H-10, H-13 |
 | P1-5 | Redirect table `workers/site/src/redirects.ts` generated from vercel.json:2-128 and src/components/SEORedirects.tsx:14-73; 308; raw + NFC-decoded match; the 3 client-only entries become server 308s (documented parity deviation); unit test per source | Claude | 0.25 d | H-11 |
 | P1-6 | Sitemap routes `workers/site/src/sitemap.ts`: port of `api/sitemap.js` for `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, `/sitemap-:lang.xml` and `/api/sitemap`; identical headers (api/sitemap.js:392-396); Cache API 1 h; stale blobs served as they are | Claude | 0.25 d | H-12 |
 | P1-7 | Preview hardening: `X-Robots-Tag: noindex` on every non-production host (`workers/site/src/preview.ts`); Access application on the preview hosts with a service token for the parity tool, Playwright and Lighthouse | Both | 0.25 d | H-1 |
@@ -123,12 +123,13 @@ File-level change list:
 | New | `workers/site/src/index.ts`, `workers/site/src/flags.ts`, `workers/site/src/api/forward.ts` | Router; KV `FLAGS` reader; Phase 1 forward of `/api/*` to Vercel |
 | New | `workers/site/src/seo/handler.ts` | Imports `middleware/{slugs,inject,meta,schema,services,i18n,renderers/*}` unchanged |
 | New | `workers/site/src/redirects.ts`, `workers/site/src/sitemap.ts`, `workers/site/src/preview.ts` | — |
-| New | `scripts/seo-parity.mjs`, `scripts/seo-parity.allow.json` | Allow-list holds only documented deviations |
+| New | `scripts/seo-parity.mjs`, `scripts/seo-parity.allow.json`, `scripts/seo-parity/` (own package and lockfile) | Allow-list holds only documented deviations |
 | New | `.github/workflows/cf-preview.yml` | Uses secret names `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
-| Changed | `scripts/verify-ssr.sh` | Two hosts, Access headers |
-| Changed | `package.json`, lockfile | `wrangler`, `@cloudflare/workers-types` dev dependencies, `cf:*` scripts |
-| Changed | `tsconfig.middleware.json` | Add Workers types |
-| Changed | `playwright.config.ts` | Access headers from env when set; default `BASE_URL` unchanged (playwright.config.ts:8) |
+| Changed | `scripts/verify-ssr.sh` | Two hosts, Access headers; `grep -q` checks read pages through here-strings (SEO_PARITY.md §6) |
+| Changed | `package.json` | `cf:*` scripts only. The root lockfile is unchanged: `wrangler`, `@cloudflare/workers-types` and the parity tool's dependencies live in `workers/site/package.json` and `scripts/seo-parity/package.json` with their own lockfiles; `cf:e2e` installs `@playwright/test` with `--no-save` |
+| Unchanged | `tsconfig.middleware.json` | Planned change dropped: `workers/site/tsconfig.json` carries the Workers types |
+| Changed | `playwright.config.ts`, `tests/e2e/seo.spec.ts`; new `tests/e2e/fixtures/access.ts` | Access headers from env when set, for the `BASE_URL` origin only; default `BASE_URL` unchanged (playwright.config.ts:8) |
+| Changed | `tests/middleware/smoke.mjs` | Redirect table and route-decision checks (SEO_PARITY.md §6) |
 | Changed | `.gitignore` | `.wrangler/` |
 | Deleted | `public/_redirects`, `public/index.html` | H-3; the built `index.html` overwrites the public one today (H-21) |
 | Untouched | `vercel.json`, `middleware.ts`, `middleware/*`, `api/*`, `index.html`, `src/*`, `vite.config.ts` | Vercel output must stay identical |
@@ -608,7 +609,7 @@ Total to the end of Phase 6 work: about 12 weeks (parallel zone move) or 14 week
 
 ## 9. Open questions
 
-Q1–Q22 are the final list agreed in planning; Q4 is answered; Q23 was added with the optional Phase 7. Other documents cite them as "PLAN.md Q<n>". "Blocks" names the first item that cannot start without an answer; the recommended default is what Claude will assume if the owner agrees without further detail.
+Q1–Q22 are the final list agreed in planning; Q4 is answered; Q23 was added with the optional Phase 7; Q24 was added during Phase 1 (2026-10-03). Other documents cite them as "PLAN.md Q<n>". "Blocks" names the first item that cannot start without an answer; the recommended default is what Claude will assume if the owner agrees without further detail.
 
 | # | Question | Recommended default | Blocks |
 |---|---|---|---|
@@ -635,3 +636,4 @@ Q1–Q22 are the final list agreed in planning; Q4 is answered; Q23 was added wi
 | Q21 | Google Ads offline conversions: do you have Ads API access (developer token, customer ID)? | Ship the ops digest without offline conversions; add them when access exists | The Ads part of P5-7 |
 | Q22 | Mac mini Fusion 360 worker: expected timeline? Should Phase 5 target the Container only and add the Mac mini later behind the same interface? | Container only in Phase 5; Mac mini later behind the same Queue → R2 → Supabase-row interface | Nothing (P5-6 design) |
 | Q23 | Phase 7 (optional D1 move): which auth approach replaces Supabase Auth for customers and partners (Workers-native library, hosted IdP, or Access for staff + one of those), and are the two Realtime features still needed? | Decide at Phase 7 start; leaning to Access for staff + a Workers-native library for customers and partners; keep the polling fallback instead of `RealtimeHub` if Realtime is not needed | P7-3, P7-4 |
+| Q24 | Czech URLs for industries and our work: `content_pages.localized_slug` is `odvetvi` and `projekty` for `cs`, while the static routes, the prerender and the published sitemap use `prumysl` and `nase-prace` (middleware/slugs.ts:64, vite.config.ts:24); the other 13 languages match (Supabase, read 2026-10-03). All 9 published `cs` content rows link to `/cs/odvetvi` and `/cs/projekty`, which answer 200 with the database page and their own canonical, next to the static `/cs/prumysl` and `/cs/nase-prace`. Vercel serves the same today; the parity URL set covers both forms (G1 and G3). Which form should be canonical? | No change before Phase 3 sign-off (a content edit during the parity window changes both hosts and the baseline); then align the database rows with one form, decided with GSC data for both | Nothing in Phases 1–3 |
