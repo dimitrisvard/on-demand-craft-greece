@@ -4,9 +4,14 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --port 8787",
+    "dev:all": "wrangler dev -c wrangler.jsonc -c ../ops/wrangler.jsonc --local --port 8787",
     "test": "vitest run",
+    "test:integration": "vitest run -c vitest.t2.config.ts",
+    "t2:up": "node test/integration/harness.mjs up",
+    "t2:wait": "node test/integration/harness.mjs wait",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build:dry": "wrangler deploy --dry-run --outdir .wrangler/dry",
+    "build:dry": "wrangler deploy --dry-run --outdir .wrangler/dry --metafile .wrangler/dry/meta.json",
+    "check-bundle": "node scripts/check-bundle.mjs",
     "preview": "wrangler versions upload --preview-alias staging"
   },
   "devDependencies": {

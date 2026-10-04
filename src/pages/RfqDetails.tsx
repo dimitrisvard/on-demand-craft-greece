@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense, useRef, lazy } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -69,6 +69,7 @@ import { type PartInfo } from '@/utils/technicalDrawingPdf';
 import { generateManufacturingPdfWithFallback, extractFlatPattern, type FlatPatternResponse } from '@/utils/serverManufacturingPdf';
 import { TechnicalDrawingViewer } from '@/components/sheetmetal/TechnicalDrawingViewer';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { fetchWithAuth, useApiUnauthorized } from '@/utils/apiAuth';
 
 // Add QuoteFile interface
 interface QuoteFile {
@@ -92,6 +93,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { toast } = useToast();
+  const apiUnauthorized = useApiUnauthorized();
   
   const [rfq, setRfq] = useState<any>(null);
   const [customer, setCustomer] = useState<any>(null);
@@ -1612,7 +1614,7 @@ const RfqDetails = (props: RfqDetailsProps) => {
       }
 
       // Call nesting API
-      const nestResponse = await fetch('/api/notifications', {
+      const nestResponse = await fetchWithAuth('/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1852,6 +1854,17 @@ const RfqDetails = (props: RfqDetailsProps) => {
   return (
     <ErrorBoundary>
       <div className="w-full max-w-none px-6 py-6 pt-20 space-y-6">
+        {apiUnauthorized && (
+          <div role="alert" className="flex items-center justify-between gap-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span>Your session has expired, so the last request was refused.</span>
+            <Link
+              to={`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+              className="font-medium underline whitespace-nowrap"
+            >
+              Sign in again
+            </Link>
+          </div>
+        )}
         <div className="flex items-center gap-4 mb-6">
           <Button 
             variant="outline" 

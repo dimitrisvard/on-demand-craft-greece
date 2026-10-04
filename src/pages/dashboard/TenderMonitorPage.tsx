@@ -30,6 +30,7 @@ import {
   Building,
 } from "lucide-react";
 import type { Tender, TenderFilters, TenderStats, TenderConnector } from "@/types/tenders";
+import { fetchWithAuth, downloadWithAuth } from "@/utils/apiAuth";
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -120,13 +121,13 @@ export default function TenderMonitorPage() {
 
   const apiGet = useCallback(async (path: string, params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();
-    const resp = await fetch(`/api${path}${qs ? "?" + qs : ""}`);
+    const resp = await fetchWithAuth(`/api${path}${qs ? "?" + qs : ""}`);
     if (!resp.ok) throw new Error(`API error: ${resp.status}`);
     return resp.json();
   }, []);
 
   const apiPost = useCallback(async (path: string, body: any) => {
-    const resp = await fetch(`/api${path}`, {
+    const resp = await fetchWithAuth(`/api${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -259,7 +260,7 @@ export default function TenderMonitorPage() {
 
   const updateTenderStatus = async (id: string, status: string) => {
     try {
-      await fetch("/api/tenders", {
+      await fetchWithAuth("/api/tenders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status }),
@@ -273,7 +274,10 @@ export default function TenderMonitorPage() {
     delete (params as any).limit;
     delete (params as any).offset;
     const qs = new URLSearchParams(params).toString();
-    window.open(`/api/tenders?export=csv${qs ? "&" + qs : ""}`, "_blank");
+    const fallbackName = `micronshub-tenders-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadWithAuth(`/api/tenders?export=csv${qs ? "&" + qs : ""}`, fallbackName).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "Export failed");
+    });
   };
 
   const handleFilterChange = (key: keyof TenderFilters, value: string | boolean) => {

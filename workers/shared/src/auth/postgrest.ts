@@ -91,7 +91,7 @@ export async function restRequest(cfg: RestConfig, pathAndQuery: string, init: R
   try {
     return await Promise.race([attempt, deadline]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

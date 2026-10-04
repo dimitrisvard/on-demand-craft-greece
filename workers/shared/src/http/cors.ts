@@ -74,7 +74,7 @@ function workersSubdomainOf(cfg: AllowlistConfig): string | null {
   return fromHost ? fromHost[1] : null;
 }
 
-/** Allow-list check of §2.11 (exact host match, never substring matching). */
+/** True when the Origin matches one of the allow-list rules above (exact host match, never substring matching). */
 export function isAllowedOrigin(origin: string, cfg: AllowlistConfig): boolean {
   const url = canonicalOrigin(origin);
   if (!url) return false;

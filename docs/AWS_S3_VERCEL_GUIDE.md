@@ -131,29 +131,28 @@ If you already have an IAM user (e.g., for RFQs) and want to grant it access to 
 
 ## 3. Vercel Environment Variables
 
-Configure these variables in your Vercel Project Settings > Environment Variables.
+Configure these variables in your Vercel Project Settings > Environment Variables. They are server-side only: `api/s3.js` reads them at run time (api/s3.js:30-66), and none of them may carry a `VITE_` prefix, because Vite ships `VITE_` variables to the browser and drops the old client-side AWS key names from the build (vite.config.ts:59-78).
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `VITE_AWS_ACCESS_KEY_ID` | The IAM User Access Key | `AKIA...` |
-| `VITE_AWS_SECRET_ACCESS_KEY` | The IAM User Secret Key | `wJalr...` |
-| `VITE_AWS_REGION` | The bucket region | `eu-central-1` |
-| `VITE_AWS_BUCKET_NAME` | Main bucket for RFQs (if applicable) | `odc-main` |
-| `VITE_AWS_ARTICLES_BUCKET_NAME` | Bucket for Blog/Articles | `odc-articles` |
+| `AWS_ACCESS_KEY_ID` | The IAM user access key ID | `<access key id>` |
+| `AWS_SECRET_ACCESS_KEY` | The IAM user secret access key | `<secret access key>` |
+| `AWS_REGION` | Fallback region; each bucket's own region is looked up at run time | `eu-north-1` |
+| `AWS_S3_BUCKET` | Bucket for RFQ files | `<rfq bucket name>` |
+| `AWS_ARTICLES_BUCKET` | Bucket for blog/article images | `<articles bucket name>` |
+| `AWS_ARTICLES_ACCESS_KEY_ID`, `AWS_ARTICLES_SECRET_ACCESS_KEY` | Optional separate key pair for the articles bucket; falls back to the pair above | `<access key id>` |
 
-*Note: You can use the same bucket for both if desired, just set both variables to the same name.*
+*Note: You can use the same bucket for both if desired, just set both bucket variables to the same name.*
 
 ## 4. Application Logic
 
-The application uses these credentials to:
-1. Generate Presigned URLs on the client side (using the keys exposed via `import.meta.env`).
-   - *Security Note*: exposing keys in VITE variables means they are visible in the browser.
-   - **Recommendation**: For better security, move the presigned URL generation to a Supabase Edge Function or Backend API, so keys are not exposed.
-   - **Current Implementation**: The current implementation reads `VITE_AWS_ACCESS_KEY_ID` in `src/utils/awsS3Storage.ts`. This exposes your Write credentials to anyone visiting the site.
-   - **URGENT**: You should scope the IAM Policy strictly to allow uploads only, or better, refactor to use a backend proxy for signing URLs.
+| Step | Where | What |
+|------|-------|------|
+| 1 | Browser (`src/utils/s3Api.ts`) | Asks `/api/s3?action=…` for a presigned URL (upload, download), a listing or a delete; it holds no AWS key |
+| 2 | Server (`api/s3.js` on Vercel) | Signs the URL with the server-side keys above; uploads are valid 300 s, downloads 1 h by default |
+| 3 | Browser | Uploads or downloads directly against the presigned URL (hence the bucket CORS rules of section 1) |
 
-### Security Enhancement (Recommended)
-Refactor `src/utils/articleImageStorage.ts` to call a Supabase Edge Function `create-upload-url` instead of signing locally.
+The Cloudflare Workers (`workers/site`, migration Phase 2) serve the same `/api/s3` contract with their own variable names (`LEGACY_AWS_*`, `R2_*`; see `workers/site/.dev.vars.example`); no AWS key is ever part of the frontend build.
 
 ## 5. Hreflang Configuration
 

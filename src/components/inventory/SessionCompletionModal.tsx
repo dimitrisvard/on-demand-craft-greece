@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { completeSession, selectStockForSession, getLabelUrl } from '@/utils/inventoryApi';
+import { openWithAuth } from '@/utils/apiAuth';
 import type { NestingSession, Material, SessionCompletionSheetInput, SelectedStock } from '@/types/inventory';
 
 interface Props {
@@ -159,9 +160,13 @@ export default function SessionCompletionModal({ session, materials, onClose }: 
                   <p className="font-medium text-sm">Remnant: {r.width}×{r.height}mm</p>
                   <p className="text-xs text-gray-500">QR: {r.qrCode}</p>
                 </div>
-                <a href={getLabelUrl(r.id)} target="_blank" rel="noopener noreferrer">
-                  <Button size="sm" variant="outline">Print Label</Button>
-                </a>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { void openWithAuth(getLabelUrl(r.id), `label-${r.id}.pdf`); }}
+                >
+                  Print Label
+                </Button>
               </div>
             ))}
             <DialogFooter>

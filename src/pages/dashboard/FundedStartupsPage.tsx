@@ -32,6 +32,7 @@ import {
   Target,
 } from "lucide-react";
 import type { FundedStartup, FundedStartupFilters, FundedStartupStats, FundingFeed } from "@/types/funded-startups";
+import { fetchWithAuth, downloadWithAuth } from "@/utils/apiAuth";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -390,9 +391,6 @@ export default function FundedStartupsPage() {
     source: "all",
   });
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
   // ── Fetch list ──
   const fetchStartups = useCallback(async (resetPage = false) => {
     setLoading(true);
@@ -416,9 +414,7 @@ export default function FundedStartupsPage() {
     if (filters.source && filters.source !== "all") params.set("source", filters.source);
 
     try {
-      const res = await fetch(`/api/funded-startups?${params}`, {
-        headers: { Authorization: `Bearer ${supabaseKey}` },
-      });
+      const res = await fetchWithAuth(`/api/funded-startups?${params}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load startups");
       setStartups(json.data || []);
@@ -428,29 +424,25 @@ export default function FundedStartupsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters, page, supabaseKey]);
+  }, [filters, page]);
 
   // ── Fetch stats ──
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch(`/api/funded-startups?action=stats&days_back=${filters.days_back}`, {
-        headers: { Authorization: `Bearer ${supabaseKey}` },
-      });
+      const res = await fetchWithAuth(`/api/funded-startups?action=stats&days_back=${filters.days_back}`);
       const json = await res.json();
       if (res.ok) setStats(json);
     } catch { /* silent */ }
-  }, [filters.days_back, supabaseKey]);
+  }, [filters.days_back]);
 
   // ── Fetch feeds ──
   const fetchFeeds = useCallback(async () => {
     try {
-      const res = await fetch(`/api/funded-startups?action=feeds`, {
-        headers: { Authorization: `Bearer ${supabaseKey}` },
-      });
+      const res = await fetchWithAuth(`/api/funded-startups?action=feeds`);
       const json = await res.json();
       if (res.ok) setFeeds(json);
     } catch { /* silent */ }
-  }, [supabaseKey]);
+  }, []);
 
   useEffect(() => {
     fetchStartups(true);
@@ -467,9 +459,9 @@ export default function FundedStartupsPage() {
     setScanning(true);
     setScanResult(null);
     try {
-      const res = await fetch(`/api/funded-startups`, {
+      const res = await fetchWithAuth(`/api/funded-startups`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priority }),
       });
       const json = await res.json();
@@ -487,9 +479,9 @@ export default function FundedStartupsPage() {
 
   // ── Update outreach status ──
   const updateStatus = async (id: string, status: string) => {
-    await fetch(`/api/funded-startups`, {
+    await fetchWithAuth(`/api/funded-startups`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, outreach_status: status }),
     });
     setStartups(prev => prev.map(s => s.id === id ? { ...s, outreach_status: status as FundedStartup["outreach_status"] } : s));
@@ -497,9 +489,9 @@ export default function FundedStartupsPage() {
 
   // ── Update notes ──
   const updateNotes = async (id: string, notes: string) => {
-    await fetch(`/api/funded-startups`, {
+    await fetchWithAuth(`/api/funded-startups`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${supabaseKey}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, notes }),
     });
     setStartups(prev => prev.map(s => s.id === id ? { ...s, notes } : s));
@@ -512,7 +504,10 @@ export default function FundedStartupsPage() {
       days_back: String(filters.days_back),
     });
     if (filters.is_hardware === true) params.set("is_hardware", "true");
-    window.open(`/api/funded-startups?${params}`, "_blank");
+    const fallbackName = `funded-startups-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadWithAuth(`/api/funded-startups?${params}`, fallbackName).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "Export failed");
+    });
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);

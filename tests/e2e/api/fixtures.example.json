@@ -1,0 +1,130 @@
+{
+  "$comment": "Shape of the E2E_FIXTURES file for tests/e2e/api.spec.ts (preview and compare modes). Copy it OUTSIDE the repository, fill the <...> values and delete the optional entries you do not use (users.admin, seed.legacyObjectKey, seed.freshRfqNumber, machine.*, webhookSigningSecret); the tests that need them are then skipped. Never commit the filled copy. Seeded ids are those of tests/e2e/api/seed.sql.",
+  "supabase": {
+    "url": "https://<project-ref>.supabase.co",
+    "anonKey": "<public anon key of the project>"
+  },
+  "users": {
+    "staff": {
+      "email": "delivered+e2e-staff@resend.dev",
+      "password": "<set by the owner>"
+    },
+    "customer": {
+      "email": "delivered+e2e-customer@resend.dev",
+      "password": "<set by the owner>"
+    },
+    "admin": {
+      "email": "delivered+e2e-admin@resend.dev",
+      "password": "<optional: set by the owner>"
+    }
+  },
+  "machine": {
+    "collector": {
+      "clientId": "<client id of microns-machine-collector>",
+      "clientSecret": "<client secret of microns-machine-collector>"
+    },
+    "mcp": {
+      "clientId": "<client id of microns-machine-mcp>",
+      "clientSecret": "<client secret of microns-machine-mcp>"
+    }
+  },
+  "webhookSigningSecret": "<test signing secret set as RESEND_WEBHOOK_SECRET on microns-ops for the preview>",
+  "siteOrigin": "https://www.micronshub.eu",
+  "seed": {
+    "rfqNumber": "RFQ-01011970-90001",
+    "rfqId": "e2e00000-0000-4000-8000-0000000a0001",
+    "customerEmail": "delivered+e2e-customer@resend.dev",
+    "ownFileKey": "RFQ-01011970-90001/e2e/own.step",
+    "otherRfqNumber": "RFQ-01011970-90002",
+    "otherFileKey": "RFQ-01011970-90002/e2e/other.step",
+    "freshRfqNumber": "RFQ-01011970-90003",
+    "legacyObjectKey": "<optional: key of an object that exists only in the legacy rfq bucket>",
+    "stockItemId": "e2e00000-0000-4000-8000-0000000b0001",
+    "stockQrCode": "E2E-QR-0001",
+    "scanCountry": "LU",
+    "clickUrl": "https://e2e.example.org/landing",
+    "tracking": {
+      "preview": {
+        "campaignId": "e2e00000-0000-4000-8000-0000000c0001",
+        "open": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0101"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0102"
+          }
+        },
+        "click": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0103"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0104"
+          }
+        },
+        "unsubscribe": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0105"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0106"
+          }
+        }
+      },
+      "compareWorker": {
+        "campaignId": "e2e00000-0000-4000-8000-0000000c0002",
+        "open": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0201"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0202"
+          }
+        },
+        "click": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0203"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0204"
+          }
+        },
+        "unsubscribe": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0205"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0206"
+          }
+        }
+      },
+      "compareVercel": {
+        "campaignId": "e2e00000-0000-4000-8000-0000000c0003",
+        "open": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0301"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0302"
+          }
+        },
+        "click": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0303"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0304"
+          }
+        },
+        "unsubscribe": {
+          "first": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0305"
+          },
+          "repeat": {
+            "eid": "e2e00000-0000-4000-8000-0000000e0306"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Template for workers/ops/.dev.vars (local `wrangler dev` only; the real file is gitignored).
+# Copy to .dev.vars and keep the dummy values unless a local test needs a real one. Only the names listed in
+# secrets.required of wrangler.jsonc are loaded; a var override here is ignored (use `wrangler dev --var`).
+# With these values every module-scope constructor succeeds while every write to Supabase, Resend, Telegram,
+# Google or Apollo fails with an authentication error.
+SUPABASE_SERVICE_ROLE_KEY=dummy-not-a-secret
+SUPABASE_ANON_KEY=dummy-not-a-secret
+RESEND_API_KEY=dummy-not-a-secret
+RESEND_WEBHOOK_SECRET=dummy-not-a-secret
+TELEGRAM_BOT_TOKEN=dummy-not-a-secret
+TELEGRAM_CHAT_ID=dummy-not-a-secret
+GOOGLE_CLIENT_ID=dummy-not-a-secret
+GOOGLE_CLIENT_SECRET=dummy-not-a-secret
+GOOGLE_REDIRECT_URI=dummy-not-a-secret
+APOLLO_API_KEY=dummy-not-a-secret

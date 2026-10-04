@@ -5,6 +5,23 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { downloadAndSaveRfqFile } from '@/utils/rfqFileStorage';
 import { supabase } from '@/integrations/supabase/client';
+import { callS3 } from '@/utils/s3Api';
+import { openInNewWindow } from '@/utils/apiAuth';
+
+/** Where the file was found: the /api/s3 file store, or the `rfq-files` Supabase Storage bucket. */
+type FileSource = 'files-api' | 'storage';
+
+/** True when `/api/s3` lists `filePath` (rfq scope) under its folder. */
+async function existsInFilesApi(filePath: string): Promise<boolean> {
+  const slash = filePath.lastIndexOf('/');
+  const prefix = slash >= 0 ? filePath.slice(0, slash + 1) : filePath;
+  try {
+    const { objects } = await callS3<{ objects?: Array<{ key?: string }> }>('list', { prefix, scope: 'rfq' });
+    return Array.isArray(objects) && objects.some((o) => o?.key === filePath);
+  } catch {
+    return false;
+  }
+}
 
 interface RfqFileDownloadProps {
   fileName: string;
@@ -25,15 +42,28 @@ const RfqFileDownload: React.FC<RfqFileDownloadProps> = ({
 }) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [fileExists, setFileExists] = useState<boolean | null>(null);
+  const [source, setSource] = useState<FileSource | null>(null);
   const { toast } = useToast();
 
-  // Check if the file actually exists in storage
+  // Check if the file actually exists: first in the /api/s3 file store, then in
+  // the `rfq-files` Supabase Storage bucket.
   useEffect(() => {
+    let cancelled = false;
     const checkFileExists = async () => {
       if (!filePath) {
         setFileExists(false);
         return;
       }
+
+      if (await existsInFilesApi(filePath)) {
+        if (!cancelled) {
+          setSource('files-api');
+          setFileExists(true);
+        }
+        return;
+      }
+      if (cancelled) return;
+      setSource('storage');
 
       try {
         // Extract folder path and filename
@@ -66,6 +96,9 @@ const RfqFileDownload: React.FC<RfqFileDownloadProps> = ({
     };
     
     checkFileExists();
+    return () => {
+      cancelled = true;
+    };
   }, [filePath]);
 
   const handleDownload = async () => {
@@ -88,6 +121,23 @@ const RfqFileDownload: React.FC<RfqFileDownloadProps> = ({
     }
 
     setIsDownloading(true);
+
+    if (source === 'files-api') {
+      // The window opens inside the click, before the presign request.
+      const opened = await openInNewWindow(async () => {
+        const { url } = await callS3<{ url?: string }>('presign-download', { key: filePath, scope: 'rfq' });
+        if (!url) throw new Error('No download URL was returned');
+        return { href: url };
+      }, fileName);
+      if (opened) {
+        toast({
+          title: "Download started",
+          description: `File "${fileName}" is being downloaded`,
+        });
+      }
+      setIsDownloading(false);
+      return;
+    }
     
     try {
       console.log(`Starting download for file: ${fileName}, path: ${filePath}`);

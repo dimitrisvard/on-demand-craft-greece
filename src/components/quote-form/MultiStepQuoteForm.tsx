@@ -19,6 +19,7 @@ import { trackQuoteRequest, trackFormSubmission, trackQuoteFormSubmitSuccess } f
 import { sendRFQEmails } from '@/utils/emailService';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { LogIn, UserPlus } from 'lucide-react';
+import TurnstileWidget, { type TurnstileWidgetHandle } from '@/components/security/TurnstileWidget';
 
 const validationSchemas = [
   // Step 1: Company & Contact Information
@@ -136,6 +137,7 @@ const MultiStepQuoteForm: React.FC<MultiStepQuoteFormProps> = ({ isOrder = false
   const [currentStep, setCurrentStep] = useState(skipCompanyStep ? 1 : 0);
   const [prefillValues, setPrefillValues] = useState<Partial<typeof initialValues> | null>(null);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
   const { toast } = useToast();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -558,7 +560,10 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
         console.log('Order record created for RFQ:', rfqData.id);
       }
 
-      // Send confirmation and notification emails
+      // Send confirmation and notification emails. The Turnstile token is read
+      // right before that request (after the uploads above), and the widget stays
+      // mounted until it has returned.
+      const turnstile = turnstileRef.current;
       try {
         console.log('Sending RFQ confirmation and notification emails...');
         const emailResult = await sendRFQEmails({
@@ -567,7 +572,7 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
           companyName: values.companyName,
           rfqNumber: rfqNumber,
           phone: values.contact.phone
-        });
+        }, turnstile ? () => turnstile.getToken() : undefined);
         
         if (emailResult.confirmationSent) {
           console.log('Confirmation email sent successfully');
@@ -583,6 +588,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
       } catch (emailError) {
         console.error('Error sending emails:', emailError);
         // Don't throw error here - we don't want email failures to break the form submission
+      } finally {
+        turnstile?.reset();
       }
 
       // Track the quote request submission
@@ -729,6 +736,8 @@ ${part.comments ? `Comments: ${part.comments}` : ''}`,
                   },
                 })}
               </div>
+
+              <TurnstileWidget ref={turnstileRef} action="quote" className="mb-4 flex justify-center" />
 
               <div className="flex justify-between">
                 {currentStep > (skipCompanyStep ? 1 : 0) ? (

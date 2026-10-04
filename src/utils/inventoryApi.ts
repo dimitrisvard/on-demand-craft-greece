@@ -10,6 +10,7 @@ import type {
   StockSummaryRow, SessionCompletionSheetInput, SessionCompletionResult,
   LowStockAlert, InventorySettings, StockTransaction, SelectedStock,
 } from '@/types/inventory';
+import { fetchWithAuth } from './apiAuth';
 
 const API_BASE = '/api/notifications';
 
@@ -32,7 +33,7 @@ async function apiCall<T>(action: string, options: {
     fetchOpts.body = JSON.stringify({ action, ...body });
   }
 
-  const res = await fetch(url, fetchOpts);
+  const res = await fetchWithAuth(url, fetchOpts);
   const json = await res.json();
 
   if (!res.ok) {

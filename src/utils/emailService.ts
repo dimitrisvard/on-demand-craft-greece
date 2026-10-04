@@ -1,3 +1,5 @@
+import { fetchWithTurnstile } from './turnstile';
+
 interface RFQConfirmationEmailData {
   customerName: string;
   customerEmail: string;
@@ -14,9 +16,14 @@ interface InternalNotificationEmailData {
 }
 
 /**
- * Send both confirmation and notification emails after RFQ submission using Vercel API endpoint
+ * Send both confirmation and notification emails after RFQ submission.
+ * `getToken` (optional) supplies a Turnstile token; it is called right before the
+ * request is sent, and the request is sent without the header when it yields none.
  */
-export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ confirmationSent: boolean; notificationSent: boolean }> => {
+export const sendRFQEmails = async (
+  data: RFQConfirmationEmailData,
+  getToken?: () => Promise<string | null>,
+): Promise<{ confirmationSent: boolean; notificationSent: boolean }> => {
   try {
     console.log('Sending RFQ emails via Vercel API...');
     console.log('Email data:', data);
@@ -34,13 +41,13 @@ export const sendRFQEmails = async (data: RFQConfirmationEmailData): Promise<{ c
     console.log('Prepared email data:', emailData);
     
     // Use the consolidated /api/emails endpoint with RFQ data
-    const response = await fetch('/api/emails', {
+    const response = await fetchWithTurnstile('/api/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ ...emailData, action: 'email' })
-    });
+    }, getToken);
     
     console.log('Response status:', response.status);
     console.log('Response headers:', Object.fromEntries(response.headers.entries()));

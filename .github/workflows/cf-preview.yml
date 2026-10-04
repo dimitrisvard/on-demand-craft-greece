@@ -15,6 +15,8 @@ name: Cloudflare preview (microns-site)
 #   CLOUDFLARE_ACCOUNT_ID   Cloudflare account ID
 #   VITE_SUPABASE_URL       same value as the Vercel build env
 #   VITE_SUPABASE_ANON_KEY  same value as the Vercel build env (public anon key)
+#   VITE_TURNSTILE_SITE_KEY Turnstile site key of the contact and quote forms (public;
+#                           Phase 2: Cloudflare's test site key). Not set in the Vercel env.
 # The Worker secret SUPABASE_ANON_KEY is set once on the Worker itself
 # (`npx wrangler secret put SUPABASE_ANON_KEY` in workers/site), not here.
 #
@@ -62,6 +64,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
           PREVIEW_ALIAS: ${{ inputs.preview_alias }}
         run: |
           missing=""
@@ -70,6 +73,12 @@ jobs:
           done
           if [ -n "$missing" ]; then
             echo "::error title=Missing repository secrets::Set these repository secrets before running this workflow:$missing (Settings -> Secrets and variables -> Actions). Nothing was built or uploaded."
+            exit 1
+          fi
+          # Without a site key the build renders no Turnstile widget, and the API answers the contact and quote
+          # forms with 403 turnstile_failed.
+          if [ -z "$VITE_TURNSTILE_SITE_KEY" ]; then
+            echo "::error title=Missing VITE_TURNSTILE_SITE_KEY::Set the repository secret VITE_TURNSTILE_SITE_KEY to the Turnstile site key (Phase 2: Cloudflare's test site key, paired with the Worker's test secret). Without it the preview forms cannot pass the Turnstile check. Nothing was built or uploaded."
             exit 1
           fi
           # The alias becomes the DNS label "<alias>-microns-site" (max 63 chars).
@@ -144,6 +153,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             workers/site/package-lock.json
+            workers/shared/package-lock.json
             scripts/seo-parity/package-lock.json
 
       - name: Install root dependencies
@@ -151,6 +161,10 @@ jobs:
 
       - name: Install Worker dependencies
         working-directory: workers/site
+        run: npm ci
+
+      - name: Install shared Worker code dependencies (workers/shared, imported by the site's /api code)
+        working-directory: workers/shared
         run: npm ci
 
       - name: Install seo-parity dependencies (route list for the prerender check)
@@ -161,6 +175,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: |
           npx vite build 2>&1 | tee "$RUNNER_TEMP/vite-build.log"
           echo "index.html files in dist: $(find dist -name index.html | wc -l)"
@@ -169,6 +184,18 @@ jobs:
             echo "::error title=Prerender skipped::vite build ran without the jsdom prerender, so dist lacks the prerendered */index.html files Vercel serves. Not uploading."
             exit 1
           fi
+
+      - name: Check prerendered pages carry no Turnstile script or widget
+        run: |
+          # The challenge script loads only after a visitor interacts with a form; the jsdom prerender must
+          # never bake it (or a widget) into the static HTML.
+          hits=$(grep -rlE --include='*.html' 'challenges\.cloudflare\.com|cf-turnstile' dist || true)
+          if [ -n "$hits" ]; then
+            echo "$hits" | head -n 20
+            echo "::error title=Turnstile in prerendered HTML::$(echo "$hits" | wc -l) file(s) in dist contain challenges.cloudflare.com or cf-turnstile. Not uploading."
+            exit 1
+          fi
+          echo "No Turnstile script or widget markup in dist/**/*.html"
 
       - name: Check prerendered pages (same set as the Vercel build)
         env:
@@ -225,6 +252,11 @@ jobs:
             echo "Static assets: $(find ../../dist -type f | wc -l) files, $(du -sh ../../dist | cut -f1)"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Bundle guard (no microns-ops or legacy S3 code in the site bundle)
+        working-directory: workers/site
+        # Builds once more with an esbuild metafile and fails on any forbidden input (scripts/check-bundle.mjs).
+        run: npm run check-bundle -- --build
 
       - name: Upload preview version (no deploy)
         working-directory: workers/site

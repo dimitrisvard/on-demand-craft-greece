@@ -1,7 +1,8 @@
 // microns-site: Static Assets, SEO handler, redirect table, sitemap routes, /api/* router.
 // Phase 1 (PLAN.md §5.1, P1-1): preview only on *.workers.dev; nothing in production uses this Worker.
-// Source: the "workers/site/wrangler.jsonc" object of docs/migration/wrangler.jsonc.draft, reduced to the
-// Phase 1 entries. Phase 2 adds OPS, PRIVATE_FILES, API_RATE_LIMIT and the R2 vars; Phase 3 adds the routes.
+// Source: the "workers/site/wrangler.jsonc" object of docs/migration/wrangler.jsonc.draft. Phase 2 (PLAN.md §5.2)
+// adds the /api port: OPS (microns-ops), PRIVATE_FILES, the three rate limits, the R2, legacy S3, forward, Access
+// and gate vars, and the Phase 2 secrets. Phase 3 adds the routes.
 //
 // Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put
 // them in workers/site/.dev.vars (gitignored). The repository is public: never write a value here.
@@ -47,9 +48,29 @@
   "kv_namespaces": [
     // SEO row cache shared by all isolates, behind the per-isolate Map caches (src/seo/handler.ts).
     { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" },
-    // Feature flags, JSON {"enabled": true|false} per key: seo.strict_404 (src/flags.ts). Set by hand until
-    // Phase 4 mirrors table feature_flags into it.
+    // Feature flags, JSON {"enabled": true|false, ...} per key: seo.strict_404, api.forward_to_vercel
+    // (src/flags.ts, src/api/forward.ts). Set by hand until Phase 4 mirrors table feature_flags into it.
     { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+  ],
+
+  // Phase 2: every /api endpoint except emails, s3 and marketing tracking runs in microns-ops, reached over RPC on
+  // its named entrypoint OpsApi (src/api/ops-client.ts). microns-ops must be deployed before this Worker.
+  "services": [
+    { "binding": "OPS", "service": "microns-ops", "entrypoint": "OpsApi" }
+  ],
+
+  // Phase 2: customer files of /api/s3 (src/api/files.ts). The jurisdiction can only be chosen when the bucket is
+  // created (wrangler r2 bucket create microns-private -J eu) and must equal R2_JURISDICTION in src/api/files.ts.
+  "r2_buckets": [
+    { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
+  ],
+
+  // Phase 2: API rate limits (src/auth/rate-limit.ts). MAIL takes the mail keys, BULK idempotent reads and upload
+  // presigns; both fall back to API_RATE_LIMIT when absent. A namespace_id shares its counters across Workers.
+  "ratelimits": [
+    { "name": "API_RATE_LIMIT", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
+    { "name": "API_RATE_LIMIT_MAIL", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+    { "name": "API_RATE_LIMIT_BULK", "namespace_id": "2003", "simple": { "limit": 300, "period": 60 } }
   ],
 
   "vars": {
@@ -63,20 +84,52 @@
     // Deploy-time default of flag seo.strict_404; an entry in KV FLAGS wins (SEO_PARITY.md §7). "false" keeps
     // soft-404 parity with Vercel (H-9) until PLAN.md Q5 is answered (P3-7).
     "SEO_STRICT_404": "false",
-    // Phase 1: every /api/* request is forwarded here (src/api/forward.ts). Must point at the Vercel
-    // deployment host, not www, before the Phase 3 routes send www to this Worker (the forward refuses to
-    // call its own host).
-    "API_FORWARD_ORIGIN": "https://www.micronshub.eu",
+    // Target of the /api forward (src/api/forward.ts): paths outside the /api catalogue, and every /api request
+    // while api.forward_to_vercel is on. The Vercel deployment host, not www: once the Phase 3 routes send www to
+    // this Worker, the forward refuses to call its own host.
+    "API_FORWARD_ORIGIN": "https://on-demand-craft-greece.vercel.app",
     // Router step 5: serve <dir>/index.html for /dir/ and /dir (public/laserkritis/, public/zohoverify/) as Vercel's
     // filesystem step is expected to. "true" until the P0-3 baseline says otherwise (SEO_PARITY.md G8 4-9, G9 10-11).
-    "DIRECTORY_INDEX_EMULATION": "true"
+    "DIRECTORY_INDEX_EMULATION": "true",
     // HSTS_VALUE (optional): set to the Strict-Transport-Security value of the P0-3 baseline to have the
     // Worker emit it on the SITE_ORIGIN host. Left unset in Phase 1 (preview hosts never get it).
+
+    // ----- Phase 2: /api port. Placeholders <...> are replaced by the owner with IDs and names (not secrets). -----
+    // Fallback of the KV flag api.forward_to_vercel: "true" forwards every /api request to API_FORWARD_ORIGIN.
+    // A var in .dev.vars is ignored while secrets.required exists: use `wrangler dev --var API_FORWARD_TO_VERCEL:true`.
+    "API_FORWARD_TO_VERCEL": "false",
+    // R2 S3 API endpoint https://<R2_ACCOUNT_ID>.eu.r2.cloudflarestorage.com (presigned URLs, src/api/files.ts).
+    "R2_ACCOUNT_ID": "<CF_ACCOUNT_ID>",
+    // Legacy S3 store of files uploaded before the migration (read and delete; articles scope also upload).
+    "LEGACY_S3_REGION": "eu-north-1",
+    "LEGACY_S3_RFQ_BUCKET": "<LEGACY_S3_RFQ_BUCKET>",
+    "LEGACY_S3_ARTICLES_BUCKET": "<LEGACY_S3_ARTICLES_BUCKET>",
+    // Cloudflare Access team domain (x.cloudflareaccess.com) and the audience tag(s) of the Access application in
+    // front of the API, for machine callers with a service token.
+    "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
+    "ACCESS_AUD": "<ACCESS_AUD_PREVIEW>",
+    // Gate mode per class, "<class>=report|enforce" comma list; a class not named enforces. The production value is
+    // set by the Phase 3 runbook.
+    "API_GATES_MODE": "recipient=report",
+    // Hosts besides the preview hosts that accept machine callers, comma list, exact match. Empty in Phase 2; the
+    // Phase 3 runbook sets "api.micronshub.eu".
+    "API_MACHINE_HOSTS": ""
   },
 
   "secrets": {
-    // Deploys and version uploads fail when a listed secret is missing on the Worker.
-    "required": ["SUPABASE_ANON_KEY"]
+    // Deploys and version uploads fail when a listed secret is missing on the Worker. Locally only these names
+    // are loaded from .dev.vars (template: .dev.vars.example).
+    "required": [
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "RESEND_API_KEY",
+      "TURNSTILE_SECRET_KEY",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "LEGACY_AWS_ACCESS_KEY_ID",
+      "LEGACY_AWS_SECRET_ACCESS_KEY",
+      "ACCESS_MACHINE_CLIENT_IDS"
+    ]
   },
 
   // Phase 3 (runbook S11-S14): empty until the zone is on Cloudflare.

@@ -1,4 +1,5 @@
 import { supabase } from '../integrations/supabase/client';
+import { fetchWithAuth } from './apiAuth';
 
 export interface PartnerNotificationData {
   orderId: string;
@@ -107,7 +108,7 @@ export async function sendPartnerNotification(notificationData: PartnerNotificat
     };
 
     // Send email via API
-    const response = await fetch('/api/notifications', {
+    const response = await fetchWithAuth('/api/notifications', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

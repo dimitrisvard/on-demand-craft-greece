@@ -1,0 +1,19 @@
+# Local secrets of microns-site for `wrangler dev` (copy to .dev.vars, which is gitignored; never commit values).
+# Only the names listed in secrets.required of wrangler.jsonc are loaded from .dev.vars; any other line is ignored
+# (vars are overridden with `wrangler dev --var NAME:value` instead).
+#
+# Dummy values let every module start; every write to Supabase, Resend, R2 or S3 is then refused upstream.
+# SUPABASE_ANON_KEY: put the project's public anon key here (the same value as the Vercel env
+# VITE_SUPABASE_ANON_KEY) so that the SEO pages and the sitemap can read their rows.
+# TURNSTILE_SECRET_KEY: for a contact or quote form that passes locally, use Cloudflare's documented Turnstile test
+# secret (https://developers.cloudflare.com/turnstile/troubleshooting/testing/); it is accepted on localhost only.
+SUPABASE_ANON_KEY=dummy-not-a-secret
+SUPABASE_SERVICE_ROLE_KEY=dummy-not-a-secret
+RESEND_API_KEY=dummy-not-a-secret
+TURNSTILE_SECRET_KEY=dummy-not-a-secret
+R2_ACCESS_KEY_ID=dummy-not-a-secret
+R2_SECRET_ACCESS_KEY=dummy-not-a-secret
+LEGACY_AWS_ACCESS_KEY_ID=dummy-not-a-secret
+LEGACY_AWS_SECRET_ACCESS_KEY=dummy-not-a-secret
+# "<Access service token client id>=<machine name>" pairs, comma separated; names: collector, mcp.
+ACCESS_MACHINE_CLIENT_IDS=dummy-collector-client-id=collector,dummy-mcp-client-id=mcp

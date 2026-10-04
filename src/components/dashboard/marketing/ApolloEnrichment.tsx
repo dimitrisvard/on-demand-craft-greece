@@ -39,6 +39,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
+import { fetchWithAuth } from "@/utils/apiAuth";
 
 // ─── Types ───
 interface ApolloContact {
@@ -197,7 +198,7 @@ export default function ApolloEnrichment() {
     setSelectedContactIds(new Set());
 
     try {
-      const resp = await fetch("/api/marketing?action=apollo-enrich", {
+      const resp = await fetchWithAuth("/api/marketing?action=apollo-enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companies, titles: selectedTitles }),

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { fetchWithAuth } from '@/utils/apiAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -56,7 +57,7 @@ const EmailScraperView = () => {
         return url;
       });
 
-      const response = await fetch('/api/scrape-website', {
+      const response = await fetchWithAuth('/api/scrape-website', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: normalizedUrls }),

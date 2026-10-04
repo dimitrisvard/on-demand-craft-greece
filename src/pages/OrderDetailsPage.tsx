@@ -46,6 +46,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { trackFileDownload, trackUserInteraction } from '@/utils/analytics';
 import { type PartInfo } from '@/utils/technicalDrawingPdf';
 import { generateManufacturingPdfWithFallback } from '@/utils/serverManufacturingPdf';
+import { fetchWithAuth } from '@/utils/apiAuth';
 
 interface QuoteFile {
   id: string;
@@ -1081,7 +1082,7 @@ export default function OrderDetailsPage() {
       try {
         const partner = partners.find(p => p.id === order.partner_id);
         if (partner) {
-          await fetch('/api/notifications', {
+          await fetchWithAuth('/api/notifications', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

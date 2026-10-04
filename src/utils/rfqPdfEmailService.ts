@@ -1,3 +1,5 @@
+import { fetchWithAuth } from './apiAuth';
+
 interface RFQPDFEmailData {
   customerName: string;
   customerEmail: string;
@@ -21,7 +23,7 @@ export const sendRFQPDFEmail = async (data: RFQPDFEmailData): Promise<{ success:
       pdfFileName: data.pdfFileName 
     });
     
-    const response = await fetch('/api/emails', {
+    const response = await fetchWithAuth('/api/emails', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

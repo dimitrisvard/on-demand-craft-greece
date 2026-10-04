@@ -122,7 +122,7 @@ async function fetchWithTimeout(doFetch: typeof fetch, url: string, init: Reques
   try {
     return await Promise.race([doFetch(url, { ...init, signal: controller.signal }).catch(() => null), deadline]);
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

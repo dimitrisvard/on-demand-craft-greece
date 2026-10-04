@@ -22,6 +22,7 @@ export const uploadFileToS3 = async (file: File, prefix?: string): Promise<strin
         contentType: file.type || 'application/octet-stream',
         prefix,
         scope: SCOPE,
+        size: file.size,
       }
     );
 

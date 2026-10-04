@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit, Loader2, Mail, ExternalLink, RefreshCw } from 'lucide-react';
+import { isTrustedMessageOrigin, openAuthorizedPopup } from '@/utils/apiAuth';
 
 interface SenderAccount {
   id: string;
@@ -67,9 +68,10 @@ const SenderAccountsManager = () => {
     resend_api_key: '',
   });
 
-  // Listen for OAuth popup messages
+  // Listen for OAuth popup messages; only this site's own origins may deliver them.
   React.useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      if (!isTrustedMessageOrigin(event.origin)) return;
       if (event.data?.type === 'google-oauth-success') {
         toast.success(`Google account ${event.data.email || ''} connected successfully!`);
         queryClient.invalidateQueries({ queryKey: ['sender_accounts'] });
@@ -217,7 +219,11 @@ const SenderAccountsManager = () => {
     const height = 700;
     const left = window.screenX + (window.outerWidth - width) / 2;
     const top = window.screenY + (window.outerHeight - height) / 2;
-    const popup = window.open(
+    // The popup opens inside the click; the authorize step is then requested with
+    // the session token. Any answer other than a JSON {url} sends the popup to
+    // the authorize URL itself.
+    const popup = openAuthorizedPopup(
+      url,
       url,
       'google-oauth',
       `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`

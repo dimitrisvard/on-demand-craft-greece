@@ -21,7 +21,31 @@ export TELEGRAM_BOT_TOKEN=your-bot-token   # optional
 export TELEGRAM_CHAT_ID=your-chat-id       # optional
 ```
 
-### 3. Configure Claude Desktop
+### 3. Site API settings (tools that call `/api/*`)
+
+Six tools call the site API instead of Supabase. All of them use one base URL and, when configured, a Cloudflare Access service token.
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `SITE_URL` | no | Base URL for every `/api/*` call; default `https://www.micronshub.eu`. Point it at the host that accepts machine credentials (the preview host while it is tested, the machine API host once it exists) |
+| `CF_ACCESS_CLIENT_ID` | with the secret | Client ID of the MCP service token |
+| `CF_ACCESS_CLIENT_SECRET` | with the ID | Client secret of the MCP service token; never commit it or paste it into a chat |
+
+| Rule | Detail |
+|---|---|
+| Access headers | `CF-Access-Client-Id` and `CF-Access-Client-Secret` are sent only when both variables are set, and only to the origin of `SITE_URL` |
+| Redirects | Never followed: a 3xx answer is reported as an error that names the target, so the token never travels to another host. A `SITE_URL` that redirects (for example the apex host, which redirects to `www`) therefore fails; use the final host |
+| `api_base_url` tool argument | Optional per-call override of `SITE_URL`; a different origin is called without the Access headers |
+
+| Tool | Endpoint | Result |
+|---|---|---|
+| `scan_directory`, `run_saved_search` | `POST /api/scan-directory` | Companies upserted into `company_leads` |
+| `enrich_company_emails` | `POST /api/scrape-website` | Per-company result; a 401, 403, 429 or redirect stops the run and leaves the remaining companies `pending` |
+| `trigger_country_scan` | `POST /api/tender-scan` | Counts of a synchronous scan, or `queued (run_id …)` when the API queues the scan |
+| `export_tenders_csv` | `GET /api/tenders?export=csv&…` | The CSV text (filters `country`, `min_score`, `status`, `relevant_only`), cut at 200 KB on a row boundary with a note |
+| `trigger_funding_scan` | `POST /api/funded-startups` | Feed scan counts |
+
+### 4. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
 
@@ -35,7 +59,10 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
         "SUPABASE_URL": "https://your-project.supabase.co",
         "SUPABASE_SERVICE_KEY": "your-service-role-key",
         "TELEGRAM_BOT_TOKEN": "optional",
-        "TELEGRAM_CHAT_ID": "optional"
+        "TELEGRAM_CHAT_ID": "optional",
+        "SITE_URL": "https://www.micronshub.eu",
+        "CF_ACCESS_CLIENT_ID": "optional, with the secret",
+        "CF_ACCESS_CLIENT_SECRET": "optional, with the ID"
       }
     }
   }

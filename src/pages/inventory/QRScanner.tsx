@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import InventoryLayout from '@/components/inventory/InventoryLayout';
 import { scanStockQr, adjustStock, getLabelUrl } from '@/utils/inventoryApi';
+import { openWithAuth } from '@/utils/apiAuth';
 import type { StockItem } from '@/types/inventory';
 
 export default function QRScanner() {
@@ -238,12 +239,15 @@ export default function QRScanner() {
               </div>
 
               <div className="flex gap-2 pt-2 border-t">
-                <a href={getLabelUrl(scannedItem.id)} target="_blank" rel="noopener noreferrer" className="flex-1">
-                  <Button variant="outline" className="w-full" size="sm">
-                    <Package className="h-3 w-3 mr-1" />
-                    Print Label
-                  </Button>
-                </a>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  size="sm"
+                  onClick={() => { void openWithAuth(getLabelUrl(scannedItem.id), `label-${scannedItem.id}.pdf`); }}
+                >
+                  <Package className="h-3 w-3 mr-1" />
+                  Print Label
+                </Button>
                 {scannedItem.status === 'available' && (
                   <Button variant="destructive" size="sm" onClick={handleScrap}>
                     <Trash2 className="h-3 w-3 mr-1" />

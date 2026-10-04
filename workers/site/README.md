@@ -1,9 +1,11 @@
-# microns-site (Cloudflare Worker, Phase 1)
+# microns-site (Cloudflare Worker, Phases 1-2)
 
 `microns-site` serves every public URL of www.micronshub.eu the way Vercel serves it today: the redirect table,
 the sitemap routes, `/api/*`, the SEO server-side rendering of `/{lang}` and `/{lang}/*`, and the static build in
 `dist/`. Phase 1 runs **only as a preview on `*.workers.dev`** behind Cloudflare Access, with
-`X-Robots-Tag: noindex` on every response. Nothing in production uses it.
+`X-Robots-Tag: noindex` on every response. Nothing in production uses it. Phase 2 (PLAN.md §5.2) ports `/api/*`:
+the site answers emails, files and tracking itself and sends every other endpoint to `microns-ops` over the
+service binding `OPS` (section "Phase 2: /api port" below).
 
 The specs live in `docs/migration/`: PLAN.md §5.1, ARCHITECTURE.md §6, §7.1, §17 and §19, SEO_PARITY.md and
 INVENTORY.md. Today's Vercel code is the source of truth for behaviour: `middleware.ts`, `middleware/*`,
@@ -18,7 +20,7 @@ Every method takes the same path (`src/index.ts`). Every response passes through
 |---|---|---|
 | 1 | `src/redirects.ts` | 28 redirects, all 308. RD-01…RD-25 come from vercel.json:2-128, byte-exact (RD-12 keeps its mojibake source). RD-26…RD-28 are client-only entries of SEORedirects.tsx, served as 308 (documented deviation AL-001…AL-003). Matches the raw pathname and the NFC-decoded pathname. |
 | 2 | `src/sitemap.ts` + `src/compat/vercel-shim.ts` | `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, `/sitemap-:lang.xml` and `/api/sitemap` run `api/sitemap.js` unchanged through a `(req, res)` shim. Cache API 1 h, status 200 only. |
-| 3 | `src/api/forward.ts` | Every other `/api/*` request is proxied to `API_FORWARD_ORIGIN` (Vercel production). `cf-*` headers, including the Access token, are stripped. |
+| 3 | `src/api/forward.ts` + `src/api/router.ts` | Every other `/api/*` request: the flag `api.forward_to_vercel` (or the var `API_FORWARD_TO_VERCEL`) sends it unchanged to `API_FORWARD_ORIGIN` (the Vercel deployment); otherwise the Phase 2 router answers it (local handler, `microns-ops`, or the forward for paths outside its catalogue). `cf-*` headers, including the Access token, never leave Cloudflare. |
 | 4 | `src/seo/handler.ts` (+ `supabase.ts`, `cache.ts`, `clientRoutes.ts`) | Copy of the `middleware.ts` orchestrator. It reads the shell with `env.ASSETS.fetch('/index.html')` and uses a per-isolate `Map` (1 h; 30 s for "no row") plus KV `SEO_CACHE` (positives only, 1 h). It returns `null` exactly where middleware.ts returns `undefined`. `seo.strict_404` is wired but off; while off, misses are logged as `would_404`. |
 | 5 | `src/static.ts` | Directory-index emulation for `/laserkritis[/]` and `/zohoverify[/]`, when `DIRECTORY_INDEX_EMULATION` is `"true"`. |
 | 6 | `env.ASSETS.fetch` | Serves the file, or the SPA shell with 200 (`not_found_handling: single-page-application`). HEAD reads the asset as GET so it can send `Content-Length` (see deviations). |
@@ -34,13 +36,15 @@ step 4 is not an error and continues to steps 5–6 (ARCHITECTURE.md §6.2).
 
 | Path | Purpose |
 |---|---|
-| `wrangler.jsonc` | Assets `../../dist` (`html_handling` none, SPA fallback, `run_worker_first`), KV `SEO_CACHE` and `FLAGS` (placeholder IDs), vars, required secret `SUPABASE_ANON_KEY`, `nodejs_compat` |
+| `wrangler.jsonc` | Assets `../../dist` (`html_handling` none, SPA fallback, `run_worker_first`), KV `SEO_CACHE` and `FLAGS` (placeholder IDs), vars, required secrets, `nodejs_compat`; Phase 2: `OPS`, `PRIVATE_FILES`, three rate limits, `/api` vars |
 | `src/env.ts` | `Env` bindings and `LOG_PREFIX` (`[microns-site]`) |
-| `src/flags.ts` | `getFlag(env, key, fallback)` from KV `FLAGS` (`{"enabled": bool}`) |
+| `src/flags.ts` | `getFlag(env, key, fallback)` and `getFlagValue(env, key)` from KV `FLAGS` (`{"enabled": bool, "value": {...}}`) |
 | `src/index.ts` | Router (steps 1–6, error policy, HEAD `Content-Length`) |
 | `src/redirects.ts` | `REDIRECTS`, `findRedirect`, `matchRedirect` |
 | `src/sitemap.ts`, `src/compat/*` | Sitemap routes, Vercel query merge, `(req, res)` shim, ambient type for `api/sitemap.js` |
-| `src/api/forward.ts` | Phase 1 `/api/*` forward |
+| `src/api/forward.ts` | `handleApi` (flag check, then router), `forwardToVercel` |
+| `src/api/resolve.ts`, `src/api/router.ts` | Phase 2 `/api` catalogue, action resolver and router |
+| `src/api/emails.ts`, `src/api/track.ts`, `src/api/ops-client.ts` | Local handlers (lazy `api/emails.js`, `api/marketing.js`) and the `OPS` RPC client |
 | `src/seo/*` | SEO handler, Supabase lookups (same REST URLs as middleware.ts), two-tier cache, client-route exemptions for strict 404 |
 | `src/static.ts` | Directory index, `hasStaticFile` |
 | `src/preview.ts` | `finalise()` |
@@ -55,13 +59,13 @@ Related files outside this folder: `scripts/seo-parity.mjs` and `scripts/seo-par
 
 ```sh
 # once
-npm run cf:install                       # npm ci in workers/site and scripts/seo-parity (root: npm ci)
+npm run cf:install                       # npm ci in workers/shared, workers/site, workers/ops, scripts/seo-parity (root: npm ci)
 npx vite build                           # at the repo root; the Worker serves ../../dist
 # workers/site/.dev.vars (gitignored), one line:
 #   SUPABASE_ANON_KEY=<public anon key of project cfjrtmtaitwzggzpkhxi>
 
 cd workers/site
-npx wrangler dev --local --port 8787     # local KV; /api/* is still forwarded to Vercel production
+npx wrangler dev --local --port 8787     # local KV; the ops endpoints need `npm run dev:all` (Phase 2 below)
 curl -sI http://localhost:8787/en        # 200, X-Seo-Source: db, X-Robots-Tag: noindex
 ```
 
@@ -73,11 +77,11 @@ Flags are set in local KV with
 | Command (repo root unless noted) | What it checks |
 |---|---|
 | `npm run cf:typecheck` | Strict `tsc` over `src/` and `test/`. middleware.ts is not imported: it is not strict-clean, so the harness loads it through a computed path. |
-| `npm run cf:test` | vitest: 340 tests in 7 files. Includes **offline document parity**, which runs middleware.ts and `handleSeo` on the same shell and recorded REST answers for 51 cases and requires byte-identical HTML, status and headers (SEO_PARITY.md §6 row 3 (c)). |
+| `npm run cf:test` | vitest: the Phase 1 suites (340 tests in 7 files at the Phase 1 close) plus the Phase 2 suites (below). Includes **offline document parity**, which runs middleware.ts and `handleSeo` on the same shell and recorded REST answers for 51 cases and requires byte-identical HTML, status and headers (SEO_PARITY.md §6 row 3 (c)). |
 | `npm run cf:smoke` (`node tests/middleware/smoke.mjs`) | Renderer smoke checks. Redirect table: 28 entries, all 308, RD-01…RD-25 equal to vercel.json, RD-12 byte-identical to vercel.json:59, RD-26…RD-28 present in SEORedirects.tsx. Route decisions: middleware.ts `parseRoute` equals the Worker `parseRoute` for the 22 G7 probes, the 51 fixture paths, the 210 prerender routes and the G9/edge paths (323 decisions). No network needed. |
 | `npm --prefix scripts/seo-parity test` (or `node --test scripts/seo-parity/test/*.test.mjs`) | Parity tool unit tests (94), offline. Node 22 does not accept a directory argument here; use the npm script or the glob. |
 | `bash -n scripts/verify-ssr.sh` | Syntax check |
-| `npm run cf:dry` (`wrangler deploy --dry-run --outdir .wrangler/dry`) | Bundle and size report |
+| `npm run cf:dry` (`wrangler deploy --dry-run --outdir .wrangler/dry --metafile .wrangler/dry/meta.json`) | Bundle and size report; then `npm --prefix workers/site run check-bundle` (Phase 2 bundle guard) |
 | `npx wrangler check startup` (in `workers/site`) | Local startup CPU profile |
 | `HOST=<preview> bash scripts/verify-ssr.sh` | Gate item 3 |
 | `BASE_URL=<preview> npm run cf:e2e` | Gate item 4: installs `@playwright/test@1.56.1` with `--no-save` (no `package.json` or lockfile change) and runs `tests/e2e/seo.spec.ts`. Set `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` for a preview behind Access. Without `BASE_URL` it targets production. First run on a machine: `npx playwright install chromium` |
@@ -85,6 +89,117 @@ Flags are set in local KV with
 
 Fixture refresh after content edits, from the repo root:
 `set -a; . workers/site/.dev.vars; set +a; NODE_USE_ENV_PROXY=1 node workers/site/test/fixtures/seo/record.mjs`.
+
+## Phase 2: /api port
+
+PLAN.md §5.2. The site answers `/api/emails`, `/api/s3` and the tracking links itself; every other endpoint runs
+in `microns-ops` (`workers/ops`), reached over the service binding `OPS` (RPC to the named entrypoint `OpsApi`).
+Shared code (the `@vercel/node` shim, rewrite merge, HTTP helpers, auth and storage primitives) lives in
+`workers/shared` and is imported by relative path.
+
+### Router (`src/api/router.ts`)
+
+| Step | What it does |
+|---|---|
+| 0 | `handleApi` (`src/api/forward.ts`): flag `api.forward_to_vercel` on → `forwardToVercel()`, every method, no gate |
+| 1 Path | Catalogue lookup (`src/api/resolve.ts`); any other `/api/*` path is forwarded with its body unread |
+| 2 Body | Buffered once; more than 4,718,592 bytes → 413 `{"error":"payload_too_large"}` (the rest of the body is read and discarded first, so the client receives the answer) |
+| 3 Resolve | Endpoint, function URL (vercel.json rewrites of `/api/track` and `/api/connector-status` merged, request keys win), action with the handler's own precedence |
+| 4 Names | The names of the dispatch target only (table below); a missing one answers 500 and logs `api config missing: <NAMES>` |
+| 5 Sentinel | Answers the handler gives before any side effect (`#options`, `#method`, `#unknown`, `#unknown-step`, `#throws`) go ungated, as ANON |
+| 6 Gate | `applyGate()` (`src/auth/gate.ts`): deny or respond, or allow with the principal and optional overrides of the function URL and body |
+| 7 Dispatch | Local handler, `microns-ops`, or the forward (an endpoint whose port is not finished is set to `forward` in `ENDPOINT_TARGETS`) |
+| 8 Log | `[microns-site] api endpoint=… action=… actionId=… target=… status=… ms=… principal=… requestId=…` (no body, token or e-mail address) |
+| 9 Return | `finalise()` adds the vercel.json CORS headers, noindex and the HEAD handling, as for every answer |
+
+| Public path | Runs in |
+|---|---|
+| `/api/emails` | site: `api/emails.js` unchanged, through the shared shim, imported on first use, 30 s |
+| `/api/s3` | site: files API (`src/api/files.ts`), R2 `microns-private` with legacy S3 fallback |
+| `/api/marketing?action=track`, `/api/track` | site: `api/marketing.js` unchanged (track branch), imported on first use, 30 s |
+| `/api/marketing` (other actions), `/api/notifications`, `/api/gsc`, `/api/tenders`, `/api/connector-status`, `/api/tender-scan`, `/api/funded-startups`, `/api/scrape-website`, `/api/scrape-company-profile`, `/api/scan-directory` | `microns-ops`: the verified principal, function URL and action travel in the RPC `call`, never in headers; the request reaches ops without `cookie`, `cf-access-*`, `x-microns-*`, `content-length` and hop-by-hop headers |
+| `/api/sitemap` | site, router step 2 (Phase 1) |
+| any other `/api/*` | forward to `API_FORWARD_ORIGIN` |
+
+| Dispatch target | Names checked per request |
+|---|---|
+| emails | `RESEND_API_KEY` |
+| track | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SITE_ORIGIN` |
+| files | `PRIVATE_FILES`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_S3_REGION`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY` |
+| ops | `OPS` |
+| forward | none (a bad `API_FORWARD_ORIGIN` answers 502) |
+
+Gate decisions check their own names (`src/auth/gate.ts`). Every Phase 2 field of `Env` is optional, so a missing
+name fails only the requests that need it.
+
+| Case | Answer of the router |
+|---|---|
+| Body over 4.5 MiB | 413 `{"error":"payload_too_large"}` |
+| A name of the target missing | 500 `text/plain` "Internal Server Error" |
+| Handler throws before `res.end()`, gate throws, handler module fails to load | 500 `text/plain`, logged with the request id |
+| `OPS` RPC rejects | 500 `text/plain`; for `nest` 504 `{"success":false,"error":"Nesting exceeded the time limit","code":"TIMEOUT"}` |
+| Forward upstream fails | 502 `{"error":"upstream"}` |
+
+### Flag `api.forward_to_vercel` (KV `FLAGS`, 60 s edge cache)
+
+| Value | Effect |
+|---|---|
+| `{"enabled":true}` | every `/api/*` request goes to Vercel |
+| `{"enabled":true,"value":{"paths":["/api/gsc"]}}` | only these public paths (exact match) |
+| `{"enabled":true,"value":{"hosts":["preview"]}}` | only on preview hosts; `"production"`: only on the others; combines with `paths` (AND) |
+| `{"enabled":false}` | nothing goes to Vercel |
+| missing, malformed, KV error | var `API_FORWARD_TO_VERCEL`: `"true"` forwards everything, `"false"`/empty/absent nothing, any other value nothing (logged) |
+
+### Run locally
+
+```sh
+npm ci && npm run cf:install
+cp workers/site/.dev.vars.example workers/site/.dev.vars   # put the public anon key in (see the file)
+cp workers/ops/.dev.vars.example workers/ops/.dev.vars
+npm run cf:dev:all                                         # site on :8787, microns-ops behind OPS
+curl -i -X OPTIONS http://localhost:8787/api/tenders       # answered by the ops handler
+# in workers/site: forward every /api request to Vercel instead (vars in .dev.vars are ignored)
+npx wrangler dev --local --port 8787 --var API_FORWARD_TO_VERCEL:true
+npx wrangler kv key put --binding FLAGS api.forward_to_vercel '{"enabled":true,"value":{"hosts":["preview"]}}' --local
+```
+
+### Tests and checks
+
+| Command (repo root unless noted) | What it checks |
+|---|---|
+| `npm run cf:typecheck:all` | `tsc` for `workers/shared`, `workers/site`, `workers/ops` |
+| `npm run cf:test:all` | T1 (vitest in Node) of the three packages. Site Phase 2 suites: `resolve` (every resolution row, and each sentinel answered by the unchanged handler with no outbound call), `router-api` (steps 1-9 with a fake `OPS`), `forward-flag`, `rewrite-crosscheck` (shared merge equals the sitemap merge on all sitemap test inputs), `emails-local`, `track-local` (byte fixtures), `env-api` (names per target; `Env`, router and `wrangler.jsonc` agree) |
+| `npm --prefix workers/site run build:dry && npm --prefix workers/site run check-bundle` | Bundle guard: fails on any input from `@aws-sdk`, `@smithy`, `pdf-lib`, `@pdf-lib`, `qrcode`, `pngjs`, `makerjs`, `dxf-parser`, `clipper-lib`, `lib/nesting`, `lib/inventory` or an `api/*.js` handler that runs in ops; prints the sizes |
+| `npm run cf:t2` | T2: real workerd (`wrangler dev` with both configs) in front of a local upstream stub; site and ops suites |
+| `npm --prefix workers/site run t2:up &` then `npm --prefix workers/site run -s t2:wait` | Long-running harness for the Playwright local mode; `t2:wait` prints the site URL (`.wrangler/t2/urls.json`) |
+
+| T2 file (`test/integration/`) | Role |
+|---|---|
+| `harness.mjs` | Starts the stub and `wrangler dev -c <site> -c <ops> --local` from generated config copies (stub URLs, dummy secrets, Turnstile test secret, no queue consumer); `up` / `wait` |
+| `stub-server.mjs` | Upstream stub: Supabase answers (canned routes, "no rows" by default), forward echo with `x-t2-forwarded: 1`, Access certs; control API under `/__stub/` |
+| `stub-client.ts` | `stubRoute`, `stubReset`, `stubCalls`, `mintSupabaseJwt`, `mintAccessJwt` (WebCrypto) |
+| `global-setup.mjs` | vitest globalSetup of both Workers' T2 configs; `T2_REUSE=1` uses a running `t2:up` |
+| `api-router.t2.ts`, `track.t2.ts`, `startup.t2.ts` | OPTIONS on the routed paths, RPC round trip, forward echo, 413; tracking bytes; startup isolation without `RESEND_API_KEY` |
+
+### Status (2026-10-04, local)
+
+| Check | Result |
+|---|---|
+| Typecheck (`cf:typecheck:all`) | exit 0 for shared, site and ops |
+| T1 (`cf:test:all`) | shared 297, site 1,105 (20 files), ops 166: all green |
+| Dry run (`build:dry`) | 3,363.29 KiB, gzip 727.11 KiB; 411 inputs, 0 forbidden (`check-bundle`) |
+| `npx wrangler check startup` | 44.3 ms active CPU in a 119.3 ms profile window, locally (limit 1 s) |
+| T2 site suites (`test:integration`) | 5 files, 50 tests green (router, tracking, startup, gates, files) |
+
+### Owner items for the site (Phase 2)
+
+| Item | Detail |
+|---|---|
+| Secrets | `npx wrangler secret put <NAME>` here for every name in `secrets.required` (`SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `TURNSTILE_SECRET_KEY`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY`, `ACCESS_MACHINE_CLIENT_IDS`); a version upload is refused until each exists |
+| Placeholders | `R2_ACCOUNT_ID`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` in `wrangler.jsonc` (IDs and names, not secrets) |
+| Repository secret | `VITE_TURNSTILE_SITE_KEY` for `cf-preview.yml` (the workflow stops early without it) |
+| Order | `microns-ops` is deployed first (`wrangler deploy`, not a version upload); then the site preview |
+| Rate limits | namespaces `2001`, `2002`, `2003` go into the P0-2 consumer checklist |
 
 ## Documented deviations from Vercel
 
@@ -194,7 +309,7 @@ repeated on the preview once owner item 1 is done.
 | 4 | Playwright `seo.spec.ts` green against the preview | **pass (local)** | `BASE_URL=http://127.0.0.1:8796 npm run cf:e2e -- --retries=0`: 8 passed, 0 failed; the same with `CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` set (dummy values, which never appear in the output). `package.json` and `package-lock.json` unchanged (`--no-save`). Not yet run against a preview (owner item 1). |
 | 5 | Lighthouse on 5 URLs ≥ Vercel | **blocked** | Needs the preview and access to production (Q1). |
 | 6 | `tests/middleware/smoke.mjs` green | **pass** | Exit 0: 1,259 assertions ok, 0 fail. Includes the redirect table and the 323 route-decision comparisons; mutation-checked (a changed RD-12 source and a case-insensitive language matcher each fail it). |
-| 7 | Size within Workers Paid limits; startup under 1 s | **pass (local)** | `wrangler deploy --dry-run`: 1,897.59 KiB, gzip 476.47 KiB. The Paid limit is 10 MB after compression and the Free limit is 3 MB. Assets: 852 files read from `dist/`; the largest is `occt-import-js.wasm` at 7.6 MB, under the 25 MiB per-file limit. `wrangler check startup`: 16.0 ms active CPU in a 50.3 ms profile window, locally. Re-check startup on the first upload. |
+| 7 | Size within Workers Paid limits; startup under 1 s | **pass (local)** | `wrangler deploy --dry-run`: 1,897.59 KiB, gzip 476.47 KiB. The Worker size limit is 64 MiB uncompressed on Free and Paid, with no compressed limit; global scope must start within 1 s. Assets: 852 files read from `dist/`; the largest is `occt-import-js.wasm` at 7.6 MB, under the 25 MiB per-file limit. `wrangler check startup`: 16.0 ms active CPU in a 50.3 ms profile window, locally. Re-check startup on the first upload. |
 | 8 | Preview hosts send `X-Robots-Tag: noindex` and refuse requests without Access | **partial** | `noindex` is on every response sampled from the local Worker (HTML, 308, XML, assets, HEAD). `preview.ts` treats `*.workers.dev` the same way and is unit-tested. Access is not configured yet (owner item 1). |
 | 9 | Vercel production build of the same commit succeeds | **blocked** | The commit is not pushed or built on Vercel yet (git state is owned by the orchestrator). The local `vite build` of this tree succeeds, and the last production deployment (`9afcba8`) is READY. |
 

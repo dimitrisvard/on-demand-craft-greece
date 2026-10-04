@@ -16,7 +16,7 @@ export interface Env {
   SITE_ORIGIN: string;           // var, "https://www.micronshub.eu"
   PREVIEW_HOSTNAMES: string;     // var, comma-separated hostnames that get X-Robots-Tag: noindex (plus any *.workers.dev)
   SEO_STRICT_404: string;        // var, "false"
-  API_FORWARD_ORIGIN: string;    // var, "https://www.micronshub.eu" (Phase 1: /api/* is forwarded to Vercel production)
+  API_FORWARD_ORIGIN: string;    // var, "https://on-demand-craft-greece.vercel.app" (target of the /api forward, src/api/forward.ts)
   HSTS_VALUE?: string;           // var, optional; emitted only on the production host when set (value from the P0-3 baseline)
   DIRECTORY_INDEX_EMULATION: string; // var, "true" | "false": serve <dir>/index.html for /dir and /dir/ (router step 5; set from the P0-3 baseline)
 

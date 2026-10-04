@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import * as XLSX from "xlsx";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchWithAuth } from "@/utils/apiAuth";
 
 // ─────────────────────────────────────────────
 // Types
@@ -294,7 +295,7 @@ export default function CompanyScannerPage() {
       setScan(s => ({ ...s, currentPage: pg }));
 
       try {
-        const resp = await fetch("/api/scan-directory", {
+        const resp = await fetchWithAuth("/api/scan-directory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: pageUrl, source: detectedSource }),
@@ -356,7 +357,7 @@ export default function CompanyScannerPage() {
       if (toEnrich && toEnrich.length > 0) {
         for (const c of toEnrich) {
           try {
-            const resp = await fetch("/api/scrape-company-profile", {
+            const resp = await fetchWithAuth("/api/scrape-company-profile", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ url: c.source_url, source: c.source }),
@@ -399,7 +400,7 @@ export default function CompanyScannerPage() {
     setEnrichingIds(prev => new Set(prev).add(company.id));
 
     try {
-      const resp = await fetch("/api/scrape-website", {
+      const resp = await fetchWithAuth("/api/scrape-website", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ urls: [company.website_url] }),

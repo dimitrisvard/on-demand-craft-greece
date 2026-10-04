@@ -76,6 +76,12 @@ describe('precheckSupabaseJwt', () => {
     expect(precheckSupabaseJwt(await mintProjectKeyShape('service_role'), nowSec())).toEqual({ ok: false });
   });
 
+  it('rejects a user-shaped token whose role is not authenticated', async () => {
+    for (const role of ['anon', 'service_role', 'supabase_admin']) {
+      expect(precheckSupabaseJwt(await mintSupabaseJwt({ sub: UID, role }), nowSec())).toEqual({ ok: false });
+    }
+  });
+
   it('rejects an expired token', async () => {
     const token = await mintSupabaseJwt({ sub: UID, exp: nowSec() - 1 });
     expect(precheckSupabaseJwt(token, nowSec())).toEqual({ ok: false });

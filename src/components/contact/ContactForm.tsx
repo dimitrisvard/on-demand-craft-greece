@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '@/hooks/use-toast';
+import TurnstileWidget, { type TurnstileWidgetHandle } from '@/components/security/TurnstileWidget';
+import { fetchWithTurnstile } from '@/utils/turnstile';
 
 type SubjectValue =
   | 'quote'
@@ -63,6 +65,7 @@ const ContactForm: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   const onChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -93,21 +96,27 @@ const ContactForm: React.FC = () => {
 
     setError(null);
     setSubmitting(true);
+    const widget = turnstileRef.current;
 
     try {
-      const res = await fetch('/api/emails', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: state.name,
-          company: state.company,
-          email: state.email,
-          phone: state.phone,
-          subject: state.subject,
-          message: state.message,
-          action: 'email',
-        }),
-      });
+      // The Turnstile token (when there is one) is read right before the request.
+      const res = await fetchWithTurnstile(
+        '/api/emails',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: state.name,
+            company: state.company,
+            email: state.email,
+            phone: state.phone,
+            subject: state.subject,
+            message: state.message,
+            action: 'email',
+          }),
+        },
+        widget ? () => widget.getToken() : undefined,
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       setSuccess(true);
@@ -138,6 +147,7 @@ const ContactForm: React.FC = () => {
       );
       if (typeof window !== 'undefined') window.location.href = mailto;
     } finally {
+      widget?.reset();
       setSubmitting(false);
     }
   };
@@ -335,6 +345,8 @@ const ContactForm: React.FC = () => {
             {state.message.length} / {MAX_MESSAGE}
           </p>
         </div>
+
+        <TurnstileWidget ref={turnstileRef} action="contact" />
 
         <button
           type="submit"

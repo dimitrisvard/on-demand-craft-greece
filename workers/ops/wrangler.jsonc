@@ -1,0 +1,72 @@
+// microns-ops: the API handlers that do not run in microns-site (notifications incl. nest and inventory, gsc,
+// tenders, tender-scan, funded-startups, scrapers, marketing webhook / Gmail connect / apollo-enrich) and the
+// consumer of the queue "scrapes".
+// Phase 2 subset of the "workers/ops/wrangler.jsonc" object of docs/migration/wrangler.jsonc.draft.
+//
+// Reachable only through the site's service binding OPS (named entrypoint OpsApi, RPC) and the queue consumer:
+// no workers.dev URL, no preview URLs, no routes. Deploy with `wrangler deploy` (not `versions upload`): a service
+// binding reaches the target's current deployment only. Deploy order: ops first, then the site.
+//
+// Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put them in
+// workers/ops/.dev.vars (gitignored; template .dev.vars.example). The repository is public: never write a value here.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "microns-ops",
+  "main": "src/index.ts",
+  // Must stay >= 2025-04-01 (nodejs_compat populates process.env from that date on; api/*.js read it).
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  // Applies to RPC calls and queue consumers alike. `nest` needs more than the 30 s default for large orders; it is
+  // a runaway guard (CPU is billed as used).
+  "limits": {
+    "cpu_ms": 300000
+  },
+  // lib/inventory needs qrcode's server build (toBuffer); without the alias the bundler picks the package's
+  // browser build. The path is relative to this folder (repo root node_modules).
+  "alias": {
+    "qrcode": "./../../node_modules/qrcode/lib/server.js"
+  },
+  "vars": {
+    "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+    "SITE_ORIGIN": "https://www.micronshub.eu"
+  },
+  "queues": {
+    "producers": [
+      { "binding": "SCRAPES", "queue": "scrapes" }
+    ],
+    // One scan per invocation, at most two at once; a failed scan is retried after 5 minutes, three times, then
+    // kept in scrapes-dlq (created automatically when missing). max_retries must equal MAX_RETRIES in
+    // src/queues/scrapes.ts.
+    "consumers": [
+      {
+        "queue": "scrapes",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "max_concurrency": 2,
+        "retry_delay": 300,
+        "dead_letter_queue": "scrapes-dlq"
+      }
+    ]
+  },
+  // A deploy is refused until every name exists. Locally only these names are loaded from .dev.vars.
+  "secrets": {
+    "required": [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "SUPABASE_ANON_KEY",
+      "RESEND_API_KEY",
+      "RESEND_WEBHOOK_SECRET",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_CHAT_ID",
+      "GOOGLE_CLIENT_ID",
+      "GOOGLE_CLIENT_SECRET",
+      "GOOGLE_REDIRECT_URI",
+      "APOLLO_API_KEY"
+    ]
+  }
+}

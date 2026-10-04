@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Package, Layers, ScanLine, Settings, AlertTriangle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useApiUnauthorized } from '@/utils/apiAuth';
 
 const navItems = [
   { path: '/dashboard/inventory', label: 'Dashboard', icon: Package },
@@ -14,6 +15,7 @@ const navItems = [
 
 export default function InventoryLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const apiUnauthorized = useApiUnauthorized();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -46,6 +48,17 @@ export default function InventoryLayout({ children }: { children: ReactNode }) {
         </div>
       </div>
       <div className="p-6">
+        {apiUnauthorized && (
+          <div role="alert" className="mb-4 flex items-center justify-between gap-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span>Your session has expired, so the last request was refused.</span>
+            <Link
+              to={`/login?returnTo=${encodeURIComponent(location.pathname + location.search)}`}
+              className="font-medium underline whitespace-nowrap"
+            >
+              Sign in again
+            </Link>
+          </div>
+        )}
         {children}
       </div>
     </div>

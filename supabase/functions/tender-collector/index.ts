@@ -3,9 +3,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SITE_URL = Deno.env.get("SITE_URL") ?? "https://www.micronshub.eu";
+const CF_ACCESS_CLIENT_ID = Deno.env.get("CF_ACCESS_CLIENT_ID");
+const CF_ACCESS_CLIENT_SECRET = Deno.env.get("CF_ACCESS_CLIENT_SECRET");
+const HAS_ACCESS_TOKEN = Boolean(CF_ACCESS_CLIENT_ID && CF_ACCESS_CLIENT_SECRET);
+const SCAN_HEADERS: Record<string, string> = HAS_ACCESS_TOKEN
+  ? { "Content-Type": "application/json", "CF-Access-Client-Id": CF_ACCESS_CLIENT_ID!, "CF-Access-Client-Secret": CF_ACCESS_CLIENT_SECRET! }
+  : { "Content-Type": "application/json" };
 
-const BATCH_SIZE = 5;       // connectors per parallel batch
-const PER_SCAN_TIMEOUT = 25000; // ms per connector scan (increased for slow portals)
+const BATCH_SIZE = 5;
+const PER_SCAN_TIMEOUT = 25000;
 
 Deno.serve(async (req) => {
   const corsHeaders = {
@@ -19,8 +25,7 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-  // Find connectors that need scanning (last_scan_at is the column written by tender-scan.js)
-  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(); // 6h ago
+  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
 
   const [{ data: nullRows }, { data: staleRows }] = await Promise.all([
     supabase
@@ -51,7 +56,6 @@ Deno.serve(async (req) => {
 
   console.log(`[tender-collector] ${connectors.length} connectors need scanning`);
 
-  // Scan in parallel batches
   let totalNew = 0;
   let totalErrors = 0;
   const errorDetails: string[] = [];
@@ -64,12 +68,12 @@ Deno.serve(async (req) => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), PER_SCAN_TIMEOUT);
         try {
-          // Send country_code (not connectorId) — this is what tender-scan.js expects
           const resp = await fetch(`${SITE_URL}/api/tender-scan`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: SCAN_HEADERS,
             body: JSON.stringify({ country_code: connector.country_code }),
             signal: controller.signal,
+            redirect: HAS_ACCESS_TOKEN ? "manual" : "follow",
           });
           clearTimeout(timer);
           if (!resp.ok) {
@@ -77,7 +81,11 @@ Deno.serve(async (req) => {
             throw new Error(`HTTP ${resp.status} for ${connector.country_code}: ${body.slice(0, 100)}`);
           }
           const data = await resp.json();
-          console.log(`[tender-collector] ${connector.country_code}: ${data.tenders_new ?? 0} new, ${data.tenders_found ?? 0} found`);
+          if (data.queued) {
+            console.log(`[tender-collector] ${connector.country_code}: queued, run_id ${data.run_id ?? "unknown"}`);
+          } else {
+            console.log(`[tender-collector] ${connector.country_code}: ${data.tenders_new ?? 0} new, ${data.tenders_found ?? 0} found`);
+          }
           return { connector, data };
         } catch (err) {
           clearTimeout(timer);
@@ -97,7 +105,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Small delay between batches to avoid hammering the API
     if (i + BATCH_SIZE < connectors.length) {
       await new Promise(r => setTimeout(r, 1000));
     }

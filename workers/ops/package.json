@@ -3,8 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "wrangler dev --local --port 8788",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:dry": "wrangler deploy --dry-run --outdir .wrangler/dry --metafile .wrangler/dry/meta.json && node scripts/check-bundle.mjs",
+    "check-bundle": "node scripts/check-bundle.mjs",
+    "test:integration": "vitest run -c vitest.t2.config.ts"
   },
   "dependencies": {
     "hono": "4.13.12"

@@ -34,6 +34,92 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ===== Site API (/api/*) access =====
+// Every /api/* call goes to one base URL: SITE_URL (default https://www.micronshub.eu; the preview
+// host while it is being tested, the machine API host once it exists). A tool's optional
+// `api_base_url` argument overrides it for that call only.
+// When CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are both set, the Cloudflare Access service
+// token headers are added, but only to requests whose origin equals the SITE_URL origin, and
+// redirects are never followed, so the token is never sent to another host.
+const DEFAULT_SITE_URL = "https://www.micronshub.eu";
+const CSV_TEXT_LIMIT_BYTES = 200 * 1024;
+
+function siteUrl(): string {
+  return (process.env.SITE_URL || DEFAULT_SITE_URL).replace(/\/+$/, "");
+}
+
+function apiBase(override?: string): string {
+  return (override || siteUrl()).replace(/\/+$/, "");
+}
+
+function accessHeadersFor(url: string): Record<string, string> {
+  const id = process.env.CF_ACCESS_CLIENT_ID;
+  const secret = process.env.CF_ACCESS_CLIENT_SECRET;
+  if (!id || !secret) return {};
+  let sameOrigin = false;
+  try {
+    sameOrigin = new URL(url).origin === new URL(siteUrl()).origin;
+  } catch {
+    sameOrigin = false;
+  }
+  return sameOrigin ? { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret } : {};
+}
+
+async function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, baseOverride?: string): Promise<Response> {
+  const url = `${apiBase(baseOverride)}${path}`;
+  return fetch(url, {
+    ...init,
+    headers: { ...(init.headers || {}), ...accessHeadersFor(url) },
+    redirect: "manual",
+  });
+}
+
+/** One-line description of a non-2xx answer; a redirect is reported, never followed. */
+function describeHttpFailure(resp: Response): string {
+  if (resp.status >= 300 && resp.status < 400) {
+    const location = resp.headers.get("location");
+    return `HTTP ${resp.status} redirect${location ? ` to ${location}` : ""} not followed (set SITE_URL to the API host)`;
+  }
+  return `HTTP ${resp.status}`;
+}
+
+/**
+ * Cuts a CSV text (header line first) at the last record boundary that fits in `limitBytes` of
+ * UTF-8. Line breaks inside quoted fields are not record boundaries. Row counts exclude the header.
+ */
+function truncateCsv(csv: string, limitBytes: number): { text: string; truncated: boolean; totalBytes: number; keptRows: number; totalRows: number } {
+  const totalBytes = Buffer.byteLength(csv, "utf8");
+  let bytes = 0;
+  let inQuotes = false;
+  let records = csv.length === 0 ? 0 : 1;
+  let cutIndex = -1;
+  let keptRecords = 0;
+  for (let i = 0; i < csv.length; i++) {
+    const code = csv.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      bytes += 4;
+      i++;
+      continue;
+    }
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : 3;
+    if (code === 0x22) {
+      inQuotes = !inQuotes;
+    } else if (code === 0x0a && !inQuotes) {
+      if (bytes - 1 <= limitBytes) {
+        cutIndex = i;
+        keptRecords = records;
+      }
+      records++;
+    }
+  }
+  const totalRows = Math.max(records - 1, 0);
+  if (totalBytes <= limitBytes) {
+    return { text: csv, truncated: false, totalBytes, keptRows: totalRows, totalRows };
+  }
+  const text = cutIndex >= 0 ? csv.slice(0, cutIndex) : "";
+  return { text, truncated: true, totalBytes, keptRows: Math.max(keptRecords - 1, 0), totalRows };
+}
+
 // ===== Helper: format lead for display =====
 function formatLead(lead: any): string {
   const score = lead.manual_score || lead.auto_score;
@@ -51,11 +137,21 @@ function formatLead(lead: any): string {
 }
 
 // ===== Create MCP Server =====
+// Registrations are typed loosely: resolving the SDK's tool/prompt overloads against the zod shapes of ~45
+// registrations makes `tsc` (5.x) run out of memory, so `npm run build` could not finish. Runtime behaviour is the
+// SDK's own; each tool still validates its arguments with the zod shape it registers.
+interface LooseMcpServer {
+  tool(name: string, ...rest: any[]): unknown;
+  prompt(name: string, ...rest: any[]): unknown;
+  resource(name: string, ...rest: any[]): unknown;
+  connect(transport: StdioServerTransport): Promise<void>;
+}
+
 const server = new McpServer({
   name: "micronshub-leads",
   version: "1.0.0",
   description: "Microns Hub lead monitoring system — query, score, and manage manufacturing leads from Reddit, Hacker News, and forums",
-});
+}) as unknown as LooseMcpServer;
 
 // ===== Tool 1: get_leads =====
 server.tool(
@@ -519,8 +615,7 @@ server.tool(
       return { content: [{ type: "text", text: "❌ URL not recognized. Supported: europages.co.uk/de/fr/etc, wlw.com/de" }] };
     }
 
-    // Build page URLs and scan via the Vercel API
-    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
+    // Build page URLs and scan via the site API (SITE_URL)
     let totalFound = 0;
     let totalNew = 0;
     const errors: string[] = [];
@@ -538,16 +633,16 @@ server.tool(
     for (let pg = 1; pg <= maxPages; pg++) {
       const pageUrl = buildPageUrl(url, pg);
       try {
-        const resp = await fetch(`${siteUrl}/api/scan-directory`, {
+        const resp = await apiFetch("/api/scan-directory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: pageUrl, source }),
         });
 
         if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+          const err = await resp.json().catch(() => ({ error: describeHttpFailure(resp) }));
           errors.push(`Page ${pg}: ${(err as any).error || "unknown"}`);
-          if (resp.status === 429 || resp.status === 403) break;
+          if (resp.status === 429 || resp.status === 403 || resp.status === 401 || (resp.status >= 300 && resp.status < 400)) break;
           continue;
         }
 
@@ -675,16 +770,21 @@ server.tool(
       return { content: [{ type: "text", text: "No companies found to enrich (need website_url + pending status)." }] };
     }
 
-    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
     const results: string[] = [];
 
     for (const company of toEnrich) {
       try {
-        const resp = await fetch(`${siteUrl}/api/scrape-website`, {
+        const resp = await apiFetch("/api/scrape-website", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ urls: [company.website_url] }),
         });
+
+        if (resp.status === 401 || resp.status === 403 || resp.status === 429 || (resp.status >= 300 && resp.status < 400)) {
+          // The API refused the caller (credential, rate limit or wrong host): leave the rest pending.
+          results.push(`${company.company_name}: not scraped, ${describeHttpFailure(resp)}; remaining companies left pending`);
+          break;
+        }
 
         if (resp.ok) {
           const data: any = await resp.json();
@@ -794,7 +894,6 @@ server.tool(
     }
 
     const source = ss.source;
-    const siteUrl = process.env.SITE_URL || "https://www.micronshub.eu";
     let totalFound = 0;
     let totalNew = 0;
     const errors: string[] = [];
@@ -812,16 +911,16 @@ server.tool(
     for (let pg = 1; pg <= ss.max_pages; pg++) {
       const pageUrl = buildPageUrl(ss.search_url, pg);
       try {
-        const resp = await fetch(`${siteUrl}/api/scan-directory`, {
+        const resp = await apiFetch("/api/scan-directory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: pageUrl, source }),
         });
 
         if (!resp.ok) {
-          const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+          const err = await resp.json().catch(() => ({ error: describeHttpFailure(resp) }));
           errors.push(`Page ${pg}: ${(err as any).error || "unknown"}`);
-          if (resp.status === 429 || resp.status === 403) break;
+          if (resp.status === 429 || resp.status === 403 || resp.status === 401 || (resp.status >= 300 && resp.status < 400)) break;
           continue;
         }
 
@@ -940,7 +1039,7 @@ server.resource(
 server.prompt(
   "draft_lead_response",
   "Draft a helpful, non-salesy response to a lead post on behalf of Microns Hub",
-  [{ name: "lead_id", description: "The lead UUID to respond to", required: true }],
+  { lead_id: z.string().describe("The lead UUID to respond to") },
   async ({ lead_id }) => {
     const { data: lead } = await supabase.from("leads").select("*").eq("id", lead_id).single();
 
@@ -993,7 +1092,6 @@ Draft the response now:`,
 server.prompt(
   "daily_lead_review",
   "Review today's leads and suggest actions for each high-intent lead",
-  [],
   async () => {
     const today = new Date().toISOString().slice(0, 10);
     const { data: leads } = await supabase
@@ -1282,24 +1380,31 @@ server.tool(
   "Manually trigger a scan for a specific country connector to fetch new tenders.",
   {
     country_code: z.string().describe("ISO 2-letter country code, e.g. DE, FR, NL"),
-    api_base_url: z.string().optional().describe("Base URL of the API, defaults to https://micronshub.eu"),
+    api_base_url: z.string().optional().describe("Base URL of the API for this call; defaults to the SITE_URL environment variable (https://www.micronshub.eu when unset)"),
   },
   async ({ country_code, api_base_url }) => {
-    const baseUrl = api_base_url || "https://micronshub.eu";
     try {
-      const resp = await fetch(`${baseUrl}/api/tender-scan`, {
+      const resp = await apiFetch("/api/tender-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ country_code: country_code.toUpperCase() }),
         signal: AbortSignal.timeout(55000),
-      });
+      }, api_base_url);
 
       if (!resp.ok) {
         const text = await resp.text();
-        return { content: [{ type: "text", text: `Scan failed for ${country_code}: HTTP ${resp.status} — ${text.substring(0, 200)}` }] };
+        return { content: [{ type: "text", text: `Scan failed for ${country_code}: ${describeHttpFailure(resp)} — ${text.substring(0, 200)}` }] };
       }
 
-      const result = await resp.json();
+      const result: any = await resp.json();
+      if (result.queued) {
+        return {
+          content: [{
+            type: "text",
+            text: `Scan for ${country_code} queued (run_id ${result.run_id ?? "unknown"}). The counts arrive with the background run; check get_connector_status or the tender list later.`,
+          }],
+        };
+      }
       return {
         content: [{
           type: "text",
@@ -1315,23 +1420,42 @@ server.tool(
 // ===== Tender Tool 8: export_tenders_csv =====
 server.tool(
   "export_tenders_csv",
-  "Get a URL to download filtered tenders as CSV.",
+  "Export filtered tenders as CSV text (first 200 KB; narrow the filters for larger sets).",
   {
     country: z.string().optional(),
     min_score: z.number().optional(),
     status: z.string().optional(),
     relevant_only: z.boolean().optional(),
-    api_base_url: z.string().optional(),
+    api_base_url: z.string().optional().describe("Base URL of the API for this call; defaults to the SITE_URL environment variable"),
   },
   async ({ country, min_score, status, relevant_only, api_base_url }) => {
-    const baseUrl = api_base_url || "https://micronshub.eu";
     const params = new URLSearchParams();
+    params.set("export", "csv");
     if (country) params.set("country", country);
     if (min_score) params.set("min_score", String(min_score));
     if (status) params.set("status", status);
     if (relevant_only) params.set("relevant_only", "true");
-    const url = `${baseUrl}/api/tenders-export?${params.toString()}`;
-    return { content: [{ type: "text", text: `CSV export URL:\n${url}\n\nOpen this URL in a browser to download the CSV file.` }] };
+    try {
+      const resp = await apiFetch(`/api/tenders?${params.toString()}`, {
+        method: "GET",
+        headers: { Accept: "text/csv" },
+        signal: AbortSignal.timeout(60000),
+      }, api_base_url);
+
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "");
+        return { content: [{ type: "text", text: `CSV export failed: ${describeHttpFailure(resp)} — ${text.substring(0, 200)}` }] };
+      }
+
+      const csv = await resp.text();
+      const out = truncateCsv(csv, CSV_TEXT_LIMIT_BYTES);
+      const note = out.truncated
+        ? `\n\n[Truncated: first ${out.keptRows} of ${out.totalRows} tenders shown (${Math.round(CSV_TEXT_LIMIT_BYTES / 1024)} KB of ${Math.ceil(out.totalBytes / 1024)} KB). Narrow the filters (country, min_score, status, relevant_only) to get the rest.]`
+        : `\n\n[${out.totalRows} tenders]`;
+      return { content: [{ type: "text", text: `${out.text}${note}` }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: `CSV export error: ${err.message}` }] };
+    }
   }
 );
 
@@ -1544,18 +1668,17 @@ server.tool(
   "Trigger a live scan of European startup funding RSS feeds. Priority 1 scans the 3 main feeds (tech.eu, EU-Startups, TechCrunch). Priority 2 adds regional feeds.",
   {
     priority: z.number().optional().default(1).describe("Maximum feed priority to scan (1=P1 only, 2=P1+P2, 3=all)"),
-    api_base_url: z.string().optional().describe("Base URL of the deployment, e.g. https://micronshub.eu"),
+    api_base_url: z.string().optional().describe("Base URL of the API for this call; defaults to the SITE_URL environment variable (https://www.micronshub.eu when unset)"),
   },
   async ({ priority, api_base_url }) => {
-    const baseUrl = api_base_url || process.env.SITE_URL || "https://micronshub.eu";
     try {
-      const res = await fetch(`${baseUrl}/api/funded-startups`, {
+      const res = await apiFetch("/api/funded-startups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ priority }),
-      });
-      const json = await res.json() as any;
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      }, api_base_url);
+      const json = await res.json().catch(() => ({})) as any;
+      if (!res.ok) throw new Error(json.error || describeHttpFailure(res));
 
       const text = [
         `✅ Funding scan completed`,

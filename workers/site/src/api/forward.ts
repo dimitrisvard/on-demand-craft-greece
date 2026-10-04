@@ -1,19 +1,36 @@
-// Router step 3, Phase 1 (PLAN.md P1-3, §5.2 last row): every /api/* request is proxied unchanged to
-// API_FORWARD_ORIGIN (Vercel production), keeping method, path, query, body and end-to-end headers.
-// Stripped: hop-by-hop headers (RFC 9110 §7.6.1), headers named in Connection, Host and every cf-* header
-// (Cloudflare metadata, and the preview's CF-Access-Client-Id/-Secret, which must never leave Cloudflare).
-// Added: X-Forwarded-Host with the host the client asked for. Redirects are passed back, not followed.
-// The request body is buffered (Vercel Functions accept at most 4.5 MB anyway), so Content-Length is recomputed.
-// Timeout 30 s; a network error or timeout answers 502 {"error":"upstream"}. The vercel.json:163-172 CORS
-// headers are applied afterwards by finalise(), as on Vercel.
-// Phase 2 replaces this with the /api router (local handlers, OPS, and this forward behind api.forward_to_vercel).
+// Router step 3 entry (src/index.ts): every /api/* request except /api/sitemap (step 2) arrives in handleApi.
+//
+//   flag api.forward_to_vercel on  -> forwardToVercel(): the request goes unchanged to API_FORWARD_ORIGIN (the
+//                                     Vercel deployment), ungated, every method incl. OPTIONS (rollback switch)
+//   flag off                       -> routeApi() (src/api/router.ts): local handlers, microns-ops (OPS), or this
+//                                     forward for paths the router does not serve
+//
+// Flag (KV FLAGS, key api.forward_to_vercel, read with a 60 s edge cache, src/flags.ts):
+//   {"enabled": true}                                   forward every /api/* request
+//   {"enabled": true, "value": {"paths": ["/api/gsc"]}}  only these public paths (exact match)
+//   {"enabled": true, "value": {"hosts": ["preview"]}}   only on preview hosts ("production": only on the others);
+//                                                        paths and hosts combine with AND
+//   {"enabled": false}                                  forward nothing
+// A missing key, a malformed value or a KV error falls back to the var API_FORWARD_TO_VERCEL: "true" forwards
+// everything; "false", empty or absent forwards nothing; any other value forwards nothing and is logged.
+//
+// forwardToVercel keeps method, path, query, body and end-to-end headers. Stripped: hop-by-hop headers (RFC 9110
+// §7.6.1), headers named in Connection, Host, Content-Length and every cf-* header (Cloudflare metadata, and the
+// preview's CF-Access-Client-Id/-Secret, which must never leave Cloudflare). Added: X-Forwarded-Host with the host
+// the client asked for. Redirects are passed back, not followed. Timeout 30 s; a network error or timeout answers
+// 502 {"error":"upstream"}. The vercel.json CORS headers are applied afterwards by finalise(), as on Vercel.
 
 import type { Env } from '../env';
 import { LOG_PREFIX } from '../env';
+import { getFlagValue } from '../flags';
+import { isPreviewHost } from '../preview';
+import { routeApi } from './router';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
-const HOP_BY_HOP = new Set([
+export const FORWARD_FLAG_KEY = 'api.forward_to_vercel';
+
+export const HOP_BY_HOP: ReadonlySet<string> = new Set([
   'connection',
   'keep-alive',
   'proxy-authenticate',
@@ -25,13 +42,18 @@ const HOP_BY_HOP = new Set([
   'upgrade',
 ]);
 
-export function forwardHeaders(incoming: Headers, clientHost: string): Headers {
-  const named = new Set(
-    (incoming.get('connection') || '')
+/** Names listed in the Connection header (lower case); they are hop-by-hop for this message. */
+export function connectionTokens(headers: Headers): Set<string> {
+  return new Set(
+    (headers.get('connection') || '')
       .split(',')
       .map((token) => token.trim().toLowerCase())
       .filter(Boolean),
   );
+}
+
+export function forwardHeaders(incoming: Headers, clientHost: string): Headers {
+  const named = connectionTokens(incoming);
   const out = new Headers();
   for (const [name, value] of incoming) {
     const key = name.toLowerCase();
@@ -49,7 +71,12 @@ function upstreamError(): Response {
   });
 }
 
-export async function handleApi(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+/**
+ * Proxies the request to API_FORWARD_ORIGIN. When `body` is passed (bytes the router already buffered; null for
+ * none) it is sent as is and the request body is never read, because a body stream can be read only once;
+ * otherwise the request body is read here.
+ */
+export async function forwardToVercel(request: Request, env: Env, body?: Uint8Array | null): Promise<Response> {
   const url = new URL(request.url);
   let target: URL;
   try {
@@ -66,10 +93,12 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
 
   const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
   try {
+    let payload: BodyInit | undefined;
+    if (hasBody) payload = body !== undefined ? (body ?? undefined) : await request.arrayBuffer();
     return await fetch(target.toString(), {
       method: request.method,
       headers: forwardHeaders(request.headers, url.host),
-      body: hasBody ? await request.arrayBuffer() : undefined,
+      body: payload,
       redirect: 'manual',
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
@@ -77,4 +106,32 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
     console.error(`${LOG_PREFIX} api forward failed: ${request.method} ${url.pathname}`, err);
     return upstreamError();
   }
+}
+
+function varSaysForward(env: Env): boolean {
+  const value = env.API_FORWARD_TO_VERCEL;
+  if (value === 'true') return true;
+  if (value === undefined || value === '' || value === 'false') return false;
+  console.error(`${LOG_PREFIX} api forward: API_FORWARD_TO_VERCEL is neither "true" nor "false", forwarding is off`);
+  return false;
+}
+
+/** True when this /api request goes to Vercel (flag api.forward_to_vercel, else the var). */
+export async function shouldForward(env: Env, url: URL): Promise<boolean> {
+  const flag = await getFlagValue(env, FORWARD_FLAG_KEY);
+  if (flag === null) return varSaysForward(env);
+  if (!flag.enabled) return false;
+  const paths = flag.value?.paths;
+  if (paths && !paths.includes(url.pathname)) return false;
+  const hosts = flag.value?.hosts;
+  if (hosts) {
+    const kind = isPreviewHost(url.hostname, env) ? 'preview' : 'production';
+    if (!hosts.includes(kind)) return false;
+  }
+  return true;
+}
+
+export async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (await shouldForward(env, new URL(request.url))) return forwardToVercel(request, env);
+  return routeApi(request, env, ctx);
 }

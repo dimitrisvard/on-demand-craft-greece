@@ -1,0 +1,101 @@
+name: Cloudflare ops Worker (microns-ops)
+
+# Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2). Manual dispatch only.
+#
+# Installs the root, workers/shared and workers/ops packages, type-checks and tests microns-ops, bundles it with
+# `wrangler deploy --dry-run` (metafile + qrcode check + size), and only when the input `deploy` is true runs
+# `wrangler deploy`. microns-ops has no public surface (workers_dev and preview_urls off, no routes): it is reached
+# only through the site's service binding OPS and its queue consumer. It must be deployed (not version-uploaded),
+# because a service binding reaches the target's current deployment only, and it is deployed before the site.
+#
+# Repository secrets (names only; Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN    API token with "Workers Scripts: Edit" (and Queues) on the account
+#   CLOUDFLARE_ACCOUNT_ID   Cloudflare account ID
+# Worker secrets (secrets.required in workers/ops/wrangler.jsonc) are set once on the Worker with
+# `npx wrangler secret put <NAME>` in workers/ops, never here. The queue "scrapes" must exist before the first
+# deploy (`npx wrangler queues create scrapes`); scrapes-dlq is created automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Run wrangler deploy after the checks (false = checks and dry run only)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cf-ops
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  ops:
+    name: Check, bundle and (optionally) deploy microns-ops
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Guard - deploy secrets present
+        if: ${{ inputs.deploy }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing repository secrets::Set these repository secrets before deploying:$missing. Nothing was built or deployed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            workers/shared/package-lock.json
+            workers/ops/package-lock.json
+
+      - name: Install root dependencies (api/*.js and lib/* resolve from here)
+        run: npm ci
+
+      - name: Install workers/shared dependencies
+        working-directory: workers/shared
+        run: npm ci
+
+      - name: Install workers/ops dependencies
+        working-directory: workers/ops
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: workers/ops
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: workers/ops
+        run: npm test
+
+      - name: Dry run bundle (metafile, qrcode check, size)
+        working-directory: workers/ops
+        run: npm run build:dry
+
+      - name: Deploy microns-ops
+        if: ${{ inputs.deploy }}
+        working-directory: workers/ops
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
