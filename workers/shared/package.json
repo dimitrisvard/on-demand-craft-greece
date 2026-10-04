@@ -1,0 +1,23 @@
+{
+  "name": "microns-shared",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20",
+    "content-type": "1.0.5",
+    "jose": "6.2.12"
+  },
+  "devDependencies": {
+    "@aws-crypto/sha256-js": "5.2.0",
+    "@cloudflare/workers-types": "5.20260930.2",
+    "@smithy/signature-v4": "5.3.13",
+    "etag": "1.8.1",
+    "svix": "1.88.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3"
+  }
+}
