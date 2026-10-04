@@ -39,8 +39,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // host while it is being tested, the machine API host once it exists). A tool's optional
 // `api_base_url` argument overrides it for that call only.
 // When CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are both set, the Cloudflare Access service
-// token headers are added, but only to requests whose origin equals the SITE_URL origin, and
-// redirects are never followed, so the token is never sent to another host.
+// token headers are added, but only to requests whose origin equals the SITE_URL origin and whose
+// host sits behind an Access application (the preview host, the machine API host). The site hosts
+// www.micronshub.eu and micronshub.eu and every *.vercel.app host have no Access application and
+// never receive the token. Redirects are never followed, so the token is never sent to another host.
 const DEFAULT_SITE_URL = "https://www.micronshub.eu";
 const CSV_TEXT_LIMIT_BYTES = 200 * 1024;
 
@@ -52,17 +54,33 @@ function apiBase(override?: string): string {
   return (override || siteUrl()).replace(/\/+$/, "");
 }
 
+/** Hosts without a Cloudflare Access application: the Access service token is never sent to them. */
+function isHostWithoutAccessApp(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.+$/, "");
+  return host === "micronshub.eu" || host === "www.micronshub.eu" || host === "vercel.app" || host.endsWith(".vercel.app");
+}
+
+let accessWithheldNoticeShown = false;
+
 function accessHeadersFor(url: string): Record<string, string> {
   const id = process.env.CF_ACCESS_CLIENT_ID;
   const secret = process.env.CF_ACCESS_CLIENT_SECRET;
   if (!id || !secret) return {};
-  let sameOrigin = false;
+  let target: URL;
   try {
-    sameOrigin = new URL(url).origin === new URL(siteUrl()).origin;
+    target = new URL(url);
+    if (target.origin !== new URL(siteUrl()).origin) return {};
   } catch {
-    sameOrigin = false;
+    return {};
   }
-  return sameOrigin ? { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret } : {};
+  if (isHostWithoutAccessApp(target.hostname)) {
+    if (!accessWithheldNoticeShown) {
+      accessWithheldNoticeShown = true;
+      console.error(`[mcp] Access headers not sent to ${target.hostname}: not a machine API host (set SITE_URL to the preview or machine API host)`);
+    }
+    return {};
+  }
+  return { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
 }
 
 async function apiFetch(path: string, init: RequestInit & { headers?: Record<string, string> } = {}, baseOverride?: string): Promise<Response> {

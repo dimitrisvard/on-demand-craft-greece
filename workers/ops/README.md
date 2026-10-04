@@ -20,6 +20,12 @@ Cloudflare Worker for the API handlers that do not run in `microns-site`, and th
 
 A breaking change of `OpsCall` adds a new version number, and ops accepts both versions for one release (deploy ops first).
 
+| Log line | Fields |
+|---|---|
+| `[microns-ops] api …` (one per call) | `endpoint`, `action`, `status`, `ms`, `principal` (class only), `requestId`; never a query string, header, body or e-mail address |
+| `[microns-ops] handler failed …` | `endpoint`, `action`, `requestId`, then the error |
+| `action` in both | A sentinel (`#…`) or a value of at most 40 characters from `[a-z0-9-]`; anything else is written as `invalid` (the same rule as the site's log lines) |
+
 ## Routes
 
 Every route is `app.all(<function path>)`, so `OPTIONS` and every method reach the handler, as on Vercel. Modules load lazily on the first request of their route, so a module-scope failure answers 500 on that route only.

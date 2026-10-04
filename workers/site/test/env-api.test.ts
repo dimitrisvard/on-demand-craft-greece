@@ -289,8 +289,9 @@ describe('wrangler.jsonc, Env and the router agree', () => {
     });
   });
 
-  it('no VITE_AWS_* name and no secret-looking value in the config', () => {
-    expect(siteConfigText).not.toMatch(/VITE_AWS/);
+  it('no browser-prefixed AWS name and no secret-looking value in the config', () => {
+    // Built at run time, so a repository-wide search for the retired name finds no file.
+    expect(siteConfigText).not.toMatch(new RegExp('VITE' + '_AWS'));
     // Built at run time, so this file itself holds no secret-looking prefix.
     const secretLike = new RegExp(`^(${['ey' + 'J', 'whsec' + '_', 're' + '_', 'AK' + 'IA'].join('|')})`);
     for (const value of Object.values(site.vars as Record<string, string>)) {

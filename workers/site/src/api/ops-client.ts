@@ -6,7 +6,8 @@
 //   method   as received
 //   headers  the client's headers without: host, content-length, hop-by-hop headers and every name listed in
 //            Connection (the body may have been rewritten by the gate, so its length is recomputed), cookie,
-//            cf-access-client-id, cf-access-client-secret, cf-access-jwt-assertion and every x-microns-* header
+//            every cf-access-* header (service-token credentials, Access assertions and identity headers alike)
+//            and every x-microns-* header
 //   body     the buffered (possibly gate-rewritten) bytes; none for GET/HEAD
 // The verified principal, the function URL and the action travel only in `call` (OpsCall), never in headers.
 // An RPC rejection answers 500 text/plain, except for `nest`, which answers 504 {"code":"TIMEOUT"} because a
@@ -21,14 +22,8 @@ import { LOG_PREFIX } from '../env';
 import { connectionTokens, HOP_BY_HOP } from './forward';
 import { actionForLog, type ResolvedApi } from './resolve';
 
-const STRIPPED: ReadonlySet<string> = new Set([
-  'host',
-  'content-length',
-  'cookie',
-  'cf-access-client-id',
-  'cf-access-client-secret',
-  'cf-access-jwt-assertion',
-]);
+const STRIPPED: ReadonlySet<string> = new Set(['host', 'content-length', 'cookie']);
+const STRIPPED_PREFIXES: readonly string[] = ['cf-access-', 'x-microns-'];
 
 /** Headers of the request handed to microns-ops (rules above). */
 export function opsHeaders(incoming: Headers): Headers {
@@ -36,7 +31,7 @@ export function opsHeaders(incoming: Headers): Headers {
   const out = new Headers();
   for (const [name, value] of incoming) {
     const key = name.toLowerCase();
-    if (STRIPPED.has(key) || HOP_BY_HOP.has(key) || named.has(key) || key.startsWith('x-microns-')) continue;
+    if (STRIPPED.has(key) || HOP_BY_HOP.has(key) || named.has(key) || STRIPPED_PREFIXES.some((p) => key.startsWith(p))) continue;
     out.append(name, value);
   }
   return out;

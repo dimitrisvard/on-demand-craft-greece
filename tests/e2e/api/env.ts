@@ -7,8 +7,10 @@
  * | `preview` | the Cloudflare preview host (`https://`)      | tests tagged `@preview` (needs E2E_FIXTURES)           |
  * | `compare` | the preview host, plus `VERCEL_BASE_URL`      | tests tagged `@compare` (owner's allow-listed machine) |
  *
- * BASE_URL is never the production site: `www.micronshub.eu`, `micronshub.eu` and `*.vercel.app` are refused in
- * every mode, so a run can only reach the Worker under test.
+ * BASE_URL is never a production host: every host of the `micronshub.eu` zone (`www`, the apex, tenant subdomains and
+ * any other label) and every `*.vercel.app` host are refused in every mode, so a run can only reach the Worker under
+ * test. A machine API host of the zone that is served by the Worker gets its own explicit exception here once it
+ * exists (Phase 3).
  */
 
 export const API_E2E_MODES = ['local', 'preview', 'compare'] as const;
@@ -28,23 +30,28 @@ export interface RunConfig {
 
 export type GuardResult = { ok: true; config: RunConfig } | { ok: false; message: string };
 
-const PRODUCTION_HOSTS = new Set(['www.micronshub.eu', 'micronshub.eu']);
+const PRODUCTION_ZONE = 'micronshub.eu';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
 export const GUARD_USAGE =
   'tests/e2e/api.spec.ts refuses to run. Set API_E2E_MODE to local (T2 harness), preview (Cloudflare preview, ' +
   'E2E_FIXTURES required) or compare (owner machine, VERCEL_BASE_URL required), and BASE_URL to the Worker under ' +
-  'test; www.micronshub.eu, micronshub.eu and *.vercel.app are never accepted as BASE_URL.';
+  'test; micronshub.eu, every *.micronshub.eu host and *.vercel.app are never accepted as BASE_URL.';
 
 /** Host name in canonical form: lower case, without a trailing dot. */
 export function canonicalHost(hostname: string): string {
   return hostname.toLowerCase().replace(/\.+$/, '');
 }
 
-/** The production site and every Vercel deployment host. */
+/** Every host of the production zone (apex, www, tenant subdomains) and every Vercel deployment host. */
 export function isRefusedHost(hostname: string): boolean {
   const host = canonicalHost(hostname);
-  return PRODUCTION_HOSTS.has(host) || host === 'vercel.app' || host.endsWith('.vercel.app');
+  return (
+    host === PRODUCTION_ZONE ||
+    host.endsWith(`.${PRODUCTION_ZONE}`) ||
+    host === 'vercel.app' ||
+    host.endsWith('.vercel.app')
+  );
 }
 
 export function isLoopbackHost(hostname: string): boolean {

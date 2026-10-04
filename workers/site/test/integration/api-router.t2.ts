@@ -2,6 +2,7 @@
 //   - OPTIONS on every routed /api path is answered by the handler itself (local or in microns-ops) with the
 //     vercel.json CORS headers, and touches no upstream
 //   - a staff request crosses the OPS service binding (RPC to OpsApi) and its handler reads the stub database
+//   - another spelling of a catalogue path (case, trailing slash, .js) is gated and routed like the catalogue path
 //   - an /api path outside the catalogue reaches the forward target (the stub's echo), GET and POST with a 1 KiB
 //     JSON body echoed byte for byte
 //   - a body over 4.5 MiB answers 413 before any handler
@@ -106,6 +107,28 @@ describe('OPS service binding', () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: 'unauthorized' });
     expect((await stub.stubCalls()).some((c) => c.path.startsWith('/rest/v1/tender'))).toBe(false);
+  });
+
+  it('another spelling of a catalogue path is routed like the catalogue path, never forwarded', async () => {
+    for (const path of ['/api/Connector-Status.js/', '/api/connector-status/', '/api/tenders.js?connectors=true']) {
+      const res = await api(path);
+      expect(res.status, path).toBe(401);
+      expect(res.headers.get('x-t2-forwarded'), path).toBeNull();
+      expect(await res.json()).toEqual({ error: 'unauthorized' });
+    }
+    const posted = await api('/api/notifications.js/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"action":"nest"}' });
+    expect(posted.status).toBe(401);
+    expect(posted.headers.get('x-t2-forwarded')).toBeNull();
+    await posted.arrayBuffer();
+    expect((await stub.stubCalls()).filter((c) => c.path.startsWith('/api/'))).toEqual([]);
+
+    const token = await stub.mintSupabaseJwt({ sub: UID, email: 't2-staff@example.test', exp: Math.floor(Date.now() / 1000) + 600 });
+    await stub.stubRoute({ method: 'GET', path: '^/auth/v1/user$', status: 200, body: { id: UID, email: 't2-staff@example.test' } });
+    await stub.stubRoute({ method: 'GET', path: '^/rest/v1/user_roles', status: 200, body: [{ role: 'admin' }] });
+    await stub.stubRoute({ method: 'GET', path: '^/rest/v1/tender_connectors', status: 200, body: [{ country_code: 'GR', name: 't2 connector' }] });
+    const staff = await api('/api/Connector-Status.js/', { headers: { authorization: `Bearer ${token}` } });
+    expect(staff.status).toBe(200);
+    expect(JSON.stringify(await staff.json())).toContain('t2 connector');
   });
 });
 

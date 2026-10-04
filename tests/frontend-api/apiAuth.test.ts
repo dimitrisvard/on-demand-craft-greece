@@ -176,6 +176,24 @@ describe('openWithAuth', () => {
     expect(objectUrls.revoke).toHaveBeenCalledTimes(1);
   });
 
+  it('does nothing with the answer when the visitor closed the window while it loaded', async () => {
+    const w = fakeWindow();
+    stubWindowOpen(w);
+    const clicks = captureAnchorClicks();
+    stubFetch(() => {
+      // The tab is closed while the request is still in flight.
+      w.closed = true;
+      return new Response('%PDF-1.4', { status: 200, headers: { 'content-type': 'application/pdf' } });
+    });
+    expect(await openWithAuth('/api/notifications?action=inv-label&stockItemId=s1', 'label-s1.pdf')).toBe(false);
+    expect(objectUrls.create).toHaveBeenCalledTimes(1);
+    expect(objectUrls.revoke).toHaveBeenCalledTimes(1);
+    expect(objectUrls.revoke).toHaveBeenCalledWith('blob:http://localhost:3000/object-1');
+    expect(w.location.href).toBe('about:blank');
+    expect(clicks).toHaveLength(0);
+    expect(toastSpy).not.toHaveBeenCalled();
+  });
+
   it('closes the window and shows a toast when the request fails', async () => {
     const w = fakeWindow();
     stubWindowOpen(w);

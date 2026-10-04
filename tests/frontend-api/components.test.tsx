@@ -157,6 +157,19 @@ describe('TurnstileWidget', () => {
     expect(fake.api.render.mock.calls[0][0]).toBe(mounted?.container.querySelector('[data-turnstile-slot="contact"]'));
   });
 
+  it('injects the script on a pointerdown inside the form alone (no focus needed), once', async () => {
+    vi.stubEnv('VITE_TURNSTILE_SITE_KEY', TEST_SITE_KEY);
+    setUserAgent(BROWSER_UA);
+    const { input } = await mountWidget();
+    expect(scripts()).toHaveLength(0);
+
+    input.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(scripts()).toHaveLength(1);
+    input.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    input.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    expect(scripts()).toHaveLength(1);
+  });
+
   it('never injects the script under a jsdom user agent (build prerender)', async () => {
     vi.stubEnv('VITE_TURNSTILE_SITE_KEY', TEST_SITE_KEY);
     const { ref, input } = await mountWidget();
@@ -269,6 +282,38 @@ describe('QRScanner label button', () => {
     expect(log[1]).toBe('fetch /api/notifications?action=inv-label&stockItemId=stock-7');
     const labelCall = calls.find((x) => x.url.includes('inv-label'));
     expect(labelCall?.headers.get('authorization')).toBe('Bearer staff-token');
+  });
+
+  it('shows a visible error message on the page when the label request fails', async () => {
+    supabaseMock.accessToken = 'staff-token';
+    const w = fakeWindow();
+    stubWindowOpen(w);
+    stubFetch((call) => {
+      if (call.url.includes('inv-stock-scan')) {
+        return jsonResponse(200, { data: { id: 'stock-7', qr_code: 'QR-7', status: 'used', material: { name: 'S235' } } });
+      }
+      return jsonResponse(500, { error: 'Label generation failed' });
+    });
+    const { default: QRScanner } = await import('@/pages/inventory/QRScanner');
+    mounted = await render(createElement(MemoryRouter, null, createElement(QRScanner)));
+    const c = mounted.container;
+    await act(async () => {
+      typeInto(c.querySelector('input[placeholder="Enter QR code manually..."]') as HTMLInputElement, 'QR-7');
+    });
+    await act(async () => {
+      button(c, /Look ?up|Find|Search/i).click();
+    });
+    await waitFor(() => expect(c.textContent).toContain('Print Label'));
+    expect(c.textContent).not.toContain('Could not open the document');
+
+    act(() => {
+      button(c, 'Print Label').click();
+    });
+    await waitFor(() => expect(w.close).toHaveBeenCalledTimes(1));
+    // The message is rendered inside the page itself (not only announced to screen readers).
+    await waitFor(() => expect(c.textContent).toContain('Could not open the document'));
+    expect(c.textContent).toContain('HTTP 500');
+    expect(w.location.href).toBe('about:blank');
   });
 });
 
@@ -396,6 +441,48 @@ describe('RfqFileDownload', () => {
     await waitFor(() => expect(clicks).toHaveLength(1));
     expect(open).not.toHaveBeenCalled();
     expect(clicks[0]).toEqual({ href: 'https://signed.example/bracket.step', download: 'bracket.step' });
+  });
+
+  // The folder holds other objects, but not this exact key.
+  const OTHER_OBJECTS = [
+    { key: 'RFQ-20261004-1/part-A/other.step', url: 'u', lastModified: 'd' },
+    { key: `${FILE}.bak`, url: 'u', lastModified: 'd' },
+  ];
+
+  it('keeps the Supabase Storage path when /api/s3 lists only other files of the same folder', async () => {
+    const open = stubWindowOpen(fakeWindow());
+    const clicks = captureAnchorClicks();
+    supabaseMock.storageList = [{ name: 'bracket.step' }];
+    stubFetch((call) => {
+      if (call.url === '/api/s3?action=list') return jsonResponse(200, { objects: OTHER_OBJECTS });
+      return jsonResponse(200, { url: 'https://signed.example/bracket.step' });
+    });
+    const c = await mountDownload();
+    await waitFor(() => expect(button(c, 'Download').disabled).toBe(false));
+    await act(async () => {
+      button(c, 'Download').click();
+    });
+    await waitFor(() => expect(clicks).toHaveLength(1));
+    expect(open).not.toHaveBeenCalled();
+    expect(clicks[0]).toEqual({ href: 'https://signed.example/bracket.step', download: 'bracket.step' });
+  });
+
+  it('reports "File not found" and presigns nothing when only other files of the folder exist', async () => {
+    const open = stubWindowOpen(fakeWindow());
+    supabaseMock.storageList = [{ name: 'other.step' }];
+    const { calls } = stubFetch((call) => {
+      if (call.url === '/api/s3?action=list') return jsonResponse(200, { objects: OTHER_OBJECTS });
+      return jsonResponse(200, { url: 'https://bucket.example/missing' });
+    });
+    const c = await mountDownload();
+    await waitFor(() => expect(c.textContent).toContain('File not found'));
+    const btn = button(c, 'File not found');
+    expect(btn.disabled).toBe(true);
+    await act(async () => {
+      btn.click();
+    });
+    expect(open).not.toHaveBeenCalled();
+    expect(calls.map((x) => x.url)).toEqual(['/api/s3?action=list']);
   });
 
   it('falls back to Supabase Storage when the /api/s3 lookup is refused', async () => {

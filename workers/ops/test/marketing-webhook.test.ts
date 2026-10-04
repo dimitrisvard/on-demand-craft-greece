@@ -251,6 +251,17 @@ describe('replay and retries', () => {
     expect(calls.every((c) => c.startsWith('GET /rest/v1/marketing_events?select=id&event_type=eq.complained'))).toBe(true);
   });
 
+  it('a bounce recorded for another e-mail does not acknowledge this one: the handler runs and records it', async () => {
+    const OTHER_EMAIL_ID = '0d8f6a2c-5b1e-4c3d-9e7f-a1b2c3d4e5f6';
+    events.push({ id: 'b-other', event_type: 'bounced', resend_email_id: OTHER_EMAIL_ID });
+    const result = await send(delivery(bounced, { id: 'msg_first_bounce' }));
+    expect(calls[0]).toBe(`GET /rest/v1/marketing_events?select=id&event_type=eq.bounced&resend_email_id=eq.${EMAIL_ID}&limit=1`);
+    expect(events.filter((e) => e.event_type === 'bounced' && e.resend_email_id === EMAIL_ID)).toHaveLength(1);
+    expect(calls.some((c) => c.startsWith('POST /rest/v1/marketing_events'))).toBe(true);
+    // The handler's own answer (it fails after its writes, as in the retry case above); nothing is acknowledged.
+    expect(result.json).not.toEqual({ received: true });
+  });
+
   it('only 2xx answers are remembered: an invalid payload (400) is processed again', async () => {
     const invalid = JSON.stringify({ hello: 'world' });
     expect((await send(delivery(invalid, { id: 'msg_bad' }))).status).toBe(400);

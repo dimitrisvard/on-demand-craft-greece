@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Package, Layers, ScanLine, Settings, AlertTriangle, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useApiUnauthorized } from '@/utils/apiAuth';
+import { Toaster } from '@/components/ui/toaster';
 
 const navItems = [
   { path: '/dashboard/inventory', label: 'Dashboard', icon: Package },
@@ -61,6 +62,8 @@ export default function InventoryLayout({ children }: { children: ReactNode }) {
         )}
         {children}
       </div>
+      {/* Renders the toasts of every inventory page, including the label-opening errors. */}
+      <Toaster />
     </div>
   );
 }

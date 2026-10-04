@@ -102,7 +102,7 @@ Shared code (the `@vercel/node` shim, rewrite merge, HTTP helpers, auth and stor
 | Step | What it does |
 |---|---|
 | 0 | `handleApi` (`src/api/forward.ts`): flag `api.forward_to_vercel` on → `forwardToVercel()`, every method, no gate |
-| 1 Path | Catalogue lookup (`src/api/resolve.ts`); any other `/api/*` path is forwarded with its body unread |
+| 1 Path | Catalogue lookup (`src/api/resolve.ts`) on the canonical spelling of the path (percent-decoded, dot segments resolved, repeated and trailing slashes removed, lower case, without a `.js`, `.mjs`, `.cjs` or `.ts` extension): every spelling of a catalogue path is resolved, gated and dispatched as the catalogue path, and its handler sees the catalogue path; any other `/api/*` path is forwarded with its body unread |
 | 2 Body | Buffered once; more than 4,718,592 bytes → 413 `{"error":"payload_too_large"}` (the rest of the body is read and discarded first, so the client receives the answer) |
 | 3 Resolve | Endpoint, function URL (vercel.json rewrites of `/api/track` and `/api/connector-status` merged, request keys win), action with the handler's own precedence |
 | 4 Names | The names of the dispatch target only (table below); a missing one answers 500 and logs `api config missing: <NAMES>` |
@@ -168,7 +168,7 @@ npx wrangler kv key put --binding FLAGS api.forward_to_vercel '{"enabled":true,"
 | Command (repo root unless noted) | What it checks |
 |---|---|
 | `npm run cf:typecheck:all` | `tsc` for `workers/shared`, `workers/site`, `workers/ops` |
-| `npm run cf:test:all` | T1 (vitest in Node) of the three packages. Site Phase 2 suites: `resolve` (every resolution row, and each sentinel answered by the unchanged handler with no outbound call), `router-api` (steps 1-9 with a fake `OPS`), `forward-flag`, `rewrite-crosscheck` (shared merge equals the sitemap merge on all sitemap test inputs), `emails-local`, `track-local` (byte fixtures), `env-api` (names per target; `Env`, router and `wrangler.jsonc` agree) |
+| `npm run cf:test:all` | T1 (vitest in Node) of the three packages. Site Phase 2 suites: `resolve` (every resolution row, and each sentinel answered by the unchanged handler with no outbound call), `router-api` (steps 1-9 with a fake `OPS`), `forward-flag`, `rewrite-crosscheck` (shared merge equals the sitemap merge on all sitemap test inputs), `emails-local`, `track-local` (byte fixtures, the 30 s deadline), `env-api` (names per target; `Env`, router and `wrangler.jsonc` agree), `check-bundle` (which inputs the bundle guard refuses, and its exit status on fixture metafiles) |
 | `npm --prefix workers/site run build:dry && npm --prefix workers/site run check-bundle` | Bundle guard: fails on any input from `@aws-sdk`, `@smithy`, `pdf-lib`, `@pdf-lib`, `qrcode`, `pngjs`, `makerjs`, `dxf-parser`, `clipper-lib`, `lib/nesting`, `lib/inventory` or an `api/*.js` handler that runs in ops; prints the sizes |
 | `npm run cf:t2` | T2: real workerd (`wrangler dev` with both configs) in front of a local upstream stub; site and ops suites |
 | `npm --prefix workers/site run t2:up &` then `npm --prefix workers/site run -s t2:wait` | Long-running harness for the Playwright local mode; `t2:wait` prints the site URL (`.wrangler/t2/urls.json`) |
@@ -186,10 +186,10 @@ npx wrangler kv key put --binding FLAGS api.forward_to_vercel '{"enabled":true,"
 | Check | Result |
 |---|---|
 | Typecheck (`cf:typecheck:all`) | exit 0 for shared, site and ops |
-| T1 (`cf:test:all`) | shared 297, site 1,105 (20 files), ops 166: all green |
-| Dry run (`build:dry`) | 3,363.29 KiB, gzip 727.11 KiB; 411 inputs, 0 forbidden (`check-bundle`) |
-| `npx wrangler check startup` | 44.3 ms active CPU in a 119.3 ms profile window, locally (limit 1 s) |
-| T2 site suites (`test:integration`) | 5 files, 50 tests green (router, tracking, startup, gates, files) |
+| T1 (`cf:test:all`) | shared 308, site 1,181 (21 files), ops 171: all green |
+| Dry run (`build:dry`) | 3,366.23 KiB, gzip 728.01 KiB; 411 inputs, 0 forbidden (`check-bundle`) |
+| `npx wrangler check startup` | 26.9 ms active CPU in an 86.1 ms profile window, locally (limit 1 s) |
+| T2 site suites (`test:integration`) | 5 files, 52 tests green (router, tracking, startup, gates, files) |
 
 ### Owner items for the site (Phase 2)
 

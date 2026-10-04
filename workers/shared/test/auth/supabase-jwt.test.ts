@@ -20,7 +20,24 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
+
+/** Yields to the event loop (real time) until `condition` holds; the test timeout is the only bound. */
+async function until(condition: () => boolean): Promise<void> {
+  while (!condition()) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Wraps a fetch so that the test can tell when the first request has started. */
+function withStartSignal(fetchImpl: typeof fetch): { fetchImpl: typeof fetch; started: Promise<void> } {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const wrapped = ((url: string, init?: RequestInit) => {
+    markStarted();
+    return fetchImpl(url, init);
+  }) as unknown as typeof fetch;
+  return { fetchImpl: wrapped, started };
+}
 
 interface Stub {
   user?: { status: number; body?: unknown } | 'network' | 'hang';
@@ -137,19 +154,17 @@ describe('verifySupabaseJwt', () => {
 
   it('answers 503 when Supabase Auth does not answer within 5 s', async () => {
     const token = await mintSupabaseJwt({ sub: UID });
+    const { fetchImpl, started } = withStartSignal(fakeSupabase({ user: 'hang' }).fetchImpl);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const { fetchImpl } = fakeSupabase({ user: 'hang' });
     let settled = false;
     const pending = verifySupabaseJwt(token, { supabaseUrl: SUPABASE_URL, anonKey: ANON, fetchImpl }).finally(() => { settled = true; });
-    let elapsed = 0;
-    // The digest before the request is real-async, so time is advanced in steps until the call settles.
-    while (!settled && elapsed < 10_000) {
-      await new Promise((resolve) => setImmediate(resolve));
-      await vi.advanceTimersByTimeAsync(500);
-      elapsed += 500;
-    }
+    // The token digest before the request completes in real time; the 5 s deadline is armed before the request
+    // starts, so fake time is advanced only once the request is open.
+    await started;
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     expect(await pending).toEqual({ ok: false, status: 503, code: 'auth_unavailable' });
-    expect(elapsed).toBeGreaterThanOrEqual(5_000);
   });
 
   it('refuses a token whose user id differs from sub', async () => {
@@ -167,6 +182,20 @@ describe('verifySupabaseJwt', () => {
       expect(await verifySupabaseJwt(token, { supabaseUrl: SUPABASE_URL, anonKey: ANON, fetchImpl }))
         .toEqual({ ok: false, status: 503, code: 'auth_unavailable' });
     }
+  });
+
+  it('answers 401 when the role read refuses the token (401 or 403); another 4xx -> 503', async () => {
+    const token = await mintSupabaseJwt({ sub: UID });
+    for (const status of [401, 403]) {
+      resetSupabaseJwtCache();
+      const { fetchImpl } = fakeSupabase({ roles: { status, body: { message: 'JWT expired' } } });
+      expect(await verifySupabaseJwt(token, { supabaseUrl: SUPABASE_URL, anonKey: ANON, fetchImpl }))
+        .toEqual({ ok: false, status: 401, code: 'unauthorized' });
+    }
+    resetSupabaseJwtCache();
+    const { fetchImpl } = fakeSupabase({ roles: { status: 400, body: { code: 'PGRST100' } } });
+    expect(await verifySupabaseJwt(token, { supabaseUrl: SUPABASE_URL, anonKey: ANON, fetchImpl }))
+      .toEqual({ ok: false, status: 503, code: 'auth_unavailable' });
   });
 
   it('caches a verified token for 60 s, not longer', async () => {
@@ -211,6 +240,38 @@ describe('verifySupabaseJwt', () => {
     const results = await Promise.all(Array.from({ length: 10 }, () => verifySupabaseJwt(token, cfg)));
     expect(results.every((r) => r.ok)).toBe(true);
     expect(calls.filter((c) => c.url.endsWith('/auth/v1/user'))).toHaveLength(1);
+  });
+
+  it('a request arriving while the same token is being verified joins that verification', async () => {
+    const token = await mintSupabaseJwt({ sub: UID });
+    const upstream = fakeSupabase();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    // Supabase Auth answers only when the test releases it, so both requests overlap.
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      if (new URL(url).pathname === '/auth/v1/user') await held;
+      return upstream.fetchImpl(url, init);
+    }) as unknown as typeof fetch;
+    const realDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let digests = 0;
+    vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (...args: Parameters<SubtleCrypto['digest']>) => {
+      const out = await realDigest(...args);
+      digests += 1;
+      return out;
+    });
+    const cfg = { supabaseUrl: SUPABASE_URL, anonKey: ANON, fetchImpl };
+    const first = verifySupabaseJwt(token, cfg);
+    const second = verifySupabaseJwt(token, cfg);
+    // Both requests have hashed the token and passed the cache lookup before Supabase Auth answers.
+    await until(() => digests === 2);
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    const results = await Promise.all([first, second]);
+    expect(results).toEqual([
+      { ok: true, user: { uid: UID, email: 'staff@example.test', roles: ['sales_rep'] } },
+      { ok: true, user: { uid: UID, email: 'staff@example.test', roles: ['sales_rep'] } },
+    ]);
+    expect(upstream.calls.filter((c) => c.url.endsWith('/auth/v1/user'))).toHaveLength(1);
   });
 });
 

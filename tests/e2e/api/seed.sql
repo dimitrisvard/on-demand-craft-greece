@@ -2,8 +2,8 @@
 --
 -- | Step | Who | What |
 -- |---|---|---|
--- | 1 | owner | Create three Supabase Auth users with the e-mail addresses below (password sign-in; the addresses are Resend test sinks) and, optionally, the admin user |
--- | 2 | owner | Review this file against the live schema, then run it in the SQL editor (it is idempotent: it can run again) |
+-- | 1 | owner | Create the staff and customer test users in Supabase Auth with the e-mail addresses below (password sign-in; the addresses are Resend test sinks) and, optionally, the admin user |
+-- | 2 | owner | Review this file against the live schema, then run it in the SQL editor (it is idempotent: it can run again). It leaves each test user with exactly one user_roles row, its role below, and stops with an error otherwise |
 -- | 3 | owner | Before every preview run: run the RESET block at the end (first-hit tracking events, the fresh RFQ) |
 -- | 4 | owner | Put the ids below and the users' passwords into the fixtures JSON outside git (shape: fixtures.example.json) |
 -- | 5 | owner | After the Phase 2 gate: run cleanup.sql and delete the test users |
@@ -15,14 +15,46 @@
 begin;
 
 -- ---- roles of the test users ---------------------------------------------------------------------------------
+-- Every test user ends with exactly one user_roles row, the role below: the sign-up trigger gives each new user a
+-- 'customer' row first, and role checks read one row per user, so any other row of a test user is removed here.
+create temporary table e2e_roles (email text primary key, role text not null) on commit drop;
+insert into e2e_roles (email, role) values
+  ('delivered+e2e-staff@resend.dev', 'sales_rep'),
+  ('delivered+e2e-admin@resend.dev', 'admin'),
+  ('delivered+e2e-customer@resend.dev', 'customer');
+
+delete from public.user_roles x
+using auth.users u, e2e_roles r
+where x.user_id = u.id
+  and lower(u.email) = r.email
+  and x.role::text <> r.role;
+
 insert into public.user_roles (user_id, role)
 select u.id, r.role::public.app_role
 from auth.users u
-join (values ('delivered+e2e-staff@resend.dev', 'sales_rep'),
-             ('delivered+e2e-admin@resend.dev', 'admin'),
-             ('delivered+e2e-customer@resend.dev', 'customer')) as r(email, role)
-  on lower(u.email) = r.email
-where not exists (select 1 from public.user_roles x where x.user_id = u.id and x.role = r.role::public.app_role);
+join e2e_roles r on lower(u.email) = r.email
+where not exists (select 1 from public.user_roles x where x.user_id = u.id and x.role::text = r.role);
+
+-- Check: the staff and customer test users exist (step 1), and every test user has exactly one role row, its own.
+do $$
+declare
+  problems text;
+begin
+  select string_agg(format('%s: %s', r.email, case when u.id is null then 'no auth user' else coalesce(n.roles, 'no role row') end), '; ' order by r.email)
+  into problems
+  from e2e_roles r
+  left join auth.users u on lower(u.email) = r.email
+  left join lateral (
+    select string_agg(x.role::text, ',' order by x.role::text) as roles, count(*) as row_count
+    from public.user_roles x
+    where x.user_id = u.id
+  ) n on true
+  where (u.id is null and r.role <> 'admin')
+     or (u.id is not null and (n.row_count <> 1 or n.roles is distinct from r.role));
+  if problems is not null then
+    raise exception 'e2e seed: each test user needs exactly one user_roles row with its own role (%)', problems;
+  end if;
+end $$;
 
 -- ---- customers, RFQs and file rows ---------------------------------------------------------------------------
 insert into public.customers (id, email, company_name, contact_name, user_id)

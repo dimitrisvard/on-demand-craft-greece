@@ -635,6 +635,21 @@ describe('res.redirect', () => {
     expect(response.headers.get('location')).toBe('https://example.com/landing?utm=a%20b');
   });
 
+  it('a Location or header value with U+0080-U+00FF characters is accepted and handed to the runtime unchanged', async () => {
+    const redirect = await run((req, res) => {
+      res.setHeader('Cache-Control', 'no-store');
+      res.redirect(302, 'https://x.test/café?n=Müller');
+    });
+    expect(redirect.status).toBe(302);
+    expect(redirect.headers.get('location')).toBe('https://x.test/café?n=Müller');
+
+    const bodyless = await run((req, res) => {
+      res.setHeader('X-Name', 'Müller');
+      res.end();
+    });
+    expect(bodyless.headers.get('x-name')).toBe('Müller');
+  });
+
   it('keeps headers set before the redirect', async () => {
     const response = await run((req, res) => {
       res.setHeader('Cache-Control', 'no-store');
@@ -771,6 +786,30 @@ describe('lifecycle', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(errors).toHaveBeenCalledTimes(1);
   });
+
+  it('only a handler that reached end() is handed to ctx.waitUntil; after a timeout or a throw it is not kept alive', async () => {
+    const waitUntil = vi.fn();
+    const ctx = { waitUntil };
+
+    const hung = await run(() => new Promise(() => {}), { ctx, timeoutMs: 20 });
+    expect(hung.status).toBe(504);
+    const returnedWithoutEnd = await run(() => undefined, { ctx, timeoutMs: 20 });
+    expect(returnedWithoutEnd.status).toBe(504);
+    const withStatus = await run(() => {
+      throw new ApiError(400, 'Invalid JSON');
+    }, { ctx });
+    expect(withStatus.status).toBe(400);
+    const plain = new Error('boom');
+    await expect(run(async () => {
+      await Promise.resolve();
+      throw plain;
+    }, { ctx })).rejects.toBe(plain);
+    expect(waitUntil).not.toHaveBeenCalled();
+
+    const ended = await run((req, res) => res.end('ok'), { ctx });
+    expect(ended.status).toBe(200);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('a throw or rejection before end()', () => {
@@ -826,6 +865,15 @@ describe('timeout', () => {
   it('a handler that returns without ending also times out', async () => {
     const response = await run(() => undefined, { timeoutMs: 20 });
     expect(response.status).toBe(504);
+  });
+
+  it('a handler that returns first and ends later (timer, callback) is answered by that end() within timeoutMs', async () => {
+    const response = await run((req, res) => {
+      setTimeout(() => res.status(201).end('late'), 10);
+    }, { timeoutMs: 1000 });
+    expect(response.status).toBe(201);
+    expect(await response.text()).toBe('late');
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it('the default deadline is DEFAULT_TIMEOUT_MS', async () => {

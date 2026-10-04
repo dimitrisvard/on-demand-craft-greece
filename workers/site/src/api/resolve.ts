@@ -41,8 +41,10 @@ export interface ResolvedApi {
   step?: string;
 }
 
-// Public path -> endpoint. Exact match on the raw pathname, as the function paths and the vercel.json rewrite
-// sources match; every other /api/* path is forwarded with its body unread.
+// Public path -> endpoint. A request path names a catalogue endpoint when its canonical spelling
+// (cataloguePathOf below) is one of these paths; it is then resolved, gated and dispatched exactly as that path,
+// and the handler sees the catalogue path in its function URL. Only paths outside the catalogue are forwarded,
+// with their body unread.
 const CATALOGUE: ReadonlyMap<string, EndpointId> = new Map<string, EndpointId>([
   ['/api/emails', 'emails'],
   ['/api/s3', 's3'],
@@ -67,9 +69,41 @@ const SENTINELS: ReadonlySet<string> = new Set(['#options', '#method', '#unknown
 const S3_ACTIONS: ReadonlySet<string> = new Set(['presign-upload', 'presign-download', 'delete', 'delete-folder', 'list']);
 const OAUTH_STEPS: ReadonlySet<string> = new Set(['authorize', 'callback', 'refresh']);
 
-/** Catalogue lookup by path only (incl. /api/track and /api/connector-status); null: forward with the body unread. */
+const SCRIPT_EXTENSION = /\.(?:js|mjs|cjs|ts)$/;
+const TRAILING_SLASHES = /\/+$/;
+
+/** Canonical spelling of a request path: percent-decoded once (a malformed escape stays as it is), backslashes as
+ *  slashes, repeated slashes collapsed, dot segments resolved, lower case, and without trailing slashes or a
+ *  trailing script extension (.js, .mjs, .cjs, .ts; repeated). */
+export function canonicalApiPath(pathname: string): string {
+  let path = pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // keep the raw form
+  }
+  path = `/${path}`.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+  path = new URL(path, 'http://localhost').pathname.toLowerCase();
+  for (;;) {
+    const next = path.replace(TRAILING_SLASHES, '').replace(SCRIPT_EXTENSION, '');
+    if (next === path) return path;
+    path = next;
+  }
+}
+
+/** The catalogue path a request path names (itself, or the catalogue path of its canonical spelling); null when
+ *  it names none. */
+export function cataloguePathOf(pathname: string): string | null {
+  if (CATALOGUE.has(pathname)) return pathname;
+  const canonical = canonicalApiPath(pathname);
+  return CATALOGUE.has(canonical) ? canonical : null;
+}
+
+/** Catalogue lookup by path only (incl. /api/track and /api/connector-status and every spelling of a catalogue
+ *  path); null: forward with the body unread. */
 export function endpointOfPath(pathname: string): EndpointId | null {
-  return CATALOGUE.get(pathname) ?? null;
+  const path = cataloguePathOf(pathname);
+  return path === null ? null : (CATALOGUE.get(path) ?? null);
 }
 
 export function isSentinel(action: string): action is Sentinel {
@@ -284,11 +318,16 @@ const EMPTY = new Uint8Array(0);
 /** Called only when endpointOfPath() is not null. */
 export function resolveApi(request: Request, bodyBytes: Uint8Array): ResolvedApi {
   const url = new URL(request.url);
-  const endpoint = endpointOfPath(url.pathname);
-  if (endpoint === null) throw new Error(`resolveApi: ${url.pathname} is not an /api endpoint of the catalogue`);
+  const path = cataloguePathOf(url.pathname);
+  const endpoint = path === null ? undefined : CATALOGUE.get(path);
+  if (path === null || endpoint === undefined) throw new Error(`resolveApi: ${url.pathname} is not an /api endpoint of the catalogue`);
   const method = request.method.toUpperCase();
   const bytes = method === 'GET' || method === 'HEAD' ? EMPTY : bodyBytes;
-  const { functionUrl } = functionUrlFor(url);
+  // The function URL is built from the catalogue path, so every spelling reaches the handler (and the rewrite of
+  // /api/track and /api/connector-status) as the catalogue path itself; the query is kept as sent.
+  const routed = new URL(url.href);
+  routed.pathname = path;
+  const { functionUrl } = functionUrlFor(routed);
   const query = parseQuery(functionUrl);
   const body = parseVercelBody(request.headers.get('content-type'), bytes);
   const resolution = resolveAction(endpoint, { method, functionUrl, query, body });

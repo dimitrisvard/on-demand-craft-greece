@@ -7,6 +7,12 @@
 // Dry run by default: lists what would be copied and writes nothing. --execute copies. Credentials come from
 // the environment only (the owner's own) and are never printed: output lines carry keys, sizes and counts only.
 // Uses @aws-sdk/client-s3 from the root node_modules (no new dependency).
+//
+// A key the legacy bucket already holds (default rule):
+//   same size and ETag                       -> skip (same)
+//   R2 copy modified later than the legacy   -> copy over the legacy one (the Worker served the R2 revision)
+//   legacy copy modified at the same time or later -> keep the legacy one (legacy_newer)
+// --overwrite copies every key; --keep-existing skips every key the legacy bucket holds.
 
 import {
   GetObjectCommand,
@@ -15,7 +21,8 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const R2_PREFIX = 'rfq/';
 
@@ -28,7 +35,9 @@ Options:
   --execute          copy the objects
   --since <ISO>      only objects last modified at or after this time, e.g. 2026-10-01T00:00:00Z
   --prefix <p>       only keys starting with <p> (contract key, without rfq/)
-  --overwrite        also copy keys that already exist in the legacy bucket (default: skip them)
+  --overwrite        copy every key, also over a legacy copy that is the same or newer
+  --keep-existing    skip every key that already exists in the legacy bucket
+                     (default: replace a legacy copy only when the R2 copy is newer; skip identical ones)
   --endpoint <url>   tests only: send R2 and legacy requests to <url>, path style
   --help             show this text
 
@@ -45,7 +54,7 @@ Environment (values are never printed):
 class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const o = { execute: false, dryRun: false, since: null, prefix: '', overwrite: false, endpoint: null, help: false };
+  const o = { execute: false, dryRun: false, since: null, prefix: '', overwrite: false, keepExisting: false, endpoint: null, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -57,6 +66,7 @@ export function parseArgs(argv) {
     else if (a === '--execute') o.execute = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--overwrite') o.overwrite = true;
+    else if (a === '--keep-existing') o.keepExisting = true;
     else if (a === '--since') {
       const v = value();
       const d = new Date(v);
@@ -67,6 +77,7 @@ export function parseArgs(argv) {
     else throw new UsageError(`unknown option: ${a}`);
   }
   if (o.execute && o.dryRun) throw new UsageError('--execute and --dry-run exclude each other');
+  if (o.overwrite && o.keepExisting) throw new UsageError('--overwrite and --keep-existing exclude each other');
   return o;
 }
 
@@ -102,14 +113,27 @@ async function* listR2(r2, bucket, prefix) {
   } while (token);
 }
 
-async function existsInLegacy(legacy, bucket, key) {
+/** The legacy object's size, ETag and modification time, or null when the key does not exist. */
+async function headLegacy(legacy, bucket, key) {
   try {
-    await legacy.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return true;
+    const h = await legacy.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { size: h.ContentLength, etag: h.ETag, lastModified: h.LastModified };
   } catch (err) {
-    if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound') return false;
+    if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound') return null;
     throw err;
   }
+}
+
+const bareEtag = (etag) => (typeof etag === 'string' ? etag.replace(/"/g, '') : '');
+
+/** 'new' | 'same' | 'r2-newer' | 'legacy-newer' for an R2 list entry and its legacy counterpart. */
+export function compareCopies(r2, legacyHead) {
+  if (!legacyHead) return 'new';
+  const sameEtag = bareEtag(r2.ETag) !== '' && bareEtag(r2.ETag) === bareEtag(legacyHead.etag);
+  if (sameEtag && r2.Size === legacyHead.size) return 'same';
+  const r2Time = r2.LastModified ? new Date(r2.LastModified).getTime() : Number.NaN;
+  const legacyTime = legacyHead.lastModified ? new Date(legacyHead.lastModified).getTime() : Number.NaN;
+  return r2Time > legacyTime ? 'r2-newer' : 'legacy-newer';
 }
 
 function errorText(err) {
@@ -136,7 +160,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
   const { r2, legacy } = clients(c, o.endpoint);
   out(`mode=${mode} source=r2:${c.r2Bucket}/${R2_PREFIX}${o.prefix} target=s3:${c.legacyBucket} (${c.legacyRegion})${o.since ? ` since=${o.since.toISOString()}` : ''}`);
 
-  const counts = { listed: 0, older: 0, exists: 0, copy: 0, copied: 0, failed: 0 };
+  const counts = { listed: 0, older: 0, same: 0, legacyNewer: 0, exists: 0, copy: 0, copied: 0, failed: 0 };
   try {
     for await (const obj of listR2(r2, c.r2Bucket, R2_PREFIX + o.prefix)) {
       counts.listed++;
@@ -147,14 +171,32 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
         continue;
       }
       try {
-        if (!o.overwrite && (await existsInLegacy(legacy, c.legacyBucket, key))) {
-          counts.exists++;
-          out(`skip (exists)  ${obj.Key} -> ${key}`);
-          continue;
+        let replaces = false;
+        if (!o.overwrite) {
+          const found = await headLegacy(legacy, c.legacyBucket, key);
+          const outcome = found && o.keepExisting ? 'exists' : compareCopies(obj, found);
+          if (outcome === 'exists') {
+            counts.exists++;
+            out(`skip (exists)  ${obj.Key} -> ${key}`);
+            continue;
+          }
+          if (outcome === 'same') {
+            counts.same++;
+            out(`skip (same)    ${obj.Key} -> ${key}`);
+            continue;
+          }
+          if (outcome === 'legacy-newer') {
+            counts.legacyNewer++;
+            out(`skip (legacy newer)  ${obj.Key} -> ${key}`);
+            continue;
+          }
+          replaces = outcome === 'r2-newer';
         }
         counts.copy++;
         if (!o.execute) {
-          out(`would copy     ${obj.Key} -> ${key} (${obj.Size ?? '?'} bytes)`);
+          out(replaces
+            ? `would replace  ${obj.Key} -> ${key} (${obj.Size ?? '?'} bytes; legacy copy is older)`
+            : `would copy     ${obj.Key} -> ${key} (${obj.Size ?? '?'} bytes)`);
           continue;
         }
         const got = await r2.send(new GetObjectCommand({ Bucket: c.r2Bucket, Key: obj.Key }));
@@ -166,7 +208,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
           ContentType: got.ContentType || 'application/octet-stream',
         }));
         counts.copied++;
-        out(`copied         ${obj.Key} -> ${key} (${body.byteLength} bytes)`);
+        out(`${replaces ? 'replaced      ' : 'copied        '} ${obj.Key} -> ${key} (${body.byteLength} bytes)`);
       } catch (e) {
         counts.failed++;
         err(`failed         ${obj.Key}: ${errorText(e)}`);
@@ -176,9 +218,18 @@ export async function main(argv = process.argv.slice(2), env = process.env, out 
     err(`r2-to-legacy-s3: listing R2 failed: ${errorText(e)}`);
     return 1;
   }
-  out(`listed=${counts.listed} older=${counts.older} exists=${counts.exists} ${o.execute ? `copied=${counts.copied}` : `would_copy=${counts.copy}`} failed=${counts.failed}`);
+  out(`listed=${counts.listed} older=${counts.older} same=${counts.same} legacy_newer=${counts.legacyNewer} exists=${counts.exists} ${o.execute ? `copied=${counts.copied}` : `would_copy=${counts.copy}`} failed=${counts.failed}`);
   return counts.failed ? 1 : 0;
 }
 
-const isEntry = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isEntry) process.exitCode = await main();
+/** True when Node started this file, also through a symlinked path (Node runs the resolved file). */
+function startedDirectly() {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (startedDirectly()) process.exitCode = await main();

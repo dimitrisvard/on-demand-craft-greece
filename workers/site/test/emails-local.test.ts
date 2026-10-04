@@ -62,6 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.doUnmock('../../../api/emails.js');
   vi.doUnmock('../../../api/marketing.js');
   vi.unstubAllEnvs();
@@ -100,6 +101,51 @@ describe('lazy import', () => {
     await expect(handleEmails(input('POST', '/api/emails', '{}', makeEnv()))).rejects.toThrow(/Missing API key/);
     // The failed module is not evaluated again in this isolate: the next request fails the same way.
     await expect(handleEmails(input('OPTIONS', '/api/emails', undefined, makeEnv()))).rejects.toThrow(/Missing API key/);
+  });
+});
+
+describe('deadline: 30 s from the call to res.end()', () => {
+  // Stand-in handler: ends after ?ms= milliseconds, or never when ms is absent.
+  function delayedHandler() {
+    return {
+      default: (req: { url: string }, res: { status(n: number): { json(v: unknown): void } }) => {
+        const ms = new URL(req.url, 'http://localhost').searchParams.get('ms');
+        if (ms !== null) setTimeout(() => res.status(200).json({ endedAfter: Number(ms) }), Number(ms));
+      },
+    };
+  }
+
+  function settle(promise: Promise<Response>): { done(): Response | undefined } {
+    let settled: Response | undefined;
+    void promise.then((r) => (settled = r));
+    return { done: () => settled };
+  }
+
+  it('a handler that ends at 29,999 ms keeps its own answer', async () => {
+    vi.doMock('../../../api/emails.js', delayedHandler);
+    const { handleEmails } = await import('../src/api/emails');
+    await handleEmails(input('POST', '/api/emails?ms=0', '{}'));
+    vi.useFakeTimers();
+    const run = settle(handleEmails(input('POST', '/api/emails?ms=29999', '{}')));
+    await vi.advanceTimersByTimeAsync(29_998);
+    expect(run.done()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.done()?.status).toBe(200);
+    expect(await run.done()!.json()).toEqual({ endedAfter: 29_999 });
+  });
+
+  it('a handler that has not ended after 30,000 ms gets 504 "Gateway Timeout", not earlier', async () => {
+    vi.doMock('../../../api/emails.js', delayedHandler);
+    const { handleEmails } = await import('../src/api/emails');
+    await handleEmails(input('POST', '/api/emails?ms=0', '{}'));
+    vi.useFakeTimers();
+    const run = settle(handleEmails(input('POST', '/api/emails', '{}')));
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(run.done()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.done()?.status).toBe(504);
+    expect(run.done()!.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(await run.done()!.text()).toBe('Gateway Timeout');
   });
 });
 

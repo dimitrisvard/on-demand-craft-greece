@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runNodeHandler, type VercelHandler } from '../../shared/src/compat/vercel-node';
 import { applyGate, type GateOutcome } from '../src/auth/gate';
+import { canonicalUuid } from '../src/auth/db';
 import { UNSUBSCRIBE_HTML, isOwnHost, linkHosts, trackingPixel } from '../src/auth/tracking';
 import { SITE_ORIGIN, SUPABASE_URL, apiCall, ctx, fakeLimiter, installUpstream, makeEnv, uuid, type Upstream } from './gate-support';
 
@@ -35,6 +36,49 @@ async function gateTrack(query: string, env = makeEnv(), o: { publicPath?: strin
 
 function clickQuery(eid: string, cid: string, url: string): string {
   return `action=track&type=click&eid=${eid}&cid=${cid}&url=${encodeURIComponent(url)}`;
+}
+
+const EVENT_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+
+/**
+ * Spellings PostgreSQL's uuid input reads as the same value: upper- or lower-case hex, optional braces around the
+ * whole value, and hyphens in the standard places, after every group of four digits, or none at all.
+ */
+function uuidSpellings(canonical: string): string[] {
+  const hex = canonical.replace(/-/g, '');
+  const groups = (h: string, sizes: number[]) => {
+    const out: string[] = [];
+    let at = 0;
+    for (const size of sizes) {
+      out.push(h.slice(at, at + size));
+      at += size;
+    }
+    return out;
+  };
+  const casings = [
+    (h: string) => h,
+    (h: string) => h.toUpperCase(),
+    (h: string) => [...h].map((ch, i) => (i % 2 ? ch.toUpperCase() : ch)).join(''),
+    (h: string) => [...h].map((ch, i) => (i % 2 ? ch : ch.toUpperCase())).join(''),
+    (h: string) => h.slice(0, 16).toUpperCase() + h.slice(16),
+    (h: string) => h.slice(0, 16) + h.slice(16).toUpperCase(),
+  ];
+  const layouts = [
+    (h: string) => groups(h, [8, 4, 4, 4, 12]).join('-'),
+    (h: string) => h,
+    (h: string) => groups(h, [4, 4, 4, 4, 4, 4, 4, 4]).join('-'),
+    (h: string) => groups(h, [8, 8, 8, 8]).join('-'),
+  ];
+  const out: string[] = [];
+  for (const braces of [false, true]) {
+    for (const layout of layouts) {
+      for (const casing of casings) {
+        const value = layout(casing(hex));
+        out.push(braces ? `{${value}}` : value);
+      }
+    }
+  }
+  return [...new Set(out)];
 }
 
 /** The url the handler will redirect to for this function URL (query parse, then decodeURIComponent). */
@@ -129,6 +173,15 @@ describe('redirect target of a click (redirect=enforce)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('PostgREST 503 keeps only http(s) targets: javascript:, data: and relative urls -> SITE_ORIGIN/', async () => {
+    up.failures.push({ match: /marketing_events/, failure: 503 });
+    for (const url of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '/relative/path', '//evil.example/x']) {
+      const outcome = allowed(await gateTrack(clickQuery(uuid(), uuid(), url)));
+      expect(handlerLocation(outcome.functionUrl!)).toBe(HOME);
+    }
+    expect(logLines()).toContain('[microns-site] gate db_unavailable MK-1');
   });
 
   it('a network failure on the campaign lookup keeps the url', async () => {
@@ -227,6 +280,42 @@ describe('throttled side effects (trk:<eid>)', () => {
     expect(throttled.response.status).toBe(302);
     expect(throttled.response.headers.get('Location')).toBe(HOME);
     expect(throttled.response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('the trk key is the event id as the database reads it: 31 spellings of one id -> the 31st is answered by the gate', async () => {
+    const env = makeEnv();
+    const limiter = env.API_RATE_LIMIT as unknown as ReturnType<typeof fakeLimiter>;
+    const spellings = uuidSpellings(EVENT_ID).slice(0, 31);
+    expect(new Set(spellings).size).toBe(31);
+    const cid = uuid();
+    for (const eid of spellings.slice(0, 30)) {
+      allowed(await gateTrack(`action=track&type=unsubscribe&eid=${encodeURIComponent(eid)}&cid=${cid}`, env));
+    }
+    const last = await gateTrack(`action=track&type=unsubscribe&eid=${encodeURIComponent(spellings[30])}&cid=${cid}`, env);
+    expect(last.kind).toBe('respond');
+    if (last.kind === 'respond') expect(await last.response.text()).toBe(UNSUBSCRIBE_HTML);
+    expect([...limiter.counts.keys()]).toEqual([`trk:${EVENT_ID}`]);
+  });
+
+  it('one event id with a different cid on each click shares one trk key: the 31st click is answered by the gate', async () => {
+    const env = makeEnv();
+    const eid = uuid();
+    for (let i = 0; i < 30; i++) allowed(await gateTrack(clickQuery(eid, uuid(), 'https://example.org'), env));
+    const throttled = await gateTrack(clickQuery(eid, uuid(), 'https://example.org'), env);
+    expect(throttled.kind).toBe('respond');
+    if (throttled.kind === 'respond') {
+      expect(throttled.response.status).toBe(302);
+      expect(throttled.response.headers.get('Location')).toBe(HOME);
+    }
+  });
+
+  it('values that are not a uuid keep their own key (they never match a row)', async () => {
+    const env = makeEnv();
+    const limiter = env.API_RATE_LIMIT as unknown as ReturnType<typeof fakeLimiter>;
+    for (const eid of ['x', `{${EVENT_ID}`, ` ${EVENT_ID}`, `${EVENT_ID}-`, EVENT_ID.replace('-', '--')]) {
+      allowed(await gateTrack(`action=track&type=open&eid=${encodeURIComponent(eid)}&cid=${uuid()}`, env));
+      expect(limiter.counts.has(`trk:${eid}`)).toBe(true);
+    }
   });
 
   it('a throttled genuine click still goes to its url (the lookups run, no write)', async () => {
@@ -344,6 +433,19 @@ describe('helpers', () => {
     expect(isOwnHost('a.b.micronshub.eu', env)).toBe(false);
     expect(isOwnHost('micronshub.eu.evil.net', env)).toBe(false);
     expect(isOwnHost('evilmicronshub.eu', env)).toBe(false);
+  });
+
+  it('canonicalUuid reads every spelling the database accepts as a uuid, and nothing else', () => {
+    const spellings = uuidSpellings(EVENT_ID);
+    expect(spellings.length).toBeGreaterThanOrEqual(40);
+    for (const s of spellings) expect(canonicalUuid(s)).toBe(EVENT_ID);
+    for (const bad of [
+      '', 'x', `{${EVENT_ID}`, `${EVENT_ID}}`, `{{${EVENT_ID}}}`, ` ${EVENT_ID}`, `${EVENT_ID} `, `${EVENT_ID}-`, `-${EVENT_ID}`,
+      EVENT_ID.replace('-', '--'), 'a0e-ebc99-9c0b-4ef8-bb6d-6bb9bd380a11', `${EVENT_ID}0`, EVENT_ID.slice(0, -1),
+      EVENT_ID.replace('a', 'g'), `{${EVENT_ID}-}`, `(${EVENT_ID})`,
+    ]) {
+      expect(canonicalUuid(bad)).toBeNull();
+    }
   });
 
   it('linkHosts reads quoted and unquoted absolute links only', () => {

@@ -21,12 +21,22 @@ vi.mock('../../../api/gsc.js', () => ({
   },
 }));
 
+const notifications = vi.hoisted(() => ({ mode: 'ok' as 'ok' | 'throw' }));
+
+vi.mock('../../../api/notifications.js', () => ({
+  default: async (_req: unknown, res: { status(n: number): { json(b: unknown): void } }) => {
+    if (notifications.mode === 'throw') throw new Error('inventory step failed');
+    res.status(400).json({ error: 'Unknown action' });
+  },
+}));
+
 let logs: string[];
 let errors: string[];
 
 beforeEach(() => {
   gsc.seen = [];
   gsc.mode = 'ok';
+  notifications.mode = 'ok';
   logs = [];
   errors = [];
   vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
@@ -180,5 +190,42 @@ describe('error boundary and logging', () => {
     gsc.mode = 'throw';
     await invoke(OpsApi, GSC_CALL);
     expect(logs.find((l) => l.startsWith('[microns-ops] api '))).toContain('status=500');
+  });
+
+  describe('the action is logged only as a sentinel or a short [a-z0-9-] value, else as "invalid"', () => {
+    const invCall = (action: string): OpsCall =>
+      opsCall({ endpoint: 'notifications', action, functionUrl: '/api/notifications', requestId: 'req-inv-1' });
+
+    it('an inv-* action carrying an e-mail address is logged as "invalid" on the per-call line', async () => {
+      const response = await invoke(OpsApi, invCall('inv-someone@example.test'), { method: 'POST' });
+      expect(response.status).toBe(400);
+      const line = logs.find((l) => l.startsWith('[microns-ops] api '));
+      expect(line).toMatch(/^\[microns-ops\] api endpoint=notifications action=invalid status=400 ms=\d+ principal=STAFF requestId=req-inv-1$/);
+      expect([...logs, ...errors].join('\n')).not.toContain('someone');
+    });
+
+    it('an inv-* action carrying an e-mail address is logged as "invalid" on the error-boundary line', async () => {
+      notifications.mode = 'throw';
+      const response = await invoke(OpsApi, invCall('inv-someone@example.test'), { method: 'POST' });
+      expect(response.status).toBe(500);
+      expect(errors.join('\n')).toContain('[microns-ops] handler failed endpoint=notifications action=invalid requestId=req-inv-1');
+      expect([...logs, ...errors].join('\n')).not.toContain('someone');
+    });
+
+    it('an action longer than 40 characters or with other characters is logged as "invalid"', async () => {
+      for (const action of [`inv-${'x'.repeat(40)}`, 'inv-Label', 'inv label', 'inv-"x"', '#a@b.example', '']) {
+        logs = [];
+        await invoke(OpsApi, invCall(action), { method: 'POST' });
+        expect(logs.find((l) => l.startsWith('[microns-ops] api ')), action).toContain(' action=invalid ');
+      }
+    });
+
+    it('sentinels and short [a-z0-9-] actions are logged as they are', async () => {
+      for (const action of ['inv-label', 'nest', 'partner', '#options', '#method', '#unknown-step', 'x'.repeat(40)]) {
+        logs = [];
+        await invoke(OpsApi, invCall(action), { method: 'POST' });
+        expect(logs.find((l) => l.startsWith('[microns-ops] api ')), action).toContain(` action=${action} `);
+      }
+    });
   });
 });

@@ -9,8 +9,8 @@
  *
  * | Rule | Detail |
  * |---|---|
- * | Hosts | BASE_URL is never www.micronshub.eu, micronshub.eu or *.vercel.app; without a valid mode the run stops in beforeAll with the guard message (`--list` still lists the suite) |
- * | Credentials | No `extraHTTPHeaders`. `api()` adds one Access service-token pair per call, only for the BASE_URL origin, with `maxRedirects: 0`; `plain()` (no headers) serves every absolute URL of another host |
+ * | Hosts | BASE_URL is never a host of the micronshub.eu zone (www, the apex, tenant subdomains) or *.vercel.app; without a valid mode the run stops in beforeAll with the guard message (`--list` still lists the suite) |
+ * | Credentials | No `extraHTTPHeaders`. `api()` adds one Access service-token pair per call, only for the BASE_URL origin, with `maxRedirects: 0`, through one request context per Access identity (no shared cookie jar); `plain()` (no headers) serves every absolute URL of another host; a failed call reports no credential value |
  * | Retries | 0 for this file: mail, seeded writes and the rate-limit vector are not idempotent |
  * | Data | Database writes of a preview run touch only the rows of tests/e2e/api/seed.sql, except the one queued machine scan (the same tender upserts as a daily collector run); R2 objects the tests upload are deleted by the tests. Re-run the seed's reset block before every preview run and apply cleanup.sql after the gate |
  * | Mail | The only test that sends e-mail needs E2E_SEND_MAIL=1 and sends to Resend's test sink |
@@ -21,7 +21,7 @@ import type { APIRequestContext, APIResponse } from '@playwright/test';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { checkRun, type RunConfig } from './api/env';
-import { ApiClient, PlainClient, ciCredentialsFromEnv, type AccessCredentials } from './api/client';
+import { ApiClient, PlainClient, callError, ciCredentialsFromEnv, type AccessCredentials } from './api/client';
 import { accessTokenOf, loadFixtures, machinePair, type E2eFixtures, type TrackingSet } from './api/fixtures';
 import {
   OPTIONS_STATUS,
@@ -53,9 +53,8 @@ const RUN_ID = randomUuid().slice(0, 8);
 
 test.describe.configure({ retries: 0 });
 
-let apiCtx: APIRequestContext | undefined;
 let plainCtx: APIRequestContext | undefined;
-let client: ApiClient;
+let client: ApiClient | undefined;
 let plainClient: PlainClient;
 let fixtures: E2eFixtures | undefined;
 
@@ -68,20 +67,21 @@ test.beforeAll(async () => {
     collector: machinePair(fixtures?.machine?.collector),
     mcp: machinePair(fixtures?.machine?.mcp),
   };
-  apiCtx = await playwrightRequest.newContext({ baseURL: run.baseURL });
+  // One context per Access identity (ci, collector, mcp, none), created on first use: see tests/e2e/api/client.ts.
+  client = new ApiClient(() => playwrightRequest.newContext({ baseURL: run.baseURL }), run.baseURL, credentials);
   plainCtx = await playwrightRequest.newContext();
-  client = new ApiClient(apiCtx, run.baseURL, credentials);
   plainClient = new PlainClient(plainCtx, run.baseURL);
 });
 
 test.afterAll(async () => {
-  await apiCtx?.dispose();
+  await client?.dispose();
   await plainCtx?.dispose();
 });
 
 // ----- helpers -----
 
 function api(path: string, init: Parameters<ApiClient['fetch']>[1] = {}): Promise<APIResponse> {
+  if (!client) throw new Error('api() is available once beforeAll has run');
   return client.fetch(path, init);
 }
 
@@ -140,9 +140,22 @@ test.describe('request helpers', () => {
     expect(ok({ BASE_URL: 'http://127.0.0.1:8787' })).toBe(false);
     expect(ok({ API_E2E_MODE: 'local' })).toBe(false);
     expect(ok({ API_E2E_MODE: 'local', BASE_URL: 'https://preview.example.workers.dev' })).toBe(false);
-    for (const host of ['https://www.micronshub.eu', 'https://micronshub.eu', 'https://WWW.MICRONSHUB.EU.', 'https://on-demand-craft-greece.vercel.app']) {
-      expect(ok({ API_E2E_MODE: 'preview', BASE_URL: host, E2E_FIXTURES: '/tmp/x.json' }), host).toBe(false);
+    for (const host of [
+      'https://www.micronshub.eu',
+      'https://micronshub.eu',
+      'https://WWW.MICRONSHUB.EU.',
+      'https://laserkritis.micronshub.eu',
+      'https://api.micronshub.eu',
+      'https://a.b.micronshub.eu',
+      'https://on-demand-craft-greece.vercel.app',
+    ]) {
+      for (const mode of ['preview', 'compare']) {
+        const env = { API_E2E_MODE: mode, BASE_URL: host, E2E_FIXTURES: '/tmp/x.json', VERCEL_BASE_URL: 'https://vercel.example.test' };
+        expect(ok(env), `${mode} ${host}`).toBe(false);
+      }
     }
+    expect(ok({ API_E2E_MODE: 'preview', BASE_URL: 'https://micronshub.eu.example.test', E2E_FIXTURES: '/tmp/x.json' })).toBe(true);
+    expect(ok({ API_E2E_MODE: 'compare', BASE_URL: 'https://microns-site.example.workers.dev', E2E_FIXTURES: '/tmp/x.json', VERCEL_BASE_URL: 'https://vercel.example.test' })).toBe(true);
     expect(ok({ API_E2E_MODE: 'preview', BASE_URL: 'https://microns-site.example.workers.dev' })).toBe(false);
     expect(ok({ API_E2E_MODE: 'preview', BASE_URL: 'https://microns-site.example.workers.dev', E2E_FIXTURES: '/tmp/x.json' })).toBe(true);
     expect(ok({ API_E2E_MODE: 'compare', BASE_URL: 'https://microns-site.example.workers.dev', E2E_FIXTURES: '/tmp/x.json' })).toBe(false);
@@ -161,9 +174,9 @@ test.describe('request helpers', () => {
     await new Promise<void>((resolve) => base.listen(0, '127.0.0.1', resolve));
     const baseOrigin = `http://127.0.0.1:${(base.address() as AddressInfo).port}`;
     const ctx = await playwrightRequest.newContext();
+    const pair = { id: 'self-test-id', secret: 'self-test-value' };
+    const own = new ApiClient(() => playwrightRequest.newContext(), baseOrigin, { ci: pair });
     try {
-      const pair = { id: 'self-test-id', secret: 'self-test-value' };
-      const own = new ApiClient(ctx, baseOrigin, { ci: pair });
       const free = new PlainClient(ctx, baseOrigin);
 
       expect((await own.fetch('/echo', { headers: { 'CF-Access-Client-Secret': 'caller-supplied' } })).status()).toBe(200);
@@ -194,9 +207,107 @@ test.describe('request helpers', () => {
       expect(seen.at(-1)!.headers['cf-access-client-id']).toBeUndefined();
       expect(seen.at(-1)!.headers['cf-access-client-secret']).toBeUndefined();
     } finally {
+      await own.dispose();
       await ctx.dispose();
       await new Promise((resolve) => base.close(resolve));
       await new Promise((resolve) => other.close(resolve));
+    }
+  });
+
+  test('a call that fails before an answer names the request and none of its credential values', { tag: '@local' }, async () => {
+    const pair = { id: 'self-test-id', secret: 'self-test-value' };
+    const userToken = `self-test-user-token-${RUN_ID}`;
+    const apikey = `self-test-apikey-${RUN_ID}`;
+    const signature = `self-test-signature-${RUN_ID}`;
+    const silent = http.createServer(() => { /* never answers */ });
+    await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve));
+    const silentOrigin = `http://127.0.0.1:${(silent.address() as AddressInfo).port}`;
+    const closed = http.createServer();
+    await new Promise<void>((resolve) => closed.listen(0, '127.0.0.1', resolve));
+    const closedOrigin = `http://127.0.0.1:${(closed.address() as AddressInfo).port}`;
+    await new Promise((resolve) => closed.close(resolve));
+    const ctx = await playwrightRequest.newContext();
+    const clients = [
+      new ApiClient(() => playwrightRequest.newContext(), silentOrigin, { ci: pair }),
+      new ApiClient(() => playwrightRequest.newContext(), closedOrigin, { ci: pair }),
+    ];
+    const failure = async (call: Promise<APIResponse>): Promise<Error> => {
+      try {
+        await call;
+      } catch (err) {
+        return err as Error;
+      }
+      throw new Error('the call was expected to fail');
+    };
+    try {
+      const timedOut = await failure(clients[0].fetch('/api/notifications?action=nest', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${userToken}` },
+        json: { action: 'nest' },
+        timeout: 500,
+      }));
+      const refused = await failure(clients[1].fetch('/api/tenders', { headers: { Authorization: `Bearer ${userToken}` } }));
+      const plainTimedOut = await failure(new PlainClient(ctx, closedOrigin).fetch(`${silentOrigin}/bucket/key.step?X-Amz-Signature=${signature}`, {
+        method: 'POST',
+        headers: { apikey, Authorization: `Bearer ${userToken}` },
+        json: { grant: 'password' },
+        timeout: 500,
+      }));
+      expect(timedOut.message).toMatch(/^api\(\) POST http:\/\/127\.0\.0\.1:\d+\/api\/notifications\?action=nest failed: .*Timeout 500ms/);
+      expect(refused.message).toMatch(/^api\(\) GET http:\/\/127\.0\.0\.1:\d+\/api\/tenders failed: .*ECONNREFUSED/);
+      expect(plainTimedOut.message).toMatch(/^plain\(\) POST http:\/\/127\.0\.0\.1:\d+\/bucket\/key\.step failed: .*Timeout 500ms/);
+      for (const err of [timedOut, refused, plainTimedOut]) {
+        const text = `${err.message}\n${err.stack ?? ''}`;
+        for (const value of [pair.id, pair.secret, userToken, apikey, signature]) expect(text).not.toContain(value);
+        expect(err.message).not.toContain('\n');
+        expect(err.cause).toBeUndefined();
+      }
+      // A reason line that repeats a header value or the query is masked as well.
+      const masked = callError('plain()', 'GET', 'https://bucket.example.test/k', { apikey, Authorization: `Bearer ${userToken}` },
+        new Error(`failed for ${userToken} and ${apikey} at ?X-Amz-Signature=${signature}\nCall log: ${pair.secret}`), [`X-Amz-Signature=${signature}`]);
+      expect(masked.message).toBe('plain() GET https://bucket.example.test/k failed: failed for <redacted> and <redacted> at ?<redacted>');
+    } finally {
+      for (const c of clients) await c.dispose();
+      await ctx.dispose();
+      silent.closeAllConnections();
+      await new Promise((resolve) => silent.close(resolve));
+    }
+  });
+
+  test('api() keeps one cookie jar per Access identity', { tag: '@local' }, async () => {
+    const seen: Array<{ id?: string; cookie?: string }> = [];
+    // Answers each service-token request with a session cookie for that client id, as Access does.
+    const server = http.createServer((req, res) => {
+      const id = req.headers['cf-access-client-id'] as string | undefined;
+      seen.push({ id, cookie: req.headers.cookie });
+      if (id) res.setHeader('Set-Cookie', `CF_Authorization=session-of-${id}; Path=/; HttpOnly`);
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const own = new ApiClient(() => playwrightRequest.newContext({ baseURL: origin }), origin, {
+      ci: { id: 'ci-id', secret: 'self-test-value-1' },
+      collector: { id: 'collector-id', secret: 'self-test-value-2' },
+      mcp: { id: 'mcp-id', secret: 'self-test-value-3' },
+    });
+    try {
+      await own.fetch('/api/tender-scan', { method: 'POST', json: {} });
+      await own.fetch('/api/tender-scan', { method: 'POST', json: {}, access: 'collector' });
+      await own.fetch('/api/tenders?export=csv', { access: 'mcp' });
+      await own.fetch('/api/tenders', { access: 'none' });
+      await own.fetch('/api/tenders');
+      await own.fetch('/api/tender-scan', { method: 'POST', json: {}, access: 'collector' });
+      expect(seen).toEqual([
+        { id: 'ci-id', cookie: undefined },
+        { id: 'collector-id', cookie: undefined },
+        { id: 'mcp-id', cookie: undefined },
+        { id: undefined, cookie: undefined },
+        { id: 'ci-id', cookie: 'CF_Authorization=session-of-ci-id' },
+        { id: 'collector-id', cookie: 'CF_Authorization=session-of-collector-id' },
+      ]);
+    } finally {
+      await own.dispose();
+      await new Promise((resolve) => server.close(resolve));
     }
   });
 });

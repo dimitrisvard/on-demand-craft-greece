@@ -2,11 +2,13 @@
 // upstream stub of test/integration/harness.mjs). Run with `npm run test:integration -- files.t2`.
 //   - sentinels answered by the files API itself (OPTIONS 204, unknown action, invalid JSON), with parity CORS
 //   - presign-upload as staff: presigned PUT on the R2 S3 endpoint (EU jurisdiction), 300 s, Content-Type signed
-//   - presign-download as staff: the local R2 binding is asked first (head); a key it does not hold is presigned on
-//     the legacy bucket
+//   - presign-download as staff: the local R2 binding is asked first (head); an object placed in the local bucket
+//     (`wrangler r2 object put --local` into the harness state) is presigned on R2, a key it does not hold on the
+//     legacy bucket
 // Only paths that stay on this machine are exercised: list, delete and delete-folder also call the legacy S3 API,
 // which T2 never reaches (they are covered against the fake S3 in test/files.test.ts and on the preview in T3).
-// The stub client (test/integration/stub-client.ts) is loaded at run time, so this file type-checks on its own.
+// The stub client (test/integration/stub-client.ts) and Node modules are loaded at run time, so this file
+// type-checks under the Worker tsconfig.
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -19,6 +21,32 @@ interface StubClient {
 }
 
 const SITE = (process.env.T2_SITE_URL as string | undefined) ?? '';
+const T2_TMP = (process.env.T2_TMP as string | undefined) ?? '';
+const WRANGLER = new URL('../../node_modules/.bin/wrangler', (import.meta as unknown as { url: string }).url).pathname;
+const NODE_CHILD_PROCESS: string = 'node:child_process';
+const NODE_FS: string = 'node:fs';
+
+interface ExecFile {
+  execFile(
+    file: string,
+    args: string[],
+    options: { timeout: number },
+    cb: (error: { code?: number } | null, stdout: string, stderr: string) => void,
+  ): unknown;
+}
+
+/** Puts an object into the local PRIVATE_FILES bucket of the running harness (same persisted state). */
+async function seedLocalR2(key: string, text: string): Promise<void> {
+  const fs = (await import(/* @vite-ignore */ NODE_FS)) as { writeFileSync(path: string, data: string): void };
+  const cp = (await import(/* @vite-ignore */ NODE_CHILD_PROCESS)) as ExecFile;
+  const file = `${T2_TMP}/seed-object.txt`;
+  fs.writeFileSync(file, text);
+  const args = ['r2', 'object', 'put', `microns-private/${key}`, '-c', `${T2_TMP}/site/wrangler.jsonc`, '--local', '--persist-to', `${T2_TMP}/state`, '-J', 'eu', '--file', file];
+  const result = await new Promise<{ code: number; out: string }>((resolve) => {
+    cp.execFile(WRANGLER, args, { timeout: 60_000 }, (error, stdout, stderr) => resolve({ code: error ? (error.code ?? 1) : 0, out: stdout + stderr }));
+  });
+  expect(result.code, result.out).toBe(0);
+}
 // Values the harness writes into the generated site config (§2.12): R2 account and legacy bucket names.
 const R2_HOST = 't2account.eu.r2.cloudflarestorage.com';
 const RFQ_BUCKET = 't2-rfq';
@@ -90,6 +118,19 @@ describe('/api/s3 presigned URLs through the Worker (staff)', () => {
     expect(url.pathname).toBe('/microns-private/rfq/RFQ-04102026-7/part-a/part_1.step');
     expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
     expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host');
+    expect(url.searchParams.get('X-Amz-Credential')).toMatch(/\/auto\/s3\/aws4_request$/);
+  });
+
+  it('presign-download: an object in the local R2 bucket is presigned on the R2 EU endpoint under rfq/, 3600 s at most', async () => {
+    expect(T2_TMP, 'T2_TMP is set by the T2 harness').not.toBe('');
+    await seedLocalR2('rfq/RFQ-04102026-7/part-a/seeded.step', 'seeded through the local R2 binding');
+    const token = await staffToken();
+    const res = await s3('presign-download', { key: 'RFQ-04102026-7/part-a/seeded.step', expiresIn: 86_400 }, token);
+    expect(res.status).toBe(200);
+    const url = new URL(((await res.json()) as { url: string }).url);
+    expect(url.host).toBe(R2_HOST);
+    expect(url.pathname).toBe('/microns-private/rfq/RFQ-04102026-7/part-a/seeded.step');
+    expect(url.searchParams.get('X-Amz-Expires')).toBe('3600');
     expect(url.searchParams.get('X-Amz-Credential')).toMatch(/\/auto\/s3\/aws4_request$/);
   });
 

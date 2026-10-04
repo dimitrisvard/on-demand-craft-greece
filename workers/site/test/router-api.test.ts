@@ -12,6 +12,7 @@ import { MAX_FUNCTION_BODY_BYTES } from '../../shared/src/compat/vercel-node';
 import type { OpsCall } from '../../shared/src/http/rpc';
 import { handleEmails } from '../src/api/emails';
 import { handleFiles } from '../src/api/files';
+import { opsHeaders } from '../src/api/ops-client';
 import { resolveApi, type ResolvedApi } from '../src/api/resolve';
 import { createRouteApi, ENDPOINT_TARGETS, routeApi, targetOf } from '../src/api/router';
 import { handleTrack } from '../src/api/track';
@@ -169,6 +170,48 @@ describe('step 1: paths outside the catalogue are forwarded with the body unread
     const res = await routeApi(api('POST', '/api/x', { body: bytesOf(MAX_FUNCTION_BODY_BYTES + 1) }), makeEnv(), ctx.asContext());
     expect(res.status).toBe(200);
     expect(upstreamSeen[0].body!.byteLength).toBe(MAX_FUNCTION_BODY_BYTES + 1);
+  });
+});
+
+describe('step 1: every spelling of a catalogue path is routed like the catalogue path', () => {
+  it.each([
+    ['POST', '/api/emails/?action=x', 'emails', '/api/emails?action=x'],
+    ['POST', '/api/Emails.js?action=x', 'emails', '/api/emails?action=x'],
+    ['POST', '/api/em%61ils?action=x', 'emails', '/api/emails?action=x'],
+    ['POST', '/api/s3/?action=list', 's3', '/api/s3?action=list'],
+    ['POST', '/api/s3.js?action=list', 's3', '/api/s3?action=list'],
+    ['POST', '/api/notifications/?action=x', 'notifications', '/api/notifications?action=x'],
+    ['POST', '/api/Notifications.js/?action=x', 'notifications', '/api/notifications?action=x'],
+    ['POST', '/api//gsc?action=x', 'gsc', '/api/gsc?action=x'],
+    ['GET', '/api/track/?type=open', 'marketing', '/api/marketing?type=open&action=track'],
+    ['GET', '/api/connector-status.js', 'tenders', '/api/tenders?connectors=true'],
+  ])('%s %s goes through resolve, gate and dispatch (%s); nothing reaches the upstream', async (method, path, endpoint, functionUrl) => {
+    vi.mocked(applyGate).mockImplementation(async () => ({ kind: 'deny', actionId: 'GS-1', response: Response.json({ error: 'unauthorized' }, { status: 401 }) }));
+    const init = method === 'GET' ? {} : { body: '{}', headers: { 'content-type': 'application/json' } };
+    const res = await routeApi(api(method, path, init), makeEnv(), ctx.asContext());
+    expect(res.status).toBe(401);
+    expect(upstreamSeen).toEqual([]);
+    expect(applyGate).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(applyGate).mock.calls[0][0]).toMatchObject({ endpoint, functionUrl });
+  });
+
+  it('an allowed request on another spelling reaches its handler with the catalogue function URL', async () => {
+    await routeApi(api('POST', '/api/Notifications.js/?action=inv-label', { body: '{"action":"inv-label"}', headers: { 'content-type': 'application/json' } }), makeEnv(), ctx.asContext());
+    expect(applyGate).toHaveBeenCalledTimes(1);
+    expect(opsSeen[0].url).toBe(`${SITE}/api/notifications?action=inv-label`);
+    expect(opsSeen[0].call).toMatchObject({ endpoint: 'notifications', action: 'inv-label', functionUrl: '/api/notifications?action=inv-label' });
+    await routeApi(api('POST', '/api/emails/', { body: '{}', headers: { 'content-type': 'application/json' } }), makeEnv(), ctx.asContext());
+    expect(vi.mocked(handleEmails).mock.calls[0][0].functionUrl).toBe('/api/emails');
+    expect(upstreamSeen).toEqual([]);
+  });
+
+  it('a forward target receives the catalogue function URL, after the gate', async () => {
+    const route = createRouteApi({ ...ENDPOINT_TARGETS, gsc: 'forward' });
+    await route(api('POST', '/api/GSC.js/?action=bulk', { body: '{"a":1}', headers: { 'content-type': 'application/json' } }), makeEnv(), ctx.asContext());
+    expect(applyGate).toHaveBeenCalledTimes(1);
+    expect(upstreamSeen).toHaveLength(1);
+    expect(upstreamSeen[0].url).toBe(`${UPSTREAM}/api/gsc?action=bulk`);
+    expect(new TextDecoder().decode(upstreamSeen[0].body!)).toBe('{"a":1}');
   });
 });
 
@@ -406,6 +449,9 @@ describe('callOps: the request handed to microns-ops', () => {
         'cf-access-client-id': 'id.access',
         'cf-access-client-secret': 'not-a-real-secret',
         'cf-access-jwt-assertion': 'assertion',
+        'Cf-Access-Authenticated-User-Email': 'someone@example.com',
+        'cf-access-token': 'access-token-value',
+        'CF-Access-Anything-New': '1',
         'cf-connecting-ip': '198.51.100.7',
         'x-microns-principal': 'ADMIN',
         'X-Microns-Request-Id': 'forged',
@@ -435,6 +481,19 @@ describe('callOps: the request handed to microns-ops', () => {
       functionUrl: '/api/tenders?x=1&connectors=true',
       principal: STAFF,
     });
+  });
+
+  it('opsHeaders drops every cf-access-* name, whatever its case, and keeps names that only resemble it', () => {
+    const out = opsHeaders(new Headers({
+      'CF-Access-Client-Id': 'id.access',
+      'Cf-Access-Authenticated-User-Email': 'someone@example.com',
+      'cf-access-token': 'access-token-value',
+      'cf-access-': 'empty-suffix',
+      'x-cf-access-note': 'kept',
+      'cf-accessibility': 'kept',
+      authorization: 'Bearer test-token-value',
+    }));
+    expect(Object.fromEntries(out)).toEqual({ authorization: 'Bearer test-token-value', 'x-cf-access-note': 'kept', 'cf-accessibility': 'kept' });
   });
 
   it('GET carries no body', async () => {

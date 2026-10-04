@@ -14,6 +14,18 @@ export const USER_DB_NAMES = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'] as const;
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const RFQ_NUMBER_RE = /^RFQ-\d{8}-\d+$/;
 
+// Every text form PostgreSQL's uuid input accepts: upper- or lower-case hex digits, optional braces around the
+// whole value, and at most one hyphen after any group of four digits.
+const UUID_INPUT_RE = /^(?:\{([0-9a-f]{4}(?:-?[0-9a-f]{4}){7})\}|([0-9a-f]{4}(?:-?[0-9a-f]{4}){7}))$/i;
+
+/** The value as the database stores a uuid (lower-case 8-4-4-4-12), or null when the database would refuse it. */
+export function canonicalUuid(value: string): string | null {
+  const match = UUID_INPUT_RE.exec(value);
+  if (!match) return null;
+  const hex = (match[1] ?? match[2]).replace(/-/g, '').toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export type Unavailable = 'unavailable';
 
 export function serviceRest(env: Env, pathAndQuery: string, init?: RestInit, timeoutMs?: number): Promise<RestResult> {

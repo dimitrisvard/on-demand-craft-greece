@@ -397,6 +397,20 @@ describe('delete', () => {
     expect(line).not.toContain('secret-name');
     logs.mockRestore();
   });
+
+  it('the error log line carries at most 300 characters of the error message', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const long = 'm'.repeat(5000);
+    const refusing: typeof fetch = async () =>
+      new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>InternalError</Code><Message>${long}</Message></Error>`, { status: 500 });
+    const res = await handleFiles({ resolved: build({ search: '?action=delete', json: { key: 'RFQ-1/a.pdf' } }).resolved, principal: STAFF, constraints: NO_FILE_CONSTRAINTS, env, ctx, fetchImpl: refusing });
+    expect(res.status).toBe(500);
+    expect((await json(res)).error).toBe(long);
+    const line = logs.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+    expect(line).toContain('[microns-site] files error');
+    expect(line).not.toContain('m'.repeat(301));
+    logs.mockRestore();
+  });
 });
 
 describe('delete-folder', () => {
@@ -508,7 +522,9 @@ describe('list', () => {
 // ----- FileConstraints -----
 
 describe('FileConstraints on presign-upload', () => {
-  const upload = (b: Record<string, unknown>, c: FileConstraints) => ours({ search: '?action=presign-upload', json: { prefix: 'RFQ-02102026-5/part-a', contentType: 'model/step', ...b } }, c);
+  // Callers send the file size (src/utils/awsS3Storage.ts); a case without it passes `size: undefined`.
+  const upload = (b: Record<string, unknown>, c: FileConstraints) => ours({ search: '?action=presign-upload', json: { prefix: 'RFQ-02102026-5/part-a', contentType: 'model/step', size: 1, ...b } }, c);
+  const rfqKeys = () => r2Keys().filter((k) => k.startsWith('rfq/'));
 
   it('extension allow-list for non-staff (case-insensitive, on the sanitised name); staff unrestricted', async () => {
     for (const fileName of ['a.STEP', 'b.stp', 'c.x_t', 'd.SLDPRT', 'e.jpeg', 'f.zip', 'g h.pdf']) {
@@ -530,12 +546,30 @@ describe('FileConstraints on presign-upload', () => {
     expect(new URL(body.uploadUrl).searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host');
     expect((await fake.fetch(body.uploadUrl, { method: 'PUT', body: enc('123456'), headers: { 'Content-Type': 'model/step' } })).status).toBe(403);
     expect((await fake.fetch(body.uploadUrl, { method: 'PUT', body: enc('12345'), headers: { 'Content-Type': 'model/step' } })).status).toBe(200);
-    // A size that is not a number is not a declaration.
-    const unsized = await json(await upload({ fileName: 'b.step', size: '5' }, CUSTOMER));
-    expect(new URL(unsized.uploadUrl).searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host');
-    // Staff: never signed, never capped.
+    // Staff: never signed, never capped, never required.
     const staff = await json(await upload({ fileName: 'c.step', size: 209_715_201 }, NO_FILE_CONSTRAINTS));
     expect(new URL(staff.uploadUrl).searchParams.get('X-Amz-SignedHeaders')).toBe('content-type;host');
+    const staffUnsized = await upload({ fileName: 'd.step', size: undefined }, NO_FILE_CONSTRAINTS);
+    expect(staffUnsized.status).toBe(200);
+  });
+
+  it('non-staff: the size is required as a whole number of bytes and every upload URL signs it as Content-Length', async () => {
+    for (const c of [CUSTOMER, ANONYMOUS]) {
+      for (const size of [undefined, null, '5', '999999999', -1, 1.5, 'abc', [5], { n: 5 }, true]) {
+        const res = await upload({ fileName: 'a.step', size }, c);
+        expect(res.status, JSON.stringify(size)).toBe(400);
+        expect(await res.text()).toBe('{"error":"size_required"}');
+      }
+    }
+    expect(fake.calls).toEqual([]);
+    // Zero bytes is a size; the URL accepts exactly that body.
+    const empty = await json(await upload({ fileName: 'empty.step', size: 0 }, ANONYMOUS));
+    const url = new URL(empty.uploadUrl);
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toBe('content-length;content-type;host');
+    expect((await fake.fetch(empty.uploadUrl, { method: 'PUT', body: enc('x'), headers: { 'Content-Type': 'model/step' } })).status).toBe(403);
+    expect((await fake.fetch(empty.uploadUrl, { method: 'PUT', body: new Uint8Array(), headers: { 'Content-Type': 'model/step' } })).status).toBe(200);
+    // The largest allowed size is accepted.
+    expect((await upload({ fileName: 'max.step', size: 209_715_200 }, CUSTOMER)).status).toBe(200);
   });
 
   it('noOverwrite: an existing key in R2 or in legacy S3 -> 409 exists; staff may overwrite', async () => {
@@ -573,7 +607,68 @@ describe('FileConstraints on presign-upload', () => {
       const { uploadUrl } = await json(res);
       expect((await fake.fetch(uploadUrl, { method: 'PUT', body: enc('x'), headers: { 'Content-Type': 'model/step' } })).status).toBe(200);
     }
-    expect(r2Keys()).toHaveLength(40);
+    expect(rfqKeys()).toHaveLength(40);
+  });
+
+  it('anonymous: at most 50 upload URLs per RFQ folder, counted when the URL is issued', async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 60; i++) {
+      const res = await upload({ fileName: `p${i}.step`, prefix: `RFQ-02102026-5/part-${i % 3}` }, ANONYMOUS);
+      statuses.push(res.status);
+      if (res.status === 409) expect(await res.text()).toBe('{"error":"limit_reached"}');
+    }
+    expect(statuses.slice(0, 50)).toEqual(new Array(50).fill(200));
+    expect(statuses.slice(50)).toEqual(new Array(10).fill(409));
+    // Nothing was uploaded: the count follows issued URLs, not stored objects.
+    expect(rfqKeys()).toEqual([]);
+    // Other folders, signed-in customers and staff are not limited by it.
+    expect((await upload({ fileName: 'x.step', prefix: 'RFQ-02102026-6/part-a' }, ANONYMOUS)).status).toBe(200);
+    expect((await upload({ fileName: 'x.step' }, CUSTOMER)).status).toBe(200);
+    expect((await upload({ fileName: 'y.step' }, NO_FILE_CONSTRAINTS)).status).toBe(200);
+    // The count is kept outside rfq/, so list and delete-folder never see it.
+    const listed = await json(await ours({ search: '?action=list', json: { prefix: '' } }));
+    expect(listed.objects).toEqual([]);
+  });
+
+  it('anonymous: parallel requests for one folder never get more than 50 upload URLs together', async () => {
+    // Every read of the count is held back 30 ms, so the parallel requests all read before any of them writes.
+    const r2 = env.PRIVATE_FILES;
+    const slowReads = {
+      head: async (key: string) => {
+        const found = await r2.head(key);
+        if (key.startsWith('upload-counters/')) await new Promise((resolve) => setTimeout(resolve, 30));
+        return found;
+      },
+      get: r2.get.bind(r2),
+      put: r2.put.bind(r2),
+      delete: r2.delete.bind(r2),
+      list: r2.list.bind(r2),
+    } as unknown as R2Bucket;
+    const racing = (fileName: string) =>
+      handleFiles({
+        resolved: build({ search: '?action=presign-upload', json: { prefix: 'RFQ-02102026-5/part-a', contentType: 'model/step', size: 1, fileName } }).resolved,
+        principal: { class: 'ANON' },
+        constraints: ANONYMOUS,
+        env: { ...env, PRIVATE_FILES: slowReads },
+        ctx,
+        fetchImpl: fake.fetch,
+      });
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const statuses = (await Promise.all(Array.from({ length: 80 }, (_, i) => racing(`q${i}.step`)))).map((r) => r.status);
+      const issued = statuses.filter((st) => st === 200).length;
+      expect(issued).toBeGreaterThan(0);
+      expect(issued).toBeLessThanOrEqual(50);
+      for (const st of statuses) expect([200, 409, 500]).toContain(st);
+      // The count equals the URLs issued, and later requests get only the rest.
+      expect(fake.object('microns-private', 'upload-counters/RFQ-02102026-5/')?.customMetadata.issued).toBe(String(issued));
+      const after: number[] = [];
+      for (let i = 0; i < 60 - issued; i++) after.push((await racing(`r${i}.step`)).status);
+      expect(after.filter((st) => st === 200)).toHaveLength(50 - issued);
+      expect(after.slice(50 - issued)).toEqual(new Array(10).fill(409));
+    } finally {
+      logs.mockRestore();
+    }
   });
 
   it('staff: true switches every upload limit off, even when limits are set', async () => {
@@ -590,8 +685,38 @@ describe('FileConstraints on presign-upload', () => {
   it('a constraint answer happens before anything is signed or written', async () => {
     await upload({ fileName: 'evil.exe' }, ANONYMOUS);
     await upload({ fileName: 'a.step', size: 1e12 }, ANONYMOUS);
+    await upload({ fileName: 'a.step', size: undefined }, ANONYMOUS);
     expect(fake.calls).toEqual([]);
     expect(fake.writes()).toEqual([]);
+  });
+
+  it('a refused upload (exists, object limit) does not use up one of the folder\'s upload URLs', async () => {
+    fake.seed('microns-private', 'rfq/RFQ-02102026-5/part-a/taken.step', 'x');
+    for (let i = 0; i < 5; i++) expect((await upload({ fileName: 'taken.step' }, ANONYMOUS)).status).toBe(409);
+    expect(fake.writes()).toEqual([]);
+  });
+
+  it('a content type that is not a valid header value answers 400 invalid_field, for every caller, without logging it', async () => {
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      for (const c of [NO_FILE_CONSTRAINTS, CUSTOMER, ANONYMOUS]) {
+        for (const contentType of ['x/y\nBODY-MARKER', 'x/y\r\nBODY-MARKER', 'x/y\u0000BODY-MARKER', `x/${'y'.repeat(300)}`, 'x/\u00e9']) {
+          const res = await upload({ fileName: 'a.step', contentType }, c);
+          expect(res.status, JSON.stringify(contentType)).toBe(400);
+          expect(await res.text()).toBe('{"error":"invalid_field"}');
+        }
+      }
+      const lines = [...logs.mock.calls, ...errors.mock.calls].map((args) => args.map(String).join(' ')).join('\n');
+      expect(lines).not.toContain('BODY-MARKER');
+      expect(fake.calls).toEqual([]);
+      // Ordinary types, with parameters, still sign as given.
+      const ok = await json(await upload({ fileName: 'b.pdf', contentType: 'application/pdf; charset=binary' }, CUSTOMER));
+      expect((await fake.fetch(ok.uploadUrl, { method: 'PUT', body: enc('x'), headers: { 'Content-Type': 'application/pdf; charset=binary' } })).status).toBe(200);
+    } finally {
+      logs.mockRestore();
+      errors.mockRestore();
+    }
   });
 });
 

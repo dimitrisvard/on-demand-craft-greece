@@ -3,15 +3,20 @@
  *
  * | Helper        | Context                              | Rules                                                     |
  * |---------------|--------------------------------------|-----------------------------------------------------------|
- * | `ApiClient`   | `apiCtx` (BASE_URL, no default headers) | resolves the path against BASE_URL and throws when the result has another origin; adds one Cloudflare Access service-token pair to that single call; never follows a redirect (`maxRedirects: 0`) |
+ * | `ApiClient`   | one context per Access identity (`ci`, `collector`, `mcp`, `none`), each with `baseURL` = BASE_URL and no default headers | resolves the path against BASE_URL and throws when the result has another origin; adds the identity's Cloudflare Access service-token pair to that single call; never follows a redirect (`maxRedirects: 0`) |
  * | `PlainClient` | `plainCtx` (no headers at all)       | absolute URLs only (presigned R2 / legacy S3 URLs, Supabase Auth, the Vercel side of compare mode); refuses the BASE_URL origin; never follows a redirect |
  *
- * No `extraHTTPHeaders` anywhere: playwright.config.ts stays as it is, and a header added for one call cannot leak
- * into another. Tracing is off whenever Access credentials are set (playwright.config.ts), so no trace stores them.
+ * | Rule | Detail |
+ * |---|---|
+ * | Headers | No `extraHTTPHeaders` anywhere: playwright.config.ts stays as it is, and a header added for one call cannot leak into another |
+ * | Cookies | A request context keeps the cookies its answers set (Access answers a service-token request with a `CF_Authorization` session cookie). Each Access identity therefore has its own context, so a call made for one identity never carries another identity's session |
+ * | Errors | A call that fails before an answer arrives (timeout, refused or reset connection) throws an error with the method, the URL (`plain()`: without its query) and the first line of the reason, with every credential value masked; the original error is not attached |
+ * | Traces and reports | Traces are off whenever Access credentials are set (playwright.config.ts). Playwright's HTML report records each request's headers like a trace does, so a run with credentials uses the default list/dot reporter (`npm run cf:e2e:api`), and its `playwright-report/` and `test-results/` are never shared |
  */
 import type { APIRequestContext, APIResponse } from '@playwright/test';
 
 export type CredentialName = 'ci' | 'collector' | 'mcp';
+export type AccessIdentity = CredentialName | 'none';
 
 export interface AccessPair {
   id: string;
@@ -19,6 +24,9 @@ export interface AccessPair {
 }
 
 export type AccessCredentials = Partial<Record<CredentialName, AccessPair | null>>;
+
+/** Creates one request context (`playwright.request.newContext`); called once per Access identity. */
+export type ContextFactory = () => Promise<APIRequestContext>;
 
 export interface CallInit {
   method?: string;
@@ -28,13 +36,23 @@ export interface CallInit {
   /** JSON body: serialised with JSON.stringify, Content-Type application/json unless set. */
   json?: unknown;
   /** Which Access service token goes with this call (default 'ci'; 'none' sends none). */
-  access?: CredentialName | 'none';
+  access?: AccessIdentity;
   /** Per-request timeout in ms (default 30 s). */
   timeout?: number;
 }
 
 const ACCESS_HEADER_NAMES = new Set(['cf-access-client-id', 'cf-access-client-secret']);
+/** Headers whose values are credentials: they never appear in an error message. */
+const CREDENTIAL_HEADER_NAMES = new Set([
+  'authorization',
+  'apikey',
+  'cookie',
+  'cf-access-client-id',
+  'cf-access-client-secret',
+  'cf-access-jwt-assertion',
+]);
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MASK = '<redacted>';
 
 /** CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET (the CI token) when both are set. */
 export function ciCredentialsFromEnv(env: Record<string, string | undefined> = process.env): AccessPair | null {
@@ -65,12 +83,69 @@ function requestBody(init: CallInit, headers: Record<string, string>): Buffer | 
   return typeof init.body === 'string' ? Buffer.from(init.body, 'utf8') : Buffer.from(init.body);
 }
 
-/** Calls to the Worker under test (BASE_URL origin only). */
+/** Values of the credential headers of a request, plus the token of `<scheme> <token>`; longest first. */
+function credentialValues(headers: Record<string, string>): string[] {
+  const values = new Set<string>();
+  for (const [name, value] of Object.entries(headers)) {
+    if (!CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()) || value.trim() === '') continue;
+    values.add(value);
+    const token = /^\s*\S+\s+(\S.*?)\s*$/.exec(value)?.[1];
+    if (token) values.add(token);
+  }
+  return [...values].sort((a, b) => b.length - a.length);
+}
+
+/**
+ * The error a failed call throws: method, URL and the first line of the reason, with every credential header value
+ * (and `hidden` strings, e.g. a URL query) masked. The original error is not attached as `cause`.
+ */
+export function callError(
+  label: 'api()' | 'plain()',
+  method: string,
+  shownUrl: string,
+  headers: Record<string, string>,
+  err: unknown,
+  hidden: readonly string[] = [],
+): Error {
+  let reason = (err instanceof Error ? err.message : String(err)).split('\n', 1)[0];
+  for (const value of [...credentialValues(headers), ...hidden.filter((h) => h !== '')]) {
+    reason = reason.split(value).join(MASK);
+  }
+  return new Error(`${label} ${method} ${shownUrl} failed: ${reason}`);
+}
+
+async function send(
+  ctx: APIRequestContext,
+  label: 'api()' | 'plain()',
+  url: URL,
+  shownUrl: string,
+  init: CallInit,
+  headers: Record<string, string>,
+  hidden: readonly string[],
+): Promise<APIResponse> {
+  const data = requestBody(init, headers);
+  const method = init.method ?? (data === undefined ? 'GET' : 'POST');
+  try {
+    return await ctx.fetch(url.href, {
+      method,
+      headers,
+      data,
+      maxRedirects: 0,
+      failOnStatusCode: false,
+      timeout: init.timeout ?? DEFAULT_TIMEOUT_MS,
+    });
+  } catch (err) {
+    throw callError(label, method, shownUrl, headers, err, hidden);
+  }
+}
+
+/** Calls to the Worker under test (BASE_URL origin only); one request context per Access identity. */
 export class ApiClient {
   readonly origin: string;
+  private readonly contexts = new Map<AccessIdentity, Promise<APIRequestContext>>();
 
   constructor(
-    private readonly ctx: APIRequestContext,
+    private readonly newContext: ContextFactory,
     baseURL: string,
     private readonly credentials: AccessCredentials = {},
   ) {
@@ -86,6 +161,16 @@ export class ApiClient {
     return url;
   }
 
+  /** The request context of one Access identity (created on first use, kept until dispose()). */
+  private contextFor(identity: AccessIdentity): Promise<APIRequestContext> {
+    let ctx = this.contexts.get(identity);
+    if (!ctx) {
+      ctx = this.newContext();
+      this.contexts.set(identity, ctx);
+    }
+    return ctx;
+  }
+
   async fetch(path: string, init: CallInit = {}): Promise<APIResponse> {
     const url = this.url(path);
     const headers = withoutAccessHeaders(init.headers);
@@ -98,15 +183,15 @@ export class ApiClient {
         headers['CF-Access-Client-Secret'] = pair.secret;
       }
     }
-    const data = requestBody(init, headers);
-    return this.ctx.fetch(url.href, {
-      method: init.method ?? (data === undefined ? 'GET' : 'POST'),
-      headers,
-      data,
-      maxRedirects: 0,
-      failOnStatusCode: false,
-      timeout: init.timeout ?? DEFAULT_TIMEOUT_MS,
-    });
+    const ctx = await this.contextFor(access);
+    return send(ctx, 'api()', url, url.href, init, headers, []);
+  }
+
+  /** Disposes every context this client created. */
+  async dispose(): Promise<void> {
+    const pending = [...this.contexts.values()];
+    this.contexts.clear();
+    await Promise.allSettled(pending.map(async (ctx) => (await ctx).dispose()));
   }
 }
 
@@ -130,14 +215,7 @@ export class PlainClient {
     }
     if (url.origin === this.refusedOrigin) throw new Error('plain(): BASE_URL requests go through api()');
     const headers = withoutAccessHeaders(init.headers);
-    const data = requestBody(init, headers);
-    return this.ctx.fetch(url.href, {
-      method: init.method ?? (data === undefined ? 'GET' : 'POST'),
-      headers,
-      data,
-      maxRedirects: 0,
-      failOnStatusCode: false,
-      timeout: init.timeout ?? DEFAULT_TIMEOUT_MS,
-    });
+    // Presigned URLs carry their signature in the query: an error names the URL without it.
+    return send(this.ctx, 'plain()', url, `${url.origin}${url.pathname}`, init, headers, [url.search.slice(1)]);
   }
 }

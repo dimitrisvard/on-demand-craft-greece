@@ -510,6 +510,15 @@ describe('/api/emails rfq (EM-3) and rfq-pdf (EM-4) recipient rules', () => {
     // A var that does not name the class enforces it.
     await expectDeny(await gate(call, makeEnv({ API_GATES_MODE: 'redirect=report' })), 422, 'recipient_mismatch');
   });
+
+  it('rfq-pdf recipient lookup unreachable belongs to the recipient class: logged and allowed by default, 503 with recipient=enforce', async () => {
+    up.failures.push({ match: /\/rest\/v1\/rfqs/, failure: 503 });
+    const call: ApiCall = { ...STAFF_CALLS['EM-4'], headers: bearer(users.STAFF) };
+    expectAllow(await gate(call));
+    expect(vi.mocked(console.log).mock.calls.map((c) => String(c[0]))).toContain('[microns-site] gate would deny EM-4 auth_unavailable');
+    expectAllow(await gate(call, makeEnv({ API_GATES_MODE: 'recipient=report,data=enforce' })));
+    await expectDeny(await gate(call, makeEnv({ API_GATES_MODE: 'recipient=enforce' })), 503, 'auth_unavailable');
+  });
 });
 
 describe('NT-1 partner recipient (always enforced)', () => {
@@ -526,6 +535,17 @@ describe('NT-1 partner recipient (always enforced)', () => {
   it('a wildcard-looking address is compared literally', async () => {
     await expectDeny(await gate(call('*@example.test')), 422, 'recipient_mismatch');
     expect(up.calls.some((c) => c.includes('email=eq.*%40example.test'))).toBe(true);
+  });
+
+  it('the partner lookup unreachable (5xx, network, timeout) -> 503 auth_unavailable, also in report mode', async () => {
+    for (const failure of [503, 'network'] as const) {
+      up.failures.length = 0;
+      up.failures.push({ match: /\/rest\/v1\/production_partners/, failure });
+      await expectDeny(await gate(call(PARTNER_EMAIL)), 503, 'auth_unavailable');
+      await expectDeny(await gate(call(PARTNER_EMAIL), makeEnv({ API_GATES_MODE: 'auth=report,data=report,recipient=report' })), 503, 'auth_unavailable');
+    }
+    up.failures.length = 0;
+    expectAllow(await gate(call(PARTNER_EMAIL)));
   });
 });
 
@@ -589,6 +609,16 @@ describe('S3 ownership rules', () => {
     await expectDeny(await gate({ endpoint: 's3', action: 'presign-download', functionUrl: '/api/s3?action=presign-download', body: { key: 'k' }, headers: bearer(users.CUSTOMER) }), 503, 'auth_unavailable');
   });
 
+  it('presign-upload with a bearer while Supabase Auth is unreachable -> 503 auth_unavailable (even into a fresh RFQ)', async () => {
+    up.failures.push({ match: /\/auth\/v1\/user/, failure: 503 });
+    await expectDeny(await gate(upload(`${RFQ_NUMBER}/p`, bearer(users.CUSTOMER))), 503, 'auth_unavailable');
+    expect(up.calls.some((c) => c.includes('/rest/v1/'))).toBe(false);
+    // auth=report: logged, and the request goes on as the anonymous caller it then is.
+    const reported = expectAllow(await gate(upload(`${RFQ_NUMBER}/p`, bearer(users.CUSTOMER)), makeEnv({ API_GATES_MODE: 'auth=report' })));
+    expect(reported.principal).toEqual({ class: 'ANON' });
+    expect(reported.constraints?.maxObjectsUnderPrefix).toBe(50);
+  });
+
   it('articles scope and list are staff only', async () => {
     await expectDeny(await gate({ ...STAFF_CALLS['S3-6'], headers: bearer(users.CUSTOMER) }), 403, 'forbidden');
     await expectDeny(await gate({ ...STAFF_CALLS['S3-5'] }), 401, 'unauthorized');
@@ -641,6 +671,16 @@ describe('machine callers and hosts', () => {
     await expectDeny(await gate({ ...scan, host: api, headers }, makeEnv({ API_MACHINE_HOSTS: '' })), 401, 'unauthorized');
     expectAllow(await gate({ ...scan, host: api, headers }, makeEnv({ API_MACHINE_HOSTS: 'other.example, API.micronshub.eu' })));
     await expectDeny(await gate({ ...scan, host: WWW, headers }, makeEnv({ API_MACHINE_HOSTS: 'api.micronshub.eu' })), 401, 'unauthorized');
+  });
+
+  it('API_MACHINE_HOSTS matches whole host names only (no suffix or subdomain match)', async () => {
+    const headers = { 'Cf-Access-Jwt-Assertion': await up.machineAssertion(COLLECTOR_ID) };
+    const env = makeEnv({ API_MACHINE_HOSTS: 'api.micronshub.eu' });
+    for (const host of ['https://xapi.micronshub.eu', 'https://v2.api.micronshub.eu', 'https://api.micronshub.eu.example.net']) {
+      await expectDeny(await gate({ ...scan, host, headers }, env), 401, 'unauthorized');
+    }
+    expect(up.calls.some((c) => c.includes('/cdn-cgi/access/certs'))).toBe(false);
+    expectAllow(await gate({ ...scan, host: 'https://api.micronshub.eu', headers }, env));
   });
 
   it('a staff JWT still works on any host', async () => {
@@ -722,6 +762,20 @@ describe('burst vectors', () => {
     const call = (i: number): ApiCall => ({ endpoint: 'emails', action: 'email', body: { email: `a${i}@b.co` }, headers: { 'X-Turnstile-Token': DUMMY_TOKEN, 'CF-Connecting-IP': '192.0.2.1' } });
     for (let i = 0; i < 5; i++) expectAllow(await gate(call(i), env));
     await expectDeny(await gate(call(9), env), 429, 'rate_limited');
+  });
+
+  it('staff presign-upload counts against the per-user upload key on the bulk binding', async () => {
+    const env = makeEnv();
+    const call: ApiCall = { endpoint: 's3', action: 'presign-upload', functionUrl: '/api/s3?action=presign-upload', body: { fileName: 'a.step', prefix: 'any/where' }, headers: bearer(users.STAFF) };
+    expectAllow(await gate(call, env));
+    expect((env.API_RATE_LIMIT_BULK as unknown as ReturnType<typeof fakeLimiter>).counts.get(`u:${users.STAFF.uid}:s3:up`)).toBe(1);
+    await expectDeny(await gate(call, makeEnv({ API_RATE_LIMIT_BULK: fakeLimiter(0) })), 429, 'rate_limited');
+  });
+
+  it('a rate-limit binding that throws lets the request through, with an error log naming the binding', async () => {
+    const throwing = { async limit(): Promise<{ success: boolean }> { throw new Error('binding unavailable'); } };
+    expectAllow(await gate({ ...STAFF_CALLS['GS-1'], headers: bearer(users.STAFF) }, makeEnv({ API_RATE_LIMIT: throwing })));
+    expect(vi.mocked(console.error).mock.calls.map((c) => String(c[0]))).toContain('[microns-site] gate rate_limit_error default');
   });
 });
 

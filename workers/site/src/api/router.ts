@@ -1,6 +1,7 @@
 // /api/* router of microns-site (runs when the flag api.forward_to_vercel is off, src/api/forward.ts).
 //
-//   1 Path      endpointOfPath(); a path outside the catalogue is forwarded to Vercel with its body unread
+//   1 Path      endpointOfPath(), on the canonical spelling of the path (src/api/resolve.ts); a path outside the
+//               catalogue is forwarded to Vercel with its body unread
 //   2 Body      non-GET/HEAD bodies are buffered once (at most 4.5 MiB, else 413 {"error":"payload_too_large"});
 //               from here on every consumer gets these bytes, the request body is never read again
 //   3 Resolve   endpoint, function URL (vercel.json rewrite merged), action (src/api/resolve.ts)
@@ -29,7 +30,7 @@ import { handleEmails } from './emails';
 import { handleFiles, type FilesEnv } from './files';
 import { forwardToVercel } from './forward';
 import { callOps } from './ops-client';
-import { actionForLog, endpointOfPath, isSentinel, resolveApi, type ResolvedApi } from './resolve';
+import { actionForLog, cataloguePathOf, endpointOfPath, isSentinel, resolveApi, type ResolvedApi } from './resolve';
 import { handleTrack } from './track';
 
 export type Target = 'local' | 'ops' | 'forward';
@@ -165,9 +166,10 @@ function withOverrides(r: ResolvedApi, request: Request, functionUrl: string, by
   };
 }
 
-// A forward of a routed endpoint sends the function URL the gate left (unchanged unless overridden).
+// A forward of a routed endpoint sends the request as received when its path is the catalogue path and the gate
+// left the function URL unchanged; otherwise it sends the function URL the gate decided on.
 function forwardRequestFor(request: Request, r: ResolvedApi, functionUrl: string): Request {
-  if (functionUrl === r.functionUrl) return request;
+  if (functionUrl === r.functionUrl && cataloguePathOf(r.publicPath) === r.publicPath) return request;
   return new Request(new URL(functionUrl, request.url), { method: request.method, headers: request.headers, redirect: 'manual' });
 }
 

@@ -27,9 +27,9 @@ Source-only TypeScript shared by the two Workers of the `/api` port: `microns-si
 | `res` helpers | `status`, `json`, `send`, `redirect` as `@vercel/node`: default `text/html` for strings, `charset=utf-8` added to any string type, weak ETag, `application/octet-stream` for a `Buffer`, JSON for objects, numbers and booleans, 204/304 without body, `redirect` default 307 with no body |
 | `res` (Node) | `statusCode`, `statusMessage`, `setHeader` (values stringified, arrays kept, names and values checked as Node checks them), `getHeader(s)`, `hasHeader`, `removeHeader`, `writeHead`, `write`, `end`; `end(string \| Buffer)` sends the bytes as given (no type, charset or ETag) |
 | Response | One `Response` built at `res.end()`; HEAD and null-body statuses carry no body |
-| After `end()` | The rest of the handler runs under `ctx.waitUntil`; a late rejection is logged |
-| Throw before `end()` | An error with a numeric `statusCode` 400-599 → that status, `text/plain`, body = message; anything else propagates (the caller answers 500) |
-| Timeout | No `end()` within `timeoutMs` (default 30 s) → 504 `text/plain` `Gateway Timeout` |
+| After `end()` | The rest of the handler runs under `ctx.waitUntil`; a late rejection is logged. A handler that returns before it ends (timer, callback) is answered by its later `end()` within the same deadline |
+| Throw before `end()` | An error with a numeric `statusCode` 400-599 → that status, `text/plain`, body = message; anything else propagates (the caller answers 500). The handler is not registered with `ctx.waitUntil` |
+| Timeout | No `end()` within `timeoutMs` (default 30 s) → 504 `text/plain` `Gateway Timeout`; the handler is not registered with `ctx.waitUntil` |
 | `process.env` | Not handled here: populated by the runtime (`nodejs_compat`) |
 
 Known differences from a Node server running `@vercel/node`:
@@ -39,6 +39,7 @@ Known differences from a Node server running `@vercel/node`:
 | `Content-Length`, `Transfer-Encoding` | Left to the runtime, which sets `Content-Length` from the body; a HEAD answer carries none |
 | Repeated request headers | Joined with `, ` by the `Headers` object (Node keeps the first value of some single-value headers and joins `Cookie` with `; `) |
 | Uncaught `ApiError` and timeout bodies | Plain text (status and message; `Gateway Timeout`), not the platform error page |
+| Header values with U+0080-U+00FF characters (for example a `Location` built from a decoded URL) | Sent as UTF-8 on every answer (`é` = `C3 A9`): the runtime encodes header strings as UTF-8 and the shim cannot send raw Latin-1 bytes. Node sends UTF-8 only when the header block goes out with a UTF-8 string body (`end(string)`, or `send`/`json` under 1,000 characters); with no body (`end()`, `redirect`, 204/304, HEAD), a `Buffer` body or a longer `send` string it sends Latin-1 (`é` = `E9`). Vercel's production bytes for such a redirect are not measured here (a capture item before the switch). Characters above U+00FF throw in both |
 
 ## Commands
 

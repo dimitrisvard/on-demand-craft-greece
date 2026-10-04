@@ -1,8 +1,9 @@
 // E-mail tracking links (/api/marketing?action=track, /api/track): no credential by design, and every real link
 // keeps the handler's exact answer. Two rules on top of the unchanged handler:
-//   1. Side effects are throttled per sent event (key trk:<eid>). Over the limit the gate answers itself with the
-//      response the handler gives for a repeat hit (open: pixel; click: 302; unsubscribe: page), byte for byte,
-//      and no database write happens. The redirect decision below still applies to a throttled click.
+//   1. Side effects are throttled per sent event (key trk:<eid>, the id in canonical uuid form). Over the limit
+//      the gate answers itself with the response the handler gives for a repeat hit (open: pixel; click: 302;
+//      unsubscribe: page), byte for byte, and no database write happens. The redirect decision below still
+//      applies to a throttled click.
 //   2. A click redirects to its `url` only when the link belongs to the site:
 //        - eid and cid must be UUIDs, else the target is SITE_ORIGIN/ (no lookup);
 //        - a recorded 'sent' event (id = eid, campaign_id = cid) keeps an http(s) url;
@@ -18,7 +19,7 @@ import { missingNames } from '../../../shared/src/http/env-check';
 import type { ResolvedApi } from '../api/resolve';
 import type { Env } from '../env';
 import { replaceQueryParam } from './body';
-import { SERVICE_NAMES, UUID_RE, serviceRest } from './db';
+import { SERVICE_NAMES, UUID_RE, canonicalUuid, serviceRest } from './db';
 import type { GateModes } from './policy';
 import { checkRate } from './rate-limit';
 
@@ -187,8 +188,11 @@ export async function trackingGate(r: ResolvedApi, env: Env, modes: GateModes): 
     if (missing.length) return { kind: 'config', missing };
   }
 
-  // Values are coerced as the handler's template strings and query builders coerce them.
-  const rate = await checkRate(env, rateKey('trk', String(eid)));
+  // Values are coerced as the handler's template strings and query builders coerce them. The key is the event id
+  // as the database reads it, so every spelling of one id counts against the same limit; a value that is not a
+  // uuid matches no row and keeps its own key.
+  const eventId = String(eid);
+  const rate = await checkRate(env, rateKey('trk', canonicalUuid(eventId) ?? eventId));
   if (rate.kind === 'config') return rate;
   let throttled = rate.kind === 'limited';
   if (throttled && modes.rate === 'report') {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseMachineMap, resetAccessCertsCache, verifyAccessAssertion } from '../../src/auth/access-jwt';
 import { accessKeyPair, es256KeyPair, jwksBody, mintAccessJwt, nowSec, type SigningKey } from '../helpers/jwt';
 
@@ -9,6 +9,9 @@ const CLIENT_ID = 'collector-client-id.access';
 
 beforeEach(() => {
   resetAccessCertsCache();
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function certsEndpoint(...keys: SigningKey[]) {
@@ -91,17 +94,45 @@ describe('verifyAccessAssertion', () => {
     expect((await verifyAccessAssertion(headersWith(token), { teamDomain: TEAM, audiences: [AUD], fetchImpl: certs.fetchImpl })).ok).toBe(false);
   });
 
-  it('refetches the certs once when a token names an unknown key (rotation)', async () => {
+  it('refetches the certs once when a token names an unknown key (rotation), at most every 30 s', async () => {
     const oldKey = await accessKeyPair('old');
     const newKey = await accessKeyPair('new');
     const certs = certsEndpoint(oldKey);
     const cfg = { teamDomain: TEAM, audiences: [AUD], fetchImpl: certs.fetchImpl };
-    expect((await verifyAccessAssertion(headersWith(await mintAccessJwt(oldKey, { iss: ISS, aud: AUD, commonName: CLIENT_ID })), cfg)).ok).toBe(true);
+    const mint = (key: SigningKey) => mintAccessJwt(key, { iss: ISS, aud: AUD, commonName: CLIENT_ID });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    expect((await verifyAccessAssertion(headersWith(await mint(oldKey)), cfg)).ok).toBe(true);
+    expect(certs.urls).toHaveLength(1);
     certs.publish(oldKey, newKey);
-    // The cached set is younger than the cool-down, so the unknown kid is not refetched immediately.
-    expect((await verifyAccessAssertion(headersWith(await mintAccessJwt(newKey, { iss: ISS, aud: AUD, commonName: CLIENT_ID })), cfg)).ok).toBe(false);
-    resetAccessCertsCache();
-    expect((await verifyAccessAssertion(headersWith(await mintAccessJwt(newKey, { iss: ISS, aud: AUD, commonName: CLIENT_ID })), cfg)).ok).toBe(true);
+
+    // Within the 30 s cool-down the cached set is kept, so the unknown kid is refused without a fetch.
+    vi.setSystemTime(start + 29_000);
+    expect((await verifyAccessAssertion(headersWith(await mint(newKey)), cfg)).ok).toBe(false);
+    expect(certs.urls).toHaveLength(1);
+
+    // After the cool-down (still inside the 10 min cache lifetime) the unknown kid triggers one refetch.
+    vi.setSystemTime(start + 31_000);
+    expect(await verifyAccessAssertion(headersWith(await mint(newKey)), cfg)).toEqual({ ok: true, commonName: CLIENT_ID, email: null });
+    expect(certs.urls).toHaveLength(2);
+
+    // Known kids are served from the refreshed cache.
+    expect((await verifyAccessAssertion(headersWith(await mint(oldKey)), cfg)).ok).toBe(true);
+    expect((await verifyAccessAssertion(headersWith(await mint(newKey)), cfg)).ok).toBe(true);
+    expect(certs.urls).toHaveLength(2);
+  });
+
+  it('a kid the team does not publish after the refetch is refused', async () => {
+    const published = await accessKeyPair('published');
+    const unknown = await accessKeyPair('never-published');
+    const certs = certsEndpoint(published);
+    const cfg = { teamDomain: TEAM, audiences: [AUD], fetchImpl: certs.fetchImpl };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    expect((await verifyAccessAssertion(headersWith(await mintAccessJwt(published, { iss: ISS, aud: AUD, commonName: CLIENT_ID })), cfg)).ok).toBe(true);
+    vi.setSystemTime(start + 31_000);
+    expect((await verifyAccessAssertion(headersWith(await mintAccessJwt(unknown, { iss: ISS, aud: AUD, commonName: CLIENT_ID })), cfg)).ok).toBe(false);
+    expect(certs.urls).toHaveLength(2);
   });
 
   it('reports unavailable certs', async () => {

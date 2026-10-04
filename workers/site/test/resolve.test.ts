@@ -52,14 +52,77 @@ describe('endpointOfPath', () => {
     expect(CATALOGUE_PATHS).toHaveLength(13);
   });
 
-  it('every other path is null (forwarded with the body unread): exact match only', () => {
-    for (const path of ['/api/sitemap', '/api/x', '/api/emails/', '/api/Emails', '/api/emails.js', '/api/em%61ils', '/api', '/api/', '/api/tenders-export', '/emails']) {
+  it('every spelling of a catalogue path names its endpoint: case, trailing slash, script extension, escapes', () => {
+    for (const path of CATALOGUE_PATHS) {
+      const endpoint = endpointOfPath(path);
+      const name = path.slice('/api/'.length);
+      const spellings = [
+        `${path}/`,
+        `${path}//`,
+        `${path}.js`,
+        `${path}.js/`,
+        `${path}.JS`,
+        `${path}.mjs`,
+        `${path}.cjs`,
+        `${path}.ts`,
+        `${path}.js.js`,
+        `/api/${name.toUpperCase()}`,
+        `/api/${name[0].toUpperCase()}${name.slice(1)}/`,
+        `/api/%${name.charCodeAt(0).toString(16)}${name.slice(1)}`,
+        `/api/%${name.charCodeAt(0).toString(16).toUpperCase()}${name.slice(1)}.js`,
+        `${path}%2F`,
+        `${path}%3F`,
+        `${path}%23x`,
+        `/api//${name}`,
+        `/api/x/../${name}`,
+        `/api/x/%2E%2E/${name}`,
+        `/api/${name}/.`,
+      ];
+      for (const spelling of spellings) expect(endpointOfPath(spelling), spelling).toBe(endpoint);
+    }
+    expect(endpointOfPath('/api/track/')).toBe('marketing');
+    expect(endpointOfPath('/api/Connector-Status.js')).toBe('tenders');
+  });
+
+  it('every other path is null (forwarded with the body unread)', () => {
+    for (const path of [
+      '/api/sitemap',
+      '/api/sitemap/',
+      '/api/sitemap.js',
+      '/api/x',
+      '/api',
+      '/api/',
+      '/api/tenders-export',
+      '/api/emailsx',
+      '/api/emails/x',
+      '/api/emails.json',
+      '/api/emails.js.map',
+      '/api/em%ZZails',
+      '/emails',
+    ]) {
       expect(endpointOfPath(path), path).toBeNull();
     }
   });
 
   it('resolveApi refuses a path outside the catalogue', () => {
     expect(() => resolve('GET', '/api/x')).toThrow(/not an \/api endpoint/);
+  });
+
+  it('resolveApi resolves another spelling exactly as the catalogue path: function URL, action, body', () => {
+    const variant = resolve('POST', '/api/Emails.js/?action=contact', json({ name: 'n' }));
+    const plain = resolve('POST', '/api/emails?action=contact', json({ name: 'n' }));
+    expect(variant.publicPath).toBe('/api/Emails.js/');
+    expect({ ...variant, publicPath: plain.publicPath }).toEqual(plain);
+    expect(variant.functionUrl).toBe('/api/emails?action=contact');
+
+    expect(resolve('GET', '/api/track/?type=open&eid=1&cid=2')).toMatchObject({
+      endpoint: 'marketing',
+      functionUrl: '/api/marketing?type=open&eid=1&cid=2&action=track',
+      action: 'track',
+    });
+    expect(resolve('GET', '/api/Connector-Status.js')).toMatchObject({ endpoint: 'tenders', functionUrl: '/api/tenders?connectors=true', action: 'connectors' });
+    expect(resolve('POST', '/api/notifications/', json({ action: 'nest' }))).toMatchObject({ endpoint: 'notifications', functionUrl: '/api/notifications', action: 'nest' });
+    expect(resolve('POST', '/api/s3.js?action=list', json({ scope: 'articles' }))).toMatchObject({ endpoint: 's3', functionUrl: '/api/s3?action=list', action: 'list', scope: 'articles' });
   });
 });
 

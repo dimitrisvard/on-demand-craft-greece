@@ -90,6 +90,20 @@ describe('verifyTurnstile with a real secret', () => {
     expect((await mod.verifyTurnstile(input({ fetchImpl: edge.fetchImpl }))).ok).toBe(true);
   });
 
+  it('accepts a challenge_ts at most 60 s in the future (clock skew) and rejects one further ahead', async () => {
+    const ahead = siteverify(goodAnswer({ challenge_ts: new Date(NOW + 120_000).toISOString() }));
+    expect(await mod.verifyTurnstile(input({ fetchImpl: ahead.fetchImpl }))).toEqual({ ok: false, status: 403, code: 'turnstile_failed' });
+    const edge = siteverify(goodAnswer({ challenge_ts: new Date(NOW + 60_000).toISOString() }));
+    expect(await mod.verifyTurnstile(input({ fetchImpl: edge.fetchImpl }))).toEqual({ ok: true, testMode: false });
+  });
+
+  it('rejects a missing or unparsable challenge_ts', async () => {
+    for (const challenge_ts of [undefined, 'not a date', 1_700_000_000]) {
+      const { fetchImpl } = siteverify(goodAnswer({ challenge_ts }));
+      expect(await mod.verifyTurnstile(input({ fetchImpl }))).toEqual({ ok: false, status: 403, code: 'turnstile_failed' });
+    }
+  });
+
   it('answers 503 when siteverify answers 5xx', async () => {
     const { fetchImpl } = siteverify({ error: 'down' }, 502);
     expect(await mod.verifyTurnstile(input({ fetchImpl }))).toEqual({ ok: false, status: 503, code: 'turnstile_unavailable' });

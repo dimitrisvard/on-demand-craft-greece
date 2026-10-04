@@ -13,6 +13,17 @@
 // `rfq/`. `publicUrl` and `url` keep the legacy S3 URL format. A delete-folder prefix always ends in '/' before
 // listing, so `RFQ-…-1` never matches `RFQ-…-10/`. The gate's FileConstraints are applied here; a caller that
 // respects them sees the same answers as before.
+//
+// Upload rules for every caller: the content type must be a valid header value (else 400 invalid_field).
+// Non-staff callers also:
+//   - upload only the listed file types (400 file_type_not_allowed);
+//   - declare the file size as a whole number of bytes (400 size_required), at most maxSizeBytes
+//     (400 file_too_large); the upload URL signs it as Content-Length, so the body must have exactly that size;
+//   - never target an existing key (409 exists);
+//   - with maxObjectsUnderPrefix: find fewer than that many objects under the folder (409 limit_reached) and be
+//     issued at most that many upload URLs per folder in total (409 limit_reached). The issued count is kept in
+//     R2 under `upload-counters/<folder>/` and advanced with a conditional write, so requests that run at the
+//     same time cannot share a number.
 
 import { weakEtag } from '../../../shared/src/compat/etag';
 import type { Principal } from '../../../shared/src/http/rpc';
@@ -58,6 +69,21 @@ export const UPLOAD_EXPIRES_SEC = 300;
 
 /** Default lifetime of a presigned download URL, as api/s3.js. */
 export const DOWNLOAD_EXPIRES_SEC = 3600;
+
+/** Key prefix (outside `rfq/`) of the per-folder count of issued upload URLs. */
+export const UPLOAD_COUNTER_PREFIX = 'upload-counters/';
+
+/** Conditional-write attempts for one count update before the request fails with 500. */
+const COUNTER_ATTEMPTS = 8;
+
+/** Longest accepted content type; browsers send `type/subtype` well below it. */
+const MAX_CONTENT_TYPE_LENGTH = 255;
+
+/** A header value a presigned URL can sign: visible ASCII, space and tab. */
+const HEADER_VALUE = /^[\t\x20-\x7e]*$/;
+
+/** Longest error message written to the log line. */
+const MAX_LOGGED_MESSAGE = 300;
 
 const LOG_PREFIX = '[microns-site]';
 
@@ -164,18 +190,46 @@ async function exists(s: Stores, scope: Scope, key: string): Promise<boolean> {
   return headObject(s.legacy, key, s.fetchImpl);
 }
 
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Takes the next of `limit` upload URLs for `folder`; false when all are taken. The count is the body of
+ * `upload-counters/<folder>` (so each value has its own ETag) and is written only if the object is unchanged
+ * since it was read (or still absent); a request that loses the race reads again.
+ */
+async function takeUploadUrl(s: Stores, folder: string, limit: number): Promise<boolean> {
+  const key = UPLOAD_COUNTER_PREFIX + folder;
+  for (let attempt = 0; attempt < COUNTER_ATTEMPTS; attempt++) {
+    const current = await s.env.PRIVATE_FILES.head(key);
+    const issued = current === null ? 0 : Number(current.customMetadata?.issued);
+    if (!Number.isSafeInteger(issued) || issued < 0 || issued >= limit) return false;
+    const next = String(issued + 1);
+    const written = await s.env.PRIVATE_FILES.put(key, next, {
+      httpMetadata: { contentType: 'text/plain' },
+      customMetadata: { issued: next },
+      onlyIf: current === null ? { etagDoesNotMatch: '*' } : { etagMatches: current.etag },
+    });
+    if (written !== null) return true;
+    await pause(5 + Math.floor(Math.random() * 20) * (attempt + 1));
+  }
+  throw new Error('Upload count is busy, try again');
+}
+
 async function presignUpload(s: Stores, scope: Scope, body: any, c: FileConstraints): Promise<Response> {
   const { fileName, contentType, prefix, size } = body;
   if (!fileName) return handlerJson(400, { error: 'fileName is required' });
   const safeName = sanitizeName(fileName);
   const key = prefix ? `${prefix}/${safeName}` : safeName;
+  const type = String(contentType || 'application/octet-stream');
+  if (type.length > MAX_CONTENT_TYPE_LENGTH || !HEADER_VALUE.test(type)) return apiError(400, 'invalid_field');
 
   let contentLength: number | undefined;
   if (!c.staff) {
     if (c.extensionAllowList && !c.extensionAllowList.includes(extensionOf(safeName))) {
       return apiError(400, 'file_type_not_allowed');
     }
-    if (c.maxSizeBytes !== undefined && typeof size === 'number') {
+    if (c.maxSizeBytes !== undefined) {
+      if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) return apiError(400, 'size_required');
       if (size > c.maxSizeBytes) return apiError(400, 'file_too_large');
       contentLength = size;
     }
@@ -185,10 +239,10 @@ async function presignUpload(s: Stores, scope: Scope, body: any, c: FileConstrai
       const under = slash === -1 ? '' : key.slice(0, slash + 1);
       const { merged } = await listBoth(s, scope, under);
       if (merged.length >= c.maxObjectsUnderPrefix) return apiError(409, 'limit_reached');
+      if (!(await takeUploadUrl(s, under, c.maxObjectsUnderPrefix))) return apiError(409, 'limit_reached');
     }
   }
 
-  const type = String(contentType || 'application/octet-stream');
   const uploadUrl =
     scope === 'rfq'
       ? await presignPut(s.r2, R2_RFQ_PREFIX + key, type, UPLOAD_EXPIRES_SEC, { contentLength })
@@ -270,7 +324,8 @@ export async function handleFiles(i: {
     }
   } catch (err) {
     const message = (err as { message?: unknown } | null | undefined)?.message;
-    logLine(LOG_PREFIX, 'files error', { action: r.action, message: typeof message === 'string' ? message : undefined });
+    const logged = typeof message === 'string' ? message.slice(0, MAX_LOGGED_MESSAGE) : undefined;
+    logLine(LOG_PREFIX, 'files error', { action: r.action, message: logged });
     return handlerJson(500, { error: message || 'S3 operation failed' });
   }
 }

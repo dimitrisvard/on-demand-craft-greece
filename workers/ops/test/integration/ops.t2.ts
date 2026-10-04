@@ -5,8 +5,8 @@
 //   - a machine tender-scan (Access assertion minted at the stub) is queued: 200 with every key of the scan
 //     answer at zero plus queued and run_id (the generated T2 ops config has no consumer, so no portal is called)
 //   - a STAFF call crosses the RPC boundary with its principal (the handler's GET branch reaches the stub DB)
-// The stub client (workers/site/test/integration/stub-client.ts) is loaded at run time, so this file type-checks
-// without it.
+// The stub client (workers/site/test/integration/stub-client.ts) is loaded at run time by file URL, so this file
+// type-checks without it.
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // @ts-ignore -- plain .mjs script without types; buildNestPayload(instances, level) returns the JSON body
@@ -30,8 +30,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 let stub: StubClient;
 
+// The specifier is a file URL relative to this file: vitest resolves a bare relative variable specifier against
+// the module id under the package root (workers/ops), and the stub client lives outside that root.
 async function loadStubClient(): Promise<StubClient> {
-  const specifier = '../../../site/test/integration/stub-client';
+  const specifier = new URL('../../../site/test/integration/stub-client.ts', (import.meta as unknown as { url: string }).url).href;
   return (await import(/* @vite-ignore */ specifier)) as StubClient;
 }
 

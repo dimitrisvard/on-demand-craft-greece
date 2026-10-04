@@ -5,7 +5,19 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SITE_URL = Deno.env.get("SITE_URL") ?? "https://www.micronshub.eu";
 const CF_ACCESS_CLIENT_ID = Deno.env.get("CF_ACCESS_CLIENT_ID");
 const CF_ACCESS_CLIENT_SECRET = Deno.env.get("CF_ACCESS_CLIENT_SECRET");
-const HAS_ACCESS_TOKEN = Boolean(CF_ACCESS_CLIENT_ID && CF_ACCESS_CLIENT_SECRET);
+// The Access service token goes only to a host behind a Cloudflare Access application (the preview host, the
+// machine API host); www.micronshub.eu, micronshub.eu and *.vercel.app have none and never receive it.
+const SITE_HOST = (() => {
+  try {
+    return new URL(SITE_URL).hostname.toLowerCase().replace(/\.+$/, "");
+  } catch {
+    return "";
+  }
+})();
+const SITE_HAS_ACCESS_APP = SITE_HOST !== "" && SITE_HOST !== "micronshub.eu" && SITE_HOST !== "www.micronshub.eu" &&
+  SITE_HOST !== "vercel.app" && !SITE_HOST.endsWith(".vercel.app");
+const ACCESS_TOKEN_SET = Boolean(CF_ACCESS_CLIENT_ID && CF_ACCESS_CLIENT_SECRET);
+const HAS_ACCESS_TOKEN = ACCESS_TOKEN_SET && SITE_HAS_ACCESS_APP;
 const SCAN_HEADERS: Record<string, string> = HAS_ACCESS_TOKEN
   ? { "Content-Type": "application/json", "CF-Access-Client-Id": CF_ACCESS_CLIENT_ID!, "CF-Access-Client-Secret": CF_ACCESS_CLIENT_SECRET! }
   : { "Content-Type": "application/json" };
@@ -55,6 +67,9 @@ Deno.serve(async (req) => {
   }
 
   console.log(`[tender-collector] ${connectors.length} connectors need scanning`);
+  if (ACCESS_TOKEN_SET && !HAS_ACCESS_TOKEN) {
+    console.log(`[tender-collector] Access headers not sent to ${SITE_HOST || "SITE_URL"}: not a machine API host`);
+  }
 
   let totalNew = 0;
   let totalErrors = 0;

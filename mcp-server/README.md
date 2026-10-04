@@ -27,13 +27,13 @@ Six tools call the site API instead of Supabase. All of them use one base URL an
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `SITE_URL` | no | Base URL for every `/api/*` call; default `https://www.micronshub.eu`. Point it at the host that accepts machine credentials (the preview host while it is tested, the machine API host once it exists) |
+| `SITE_URL` | no | Base URL for every `/api/*` call; default `https://www.micronshub.eu` (called without Access headers). Point it at the host that accepts machine credentials (the preview host while it is tested, the machine API host once it exists) |
 | `CF_ACCESS_CLIENT_ID` | with the secret | Client ID of the MCP service token |
 | `CF_ACCESS_CLIENT_SECRET` | with the ID | Client secret of the MCP service token; never commit it or paste it into a chat |
 
 | Rule | Detail |
 |---|---|
-| Access headers | `CF-Access-Client-Id` and `CF-Access-Client-Secret` are sent only when both variables are set, and only to the origin of `SITE_URL` |
+| Access headers | `CF-Access-Client-Id` and `CF-Access-Client-Secret` are sent only when both variables are set, only to the origin of `SITE_URL`, and only to a host behind a Cloudflare Access application: never to `www.micronshub.eu`, `micronshub.eu` or a `*.vercel.app` host (the server prints one notice on stderr instead, without the values) |
 | Redirects | Never followed: a 3xx answer is reported as an error that names the target, so the token never travels to another host. A `SITE_URL` that redirects (for example the apex host, which redirects to `www`) therefore fails; use the final host |
 | `api_base_url` tool argument | Optional per-call override of `SITE_URL`; a different origin is called without the Access headers |
 
@@ -60,9 +60,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
         "SUPABASE_SERVICE_KEY": "your-service-role-key",
         "TELEGRAM_BOT_TOKEN": "optional",
         "TELEGRAM_CHAT_ID": "optional",
-        "SITE_URL": "https://www.micronshub.eu",
-        "CF_ACCESS_CLIENT_ID": "optional, with the secret",
-        "CF_ACCESS_CLIENT_SECRET": "optional, with the ID"
+        "SITE_URL": "optional: https://<preview or machine API host>",
+        "CF_ACCESS_CLIENT_ID": "optional, with the secret and SITE_URL",
+        "CF_ACCESS_CLIENT_SECRET": "optional, with the ID and SITE_URL"
       }
     }
   }

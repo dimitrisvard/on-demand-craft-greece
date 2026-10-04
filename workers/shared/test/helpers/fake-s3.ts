@@ -1,12 +1,16 @@
 // Fake S3 for tests: one in-memory object store reachable three ways.
 //   fetch       in-process fetch handler for the hosts of the configured buckets (R2 path style, AWS virtual
 //               host), used as `fetchImpl` and to PUT/GET through presigned URLs;
-//   r2Binding   an R2Bucket view (head/get/put/delete/list) over a bucket of the same store;
+//   r2Binding   an R2Bucket view (head/get/put/delete/list) over a bucket of the same store; put honours
+//               onlyIf etagMatches / etagDoesNotMatch ('*' = any object) and returns null when the condition fails;
 //   listen()    a Node HTTP server on 127.0.0.1 that serves every bucket path style (for the AWS SDK).
 // Every request must be signed (query or Authorization header). The signature is re-computed with
 // @smithy/signature-v4 (the signer inside the AWS SDK) as an independent oracle; a mismatch answers 403
 // SignatureDoesNotMatch as S3 does. Credentials, region and service in the scope must be the bucket's own.
+// ETags are the MD5 of the content, as S3 and R2 compute them for a single-part upload (same bytes, same ETag).
 
+/// <reference path="../../src/compat/ambient.d.ts" />
+import { createHash } from 'node:crypto';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { SignatureV4 } from '@smithy/signature-v4';
 
@@ -24,7 +28,9 @@ export interface StoredObject {
   body: Uint8Array;
   contentType: string;
   lastModified: Date;
+  /** Quoted, as S3 sends it: '"<md5 hex>"'. */
   etag: string;
+  customMetadata: Record<string, string>;
 }
 
 export interface FakeCall {
@@ -39,7 +45,7 @@ export interface FakeCall {
 export interface FakeS3 {
   readonly fetch: typeof fetch;
   r2Binding(bucket: string): R2Bucket;
-  seed(bucket: string, key: string, body: Uint8Array | string, o?: { contentType?: string; lastModified?: Date }): void;
+  seed(bucket: string, key: string, body: Uint8Array | string, o?: { contentType?: string; lastModified?: Date; customMetadata?: Record<string, string> }): void;
   object(bucket: string, key: string): StoredObject | undefined;
   keys(bucket: string): string[];
   readonly calls: FakeCall[];
@@ -105,7 +111,6 @@ export function createFakeS3(buckets: FakeBucketConfig[], o: { now?: () => numbe
   const store = new Map<string, Map<string, StoredObject>>(buckets.map((b) => [b.name, new Map()]));
   const calls: FakeCall[] = [];
   const localHosts = new Set<string>();
-  let etagCounter = 0;
 
   function bucketMap(name: string): Map<string, StoredObject> {
     const m = store.get(name);
@@ -113,10 +118,22 @@ export function createFakeS3(buckets: FakeBucketConfig[], o: { now?: () => numbe
     return m;
   }
 
-  function putObject(bucket: string, key: string, body: Uint8Array, contentType: string, lastModified?: Date): StoredObject {
-    const obj: StoredObject = { body, contentType, lastModified: lastModified ?? new Date(Math.floor(now() / 1000) * 1000), etag: `"etag-${++etagCounter}"` };
+  function putObject(bucket: string, key: string, body: Uint8Array, contentType: string, lastModified?: Date, customMetadata: Record<string, string> = {}): StoredObject {
+    const etag = `"${createHash('md5').update(body).digest('hex')}"`;
+    const obj: StoredObject = { body, contentType, lastModified: lastModified ?? new Date(Math.floor(now() / 1000) * 1000), etag, customMetadata: { ...customMetadata } };
     bucketMap(bucket).set(key, obj);
     return obj;
+  }
+
+  /** R2Conditional on put: etagMatches needs an object with that ETag; etagDoesNotMatch refuses an object with
+   *  that ETag ('*': any object). ETags compare without quotes. */
+  function conditionHolds(existing: StoredObject | undefined, onlyIf: { etagMatches?: string; etagDoesNotMatch?: string } | undefined): boolean {
+    if (!onlyIf) return true;
+    const bare = (e: string) => e.replace(/"/g, '');
+    const current = existing ? bare(existing.etag) : null;
+    if (onlyIf.etagMatches !== undefined && (current === null || (onlyIf.etagMatches !== '*' && bare(onlyIf.etagMatches) !== current))) return false;
+    if (onlyIf.etagDoesNotMatch !== undefined && current !== null && (onlyIf.etagDoesNotMatch === '*' || bare(onlyIf.etagDoesNotMatch) === current)) return false;
+    return true;
   }
 
   function route(url: URL): Route | null {
@@ -314,7 +331,7 @@ export function createFakeS3(buckets: FakeBucketConfig[], o: { now?: () => numbe
       httpEtag: obj.etag,
       uploaded: obj.lastModified,
       httpMetadata: { contentType: obj.contentType },
-      customMetadata: {},
+      customMetadata: { ...obj.customMetadata },
       storageClass: 'Standard',
       checksums: { toJSON: () => ({}) },
       writeHttpMetadata: () => undefined,
@@ -344,9 +361,18 @@ export function createFakeS3(buckets: FakeBucketConfig[], o: { now?: () => numbe
           text: async () => new TextDecoder().decode(bytes),
         });
       },
-      async put(key: string, value: Uint8Array | string | ArrayBuffer | ArrayBufferView | null, opts?: { httpMetadata?: { contentType?: string } }) {
+      async put(
+        key: string,
+        value: Uint8Array | string | ArrayBuffer | ArrayBufferView | null,
+        opts?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string>; onlyIf?: { etagMatches?: string; etagDoesNotMatch?: string } },
+      ) {
+        // Condition check and write happen without a pause in between, as one R2 operation.
+        if (!conditionHolds(objects.get(key), opts?.onlyIf)) {
+          record('put', key, 412);
+          return null;
+        }
         record('put', key);
-        const obj = putObject(bucket, key, value === null ? new Uint8Array() : toBytes(value), opts?.httpMetadata?.contentType ?? 'application/octet-stream');
+        const obj = putObject(bucket, key, value === null ? new Uint8Array() : toBytes(value), opts?.httpMetadata?.contentType ?? 'application/octet-stream', undefined, opts?.customMetadata);
         return r2Object(key, obj);
       },
       async delete(keys: string | string[]) {
@@ -427,7 +453,7 @@ export function createFakeS3(buckets: FakeBucketConfig[], o: { now?: () => numbe
     fetch: fakeFetch,
     r2Binding,
     seed(bucket, key, body, opts) {
-      putObject(bucket, key, toBytes(body), opts?.contentType ?? 'application/octet-stream', opts?.lastModified);
+      putObject(bucket, key, toBytes(body), opts?.contentType ?? 'application/octet-stream', opts?.lastModified, opts?.customMetadata);
     },
     object: (bucket, key) => bucketMap(bucket).get(key),
     keys: (bucket) => [...bucketMap(bucket).keys()].sort(compareKeys),
