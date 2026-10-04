@@ -11,7 +11,7 @@
 // wrangler 4.145.0 (installed 2026-09-30). The document is split like this:
 //
 //   Future file                   Worker         Created in       Grows in
-//   workers/site/wrangler.jsonc   microns-site   Phase 1 (P1-1)   Phase 2 (OPS, R2, rate limit), Phase 3 (routes)
+//   workers/site/wrangler.jsonc   microns-site   Phase 1 (P1-1)   Phase 2 (OPS, R2, rate limits, /api vars), Phase 3 (routes)
 //   workers/ops/wrangler.jsonc    microns-ops    Phase 2 (P2-1)   Phase 4 (agent layer), Phase 5 (crons, Container)
 //   workers/mail/wrangler.jsonc   microns-mail   Phase 4 (P4-4)   -
 //   (no file of its own)          microns-cad    Phase 5 (P5-6)   Container stanza in microns-ops, which exports
@@ -44,7 +44,8 @@
 //
 //   microns-site  Phase 1: SUPABASE_ANON_KEY
 //                 Phase 2: SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, TURNSTILE_SECRET_KEY, R2_ACCESS_KEY_ID,
-//                          R2_SECRET_ACCESS_KEY, LEGACY_AWS_ACCESS_KEY_ID, LEGACY_AWS_SECRET_ACCESS_KEY
+//                          R2_SECRET_ACCESS_KEY, LEGACY_AWS_ACCESS_KEY_ID, LEGACY_AWS_SECRET_ACCESS_KEY,
+//                          ACCESS_MACHINE_CLIENT_IDS
 //   microns-ops   Phase 2: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, RESEND_API_KEY, RESEND_WEBHOOK_SECRET,
 //                          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
 //                          GOOGLE_REDIRECT_URI, APOLLO_API_KEY, GSC_SERVICE_ACCOUNT_JSON (reserved; note in the ops secrets block)
@@ -56,9 +57,10 @@
 // Where today's names differ (for the P0-2 checklist): the Xometry scanner reads XB_PARTNER_AUTH_TOKEN
 // (xometry-bot/xometry_bot/config.py:153) and xometry-review reads XOMETRY_PARTNER_AUTH_TOKEN
 // (supabase/functions/xometry-review/index.ts:196); both become XOMETRY_TOKEN on the Worker. The legacy S3
-// pair replaces AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and their VITE_AWS_* fallbacks (api/s3.js:47-52).
-// The articles scope can use its own pair, AWS_ARTICLES_ACCESS_KEY_ID / AWS_ARTICLES_SECRET_ACCESS_KEY
-// (api/s3.js:53-64); if Vercel sets it, the site Worker needs a second legacy pair (P0-4 lists the names).
+// pair replaces AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and their VITE_-prefixed fallbacks (api/s3.js:47-52).
+// The articles scope can use its own pair on Vercel, AWS_ARTICLES_ACCESS_KEY_ID / AWS_ARTICLES_SECRET_ACCESS_KEY
+// (api/s3.js:53-64); the Phase 2 site Worker uses the one LEGACY_AWS_* pair for both legacy scopes (rfq, and
+// articles until P3-6), so its key is created for both buckets (P0-4 lists the Vercel names).
 {
   // ===================================================================================================
   // microns-site: Static Assets, SEO handler, redirect table, sitemap routes, /api/* router
@@ -135,31 +137,34 @@
     ],
 
     "services": [
-      // Phase 2. /api/* routes that microns-site does not serve itself go to microns-ops
-      // (PLAN.md §5.2 route table).
-      { "binding": "OPS", "service": "microns-ops" }
+      // Phase 2. /api/* endpoints that microns-site does not serve itself go to microns-ops (PLAN.md §5.2
+      // route table) as an RPC call to the named entrypoint OpsApi: handle(request, call). The verified caller
+      // and the function URL travel in `call`, never in headers. microns-ops is deployed before this Worker.
+      { "binding": "OPS", "service": "microns-ops", "entrypoint": "OpsApi" }
     ],
 
     "r2_buckets": [
-      // Phase 2. New RFQ files for the /api/s3 replacement, prefix rfq/<rfq_id>/<file_id>-<name>. Browser
-      // uploads use presigned URLs (aws4fetch against the R2 S3 API with R2_ACCESS_KEY_ID /
-      // R2_SECRET_ACCESS_KEY); the binding streams downloads and deletes. The bucket has no public access
-      // and no custom domain. EU jurisdiction can only be chosen when the bucket is created (P2-9); if it
-      // is, every binding of the bucket gains "jurisdiction": "eu" (CF docs, re-check at execution).
-      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" }
+      // Phase 2. Files of the /api/s3 replacement (workers/site/src/api/files.ts): new uploads under rfq/ +
+      // today's key (<rfqNumber>/<partFolder>/<safeName>, so the browser keeps the key it gets today; PLAN.md
+      // §5.2 DV-5), and the per-folder upload counters under upload-counters/. Phase 4 e-mail RFQs use
+      // rfq/<rfq_id>/<file_id>-<name>. Browser uploads use presigned URLs (aws4fetch against the R2 S3 API with
+      // R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY); the binding serves head, list and delete. The bucket has no
+      // public access and no custom domain. Jurisdiction eu: chosen only when the bucket is created
+      // (`wrangler r2 bucket create microns-private -J eu`, P2-9); every binding of the bucket carries it, and
+      // R2_JURISDICTION in files.ts must match (a config test checks it). Owner decision D-1.
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
     ],
 
     "ratelimits": [
-      // Phase 2. Workers Rate Limiting binding for /api/* write paths (key = client IP + route class, P2-7).
-      // namespace_id is a positive integer as a string, chosen by us and unique in the account; period is
-      // 10 or 60 s. Counters are per Cloudflare location and eventually consistent (CF docs, verified
-      // 2026-09-30), so this complements Turnstile and the zone rate-limiting rule of Phase 3.
-      // The limit below is a starting value, tuned in P2-7.
-      {
-        "name": "API_RATE_LIMIT",
-        "namespace_id": "<RATELIMIT_NAMESPACE_ID_API>",
-        "simple": { "limit": 30, "period": 60 }
-      }
+      // Phase 2. Workers Rate Limiting bindings for /api/* (P2-7). namespace_id is a positive integer as a
+      // string, chosen by us and unique in the account (the same id shares its counters across Workers);
+      // period is 10 or 60 s. Counters are per Cloudflare location and eventually consistent (CF docs, verified
+      // 2026-09-30), so this complements Turnstile and the zone rate-limiting rule of Phase 3. MAIL takes the
+      // mail keys; BULK takes idempotent reads and upload presigns (pages presign every file of an RFQ at once);
+      // the code falls back to API_RATE_LIMIT when MAIL or BULK is absent. Namespaces go into the P0-2 checklist.
+      { "name": "API_RATE_LIMIT", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
+      { "name": "API_RATE_LIMIT_MAIL", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+      { "name": "API_RATE_LIMIT_BULK", "namespace_id": "2003", "simple": { "limit": 300, "period": 60 } }
     ],
 
     // Phase 7 (optional, owner decision 2026-09-30): SEO reads move from Supabase REST to D1 (P7-8).
@@ -179,12 +184,30 @@
       // Phase 1. Deploy-time default of flag seo.strict_404 (a value in KV FLAGS wins). "false" keeps the
       // soft-404 parity with Vercel (H-9); switched only after PLAN.md Q5 (P3-7).
       "SEO_STRICT_404": "false",
-      // Phase 2. Account ID for the R2 S3 API endpoint used when presigning (not a secret).
+      // Phase 1 var, Phase 2 value. Target of the /api forward (paths outside the /api catalogue, and every
+      // /api request while api.forward_to_vercel is on): the Vercel deployment host, not www, because once the
+      // Phase 3 routes send www to this Worker the forward refuses to call its own host.
+      "API_FORWARD_ORIGIN": "https://on-demand-craft-greece.vercel.app",
+      // Phase 2. Fallback of the KV flag api.forward_to_vercel: "true" forwards every /api request.
+      "API_FORWARD_TO_VERCEL": "false",
+      // Phase 2. Account ID for the R2 S3 API endpoint used when presigning (not a secret); with jurisdiction eu
+      // the endpoint is https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com.
       "R2_ACCOUNT_ID": "<CF_ACCOUNT_ID>",
-      // Phase 2. Region of the legacy S3 buckets, kept read-only for existing keys (H-17; api/s3.js:28-34).
-      "LEGACY_S3_REGION": "eu-north-1"
-      // Constants in code, not vars (PLAN.md §5.2): the api.forward_to_vercel target
-      // on-demand-craft-greece.vercel.app and the two legacy S3 bucket names (api/s3.js:36-45).
+      // Phase 2. Region and names of the legacy S3 buckets (H-17; api/s3.js:28-45): no new rfq uploads; the
+      // articles scope stays there until P3-6 (owner decision D-17). Names come from P0-4; they are not secret.
+      "LEGACY_S3_REGION": "eu-north-1",
+      "LEGACY_S3_RFQ_BUCKET": "<LEGACY_S3_RFQ_BUCKET>",
+      "LEGACY_S3_ARTICLES_BUCKET": "<LEGACY_S3_ARTICLES_BUCKET>",
+      // Phase 2. Cloudflare Access team domain and the audience tag of the Access application in front of the
+      // machine callers' host (preview in Phase 2).
+      "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
+      "ACCESS_AUD": "<ACCESS_AUD_PREVIEW>",
+      // Phase 2. Gate mode per class, "<class>=report|enforce" comma list; a class not named enforces. The
+      // production value is set by the Phase 3 runbook (owner decision D-16).
+      "API_GATES_MODE": "recipient=report",
+      // Phase 2. Hosts besides the preview hosts that accept machine callers (exact match, comma list). Empty in
+      // Phase 2; the Phase 3 runbook sets "api.micronshub.eu" (owner decision D-3).
+      "API_MACHINE_HOSTS": ""
     },
 
     "secrets": {
@@ -192,14 +215,17 @@
         // Phase 1. SEO reads; today read from process.env with a silent empty fallback (middleware.ts:103-109).
         // The Worker fails loudly instead when it is missing (P1-4).
         "SUPABASE_ANON_KEY",
-        // Phase 2 (site-local /api/* subset: emails, files, notifications, track; PLAN.md §5.2).
+        // Phase 2 (site-local /api/* subset: emails, files, track; the gates; PLAN.md §5.2). The Worker checks
+        // the names each request needs, so a missing one fails only those requests; a deploy fails while one is unset.
         "SUPABASE_SERVICE_ROLE_KEY",
         "RESEND_API_KEY",
         "TURNSTILE_SECRET_KEY",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "LEGACY_AWS_ACCESS_KEY_ID",
-        "LEGACY_AWS_SECRET_ACCESS_KEY"
+        "LEGACY_AWS_SECRET_ACCESS_KEY",
+        // Phase 2. "<client-id>=collector,<client-id>=mcp": maps each machine service token to its consumer.
+        "ACCESS_MACHINE_CLIENT_IDS"
       ]
     },
 
@@ -229,8 +255,11 @@
   "workers/ops/wrangler.jsonc": {
     "$schema": "../../node_modules/wrangler/config-schema.json",
     "name": "microns-ops",
-    // Hono app (routes reuse api/*.js through workers/ops/src/compat/express-shim.ts), plus the scheduled()
-    // and queue() handlers; exports the Workflow, Durable Object and Container classes listed below.
+    // Hono app inside the named entrypoint OpsApi (RPC handle(request, call) from microns-site; the default
+    // fetch answers 404). Routes run api/*.js unchanged through workers/ops/src/compat/express-shim.ts, the Hono
+    // adapter over the shared @vercel/node shim (workers/shared/src/compat/vercel-node.ts). Plus the queue()
+    // handler (Phase 2) and scheduled() (Phase 4); exports the Workflow, Durable Object and Container classes
+    // listed below.
     "main": "src/index.ts",
     "compatibility_date": "2026-09-01",
     "compatibility_flags": [
@@ -248,11 +277,19 @@
       "enabled": true,
       "head_sampling_rate": 1
     },
-    // Phase 2. /api/notifications?action=nest runs the nesting engine with a 50 s budget
-    // (lib/nesting/nester.js:286); the default CPU limit is 30 s and the maximum 300,000 ms (CF docs,
-    // verified 2026-09-30). The limit applies to every invocation of this Worker.
+    // Phase 2. /api/notifications?action=nest runs the nesting engine synchronously. Its 50 s budget
+    // (lib/nesting/nester.js:286) never trips when deployed, because Date.now() advances only on I/O, and local
+    // CPU passes 30 s near 700 part instances (probe 2026-10-02); the default CPU limit is 30 s and the maximum
+    // 300,000 ms (CF docs, verified 2026-09-30). The limit applies to every invocation of this Worker, queue
+    // consumers included; it is a runaway guard (CPU is billed as used). An OPS rejection on nest answers 504
+    // TIMEOUT in microns-site. PLAN.md §5.2 DV-4.
     "limits": {
-      "cpu_ms": 60000
+      "cpu_ms": 300000
+    },
+    // Phase 2. lib/inventory needs qrcode's server build (toBuffer); without the alias the bundler picks the
+    // browser build. Relative to workers/ops/ (repo root node_modules).
+    "alias": {
+      "qrcode": "./../../node_modules/qrcode/lib/server.js"
     },
 
     "vars": {
@@ -267,8 +304,8 @@
     },
 
     "kv_namespaces": [
-      // Phase 2 (read, api.forward_to_vercel and agent flags); Phase 4 writer: the every-minute cron mirrors
-      // table feature_flags here (P4-2). Same namespace as microns-site.
+      // Phase 4 (agent flags; writer: the every-minute cron mirrors table feature_flags here, P4-2). The Phase 2
+      // ops Worker reads no flag: api.forward_to_vercel is read by microns-site. Same namespace as microns-site.
       { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" },
       // Phase 5. Purge of SEO entries when content-daily publishes (same namespace as microns-site).
       // KV allows 1 write per second to the same key (CF docs, verified 2026-09-30); purges are per key.
@@ -278,8 +315,8 @@
     "r2_buckets": [
       // Phase 4. Prefixes email/<message_id_sha256>/..., cad/<job_id>/{input,output}/...,
       // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf; Phase 5 adds sitemaps/...
-      // (served by microns-site at the identical sitemap URLs).
-      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" },
+      // (served by microns-site at the identical sitemap URLs). Same jurisdiction as the site binding.
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" },
       // Phase 5. Public objects behind the R2 custom domain files.micronshub.eu (connected in P3-6):
       // articles/<yyyy>/<mm>/<slug>.<ext>, tenants/<slug>/... Customer files never go here.
       { "binding": "PUBLIC_FILES", "bucket_name": "microns-public" }
@@ -290,7 +327,9 @@
     // consumer: the ops digest reports their depth and a manual task re-drives them.
     "queues": {
       "producers": [
-        // Phase 2. tender-scan, funded-startups scan, GSC bulk actions (P2-6); Phase 4 adds scraper jobs.
+        // Phase 2. Tender scans started by a machine caller (/api/tender-scan POST; answered 200 with queued and
+        // run_id). Staff scans, the funded-startups scan and GSC bulk actions stay synchronous in Phase 2 (P2-6,
+        // PLAN.md §5.2 DV-3); GSC kinds come in Phase 5, scraper jobs in Phase 4.
         { "binding": "SCRAPES", "queue": "scrapes" },
         // Phase 4. CAD analysis jobs from rfq-intake and quote (P4-6).
         { "binding": "CAD_JOBS", "queue": "cad-jobs" },
@@ -306,11 +345,13 @@
       // may keep at most 6 connections waiting for response headers (CF docs, verified 2026-09-30).
       "consumers": [
         {
-          // Phase 2. One scan per message: scans are long and hit third-party sites.
+          // Phase 2. One scan per message: scans are long and hit third-party sites. A failed scan is retried
+          // after 300 s, three times, then kept in scrapes-dlq. Consumer kinds built: tender-scan, funded-scan.
           "queue": "scrapes",
           "max_batch_size": 1,
           "max_retries": 3,
           "max_concurrency": 2,
+          "retry_delay": 300,
           "dead_letter_queue": "scrapes-dlq"
         },
         {
@@ -480,6 +521,8 @@
         // Phase 4. MCP_OAUTH_* for the remote MCP OAuth flow; exact names fixed in P4-11.
         // Phase 5. GEMINI_API_KEY only without BYOK.
         // "GEMINI_API_KEY",
+        // Phase 5. Copy these three only when their jobs ship: a listed secret that does not exist on the
+        // Worker makes every deploy fail (the Phase 2 file lists the Phase 2 names above only).
         "XOMETRY_TOKEN",
         "CAD_SHARED_SECRET",
         "INDEXNOW_KEY"
@@ -561,12 +604,14 @@
     },
 
     "r2_buckets": [
-      // Phase 4. email/<message_id_sha256>/raw.eml and email/<message_id_sha256>/att/<n>-<name>.
-      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private" }
+      // Phase 4. email/<message_id_sha256>/raw.eml and email/<message_id_sha256>/att/<n>-<name>. Same
+      // jurisdiction as every other binding of the bucket.
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
     ],
 
     "services": [
-      // Phase 4. Starts the rfq-intake Workflow, which lives in microns-ops.
+      // Phase 4. Starts the rfq-intake Workflow, which lives in microns-ops. P4-4 picks the entrypoint: the
+      // default fetch of microns-ops answers 404 since Phase 2, and OpsApi carries the /api calls of the site.
       { "binding": "OPS", "service": "microns-ops" }
     ],
 

@@ -60,3 +60,14 @@ Known differences from a Node server running `@vercel/node`:
 | Dependencies | Exact versions; `etag`, `svix`, `@smithy/signature-v4` and `@aws-crypto/sha256-js` are test oracles only |
 | Logs | Start with `[microns-site]` or `[microns-ops]`; never tokens, cookies, signatures, Access assertions, request bodies or e-mail addresses; the shim logs the method and function path only |
 | Test data | Key-like values are built at runtime; no secret or secret-looking literal is committed |
+| Phase 1 shim | `workers/site/src/compat/vercel-shim.ts` (sitemap routes) stays separate and unchanged; folding it into `vercel-node.ts` is a Phase 6 clean-up |
+
+## Status (2026-10-04, local)
+
+| Check | Result |
+|---|---|
+| Typecheck (`npm run typecheck`, `tsconfig.json` and `tsconfig.src.json`) | exit 0 |
+| Unit tests (`npm test`) | 18 files, 308 tests green |
+| Consumers | The site and ops suites, T2 and both dry runs pass with these modules (`workers/site/README.md`, "Phase 2 exit gate") |
+
+Design record: docs/migration/PLAN.md §5.2 (DV-2: one shim core here, the Hono adapter in `workers/ops`; DV-15: dependencies per package) and ARCHITECTURE.md §4, §6.4.

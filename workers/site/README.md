@@ -7,8 +7,8 @@ the sitemap routes, `/api/*`, the SEO server-side rendering of `/{lang}` and `/{
 the site answers emails, files and tracking itself and sends every other endpoint to `microns-ops` over the
 service binding `OPS` (section "Phase 2: /api port" below).
 
-The specs live in `docs/migration/`: PLAN.md §5.1, ARCHITECTURE.md §6, §7.1, §17 and §19, SEO_PARITY.md and
-INVENTORY.md. Today's Vercel code is the source of truth for behaviour: `middleware.ts`, `middleware/*`,
+The specs live in `docs/migration/`: PLAN.md §5.1 and §5.2, ARCHITECTURE.md §6, §7.1, §8, §14, §17 and §19,
+SEO_PARITY.md and INVENTORY.md. Today's Vercel code is the source of truth for behaviour: `middleware.ts`, `middleware/*`,
 `vercel.json`, `api/sitemap.js` and `src/components/SEORedirects.tsx`. The Worker imports `middleware/*` and
 `api/sitemap.js` unchanged.
 
@@ -200,6 +200,11 @@ npx wrangler kv key put --binding FLAGS api.forward_to_vercel '{"enabled":true,"
 | Repository secret | `VITE_TURNSTILE_SITE_KEY` for `cf-preview.yml` (the workflow stops early without it) |
 | Order | `microns-ops` is deployed first (`wrangler deploy`, not a version upload); then the site preview |
 | Rate limits | namespaces `2001`, `2002`, `2003` go into the P0-2 consumer checklist |
+| R2 | `npx wrangler r2 bucket create microns-private -J eu` (the jurisdiction is chosen only here, PLAN.md §5.2 D-1); bucket CORS from `r2/cors.private.json` with the real workers.dev subdomain; an R2 API token for `microns-private` only → `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` |
+| Turnstile | Phase 2 uses Cloudflare's test keys: the test secret as `TURNSTILE_SECRET_KEY`, the test site key as the repository secret; no site key in the Vercel env. Real keys at Phase 3 S11 (a test secret on a production host fails closed) |
+| Access | Service tokens `microns-machine-collector` and `microns-machine-mcp` with Service Auth rules on the preview application; `ACCESS_MACHINE_CLIENT_IDS` = `<client-id>=collector,<client-id>=mcp` |
+| Test data | Test users and seeded test RFQs for the preview run (`tests/e2e/api/seed.sql`, `cleanup.sql`, fixtures file outside git); uploads through the preview only for seeded RFQs; before Phase 3, `node scripts/r2-to-legacy-s3.mjs --dry-run`, then `--execute` for any non-test object |
+| Decisions | Confirm or change the defaults D-1…D-17 (PLAN.md §5.2); production values of `API_GATES_MODE` and `API_MACHINE_HOSTS` go into the Phase 3 runbook |
 
 ## Documented deviations from Vercel
 
@@ -248,6 +253,17 @@ Each one is either on the allow-list or a defensive change that does not change 
   for the form without a slash is to be confirmed (H-10, G8 #4–9, G9 #10–11). It is switchable with
   `DIRECTORY_INDEX_EMULATION`.
 - **Preview.** `X-Robots-Tag: noindex` on every response on preview hosts.
+- **/api (Phase 2).** Handler answers are unchanged; the answers the Worker produces itself differ from Vercel's
+  (all deviations from the plan: PLAN.md §5.2, DV-1…DV-19):
+  - a body over 4,718,592 bytes gets 413 `{"error":"payload_too_large"}` before any handler (Vercel's exact
+    cut-off to confirm);
+  - a missing binding, var or secret, a handler that throws and a timeout answer plain text (500, 504), not
+    Vercel's error page;
+  - the gates add their own JSON answers (401, 403, 415, 429, 503 and data-rule codes; PLAN.md §5.2 DV-14,
+    details private);
+  - two existing behaviours change on purpose: a Resend webhook retry of an event already recorded gets 200
+    without re-processing, and `delete-folder` matches whole folders only;
+  - header values are sent as UTF-8 (`workers/shared/README.md`, known differences).
 
 ## Needs the owner
 
@@ -288,7 +304,11 @@ Each one is either on the allow-list or a defensive change that does not change 
    database forms, which answer 200 with their own canonical. Vercel serves the same; the parity URL set covers
    both forms.
 7. **Docs.** Done 2026-10-03: ARCHITECTURE.md §6.2 and §17, SEO_PARITY.md §1, §2.4, §5 and §6, PLAN.md P1-3,
-   P1-4 and the Phase 1 file list, RISKS.md R-42.
+   P1-4 and the Phase 1 file list, RISKS.md R-42. Phase 2, done 2026-10-04 under the owner's delegation:
+   PLAN.md §1, §3, §5.2 (route split, shim, gate classes, tasks, file list, gate wording, rollback, deviations
+   DV-1…DV-19, defaults D-1…D-17) and §7b; ARCHITECTURE.md §4–§9, §14, §16–§20 and §23; wrangler.jsonc.draft;
+   INVENTORY.md and inventory.csv (57 rows); RISKS.md (R-19, R-23, R-26, R-36…R-39, R-44, R-62, §10, §11);
+   COSTS.md (references only, no cost changes).
 8. **Prerender is not deterministic.** jsdom captures third-party tag-manager `<script>` tags with `random=`
    timestamps. Two local builds of the same tree differ in 83 prerendered `index.html` files; the shell and
    assets are identical. The prerendered files are served only where the SEO handler returns nothing
@@ -315,3 +335,36 @@ repeated on the preview once owner item 1 is done.
 
 Rollback: nothing in production uses this Worker. Run `wrangler delete` and revert the Phase 1 commits; Vercel
 ignores `workers/`.
+
+## Phase 2 exit gate (PLAN.md §5.2), status 2026-10-04
+
+"Local" means T1 (vitest in Node), T2 (`microns-site` and `microns-ops` under `wrangler dev --local` in front of
+an upstream stub, `npm run cf:t2`) and the Playwright `local` mode against the T2 harness, all in the build
+container. No preview exists yet: the preview run (T3) follows the owner steps of P2-9 (table "Owner items for
+the site" above, `workers/ops/README.md`). Production, `*.vercel.app` and Supabase were not called with a real
+key from any test.
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | `tests/e2e/api.spec.ts` green on the preview for every endpoint and action | **blocked** (local part passes) | `npm --prefix workers/site run t2:up &`, then `BASE_URL=$(npm --prefix workers/site run -s t2:wait) API_E2E_MODE=local npx playwright test tests/e2e/api.spec.ts --grep @local`: 71 passed. `--list`: 137 tests; without `API_E2E_MODE` the run stops at the guard and runs nothing. The `preview` mode needs the preview, the test users, the seeded RFQs and the fixtures file |
+| 2 | R2 round trip; a legacy S3 object downloads | **partial (local)** | T1 files suites: every action × scope × store against a fake S3 that re-verifies SigV4 and a fake R2 binding; PUT → GET returns identical SHA-256; a legacy-only key downloads; `aws4fetch` signatures equal `@smithy/signature-v4` (shared storage tests). T2 `files.t2`: local R2 binding paths and presigned URL shapes through the Worker. The real bucket, its CORS and the signed `Content-Length` on R2 need the preview |
+| 3 | Svix-signed test event accepted, unsigned and wrongly signed ones rejected | **partial (local)** | T1: shared auth vectors built with the `svix` library at run time (valid, changed body, wrong key, timestamp ±301 s, several signatures, missing headers); ops `test/marketing-webhook.test.ts`, including the retry case. A Resend test event needs the preview and the test signing secret |
+| 4 | Tracking URLs identical to Vercel | **partial (local)** | T2 `track.t2` and the local Playwright run: byte fixtures for the pixel, click and unsubscribe answers and the "not found" shapes. The comparison with Vercel needs the `compare` mode from an allow-listed machine (this container gets 429 from Vercel, Q1); per-platform, per-case seeded events |
+| 5 | `OPTIONS` on every `/api/*` path matches Vercel | **partial (local)** | T2 `api-router.t2`: `OPTIONS` on all 14 routed paths answered by the handlers with the vercel.json CORS headers. Vercel side: P0-3 capture or the `compare` mode |
+| 6 | Write paths answer as the private gate matrix specifies; rate limits and Turnstile with test keys | **partial (local)** | T1: one test per action ID and principal class (`test/gates*.test.ts`, `test/policy.test.ts`) and the shared auth tests. T2 `gates.t2`: 401, 403, 429 and 415 shapes; a machine caller on a localhost (preview) host; Turnstile test-key mode against the real siteverify (test secret and dummy token: the gate passes and the handler answers 400; no header: 403). Preview vectors in P2-12 |
+| 7 | Forward flag on: Vercel answers through the Worker; off: local | **partial (local)** | T1 `forward-flag`: on, off, paths, hosts, malformed value → var. T2: an unknown `/api/x` reaches the stub echo as GET and as POST with a 1 KiB body, byte for byte. Preview run with `{"enabled":true,"value":{"hosts":["preview"]}}` in P2-12 (DV-17: `/api/sitemap` stays local) |
+| 8 | MCP server and a `tender-collector`-shaped request succeed against the preview | **partial (local)** | `npm --prefix mcp-server ci && npm --prefix mcp-server run build`: exit 0; no apex default and no old export path left in `mcp-server/src/index.ts`. Ops T2: a machine `tender-scan` with an Access JWT minted at the stub gets the queued answer with the exact keys. `tender-collector`: differs from the live source only in the header and logging lines; `bun build --no-bundle … --outfile` transpiles it (the `--outdir` form fails with bun 1.3.11 here). Real run after the tokens, the `tender-collector` deploy and the MCP settings |
+| 9 | Size reports within limits; no `@aws-sdk`, `pdf-lib` or nesting code in the site | **pass (local)** | `npm --prefix workers/site run build:dry && npm --prefix workers/site run check-bundle`: 3,366.23 KiB, gzip 728.01 KiB, 0 forbidden inputs. `npm --prefix workers/ops run build:dry`: 3,743.75 KiB, gzip 725.78 KiB, `qrcode` resolves to `lib/server.js`. Limit 64 MiB uncompressed. Phase 1 was 1,897.59 KiB (gzip 476.47 KiB); the growth comes from supabase-js parts, svix and postal-mime (through resend) and jose. Startup 26.9 ms locally; re-check on the first upload |
+| 10 | No `VITE_AWS_*` name in `.env.example`, docs or Worker config | **pass** | `rg -n "VITE_AWS" .env.example docs/AWS_S3_VERCEL_GUIDE.md workers` prints nothing. The migration docs name `VITE_AWS_*` only as today's aliases (INVENTORY.md §10) |
+
+Other checks of the same run (2026-10-04):
+
+| Check | Result |
+|---|---|
+| Typecheck | `npm run cf:install`, then typecheck of `workers/shared`, `workers/site`, `workers/ops`: exit 0 |
+| T1 | shared 308, site 1,181, ops 171, `tests/frontend-api` 85: all green |
+| T2 (`npm run cf:t2`) | site 52 (router, files, gates, startup, tracking), ops 4 (`inv-label` PDF, `nest` with 80 part instances, queued machine `tender-scan`, site → ops RPC round trip): all green |
+| Phase 1 unchanged | The 7 Phase 1 site suites: 340 passed, files unchanged since the Phase 1 close; `node tests/middleware/smoke.mjs`: 323 route decisions equal; parity tool tests 94/94; `npm run cf:e2e` against a local Worker: 8/8 |
+| Frontend | `tsc` error count 321 before and after (same set); ESLint errors in the changed files 106 before and after; `vite build` with and without the Turnstile test site key: 213 `index.html`, 210 prerender routes, no Turnstile markup in any HTML file; new files in `dist/`: the TurnstileWidget and apiAuth chunks only |
+| Vercel files | `git diff --exit-code origin/main -- vercel.json middleware.ts middleware api lib index.html vite.config.ts package-lock.json`: empty |
+| Secret scan | 186 changed or added files: no secret value; test keys are built at run time |

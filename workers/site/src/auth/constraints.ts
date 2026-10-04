@@ -9,12 +9,13 @@ export interface FileConstraints {
   maxExpiresIn: number;
   /** presign-upload must not target an existing key (R2 and legacy) -> 409 {"error":"exists"}. */
   noOverwrite: boolean;
-  /** Most objects allowed under the first prefix segment (R2 + legacy first pages) -> 409 {"error":"limit_reached"}. */
+  /** Most objects, and most upload URLs handed out, under the first prefix segment (R2 + legacy first pages,
+   *  plus a per-folder counter of issued upload URLs) -> 409 {"error":"limit_reached"}. */
   maxObjectsUnderPrefix?: number;
   /** Allowed file extensions (lower case, without the dot) -> 400 {"error":"file_type_not_allowed"}. */
   extensionAllowList?: readonly string[];
-  /** Largest declared upload size in bytes, when body.size is a number -> 400 {"error":"file_too_large"}; a
-   *  declared size within the limit is signed as content-length. */
+  /** When set, body.size is required as a whole, non-negative number of bytes (400 {"error":"size_required"}),
+   *  at most this many (400 {"error":"file_too_large"}), and is always signed as content-length. */
   maxSizeBytes?: number;
   /** Allowed delete-folder prefixes -> 400 {"error":"invalid_prefix"}; the prefix is then listed as
    *  `<prefix without trailing slash>/` on both stores. */

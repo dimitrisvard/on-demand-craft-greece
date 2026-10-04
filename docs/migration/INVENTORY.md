@@ -6,7 +6,7 @@ Related: [README.md](README.md) · [PLAN.md](PLAN.md) · [inventory.csv](invento
 
 This is Phase 0 deliverable 1 (brief §7 item 1): every route family, redirect, API endpoint and action, edge function (repo and live), cron job, secret or environment name, external API, special static file, storage bucket, database table group, DNS record, domain, CI workflow, service and configuration rule, with where it runs today and where it goes. [inventory.csv](inventory.csv) is the complete record (386 rows × 16 columns); the tables below show the key columns of every row.
 
-Evidence tags: `path:line` = this repository at commit `9afcba8`; "live 2026-09-30" = read-only capture on that date (Supabase SQL `SELECT`s, edge-function list, Vercel project domains, DNS over HTTPS); `audit:<reader>#<n>` = item `n` of a Phase 0 audit reader's inventory (raw audit kept outside the repo); "CF docs (verified 2026-09-27)" = Cloudflare documentation checked during planning; "plan §n" and `C1`…`C20` = the approved Phase 0 proposal of 2026-09-27 and its corrections, summarised in [README.md](README.md); `P0-1`…`P0-9` and `Q1`…`Q22` = pre-flight items and open questions in [PLAN.md](PLAN.md).
+Evidence tags: `path:line` = this repository at commit `9afcba8`; "live 2026-09-30" = read-only capture on that date (Supabase SQL `SELECT`s, edge-function list, Vercel project domains, DNS over HTTPS); `audit:<reader>#<n>` = item `n` of a Phase 0 audit reader's inventory (raw audit kept outside the repo); "CF docs (verified 2026-09-27)" = Cloudflare documentation checked during planning; "plan §n" and `C1`…`C20` = the approved Phase 0 proposal of 2026-09-27 and its corrections, summarised in [README.md](README.md); `P0-1`…`P0-9` and `Q1`…`Q22` = pre-flight items and open questions in [PLAN.md](PLAN.md); `DV-n` and `D-n` = deviations and owner defaults of the Phase 2 build, recorded in [PLAN.md](PLAN.md) §5.2 (rows updated to the build on 2026-10-04).
 
 Security wording: this repository is public. Security findings appear only as a hazard reference and the phrase "auth gap - see private note". Details: private security note (delivered to the owner out of band, not in this public repo). No secret value appears in this file or the CSV; names only.
 
@@ -72,8 +72,8 @@ CSV format: RFC 4180, UTF-8 without BOM, LF line endings, one header row, 16 col
 
 | Value | Meaning | Rows |
 |---|---|---|
-| `microns-site` | Worker + Static Assets: SEO handler, redirect table, sitemap routes, browser-facing `/api/*`, tenant hosts | 139 |
-| `microns-ops` | Worker (Hono): ops/admin API, Cron Triggers, Queues, Workflows, Durable Objects, AI Gateway, remote MCP | 85 |
+| `microns-site` | Worker + Static Assets: SEO handler, redirect table, sitemap routes, browser-facing `/api/*`, tenant hosts | 117 |
+| `microns-ops` | Worker (Hono): ops/admin API, Cron Triggers, Queues, Workflows, Durable Objects, AI Gateway, remote MCP | 107 |
 | `microns-mail` | Email Worker on `rfq.micronshub.eu` | 1 |
 | `microns-cad` | Container app built from `sheet-metal-service/Dockerfile`, fronted by the `CadRouter` DO | 4 |
 | `supabase-stays` | Stays on Supabase (Postgres, Auth, Storage, Edge Functions, pg_cron) | 46 |
@@ -118,8 +118,8 @@ Total rows: **386**.
 
 | target_component | Rows |
 |---|---|
-| `microns-site` | 139 |
-| `microns-ops` | 85 |
+| `microns-site` | 117 |
+| `microns-ops` | 107 |
 | `microns-mail` | 1 |
 | `microns-cad` | 4 |
 | `supabase-stays` | 46 |
@@ -137,8 +137,8 @@ Total rows: **386**.
 |---|---|
 | `0` | 5 |
 | `1` | 93 |
-| `2` | 93 |
-| `3` | 31 |
+| `2` | 92 |
+| `3` | 32 |
 | `4` | 3 |
 | `5` | 71 |
 | `6` | 17 |
@@ -161,7 +161,7 @@ Total rows: **386**.
 | `secret-env` | 2 | 5 | 14 | · | · | 14 | 6 | 23 | · | 64 |
 | `external-api` | · | 2 | 8 | 1 | · | 7 | 1 | 8 | · | 27 |
 | `static-file` | · | 20 | · | · | · | · | 1 | · | · | 21 |
-| `storage-bucket` | · | · | 3 | · | · | 2 | 2 | · | · | 7 |
+| `storage-bucket` | · | · | 2 | 1 | · | 2 | 2 | · | · | 7 |
 | `db-table-group` | · | · | · | · | · | · | · | 13 | · | 13 |
 | `dns-record` | · | · | · | 22 | · | · | · | 4 | · | 26 |
 | `domain` | · | · | · | 4 | 1 | · | 1 | 2 | · | 8 |
@@ -246,24 +246,24 @@ The SEO handler rows replace `middleware.ts`; everything else falls through to S
 
 | ID | Rule | Location | Headers and notes | Target | Phase |
 |---|---|---|---|---|---|
-| `HR-01` | `/api/(.*) headers` | vercel.json:164-171 | Access-Control-Allow-Credentials: true; Access-Control-Allow-Origin: \*; Access-Control-Allow-Methods: GET,OPTIONS,PATCH,DELETE,POST,PUT; Access-Control-Allow-Headers: X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version. Allow-Credentials true with Origin \* is rejected by browsers for credentialed requests (pre-existing); Allow-Headers omits Authorization (api/\_lib/admin-auth.js:58-66 sets its own list) | Hono cors() on every /api route in microns-site and microns-ops with the same header values and OPTIONS handling | `2` |
+| `HR-01` | `/api/(.*) headers` | vercel.json:164-171 | Access-Control-Allow-Credentials: true; Access-Control-Allow-Origin: \*; Access-Control-Allow-Methods: GET,OPTIONS,PATCH,DELETE,POST,PUT; Access-Control-Allow-Headers: X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version. Allow-Credentials true with Origin \* is rejected by browsers for credentialed requests (pre-existing); Allow-Headers omits Authorization (api/\_lib/admin-auth.js:58-66 sets its own list) | Phase 1 finalise() in microns-site sets the four headers on every /api/\* answer, including those from microns-ops; handlers answer their own OPTIONS; allow-list mode built (workers/shared/src/http/cors.ts) and wired after the Phase 3 observation window (D-9) | `2` |
 | `HR-02` | `/assets/(.*\.js) headers` | vercel.json:173-177 | Content-Type: application/javascript; charset=utf-8. Compare Content-Type byte-for-byte in the parity diff | Static Assets MIME inference, or an optional \_headers rule if the charset parameter must match | `1` |
 | `HR-03` | `/assets/(.*\.css) headers` | vercel.json:179-183 | Content-Type: text/css; charset=utf-8. Compare Content-Type byte-for-byte in the parity diff | Static Assets MIME inference, or an optional \_headers rule if the charset parameter must match | `1` |
 
 ## 6. API endpoints
 
-Split per plan §6 answer 1: the browser-facing subset (`emails`, `s3`, marketing `track` and `/api/track`, `notifications` partner and inventory CRUD, sitemaps) runs in `microns-site`; everything else runs in `microns-ops` behind the `OPS` service binding. Phase 2 adds Supabase-JWT/Access gates, Turnstile and rate limits to all `/api/*` write paths (H-6).
+Split as built in Phase 2 ([PLAN.md](PLAN.md) §5.2): `emails`, `s3`, marketing `track` and `/api/track`, and the sitemaps run in `microns-site`; every `/api/notifications` action (DV-1) and every other endpoint runs in `microns-ops`, reached over the `OPS` service binding (RPC to the entrypoint `OpsApi`). The gates run in the `microns-site` router for both Workers; Phase 2 adds Supabase-JWT/Access gates, Turnstile and rate limits to all `/api/*` write paths (H-6).
 
 | ID | Endpoint | Location | Secrets (names) | Target | Component | Phase | Risks |
 |---|---|---|---|---|---|---|---|
-| `API-emails` | POST /api/emails | api/emails.js | RESEND_API_KEY | microns-site /api/emails (local, browser-facing); Turnstile + rate limit + auth gates | `microns-site` | `2` | H-6; H-20 |
-| `API-s3` | POST /api/s3?action=…&scope=rfq\|articles | api/s3.js | AWS_\* (see ENV rows) | microns-site /api/s3 backed by R2 PRIVATE_FILES (aws4fetch presign) for new objects; legacy S3 read-only via LEGACY_AWS_\*; same response shapes {uploadUrl,key,publicUrl}/{url}/{objects} | `microns-site` | `2` | H-6; H-17 |
+| `API-emails` | POST /api/emails | api/emails.js | RESEND_API_KEY | microns-site /api/emails (local, browser-facing): api/emails.js unchanged through the shared @vercel/node shim, loaded on first use; Turnstile (header X-Turnstile-Token) + rate limit + auth gates | `microns-site` | `2` | H-6; H-20 |
+| `API-s3` | POST /api/s3?action=…&scope=rfq\|articles | api/s3.js | AWS_\* (see ENV rows) | microns-site files API (workers/site/src/api/files.ts, aws4fetch): rfq scope writes new objects to R2 PRIVATE_FILES under rfq/ + today's key and falls back to legacy S3 for reads (LEGACY_AWS_\*); articles scope stays on legacy S3 until P3-6 (PLAN.md §5.2 D-17); same response shapes {uploadUrl,key,publicUrl}/{url}/{objects} | `microns-site` | `2` | H-6; H-17 |
 | `API-marketing` | /api/marketing?action=track\|webhook\|google-auth\|apollo-enrich (+ alias /api/track) | api/marketing.js | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY; RESEND_WEBHOOK_SECRET; GOOGLE_CLIENT_ID; GOOGLE_CLIENT_SECRET; GOOGLE_REDIRECT_URI; VERCEL_URL; APOLLO_API_KEY | microns-site router: track local; webhook, google-auth and apollo-enrich forwarded to microns-ops | `microns-site` | `2` | H-6; H-14; H-15; H-20 |
-| `API-notifications` | /api/notifications (action: partner \| production-status \| nest \| inv-\*) | api/notifications.js (+ lib/nesting/\*, lib/inventory/\*) | RESEND_API_KEY; SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY | microns-site for partner, production-status and inv-\* CRUD; nest to microns-ops (Container or DO with raised cpu_ms); inv-cron-batch to a microns-ops Cron Trigger | `microns-site` | `2` | H-6; H-18; H-20 |
-| `API-gsc` | /api/gsc?action=… (6 actions) | api/gsc.js (+ api/\_lib/admin-auth.js, api/\_lib/gsc-client.js) | SUPABASE_URL; SUPABASE_ANON_KEY; SUPABASE_SERVICE_ROLE_KEY (alias SUPABASE_SERVICE_KEY); Google credentials in gsc_config row | microns-ops Hono route (admin-auth ported; crypto.createSign to WebCrypto or nodejs_compat); bulk actions may move to a Workflow | `microns-ops` | `2` | H-20 |
+| `API-notifications` | /api/notifications (action: partner \| production-status \| nest \| inv-\*) | api/notifications.js (+ lib/nesting/\*, lib/inventory/\*) | RESEND_API_KEY; SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY | microns-ops over OPS for every action (partner, production-status, nest, inv-\*), because api/notifications.js imports nesting and inventory at module scope (PLAN.md §5.2 DV-1); nest with limits.cpu_ms 300,000 | `microns-ops` | `2` | H-6; H-18; H-20 |
+| `API-gsc` | /api/gsc?action=… (6 actions) | api/gsc.js (+ api/\_lib/admin-auth.js, api/\_lib/gsc-client.js) | SUPABASE_URL; SUPABASE_ANON_KEY; SUPABASE_SERVICE_ROLE_KEY (alias SUPABASE_SERVICE_KEY); Google credentials in gsc_config row | microns-ops route; the handler's own admin check still runs behind the site gate; node:crypto through nodejs_compat; bulk actions synchronous in Phase 2, queued from Phase 5 (DV-3) | `microns-ops` | `2` | H-20 |
 | `API-tenders` | /api/tenders (GET list/filter/export; PATCH) + alias /api/connector-status | api/tenders.js | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY (anon fallback) | microns-ops Hono route + alias | `microns-ops` | `2` | H-6 |
-| `API-tender-scan` | POST /api/tender-scan {country_code} | api/tender-scan.js (+ lib/connectors/\*, lib/scoring.js, lib/keywords.js, lib/cpv-codes.js, lib/utils.js) | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY; TELEGRAM_BOT_TOKEN; TELEGRAM_CHAT_ID | microns-ops route returns 202 and enqueues to the scrapes Queue; consumer runs the connectors | `microns-ops` | `2` | H-6; H-14 |
-| `API-funded-startups` | /api/funded-startups (GET; POST scan; PATCH) | api/funded-startups.js | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY (anon fallback); TELEGRAM_BOT_TOKEN; TELEGRAM_CHAT_ID | microns-ops: GET/PATCH routes; POST scan to the scrapes Queue + Cron Trigger (202 + run id) | `microns-ops` | `2` | H-6 |
+| `API-tender-scan` | POST /api/tender-scan {country_code} | api/tender-scan.js (+ lib/connectors/\*, lib/scoring.js, lib/keywords.js, lib/cpv-codes.js, lib/utils.js) | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY; TELEGRAM_BOT_TOKEN; TELEGRAM_CHAT_ID | microns-ops: a MACHINE caller's POST is validated, enqueued on the scrapes Queue and answered 200 at once (queued, run_id, counts at zero); staff callers run synchronously; the consumer runs the connectors (DV-3) | `microns-ops` | `2` | H-6; H-14 |
+| `API-funded-startups` | /api/funded-startups (GET; POST scan; PATCH) | api/funded-startups.js | SUPABASE_URL; SUPABASE_SERVICE_ROLE_KEY (anon fallback); TELEGRAM_BOT_TOKEN; TELEGRAM_CHAT_ID | microns-ops: GET/PATCH routes; POST scan synchronous in Phase 2 (DV-3; queue kind funded-scan built, no producer yet) | `microns-ops` | `2` | H-6 |
 | `API-scan-directory` | POST /api/scan-directory {url, source?} | api/scan-directory.js | none | microns-ops Hono route; Browser Rendering only if plain fetch is blocked from Cloudflare egress | `microns-ops` | `2` | H-6 |
 | `API-scrape-company-profile` | POST /api/scrape-company-profile {url, source} | api/scrape-company-profile.js | none | microns-ops Hono route | `microns-ops` | `2` | H-6 |
 | `API-scrape-website` | POST /api/scrape-website {urls[&lt;=25]} | api/scrape-website.js | none | microns-ops Hono route; cap outbound concurrency at 6 (6 simultaneous outgoing connections per request: CF docs, verified 2026-09-27) | `microns-ops` | `2` | H-6 |
@@ -281,30 +281,30 @@ Split per plan §6 answer 1: the browser-facing subset (`emails`, `s3`, marketin
 | `ACT-emails-rfq` | api/emails.js:372 | microns-site /api/emails, same action dispatch; Turnstile on contact/quote forms | `microns-site` | `2` | Resend send from info@micronshub.eu |
 | `ACT-emails-rfq-pdf` | api/emails.js:374 | microns-site /api/emails, same action dispatch; Turnstile on contact/quote forms | `microns-site` | `2` | base64 PDF attachment |
 | `ACT-emails-email` | api/emails.js:376 | microns-site /api/emails, same action dispatch; Turnstile on contact/quote forms | `microns-site` | `2` | default action; Resend send from info@micronshub.eu |
-| `ACT-notifications-partner` | api/notifications.js:270 | microns-site /api/notifications (partner e-mails via Resend) | `microns-site` | `2` | default action; POST only |
-| `ACT-notifications-production-status` | api/notifications.js:268 | microns-site /api/notifications (partner e-mails via Resend) | `microns-site` | `2` | POST only |
-| `ACT-notifications-nest` | api/notifications.js:266 | microns-ops: Container or Durable Object with raised cpu_ms (decide in Phase 2); not a plain request handler | `microns-ops` | `2` | CPU-bound nesting (lib/nesting, 50 s budget, ClipperLib); NestingError TIMEOUT returns 504 |
-| `ACT-notifications-inv-materials` | lib/inventory/index.js:480 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock` | lib/inventory/index.js:484 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock-receive` | lib/inventory/index.js:486 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock-adjust` | lib/inventory/index.js:488 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock-summary` | lib/inventory/index.js:490 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock-remnants` | lib/inventory/index.js:492 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-stock-scan` | lib/inventory/index.js:494 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-sessions` | lib/inventory/index.js:498 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-session-add-jobs` | lib/inventory/index.js:500 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-session-remove-job` | lib/inventory/index.js:502 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-session-start` | lib/inventory/index.js:504 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-session-complete` | lib/inventory/index.js:506 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-session-select-stock` | lib/inventory/index.js:508 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-alerts` | lib/inventory/index.js:512 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-alert-resolve` | lib/inventory/index.js:514 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-label` | lib/inventory/index.js:518 | microns-site; verify qrcode/pngjs under nodejs_compat or swap for a pure-JS encoder | `microns-site` | `2` | PDF label via pdf-lib; QRCode.toBuffer returns a Node Buffer |
-| `ACT-notifications-inv-settings` | lib/inventory/index.js:522 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-transactions` | lib/inventory/index.js:526 | microns-site /api/notifications inventory CRUD (GET/POST/PUT) | `microns-site` | `2` | Inventory CRUD; auth gap - see private note |
-| `ACT-notifications-inv-cron-batch` | lib/inventory/index.js:530 | microns-ops Cron Trigger calling runAutoBatch(); remove or gate the public HTTP action | `microns-ops` | `2` | Not scheduled anywhere today (no Vercel cron, pg_cron or caller); lib/inventory/cron-batch.js |
+| `ACT-notifications-partner` | api/notifications.js:270 | microns-ops /api/notifications over OPS (partner e-mails via Resend; DV-1) | `microns-ops` | `2` | default action; POST only |
+| `ACT-notifications-production-status` | api/notifications.js:268 | microns-ops /api/notifications over OPS (partner e-mails via Resend; DV-1) | `microns-ops` | `2` | POST only |
+| `ACT-notifications-nest` | api/notifications.js:266 | microns-ops request handler with limits.cpu_ms 300,000 (DV-4); an OPS RPC rejection answers 504 JSON TIMEOUT; Container only if a real order exceeds the limit (D-6) | `microns-ops` | `2` | CPU-bound nesting (lib/nesting, 50 s budget, ClipperLib); NestingError TIMEOUT returns 504; deployed, Date.now() advances only on I/O, so the 50 s budget never trips |
+| `ACT-notifications-inv-materials` | lib/inventory/index.js:480 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock` | lib/inventory/index.js:484 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock-receive` | lib/inventory/index.js:486 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock-adjust` | lib/inventory/index.js:488 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock-summary` | lib/inventory/index.js:490 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock-remnants` | lib/inventory/index.js:492 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-stock-scan` | lib/inventory/index.js:494 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-sessions` | lib/inventory/index.js:498 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-session-add-jobs` | lib/inventory/index.js:500 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-session-remove-job` | lib/inventory/index.js:502 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-session-start` | lib/inventory/index.js:504 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-session-complete` | lib/inventory/index.js:506 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-session-select-stock` | lib/inventory/index.js:508 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-alerts` | lib/inventory/index.js:512 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-alert-resolve` | lib/inventory/index.js:514 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-label` | lib/inventory/index.js:518 | microns-ops over OPS; qrcode aliased to its server build (workers/ops/wrangler.jsonc); the PDF answer is checked in T2 | `microns-ops` | `2` | PDF label via pdf-lib; QRCode.toBuffer returns a Node Buffer |
+| `ACT-notifications-inv-settings` | lib/inventory/index.js:522 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-transactions` | lib/inventory/index.js:526 | microns-ops /api/notifications inventory CRUD over OPS (GET/POST/PUT; DV-1) | `microns-ops` | `2` | Inventory CRUD; auth gap - see private note |
+| `ACT-notifications-inv-cron-batch` | lib/inventory/index.js:530 | microns-ops on-demand action behind the site gate in Phase 2; a Cron Trigger calling runAutoBatch() only if the owner wants one | `microns-ops` | `2` | Not scheduled anywhere today (no Vercel cron, pg_cron or caller); lib/inventory/cron-batch.js |
 | `ACT-marketing-track` | api/marketing.js:59 | microns-site (identical path and alias /api/track, both hosts www and apex) | `microns-site` | `2` | type=open (1x1 pixel, no-store) \| click (302) \| unsubscribe (HTML); URLs baked into sent e-mails |
-| `ACT-marketing-webhook` | api/marketing.js:61 | microns-ops; verify Resend's Svix signature over the raw body | `microns-ops` | `2` | Resend events delivered/bounced/complained/opened/clicked correlate by marketing_events.resend_email_id |
+| `ACT-marketing-webhook` | api/marketing.js:61 | microns-ops; Resend's Svix signature checked on the raw bytes before the unchanged handler; a retry of an event already recorded is acknowledged with 200 (DV-14) | `microns-ops` | `2` | Resend events delivered/bounced/complained/opened/clicked correlate by marketing_events.resend_email_id |
 | `ACT-marketing-google-auth` | api/marketing.js:63 | microns-ops; GOOGLE_REDIRECT_URI set explicitly (VERCEL_URL does not exist on Cloudflare) | `microns-ops` | `2` | steps authorize \| callback \| refresh (api/marketing.js:401-548); auth gap - see private note |
 | `ACT-marketing-apollo-enrich` | api/marketing.js:65 | microns-ops (I/O bound; Workflow only for large lists) | `microns-ops` | `2` | 1.5 s sleep per 3 companies; key from app_settings.apollo_api_key then APOLLO_API_KEY |
 | `ACT-gsc-search-analytics` | api/gsc.js:197 | microns-ops | `microns-ops` | `2` | staff role required (admin-auth) |
@@ -313,11 +313,11 @@ Split per plan §6 answer 1: the browser-facing subset (`emails`, `s3`, marketin
 | `ACT-gsc-submit-indexing` | api/gsc.js:203 | microns-ops; optional Workflow for long batches | `microns-ops` | `2` | up to 200 sequential submissions |
 | `ACT-gsc-sitemaps` | api/gsc.js:205 | microns-ops | `microns-ops` | `2` | staff role required (admin-auth) |
 | `ACT-gsc-monitored-urls` | api/gsc.js:207 | microns-ops | `microns-ops` | `2` | staff role required (admin-auth) |
-| `ACT-s3-presign-upload` | api/s3.js:155 | microns-site: R2 PRIVATE_FILES for new objects (aws4fetch presign); legacy S3 keys served read-only | `microns-site` | `2` | returns {uploadUrl,key,publicUrl}; auth gap - see private note |
-| `ACT-s3-presign-download` | api/s3.js:169 | microns-site: R2 PRIVATE_FILES for new objects (aws4fetch presign); legacy S3 keys served read-only | `microns-site` | `2` | auth gap - see private note |
-| `ACT-s3-delete` | api/s3.js:179 | microns-site: R2 PRIVATE_FILES for new objects (aws4fetch presign); legacy S3 keys served read-only | `microns-site` | `2` | auth gap - see private note |
-| `ACT-s3-delete-folder` | api/s3.js:188 | microns-site: R2 PRIVATE_FILES for new objects (aws4fetch presign); legacy S3 keys served read-only | `microns-site` | `2` | auth gap - see private note |
-| `ACT-s3-list` | api/s3.js:209 | microns-site: R2 PRIVATE_FILES for new objects (aws4fetch presign); legacy S3 keys served read-only | `microns-site` | `2` | auth gap - see private note |
+| `ACT-s3-presign-upload` | api/s3.js:155 | microns-site files API: presigned PUT to R2 under rfq/ + today's key (300 s, Content-Type signed); articles scope on legacy S3 until P3-6 | `microns-site` | `2` | returns {uploadUrl,key,publicUrl}; auth gap - see private note |
+| `ACT-s3-presign-download` | api/s3.js:169 | microns-site files API: R2 when the key exists there, else legacy S3 | `microns-site` | `2` | auth gap - see private note |
+| `ACT-s3-delete` | api/s3.js:179 | microns-site files API: deletes the key on R2 and on legacy S3 | `microns-site` | `2` | auth gap - see private note |
+| `ACT-s3-delete-folder` | api/s3.js:188 | microns-site files API: first list page of each store under the prefix, normalised to end in / (DV-14); deletes on both stores | `microns-site` | `2` | auth gap - see private note |
+| `ACT-s3-list` | api/s3.js:209 | microns-site files API: first list page of each store, merged (R2 wins on duplicate keys) | `microns-site` | `2` | auth gap - see private note |
 | `ACT-sitemap-main-index` | api/sitemap.js:407 | microns-site sitemap route with Cache API (s-maxage 3600 honoured only via Cache API) | `microns-site` | `1` | /sitemap.xml |
 | `ACT-sitemap-complete` | api/sitemap.js:234 | microns-site sitemap route with Cache API (s-maxage 3600 honoured only via Cache API) | `microns-site` | `1` | /sitemap-complete.xml (no type param) |
 | `ACT-sitemap-index` | api/sitemap.js:408 | microns-site sitemap route with Cache API (s-maxage 3600 honoured only via Cache API) | `microns-site` | `1` | /sitemap-index.xml (stale blob) |
@@ -325,7 +325,7 @@ Split per plan §6 answer 1: the browser-facing subset (`emails`, `s3`, marketin
 | `ACT-tenders-GET` | api/tenders.js:32 | microns-ops (list, ?id, ?stats_only, ?export=csv, ?connectors=true) | `microns-ops` | `2` | alias /api/connector-status = ?connectors=true |
 | `ACT-tenders-PATCH` | api/tenders.js:122 | microns-ops with a staff JWT gate | `microns-ops` | `2` | auth gap - see private note |
 | `ACT-funded-startups-GET` | api/funded-startups.js:36 | microns-ops (list, stats, feeds, export CSV, ?id) | `microns-ops` | `2` |  |
-| `ACT-funded-startups-POST-scan` | api/funded-startups.js:45 | microns-ops: enqueue to the scrapes Queue, return 202 + run id; Cron Trigger optional | `microns-ops` | `2` | runs for minutes today; auth gap - see private note |
+| `ACT-funded-startups-POST-scan` | api/funded-startups.js:45 | microns-ops, synchronous in Phase 2 (DV-3); queue kind funded-scan built for a later producer; Cron Trigger optional | `microns-ops` | `2` | runs for minutes today; auth gap - see private note |
 | `ACT-funded-startups-PATCH` | api/funded-startups.js:46 | microns-ops with a staff JWT gate | `microns-ops` | `2` | auth gap - see private note |
 
 ## 8. Edge functions: repo vs live reconciliation
@@ -366,7 +366,7 @@ Phase 5 verdicts (plan §6 answer 2): **port** 14, **stays** 11, **delete** 15, 
 | `send-user-email` | in repo & deployed | 12 | true | not listed (default true) | **stays** | Stays on Supabase (user JWT context) | `supabase-stays` | `stays` |
 | `telegram-leads-bot` | in repo & deployed | 6 | false | false | **stays** | Stays on Supabase (webhook URL unchanged); Phase 4 adds approval callbacks | `supabase-stays` | `stays` |
 | `telegram-tenders-bot` | in repo & deployed | 6 | false | not listed (default true) (drift) | **stays** | Stays on Supabase (webhook URL unchanged) | `supabase-stays` | `stays` |
-| `tender-collector` | in repo & deployed | 11 | false | not listed (default true) (drift) | **port** | Port (Phase 5): Cron Trigger 06:00 + scrapes Queue in microns-ops | `microns-ops` | `5` |
+| `tender-collector` | in repo & deployed | 11 | false | not listed (default true) (drift) | **port** | Phase 2: repo source rebuilt from the live source plus Access service-token headers and queued/run_id logging (deployed by the owner); port (Phase 5): Cron Trigger 06:00 + scrapes Queue in microns-ops | `microns-ops` | `5` |
 | `translate-article` | in repo & deployed | 81 | true | not listed (default true) | **port** | Port (Phase 5): translations Queue consumer through AI Gateway route translate; IndexNow as a Workflow step | `microns-ops` | `5` |
 | `update-partner-password` | in repo & deployed | 12 | true | not listed (default true) | **stays** | Stays on Supabase (Auth admin API); needs fixing (plan §6 answer 2) | `supabase-stays` | `stays` |
 | `xometry-review` | in repo & deployed | 3 | true | not listed (default true) | **stays** | Stays on Supabase unchanged (admin gate, atomic claim) | `supabase-stays` | `stays` |
@@ -449,7 +449,7 @@ Stored-today values come from code and live metadata; the actual Vercel environm
 | `SUPABASE_ANON_KEY` | VITE_SUPABASE_ANON_KEY | middleware.ts:105 (fallback); api/sitemap.js:179,199 (no VITE_ fallback); api/\_lib/admin-auth.js; xometry-review; SPA build | Vercel env (build + runtime); Supabase (auto-injected); local (mcp-server fallback) | wrangler secret SUPABASE_ANON_KEY on microns-site and microns-ops; VITE_SUPABASE_ANON_KEY stays a build variable | `microns-site` | `1` | H-4 |
 | `SUPABASE_SERVICE_ROLE_KEY` | SUPABASE_SERVICE_KEY (api/\_lib, mcp-server, scripts) | api/\* (8 files); lib/inventory/\*; 24 edge functions; sheet-metal-service; mcp-server; scripts/seed-gsc-monitored-urls.ts | Vercel env; Supabase (auto-injected); VPS .env (sheet-metal-service); local (mcp-server, scripts); pg_cron literal in 9 cron.job commands | Rotate in pre-flight P0-2 and re-issue to every consumer; wrangler secret on microns-site, microns-ops, microns-mail; auto in Supabase; removed from cron.job when jobs move (Phase 5) | `microns-ops` | `0` | H-7 |
 | `SUPABASE_ACCESS_TOKEN` | – | Supabase MCP dev server | .env.example:19; .mcp.json (local shell) | Stays local; never deployed | `unchanged` | `stays` |  |
-| `RESEND_API_KEY` | – | api/emails.js; api/notifications.js; send-campaign; process-followups; send-user-email; 4 dead send-\* functions | Vercel env; Supabase secrets | wrangler secret on microns-site (emails, notifications) and microns-ops (campaigns, Phase 5); stays in Supabase for send-user-email | `microns-site` | `2` |  |
+| `RESEND_API_KEY` | – | api/emails.js; api/notifications.js; send-campaign; process-followups; send-user-email; 4 dead send-\* functions | Vercel env; Supabase secrets | wrangler secret on microns-site (emails) and microns-ops (notifications from Phase 2, campaigns from Phase 5); stays in Supabase for send-user-email | `microns-site` | `2` |  |
 | `RESEND_WEBHOOK_SECRET` | – | api/marketing.js webhook | Vercel env (whether set is unknown: Vercel env API returned 403) | wrangler secret on microns-ops; Svix verification | `microns-ops` | `2` | H-15 |
 | `GOOGLE_CLIENT_ID` | – | api/marketing.js google-auth; send-campaign; check-replies | Vercel env; Supabase secrets; local (scripts/get-google-refresh-token.ts) | wrangler secret on microns-ops; stays in Supabase until send-campaign is ported | `microns-ops` | `2` |  |
 | `GOOGLE_CLIENT_SECRET` | – | api/marketing.js; send-campaign; check-replies | Vercel env; Supabase secrets; local | wrangler secret on microns-ops; stays in Supabase until send-campaign is ported | `microns-ops` | `2` |  |
@@ -458,13 +458,13 @@ Stored-today values come from code and live metadata; the actual Vercel environm
 | `APOLLO_API_KEY` | app_settings.apollo_api_key (primary) | api/marketing.js apollo-enrich | app_settings table (primary); Vercel env (fallback) | wrangler secret on microns-ops (or keep the DB row only) | `microns-ops` | `2` |  |
 | `TELEGRAM_BOT_TOKEN` | app_settings.telegram_bot_token; per-tenant inventory_settings.telegram_bot_token | api/tender-scan.js; api/funded-startups.js; hn-collector; reddit-collector; telegram-leads-bot; telegram-tenders-bot | Vercel env; Supabase secrets; app_settings table | wrangler secret on microns-ops (collectors, alerts); stays in Supabase for the bots | `microns-ops` | `2` |  |
 | `TELEGRAM_CHAT_ID` | app_settings.telegram_chat_id | same consumers as TELEGRAM_BOT_TOKEN | Vercel env; Supabase secrets; app_settings table | wrangler secret on microns-ops; stays in Supabase for the bots | `microns-ops` | `2` |  |
-| `AWS_ACCESS_KEY_ID` | VITE_AWS_ACCESS_KEY_ID (legacy name, server fallback only) | api/s3.js (rfq scope) | Vercel env (AWS_\* or VITE_AWS_\* names) | wrangler secret LEGACY_AWS_ACCESS_KEY_ID on microns-site (read-only legacy S3); VITE_ name removed | `microns-site` | `2` | H-17 |
-| `AWS_SECRET_ACCESS_KEY` | VITE_AWS_SECRET_ACCESS_KEY | api/s3.js (rfq scope) | Vercel env | wrangler secret LEGACY_AWS_SECRET_ACCESS_KEY on microns-site | `microns-site` | `2` | H-17 |
-| `AWS_ARTICLES_ACCESS_KEY_ID` | VITE_AWS_ARTICLES_ACCESS_KEY_ID | api/s3.js (articles scope) | Vercel env | Retire after Phase 2: new article images go to R2 microns-public; legacy article images are public URLs that need no key | `delete` | `6` | H-17 |
-| `AWS_ARTICLES_SECRET_ACCESS_KEY` | VITE_AWS_ARTICLES_SECRET_ACCESS_KEY | api/s3.js (articles scope) | Vercel env | Retire after Phase 2 (as above) | `delete` | `6` | H-17 |
+| `AWS_ACCESS_KEY_ID` | VITE_AWS_ACCESS_KEY_ID (legacy name, server fallback only) | api/s3.js (rfq scope) | Vercel env (AWS_\* or VITE_AWS_\* names) | wrangler secret LEGACY_AWS_ACCESS_KEY_ID on microns-site (legacy S3: rfq reads and deletes, articles scope until P3-6); VITE_ name removed from .env.example and docs | `microns-site` | `2` | H-17 |
+| `AWS_SECRET_ACCESS_KEY` | VITE_AWS_SECRET_ACCESS_KEY | api/s3.js (rfq scope) | Vercel env | wrangler secret LEGACY_AWS_SECRET_ACCESS_KEY on microns-site (as above) | `microns-site` | `2` | H-17 |
+| `AWS_ARTICLES_ACCESS_KEY_ID` | VITE_AWS_ARTICLES_ACCESS_KEY_ID | api/s3.js (articles scope) | Vercel env | Retire after P3-6: article uploads stay on legacy S3 until then (D-17), and the site Worker uses the LEGACY_AWS_\* pair for both scopes; legacy article images are public URLs that need no key | `delete` | `6` | H-17 |
+| `AWS_ARTICLES_SECRET_ACCESS_KEY` | VITE_AWS_ARTICLES_SECRET_ACCESS_KEY | api/s3.js (articles scope) | Vercel env | Retire after P3-6 (as above) | `delete` | `6` | H-17 |
 | `AWS_REGION` | VITE_AWS_REGION | api/s3.js | Vercel env; .env.example:26 (us-east-1, stale) | var LEGACY_S3_REGION = eu-north-1 on microns-site | `microns-site` | `2` |  |
-| `AWS_S3_BUCKET` | AWS_BUCKET_NAME; VITE_AWS_BUCKET_NAME | api/s3.js (rfq scope) | Vercel env; .env.example:27 | Legacy RFQ bucket name as a var on microns-site (variable name to be fixed in Phase 2) | `microns-site` | `2` | H-17 |
-| `AWS_ARTICLES_BUCKET` | VITE_AWS_ARTICLES_BUCKET_NAME (default 'articles') | api/s3.js (articles scope) | Vercel env | Retire after Phase 2 (legacy article image URLs stay public on S3) | `delete` | `6` | H-17 |
+| `AWS_S3_BUCKET` | AWS_BUCKET_NAME; VITE_AWS_BUCKET_NAME | api/s3.js (rfq scope) | Vercel env; .env.example:27 | var LEGACY_S3_RFQ_BUCKET on microns-site (value from P0-4) | `microns-site` | `2` | H-17 |
+| `AWS_ARTICLES_BUCKET` | VITE_AWS_ARTICLES_BUCKET_NAME (default 'articles') | api/s3.js (articles scope) | Vercel env | var LEGACY_S3_ARTICLES_BUCKET on microns-site until P3-6, then retired (legacy article image URLs stay public on S3) | `delete` | `6` | H-17 |
 | `VITE_SITE_URL` | – | SocialPostDialog.tsx; BlogList.tsx | Vercel env (optional; default https://www.micronshub.eu) | Build variable in the Cloudflare build | `microns-site` | `1` |  |
 | `VITE_GOOGLE_ADS_CONVERSION_LABEL` | – | src/utils/analytics.ts | Vercel env (optional; literal fallback in src/utils/analytics.ts:15) | Build variable in the Cloudflare build | `microns-site` | `1` |  |
 | `VITE_APP_ENV` | – | none | .env.example:32 only | Retire | `delete` | `6` |  |
@@ -505,7 +505,7 @@ Stored-today values come from code and live metadata; the actual Vercel environm
 | `API_KEY` | – | sheet-metal-service main.py (not applied to /flat-pattern) | VPS .env (sheet-metal-service; presumably empty) | Replaced by CAD_SHARED_SECRET enforced by the CadRouter DO / microns-cad | `microns-cad` | `5` |  |
 | `app_settings.reddit_client_id` | – | src/pages/dashboard/SettingsPage.tsx (edit form only) | app_settings table | Stays in Supabase or remove: no collector reads it (reddit-collector uses pullpush without credentials) | `supabase-stays` | `stays` |  |
 | `app_settings.reddit_client_secret` | – | src/pages/dashboard/SettingsPage.tsx (edit form only) | app_settings table | As above | `supabase-stays` | `stays` |  |
-| `gsc_config (OAuth client and token fields)` | GSC_SERVICE_ACCOUNT_JSON (planned microns-ops secret name; not an env name today) | api/\_lib/gsc-client.js:51-52; mcp-server/src/gsc-client.ts | gsc_config table (single row id=1) | microns-ops keeps reading the row with the service credential, or moves the service account to secret GSC_SERVICE_ACCOUNT_JSON (decide in Phase 2) | `microns-ops` | `2` |  |
+| `gsc_config (OAuth client and token fields)` | GSC_SERVICE_ACCOUNT_JSON (planned microns-ops secret name; not an env name today) | api/\_lib/gsc-client.js:51-52; mcp-server/src/gsc-client.ts | gsc_config table (single row id=1) | microns-ops keeps reading the row with the service credential (decided in Phase 2: GSC_SERVICE_ACCOUNT_JSON is not set) | `microns-ops` | `2` |  |
 | `marketing_sender_accounts (per-sender OAuth credentials)` | – | api/marketing.js google-auth; send-campaign; check-replies | marketing_sender_accounts table (2 google_workspace accounts, live 2026-09-30) | Stays in Supabase | `supabase-stays` | `stays` |  |
 | `inventory_settings.telegram_bot_token` | – | lib/inventory/stock-check.js; lib/inventory/cron-batch.js | inventory_settings table (per tenant) | Stays in Supabase | `supabase-stays` | `stays` |  |
 | `tender_connectors.auth_config` | – | lib/connectors/\* via api/tender-scan.js | tender_connectors table (26 connectors) | Stays in Supabase | `supabase-stays` | `stays` |  |
@@ -515,9 +515,15 @@ Stored-today values come from code and live metadata; the actual Vercel environm
 | Name | Type | Where |
 |---|---|---|
 | `SITE_ORIGIN`, `PREVIEW_HOSTNAMES`, `SEO_STRICT_404`, `R2_ACCOUNT_ID`, `LEGACY_S3_REGION` | vars | microns-site |
+| `API_FORWARD_ORIGIN` (= `https://on-demand-craft-greece.vercel.app` from Phase 2), `API_FORWARD_TO_VERCEL`, `API_GATES_MODE`, `API_MACHINE_HOSTS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET` | vars (Phase 2) | microns-site; the bucket vars replace `AWS_S3_BUCKET` and `AWS_ARTICLES_BUCKET` |
+| `OPS` (entrypoint `OpsApi`), `PRIVATE_FILES` (jurisdiction `eu`), `API_RATE_LIMIT`, `API_RATE_LIMIT_MAIL`, `API_RATE_LIMIT_BULK` | bindings (Phase 2) | microns-site; rate-limit namespaces `2001`, `2002`, `2003` |
 | `TURNSTILE_SECRET_KEY` | secret | microns-site |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | secrets | microns-site (R2 S3 API presign) |
-| `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY` | secrets | microns-site (replace `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) |
+| `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY` | secrets | microns-site (replace `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`; one pair for both legacy scopes) |
+| `ACCESS_MACHINE_CLIENT_IDS` | secret (Phase 2) | microns-site: maps each machine service token to its consumer |
+| `SCRAPES` | queue producer (Phase 2) | microns-ops (queue `scrapes`, DLQ `scrapes-dlq`) |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | secrets | CI and e2e (preview Access token, Phase 1); `tender-collector` (Supabase function secrets) and the local MCP server (its env) for their machine tokens (Phase 2) |
+| `VITE_TURNSTILE_SITE_KEY` | public build variable (Phase 2) | GitHub secret for the Worker build (`cf-preview.yml`); Cloudflare test site key in Phase 2, real key from Phase 3 S11; not set in the Vercel env |
 | `GSC_SERVICE_ACCOUNT_JSON` | secret (optional) | microns-ops; today the service account is a column of the `gsc_config` row, not an env name |
 | `XOMETRY_TOKEN` | secret | microns-ops if the scanner is ported (PLAN.md Q8) |
 | `CAD_SHARED_SECRET` | secret | microns-ops / microns-cad (replaces `API_KEY`) |
@@ -551,9 +557,9 @@ Not present (checked so they are not missed): no payment provider (no Stripe, Pa
 | `EXT-ga4-ads` | Google Analytics 4 + Google Ads tags | www.googletagmanager.com/gtag/js (AW-17760727501, G-G6T5PMFLRH) | every page | Unchanged (same index.html); no Web Analytics automatic setup or HTML-rewriting features | `unchanged` | `1` |
 | `EXT-maps-embed` | Google Maps Embed API | www.google.com/maps/embed/v1/place | Contact page | Unchanged; the Maps Embed key must be referrer-restricted and gain the preview hostnames | `unchanged` | `1` |
 | `EXT-google-fonts` | Google Fonts | fonts.googleapis.com; fonts.gstatic.com | every page | Unchanged | `unchanged` | `stays` |
-| `EXT-tender-portals` | TED and \~50 national procurement portals | api.ted.europa.eu/v3; ted.europa.eu; tenderned.nl; etenders.gov.ie; boamp.fr; contrataciondelestado.es; service.bund.de; evergabe-online.de; and others (lib/connectors/generic.js:16-271) | api/tender-scan.js | microns-ops scrapes Queue consumer; test reachability from Cloudflare egress | `microns-ops` | `2` |
+| `EXT-tender-portals` | TED and \~50 national procurement portals | api.ted.europa.eu/v3; ted.europa.eu; tenderned.nl; etenders.gov.ie; boamp.fr; contrataciondelestado.es; service.bund.de; evergabe-online.de; and others (lib/connectors/generic.js:16-271) | api/tender-scan.js | microns-ops: scrapes Queue consumer for scans a machine caller starts, synchronous for staff; test reachability from Cloudflare egress | `microns-ops` | `2` |
 | `EXT-europages-wlw` | Europages / wlw directory pages | www.europages.\* ; www.wlw.\* | CompanyScannerPage; mcp-server | microns-ops fetch; Browser Rendering if blocked (Phase 4 growth agents) | `microns-ops` | `2` |
-| `EXT-funding-rss` | Funding news RSS feeds (funding_feeds table) | techcrunch.com; sifted.eu; eu-startups.com; tech.eu; and others stored in the DB | api/funded-startups.js | microns-ops scrapes Queue + Cron Trigger | `microns-ops` | `2` |
+| `EXT-funding-rss` | Funding news RSS feeds (funding_feeds table) | techcrunch.com; sifted.eu; eu-startups.com; tech.eu; and others stored in the DB | api/funded-startups.js | microns-ops (scan synchronous in Phase 2); scrapes Queue + Cron Trigger later | `microns-ops` | `2` |
 | `EXT-apollo` | Apollo.io people search | api.apollo.io/v1/mixed_people/search | ApolloEnrichment.tsx | microns-ops | `microns-ops` | `2` |
 | `EXT-gpteng` | Lovable / GPT Engineer script | cdn.gpteng.co/gptengineer.js | every page | Unchanged for parity; removal is a separate decision after cutover | `unchanged` | `6` |
 | `EXT-unsplash` | Unsplash hot-linked images | images.unsplash.com | React pages (not SSR bodies) | Unchanged | `unchanged` | `stays` |
@@ -590,17 +596,17 @@ All paths stay identical. `public/_redirects` must be deleted before any Cloudfl
 
 ## 13. Storage buckets
 
-Live Supabase Storage has 4 buckets, all public (2026-09-30). Target R2 buckets ([ARCHITECTURE.md](ARCHITECTURE.md)): `microns-public` (custom domain `files.micronshub.eu`; `articles/<yyyy>/<mm>/<slug>.<ext>`, `tenants/<slug>/…`) and `microns-private` (no public access; `rfq/…`, `email/…`, `cad/…`, `quotes/…`, `orders/…`, `sitemaps/…`).
+Live Supabase Storage has 4 buckets, all public (2026-09-30). Target R2 buckets ([ARCHITECTURE.md](ARCHITECTURE.md)): `microns-public` (custom domain `files.micronshub.eu`; `articles/<yyyy>/<mm>/<slug>.<ext>`, `tenants/<slug>/…`) and `microns-private` (no public access, jurisdiction `eu`; `rfq/…`, `email/…`, `cad/…`, `quotes/…`, `orders/…`, `sitemaps/…`). Phase 2 stores `/api/s3` uploads as `rfq/` + today's key (`<rfqNumber>/<partFolder>/<safeName>`, DV-5) and keeps the files API's per-folder upload counters under `upload-counters/`.
 
 | ID | Bucket | Live | Today | Target | Component | Phase |
 |---|---|---|---|---|---|---|
-| `BKT-sb-rfq-files` | Supabase Storage rfq-files (public) | live: 3 objects, 109,470 B, public | RFQ downloads read here while uploads go to S3 (split brain, C12); client code creates the bucket | Fix the split brain in Phase 2 (R2 microns-private rfq/&lt;rfq_id&gt;/…); retire reads, then remove the bucket in Phase 6 | `r2` | `2` |
+| `BKT-sb-rfq-files` | Supabase Storage rfq-files (public) | live: 3 objects, 109,470 B, public | RFQ downloads read here while uploads go to S3 (split brain, C12); client code creates the bucket | Phase 2 closes the split brain: RfqFileDownload looks the file up through /api/s3 list (R2, then legacy S3) and falls back to this bucket; retire reads, then remove the bucket in Phase 6 | `r2` | `2` |
 | `BKT-sb-quote-files` | Supabase Storage quote-files (public) | live: 0 objects, public | Legacy, empty | Delete in Phase 6 | `delete` | `6` |
 | `BKT-sb-sitemaps` | Supabase Storage sitemaps (public) | live: 17 objects, 6.76 MB; sitemap-complete.xml updated 2026-09-30; sitemap.xml, sitemap-index.xml and 14 sitemap-{lang}.xml last updated 2025-12-30 | Written daily by generate-sitemap; read by api/sitemap.js | Stays until Phase 5; then R2 microns-private sitemaps/… served by microns-site at the identical URLs | `r2` | `5` |
 | `BKT-sb-tenant-laserkritis` | Supabase Storage tenant-laserkritis (public) | live: 0 objects, public | Tenant assets bucket per slug | R2 microns-public tenants/&lt;slug&gt;/… (Phase 5); Supabase bucket unchanged until then | `r2` | `5` |
 | `BKT-sb-documents` | Supabase Storage documents (code reference only) | not present live (2026-09-30) | material_documents.file_url would point here; material_documents has 0 rows | Create in R2 microns-private when the catalogue documents feature is used, or remove the reference (Phase 6) | `r2` | `6` |
-| `BKT-s3-rfq` | AWS S3 RFQ bucket (scope rfq, eu-north-1) | live (not listed; AWS console not read) | RFQ CAD uploads via presigned PUT; rfq_files.file_path stores the key; sheet-metal-service downloads by presigned GET | Read-only legacy for existing keys (PLAN.md Q11); new uploads to R2 microns-private rfq/&lt;rfq_id&gt;/&lt;file_id&gt;-&lt;name&gt; | `r2` | `2` |
-| `BKT-s3-articles` | AWS S3 articles bucket (scope articles) | live: 755 articles.featured_image URLs point at \*.amazonaws.com (2026-09-30) | Blog images; absolute URLs persisted in articles and emitted as og:image | Read-only legacy (URLs must keep resolving); new images to R2 microns-public articles/&lt;yyyy&gt;/&lt;mm&gt;/&lt;slug&gt;.&lt;ext&gt; behind files.micronshub.eu | `r2` | `2` |
+| `BKT-s3-rfq` | AWS S3 RFQ bucket (scope rfq, eu-north-1) | live (not listed; AWS console not read) | RFQ CAD uploads via presigned PUT; rfq_files.file_path stores the key; sheet-metal-service downloads by presigned GET | Legacy for existing keys: read and delete through the files API, no new uploads (PLAN.md Q11); new uploads to R2 microns-private under rfq/ + today's key (D-2) | `r2` | `2` |
+| `BKT-s3-articles` | AWS S3 articles bucket (scope articles) | live: 755 articles.featured_image URLs point at \*.amazonaws.com (2026-09-30) | Blog images; absolute URLs persisted in articles and emitted as og:image | Legacy: article uploads stay here until P3-6 connects files.micronshub.eu (D-17), then new images go to R2 microns-public articles/&lt;yyyy&gt;/&lt;mm&gt;/&lt;slug&gt;.&lt;ext&gt;; existing URLs keep resolving | `r2` | `3` |
 
 ## 14. Database table groups
 
@@ -681,7 +687,7 @@ Zone `micronshub.eu` is hosted at Papaki (not Vercel DNS) and is DNSSEC-signed w
 | `DOM-apex` | `micronshub.eu` | Vercel domain redirect to www (redirectStatusCode null: status to be read from the baseline) | Single Redirect Rule to https://www.micronshub.eu${path}${query} with the status seen in the baseline | `cloudflare-zone` | `3` |
 | `DOM-wildcard` | `*.micronshub.eu` | Vercel project wildcard domain (verified, added 2026-04-08) + wildcard certificate | Proxied wildcard record + Workers Route \*.micronshub.eu/\* to microns-site; more specific routes win (Workers Custom Domains do not support wildcards: CF docs, verified 2026-09-27) | `microns-site` | `3` |
 | `DOM-laserkritis-sub` | `laserkritis.micronshub.eu` | Vercel via the wildcard (valid wildcard certificate) | Wildcard route on microns-site | `microns-site` | `3` |
-| `DOM-vercel-app` | `on-demand-craft-greece.vercel.app` | Vercel project default domain (serves the same site) | Irrelevant after cutover; must not be linked; removed with the Vercel project in Phase 6 | `delete` | `6` |
+| `DOM-vercel-app` | `on-demand-craft-greece.vercel.app` | Vercel project default domain (serves the same site) | Server-side target of the /api forward (var API_FORWARD_ORIGIN) until Phase 6; must not be linked; removed with the Vercel project in Phase 6 | `delete` | `6` |
 | `DOM-rfq` | `rfq.micronshub.eu` | caught by the wildcard CNAME (Vercel) | Email Routing subdomain (MX/TXT added by Cloudflare) with addresses rfq@ and replies@ to microns-mail | `microns-mail` | `4` |
 | `DOM-laserkritis-gr` | `www.laserkritis.gr` | nginx on its own host (46.4.122.205), not Vercel | Unchanged; moving it onto the tenant system is PLAN.md Q17 | `unchanged` | `stays` |
 | `DOM-microns-hub-com` | `microns-hub.com` | referenced as terms URL in generated PDFs | Owner decision (PLAN.md Q13) | `owner-decision` | `stays` |
@@ -692,7 +698,8 @@ Zone `micronshub.eu` is hosted at Papaki (not Vercel DNS) and is DNSSEC-signed w
 |---|---|
 | `files.micronshub.eu` | R2 custom domain for `microns-public` |
 | `mcp.micronshub.eu` | Custom Domain → `microns-ops` (remote MCP), Access + OAuth |
-| `microns-site.<account>.workers.dev` + preview alias `staging` | Preview (Phase 1–2), Access with a service token, `X-Robots-Tag: noindex` |
+| `microns-site.<account>.workers.dev` + preview alias `staging` | Preview (Phase 1–2), Access with a service token, `X-Robots-Tag: noindex`; in Phase 2 also the only host that accepts the machine tokens |
+| `api.micronshub.eu` | Machine-caller host for `tender-collector` and the local MCP server from Phase 3 (D-3): Access application `microns-machine-api` with service tokens `microns-machine-collector` and `microns-machine-mcp`, served by `microns-site`, listed in `API_MACHINE_HOSTS` by the Phase 3 runbook before the `www` flip |
 
 ## 18. CI workflows
 
@@ -701,23 +708,25 @@ Zone `micronshub.eu` is hosted at Papaki (not Vercel DNS) and is DNSSEC-signed w
 | `CI-auto-merge-claude` | .github/workflows/auto-merge-claude.yml | push to claude/\*\* (auto-merge-claude.yml:4-6) | Gate in pre-flight P0-1 (branch allow-list) with branch protection on main; delete in Phase 6 | `delete` | `0` | H-2 |
 | `CI-xometry-scan` | .github/workflows/xometry-scan.yml | cron 0 6,8,10,12,14,16,18 \* \* \* (UTC, xometry-scan.yml:21) + workflow_dispatch | Cron Trigger in microns-ops at the same 7 hours: TypeScript port (recommended) or the Python image in a Container (PLAN.md Q8); disable, do not delete, the workflow at Phase 5 | `microns-ops` | `5` |  |
 
+Workflows added by the migration (not CSV rows): `.github/workflows/cf-preview.yml` (Phase 1, manual dispatch; Phase 2 adds the `workers/shared` install, the `VITE_TURNSTILE_SITE_KEY` check, the prerender guard against Turnstile markup in `dist/**/*.html` and the bundle guard) and `.github/workflows/cf-ops.yml` (Phase 2, manual dispatch only: typecheck, tests and dry run; `wrangler deploy` of `microns-ops` only with the input `deploy` set to true).
+
 ## 19. Services, libraries and tools
 
 | ID | Service | Today | Target | Component | Phase | Risks |
 |---|---|---|---|---|---|---|
 | `SVC-vercel-project` | Vercel project (team dimitrisvards-projects, Hobby plan) | Vercel | Kept deployable and DNS-switchable until Phase 6; then paused for 30 days and decommissioned | `delete` | `6` | H-1; H-24 |
 | `SVC-middleware` | SEO engine: middleware.ts + middleware/\* (i18n, inject, meta, schema, services, slugs, types, renderers/\*) | Vercel Routing Middleware | Ported to the microns-site SEO handler; middleware/\* modules imported unchanged, orchestrator copied; caches: in-isolate Map + KV SEO_CACHE 1 h / 30 s negative | `microns-site` | `1` | H-4; H-8; H-9; H-10; H-13; H-20; H-27 |
-| `SVC-admin-auth` | api/\_lib/admin-auth.js (Supabase JWT + staff-role check) | Vercel (imported by api/gsc.js) | Basis of the Worker auth middleware (new file workers/site/src/auth/supabase-jwt.ts) applied to all write paths in Phase 2 | `microns-ops` | `2` | H-6 |
+| `SVC-admin-auth` | api/\_lib/admin-auth.js (Supabase JWT + staff-role check) | Vercel (imported by api/gsc.js) | Same trust model in the Worker gates (workers/shared/src/auth/supabase-jwt.ts: /auth/v1/user, roles from user_roles); api/gsc.js keeps its own check in microns-ops | `microns-ops` | `2` | H-6 |
 | `SVC-gsc-client` | api/\_lib/gsc-client.js (Google OAuth + service-account signing) | Vercel (imported by api/gsc.js) | microns-ops; replace crypto.createSign with WebCrypto RSASSA-PKCS1-v1_5 or rely on nodejs_compat | `microns-ops` | `2` | H-20 |
-| `SVC-lib-nesting` | lib/nesting/\* (2D nesting engine) | Vercel (imported by api/notifications.js action=nest) | Container or DO with raised cpu_ms behind microns-ops (decide in Phase 2) | `microns-ops` | `2` | H-18 |
-| `SVC-lib-inventory` | lib/inventory/\* (inventory, sessions, QR labels, cron batch) | Vercel (imported by api/notifications.js inv-\*) | microns-site (CRUD); qrcode/pngjs dependency check under nodejs_compat | `microns-site` | `2` | H-20 |
+| `SVC-lib-nesting` | lib/nesting/\* (2D nesting engine) | Vercel (imported by api/notifications.js action=nest) | microns-ops request handler with limits.cpu_ms 300,000 (decided in Phase 2, DV-4); Container only if a real order exceeds it (D-6) | `microns-ops` | `2` | H-18 |
+| `SVC-lib-inventory` | lib/inventory/\* (inventory, sessions, QR labels, cron batch) | Vercel (imported by api/notifications.js inv-\*) | microns-ops (every /api/notifications action, DV-1); qrcode aliased to its server build | `microns-ops` | `2` | H-20 |
 | `SVC-lib-connectors` | lib/connectors/\*, lib/scoring.js, lib/keywords.js, lib/cpv-codes.js, lib/utils.js | Vercel (imported only by api/tender-scan.js) | Bundled unchanged into the microns-ops scrapes Queue consumer | `microns-ops` | `2` |  |
 | `SVC-dev-server` | scripts/dev-server.js (Express + Vite dev shim) | local dev only | Replaced by wrangler dev; deleted in Phase 6 | `delete` | `6` |  |
 | `SVC-sheet-metal-service` | sheet-metal-service (FastAPI + CadQuery/OCP) | Docker on a VPS (host, spec and cost not recorded; PLAN.md Q2) | microns-cad Container app behind the CadRouter DO in microns-ops; shared secret and hard wall-clock; async Queue → R2 → Supabase interface later | `microns-cad` | `5` |  |
 | `SVC-freecad-unfold` | scripts/freecad-unfold (legacy FreeCAD + Xvfb service) | not deployed | Delete in Phase 6 | `delete` | `6` |  |
 | `SVC-xometry-review-box` | xometry-bot review API + Playwright phases (buyer_pricer, partner_form) | not deployed (binds 127.0.0.1:8077 when run) | Keep undeployed; not portable to Browser Rendering (persistent headed MFA login); Phase-2 pricing is PLAN.md Q8 | `unchanged` | `stays` |  |
 | `SVC-xometry-dashboard` | xometry-bot/dashboard (portable Next.js variant) | not deployed (kept for reference; the SPA page /dashboard/xometry is live) | Unchanged (reference only) | `unchanged` | `stays` |  |
-| `SVC-mcp-server` | mcp-server (micronshub-leads, stdio; 39 tools, 3 resources, 2 prompts) | local laptop under Claude Desktop | Stays local; remote MCP on mcp.micronshub.eu (MicronsMcp DO in microns-ops, Access + OAuth) in Phase 4 | `microns-ops` | `4` | H-14 |
+| `SVC-mcp-server` | mcp-server (micronshub-leads, stdio; 39 tools, 3 resources, 2 prompts) | local laptop under Claude Desktop | Stays local; Phase 2: one SITE_URL for every /api call, Access service-token headers only to a host behind Access, redirects not followed, export_tenders_csv returns the CSV; remote MCP on mcp.micronshub.eu (MicronsMcp DO in microns-ops, Access + OAuth) in Phase 4 | `microns-ops` | `4` | H-14 |
 | `SVC-supabase-auth` | Supabase Auth (Site URL, redirect allowlist, e-mail templates) | Supabase | Stays; add the Cloudflare preview host to the redirect allowlist and keep https://www.micronshub.eu (P0-6) | `supabase-stays` | `0` | H-22 |
 | `SVC-supabase-realtime` | Supabase Realtime (marketing_campaigns UPDATE, user_emails) | Supabase | Stays | `supabase-stays` | `stays` |  |
 | `SVC-google-workspace` | Google Workspace (apex MX, 2 sender accounts) | Google | Unchanged; apex MX never touched; Gmail reply poller for the 2 sender accounts in Phase 4 | `unchanged` | `stays` | H-16 |
@@ -739,8 +748,8 @@ Zone `micronshub.eu` is hosted at Papaki (not Vercel DNS) and is DNSSEC-signed w
 | `CFG-supabase-ref` | Hard-coded Supabase project ref cfjrtmtaitwzggzpkhxi in runtime code | middleware.ts:43; api/sitemap.js:24; index.html:45 | Worker var SUPABASE_URL; keep the index.html preconnect (Supabase stays) | `microns-site` | `1` | Only these three are runtime paths |
 | `CFG-client-redirect-maps` | Client redirect maps (REDIRECT_MAP 28 entries + 2 patterns; OLD_SLUG_REDIRECTS; OLD_BLOG_SLUG_REDIRECTS) | src/components/SEORedirects.tsx:14-77; src/components/TranslatedRouteMatcher.tsx:71-108 | Unchanged (client fallback); source for the generated microns-site redirect table | `unchanged` | `1` | See RD-01..RD-28, RD-P1, RD-P2 |
 | `CFG-google-oauth-redirect` | Google Cloud OAuth redirect URI for the Gmail connect flow | api/marketing.js:46-47 (default https://${VERCEL_URL}/…) | Register https://www.micronshub.eu/api/marketing?action=google-auth&step=callback and set GOOGLE_REDIRECT_URI | `microns-ops` | `2` | Dashboard task for the owner |
-| `CFG-resend-webhook-url` | Resend webhook destination URL | api/marketing.js:61,233 (handler); Resend dashboard (URL) | Unchanged if host and path are preserved; confirm the configured host (www or apex) in the Resend dashboard | `microns-ops` | `2` |  |
-| `CFG-s3-cors` | AWS S3 bucket CORS AllowedOrigins (localhost, production, \*.vercel.app) | docs/AWS_S3_VERCEL_GUIDE.md:36-41 | Legacy buckets are read-only (no upload CORS needed); R2 CORS for www and the preview host | `r2` | `2` |  |
+| `CFG-resend-webhook-url` | Resend webhook destination URL | api/marketing.js:61,233 (handler); Resend dashboard (URL) | Phase 3 S11: create or repoint the Resend endpoint at https://www.micronshub.eu/api/marketing?action=webhook with its signing secret (microns-ops RESEND_WEBHOOK_SECRET); read the configured host (www or apex) first | `microns-ops` | `2` |  |
+| `CFG-s3-cors` | AWS S3 bucket CORS AllowedOrigins (localhost, production, \*.vercel.app) | docs/AWS_S3_VERCEL_GUIDE.md:36-41 | Legacy rfq bucket: no new uploads, so no upload CORS needed; legacy articles bucket keeps its CORS until P3-6; R2 bucket CORS for www and the preview hosts from workers/site/r2/cors.private.json (P2-9) | `r2` | `2` |  |
 | `CFG-telegram-webhooks` | Telegram setWebhook targets for the two bots | outside the repo (Telegram) | Unchanged (bots stay on Supabase) | `unchanged` | `stays` |  |
 | `CFG-vercel-domain-settings` | Vercel domain-level behaviour: apex redirect status, HTTP→HTTPS, HSTS, default headers, Deployment Protection | Vercel dashboard (not in repo) | Captured in the baseline (P0-3) and reproduced: Redirect Rule status, Always Use HTTPS, HSTS | `cloudflare-zone` | `3` |  |
 | `CFG-vercel-firewall` | Vercel firewall / Attack Challenge Mode (non-browser clients get 429 + x-vercel-mitigated: challenge) | Vercel dashboard (setting unread) | Cloudflare bot posture explicitly permissive for verified bots; Bot Fight Mode off; one WAF rate-limit rule on /api/\* | `cloudflare-zone` | `3` | PLAN.md Q1 |
@@ -788,3 +797,4 @@ Zone `micronshub.eu` is hosted at Papaki (not Vercel DNS) and is DNSSEC-signed w
 | Security wording | Every cell scanned for exploit-level wording forbidden in this public repo; none present |
 | Byte-exact redirect sources | `RD-01`…`RD-25` names are copied from the parsed `vercel.json`, including the mojibake source of `RD-12` |
 | Live cross-checks | Edge-function list, `cron.job`, public tables, storage objects and content counts re-read on 2026-09-30; sitemap blob `<loc>` count = 2,596 |
+| Phase 2 update (2026-10-04) | 57 rows brought in line with the Phase 2 build (targets, components and phases of the `/api` endpoints and actions, legacy S3 names, buckets, callers). A script edits only those CSV cells, rewrites the same cells in this file and recomputes §1.4 and §2; the CSV parse check above passes again (386 data rows, 16 columns), and the secret and wording scans were re-run on the new cells (0 hits) |

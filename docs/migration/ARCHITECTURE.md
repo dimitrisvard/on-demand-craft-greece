@@ -161,9 +161,9 @@ Rules that follow from the split:
 
 | Rule | Detail |
 |---|---|
-| One repository, four folders | `workers/site`, `workers/ops`, `workers/mail`, `workers/cad`; one pinned `wrangler` version (H-23) |
+| One repository, four folders | `workers/site`, `workers/ops`, `workers/mail`, `workers/cad`; one pinned `wrangler` version (H-23). Since Phase 2 also `workers/shared`: source-only code (the `@vercel/node` shim, HTTP helpers, auth and storage primitives) that both Workers import by relative path; each package keeps its own lockfile, the root lockfile is unchanged |
 | Service binding, not public HTTP | `microns-site` and `microns-mail` call `microns-ops` through binding `OPS`; `microns-ops` has no public hostname except `mcp.micronshub.eu` |
-| Contract between site and ops | The site forwards the original `Request` (method, path, query, body, headers) plus the verified caller identity; ops never renders HTML |
+| Contract between site and ops | RPC to the named entrypoint `OpsApi`: `handle(request, call)`. The request keeps method, path, query and body, without cookies, Access headers, `x-microns-*` and hop-by-hop headers; `call` carries the endpoint, action, function URL and the verified caller, and ops reads the caller only from `call`. The default `fetch` of `microns-ops` answers 404; ops never renders HTML |
 | Independent rollback | `microns-site` rolls back by version (`wrangler rollback`) or record flip; agents by flag in KV `FLAGS`; ops by version |
 
 ## 5. Hostnames (canonical)
@@ -175,6 +175,7 @@ Rules that follow from the split:
 | `*.micronshub.eu` | wildcard CNAME to Vercel (tenant subdomains) | proxied wildcard record + Workers Route `*.micronshub.eu/*` → `microns-site` (more specific routes win) |
 | `files.micronshub.eu` | — | R2 custom domain for `microns-public` |
 | `mcp.micronshub.eu` | — | Custom Domain → `microns-ops` (remote MCP), Access + OAuth |
+| `api.micronshub.eu` | caught by wildcard CNAME | Machine-caller host for `tender-collector` and the local MCP server, served by `microns-site` behind Access application `microns-machine-api`; added to `API_MACHINE_HOSTS` by the Phase 3 runbook before the `www` flip ([PLAN.md](PLAN.md) §5.2 D-3) |
 | `rfq.micronshub.eu` | caught by wildcard CNAME | Email Routing subdomain (MX/TXT added by CF); addresses `rfq@`, `replies@` → `microns-mail` |
 | preview | — | `microns-site.<account>.workers.dev` + `wrangler versions upload --preview-alias staging`; Access (service token for CI tools); `X-Robots-Tag: noindex` on every non-production host |
 
@@ -184,7 +185,8 @@ Rules that follow from the split:
 | `rfq.` after Email Routing | Once MX/TXT exist at `rfq`, the wildcard CNAME no longer answers for that name; nothing browses `rfq.` today | live 2026-09-30 (wildcard answers `rfq.`) |
 | `_vercel.` | Answered by the wildcard today; kept until Vercel is decommissioned (Phase 6) | live 2026-09-30 |
 | Route precedence | Routes run in front of Custom Domains, so `*.micronshub.eu/*` would also catch `mcp.` and `files.`; at S11, routes `mcp.micronshub.eu/*` and `files.micronshub.eu/*` without a Worker are added (or the router passes those hosts through). `www.micronshub.eu/*` wins over the wildcard as the more specific pattern | CF docs (verified 2026-09-30, [wrangler.jsonc.draft](wrangler.jsonc.draft)) |
-| `on-demand-craft-greece.vercel.app` | Duplicate host serving the same site; used only as the server-side target of `api.forward_to_vercel`, never linked | live 2026-09-30; [PLAN.md](PLAN.md) §5.2 |
+| `on-demand-craft-greece.vercel.app` | Duplicate host serving the same site; used only as the server-side target of the `/api` forward (var `API_FORWARD_ORIGIN` from Phase 2: the forward refuses its own host once `www` routes to the Worker), never linked | live 2026-09-30; [PLAN.md](PLAN.md) §5.2 |
+| `api.` label | Reserved by the tenant resolver, so it never resolves to a tenant | src/utils/tenantApi.ts:29-51 (§15) |
 
 ## 6. `microns-site`
 
@@ -206,7 +208,7 @@ Rules that follow from the split:
 |---|---|---|---|
 | 1 | Redirect table: 25 `vercel.json` sources + 3 client-only sources (src/components/SEORedirects.tsx:14-73), matched on the raw and the NFC-decoded pathname | 308 with the same `Location` as Vercel; the dead mojibake source (vercel.json:58-62) kept byte-identical; the 3 client-only entries become server 308s (documented parity deviation, [PLAN.md](PLAN.md) P1-5) | Some sources sit inside the language matcher (`/en/dawycena`, vercel.json:68-72); they must redirect before the SEO handler answers 200 |
 | 2 | `/sitemap.xml`, `/sitemap-complete.xml`, `/sitemap-index.xml`, then `/sitemap-{lang}.xml`, and `/api/sitemap` | Port of `api/sitemap.js` (`type` = `main-index`, default, `index`, `lang`; api/sitemap.js:402-409); headers as api/sitemap.js:392-396; Cache API 1 h | Exact names are checked before the `{lang}` pattern because `index` and `complete` also match it (Vercel evaluates the rewrites in order, vercel.json:131-145); H-12 |
-| 3 | `/api/*` | Local handler, `OPS` forward, or Vercel forward when flag `api.forward_to_vercel` is on (§6.4) | Independent of HTML rendering; `/api/track` and `/api/connector-status` aliases resolved here (vercel.json:151-157) |
+| 3 | `/api/*` | Local handler, `OPS` RPC, or Vercel forward when flag `api.forward_to_vercel` is on or the path is outside the `/api` catalogue (§6.4) | Independent of HTML rendering; `/api/track` and `/api/connector-status` aliases resolved here (vercel.json:151-157) |
 | 4 | `/{lang}` and `/{lang}/*` for the 14 languages (middleware.ts:682-687) | SEO handler: copy of the `middleware.ts` orchestrator; `middleware/*` imported unchanged | H-8: the 210 prerendered files differ from the injected shell (Helmet head, `og:locale` `en`, no `#seo-content`) and must never be served for language routes; `src/main.tsx:7` renders without hydration |
 | 5 | `/laserkritis/`, `/zohoverify/` (only if the P0-3 baseline shows Vercel serving the directory index; var `DIRECTORY_INDEX_EMULATION`, `"true"` in Phase 1) | `env.ASSETS.fetch` of `<path>index.html` | `html_handling: "none"` serves exact file paths only |
 | 6 | Everything else | `env.ASSETS.fetch(request)`: asset, or SPA shell 200 | Same as Vercel's filesystem + `/(.*)` fallback; `/` and unprefixed legacy routes stay 200 shells (H-9) |
@@ -267,11 +269,11 @@ sequenceDiagram
     end
     X-->>C: 200 application/xml
   else path starts with /api/
-    S->>P: 3. /api/* router
+    S->>P: 3. /api/* router (gate first)
     alt browser-facing subset
       P-->>C: served locally
     else ops route
-      P->>O: service binding fetch
+      P->>O: OPS RPC handle(request, call)
       O-->>C: response
     end
   else /{lang} or /{lang}/*
@@ -302,27 +304,41 @@ sequenceDiagram
 
 ### 6.4 `/api/*` split (12 endpoints, paths and query shapes unchanged)
 
-Execution classes: **Local** = handled in `microns-site`; **OPS** = forwarded over the service binding and answered by `microns-ops` within the request; **Queue** = `microns-ops` enqueues and answers at once; **Workflow** = starts or signals a Workflow instance; **Container** = work ends in `microns-cad`. Gates (Turnstile, Supabase JWT, Access service token, Svix, rate limits) are assigned per route in the private gate matrix (PLAN.md P2-7).
+Execution classes: **Local** = handled in `microns-site`; **OPS** = sent over the service binding (RPC) and answered by `microns-ops` within the request; **Queue** = `microns-ops` enqueues and answers at once; **Workflow** = starts or signals a Workflow instance; **Container** = work ends in `microns-cad`. Gates (Turnstile, Supabase JWT, Access service token, Svix, rate limits) are assigned per route in the private gate matrix (PLAN.md P2-7) and run in the `microns-site` router for both Workers; only the Svix check and the Google OAuth `state` check run in `microns-ops`, where their secrets live. Rows below are as built in Phase 2 ([PLAN.md](PLAN.md) §5.2 lists the deviations DV-1…DV-19).
 
 | # | Endpoint | Actions (evidence) | Target | Class | Bindings / secrets used |
 |---|---|---|---|---|---|
-| 1 | `/api/emails` | `contact`, `email` (default), `rfq`, `rfq-pdf` (api/emails.js:367-376) | `microns-site` | Local | `RESEND_API_KEY`, `TURNSTILE_SECRET_KEY`, `API_RATE_LIMIT` |
-| 2 | `/api/s3` | `presign-upload`, `presign-download`, `delete`, `delete-folder`, `list` (api/s3.js:148-227) | `microns-site`: `rfq` scope → `microns-private` (new objects), legacy S3 fallback for reads; `articles` scope → legacy S3 until `files.micronshub.eu` serves `microns-public` (P3-6) | Local | `PRIVATE_FILES`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_S3_REGION`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY` |
-| 3 | `/api/marketing` | `track` (pixel, click, unsubscribe; also `/api/track`, vercel.json:151-153) | `microns-site`, byte-identical responses (H-14) | Local | `SUPABASE_SERVICE_ROLE_KEY` |
-| 3 | `/api/marketing` | `webhook`, `google-auth` (`authorize`, `callback`, `refresh`), `apollo-enrich` (api/marketing.js:56-68) | `microns-ops`; explicit `GOOGLE_REDIRECT_URI` replaces `VERCEL_URL` (api/marketing.js:47); Svix verification (H-15) | OPS | `RESEND_WEBHOOK_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APOLLO_API_KEY` |
-| 4 | `/api/notifications` | `partner` (default), `production-status` (api/notifications.js:253-272) | `microns-site` | Local | `RESEND_API_KEY` |
-| 4 | `/api/notifications` | 19 `inv-*` actions (lib/inventory/index.js:480-530) | `microns-ops` (keeps `lib/inventory`, `qrcode`, `pdf-lib` out of the site bundle) | OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
-| 4 | `/api/notifications` | `nest` (api/notifications.js:266-267) | `microns-ops` with raised `limits.cpu_ms` (draft 60,000 ms for a 50 s budget, lib/nesting/nester.js:286; CPU max 5 min); moves to the Container if measured CPU exceeds that | OPS (Container fallback) | — (H-18) |
-| 5 | `/api/gsc` | `search-analytics`, `inspect-url`, `bulk-inspect`, `submit-indexing`, `sitemaps`, `monitored-urls` (api/gsc.js:193-212) | `microns-ops`; `bulk-inspect` and `submit-indexing` batches on Queue `scrapes` | OPS + Queue | `SUPABASE_SERVICE_ROLE_KEY` (the GSC client reads its Google credentials from the database today, api/_lib/gsc-client.js:4) |
+| 1 | `/api/emails` | `contact`, `email` (default), `rfq`, `rfq-pdf` (api/emails.js:367-376) | `microns-site`; Turnstile token in request header `X-Turnstile-Token` | Local | `RESEND_API_KEY`, `TURNSTILE_SECRET_KEY`, `API_RATE_LIMIT`, `API_RATE_LIMIT_MAIL` |
+| 2 | `/api/s3` | `presign-upload`, `presign-download`, `delete`, `delete-folder`, `list` (api/s3.js:148-227) | `microns-site` files API (`workers/site/src/api/files.ts`, same statuses and bodies as api/s3.js): `rfq` scope → new objects in `microns-private` under `rfq/` + today's key, reads fall back to legacy S3, deletes and lists cover both stores; `articles` scope → legacy S3 until `files.micronshub.eu` serves `microns-public` (P3-6, D-17) | Local | `PRIVATE_FILES`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_S3_REGION`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY`, `API_RATE_LIMIT_BULK` |
+| 3 | `/api/marketing` | `track` (pixel, click, unsubscribe; also `/api/track`, vercel.json:151-153) | `microns-site`, `api/marketing.js` unchanged, byte-identical responses (H-14) | Local | `SUPABASE_SERVICE_ROLE_KEY` |
+| 3 | `/api/marketing` | `webhook`, `google-auth` (`authorize`, `callback`, `refresh`), `apollo-enrich` (api/marketing.js:56-68) | `microns-ops`; explicit `GOOGLE_REDIRECT_URI` replaces `VERCEL_URL` (api/marketing.js:47); Svix verification on the raw bytes (H-15) | OPS | `RESEND_WEBHOOK_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APOLLO_API_KEY` |
+| 4 | `/api/notifications` | `partner` (default), `production-status` (api/notifications.js:253-272) | `microns-ops`: `api/notifications.js` imports nesting and inventory at module scope (api/notifications.js:9-11), so no action can run in the site without them (DV-1) | OPS | `RESEND_API_KEY` |
+| 4 | `/api/notifications` | 19 `inv-*` actions (lib/inventory/index.js:480-530) | `microns-ops` (keeps `lib/inventory`, `qrcode`, `pdf-lib` out of the site bundle); `qrcode` aliased to its server build | OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| 4 | `/api/notifications` | `nest` (api/notifications.js:266-267) | `microns-ops`, synchronous, `limits.cpu_ms` 300,000 (DV-4): the 50 s budget (lib/nesting/nester.js:286) never trips when deployed, because `Date.now()` advances only on I/O; an RPC rejection answers 504 JSON `TIMEOUT`; Container only if a real order exceeds the limit (D-6) | OPS (Container fallback) | — (H-18) |
+| 5 | `/api/gsc` | `search-analytics`, `inspect-url`, `bulk-inspect`, `submit-indexing`, `sitemaps`, `monitored-urls` (api/gsc.js:193-212) | `microns-ops`, synchronous in Phase 2 (its own admin check still runs); `bulk-inspect` and `submit-indexing` batches move to Queue `scrapes` in Phase 5 (DV-3) | OPS (+ Queue from Phase 5) | `SUPABASE_SERVICE_ROLE_KEY` (the GSC client reads its Google credentials from the database today, api/_lib/gsc-client.js:4) |
 | 6 | `/api/tenders` | GET list/filter/stats/CSV export, `connectors=true` (alias `/api/connector-status`, vercel.json:155-157), PATCH (api/tenders.js:3-5, :32, :122) | `microns-ops` | OPS | `SUPABASE_SERVICE_ROLE_KEY` |
-| 7 | `/api/tender-scan` | POST scan (api/tender-scan.js:78); called by `tender-collector` (supabase/functions/tender-collector/index.ts:68) | `microns-ops`: enqueue on `scrapes`, answer 2xx at once with the JSON keys the caller reads | Queue | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
-| 8 | `/api/funded-startups` | GET list, `stats`, `feeds`, `export`; POST scan; PATCH (api/funded-startups.js:36-46) | `microns-ops`; POST scan on Queue `scrapes` | OPS + Queue | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| 7 | `/api/tender-scan` | POST scan (api/tender-scan.js:78); called by `tender-collector` (supabase/functions/tender-collector/index.ts:68) | `microns-ops`: a machine caller's POST is validated as the handler validates it, enqueued on `scrapes` and answered 200 at once with every key of today's body at zero plus `queued` and `run_id`; staff and dashboard callers run synchronously (DV-3) | Queue (machine) / OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SCRAPES` |
+| 8 | `/api/funded-startups` | GET list, `stats`, `feeds`, `export`; POST scan; PATCH (api/funded-startups.js:36-46) | `microns-ops`; POST scan synchronous in Phase 2 (the queue kind `funded-scan` is built, no producer yet; DV-3) | OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | 9 | `/api/scrape-website` | POST (api/scrape-website.js:15) | `microns-ops`, ≤ 6 concurrent outbound connections | OPS | — |
 | 10 | `/api/scrape-company-profile` | POST (api/scrape-company-profile.js:321) | `microns-ops`, ≤ 6 concurrent outbound connections | OPS | — |
 | 11 | `/api/scan-directory` | POST (api/scan-directory.js:349) | `microns-ops`; Europages/wlw via Browser Rendering later (P4-10) | OPS | `BROWSER` (Phase 4) |
 | 12 | `/api/sitemap` (+ `/sitemap*.xml`) | `main-index`, default, `index`, `lang` (api/sitemap.js:402-409) | `microns-site` (router step 2) | Local | `SUPABASE_ANON_KEY`; from Phase 5 `PRIVATE_FILES` (`sitemaps/…`) |
-| — | Any `/api/*` with flag `api.forward_to_vercel` on | Proxied unchanged to the Vercel production deployment | Vercel | Rollback | KV `FLAGS` |
+| — | Any `/api/*` with flag `api.forward_to_vercel` on (all paths, a path list, or preview / production hosts only), and any `/api/*` path outside the catalogue | Proxied unchanged, ungated, to `API_FORWARD_ORIGIN` (the Vercel deployment host); `/api/sitemap` stays local (router step 2) | Vercel | Rollback | KV `FLAGS`, var `API_FORWARD_TO_VERCEL` (fallback) |
 | — | `/api/agent/decision` (new in Phase 4) | POST approve / confirm / reject from `ApprovalsPage`, `RfqInboxPage` and the Telegram relay ([AGENTS.md](AGENTS.md) §2.4) | `microns-ops` | Workflow (`sendEvent` / `terminate`) | `SUPABASE_SERVICE_ROLE_KEY` |
+
+`/api` router rules (as built in Phase 2: `workers/site/src/api/{forward,resolve,router,ops-client}.ts`; detail in workers/site/README.md):
+
+| Rule | Detail | Why |
+|---|---|---|
+| Order | Flag `api.forward_to_vercel` → catalogue lookup on the canonical spelling of the path → body buffered once → endpoint and action resolved with each handler's own precedence → names of the dispatch target checked → answers the handler gives before any side effect (`OPTIONS`, wrong method, unknown action, invalid body) dispatched ungated → gate → dispatch (local, `OPS`, forward) → one log line | The rollback flag stays ungated; parity of the handlers' own `OPTIONS` and error answers |
+| Shim | Handlers run unchanged through `workers/shared/src/compat/vercel-node.ts` (`@vercel/node` 17.0.0 helper semantics, not Express), loaded with a lazy `import()` per route, so a module-scope failure answers 500 on that route only. Deadline 30 s in the site, 300 s in ops; a handler that has not ended answers 504 `text/plain` | api/emails.js:12 creates its client at module scope |
+| Config per request | Every Phase 2 binding, var and secret is optional in the site `Env`; each dispatch target and each gate decision checks only the names it needs and answers 500 `text/plain` (log `api config missing: <NAMES>`) on the requests that need a missing one | A missing mail key never breaks tracking links |
+| Body size | Above 4,718,592 bytes (4.5 MiB) → 413 `{"error":"payload_too_large"}` before any handler | Vercel's function payload limit; exact cut-off re-checked at P2-12 |
+| Gate answers | 401 `unauthorized`, 403 `forbidden` or `turnstile_failed`, 429 `rate_limited` with `Retry-After: 60`, 503 `auth_unavailable` or `turnstile_unavailable` (fail closed), 415 `unsupported_media_type` and 400 `invalid_field` (JSON-only bodies with string fields on the gated e-mail and inventory write paths), data-rule codes per the private matrix | One JSON shape `{"error": "<code>"}` for every answer the Worker produces itself |
+| Gate modes | `API_GATES_MODE`: `report` (log `gate would deny`, then allow) or `enforce` per gate class; a class not named enforces | Rollout without a code change (D-16) |
+| Errors after the gate | `OPS` RPC rejection → 500 `text/plain`, for `nest` 504 `{"success":false,"error":"Nesting exceeded the time limit","code":"TIMEOUT"}`; forward failure → 502 `{"error":"upstream"}` | — |
+| CORS | Phase 1 `finalise()` sets the vercel.json headers on every `/api/*` answer, including those from `microns-ops`; the allow-list mode (`workers/shared/src/http/cors.ts`) is built and tested, and wired after the Phase 3 observation window (D-9) | `OPTIONS` parity is a Phase 2 gate item |
+| Logs | `[microns-site] api endpoint=… action=… actionId=… target=… status=… ms=… principal=<class> requestId=…`; the same `requestId` in `microns-ops`; never a token, cookie, body or e-mail address | One request traceable across both Workers |
 
 Callers outside `/api/*` that reach Cloudflare compute: `extract-flat-pattern` and `generate-manufacturing-pdf` call `UNFOLD_SERVICE_URL` (supabase/functions/generate-manufacturing-pdf/index.ts:55), repointed in Phase 5 to `microns-ops`, which runs the job through `CadRouter` → `CadContainer` (Container class, `/flat-pattern` byte-identical, sheet-metal-service/main.py:445). `lib/inventory/cron-batch.js:7` documents `inv-cron-batch` as a cron target, but nothing schedules it today (live `cron.job`, 2026-09-30); it stays an on-demand OPS action unless the owner wants a Cron Trigger.
 
@@ -334,21 +350,22 @@ Callers outside `/api/*` that reach Cloudflare compute: `extract-flat-pattern` a
 |---|---|---|
 | Assets | `ASSETS` | `directory` = `../../dist`, `html_handling: "none"`, `not_found_handling: "single-page-application"`, `run_worker_first: true` |
 | KV | `SEO_CACHE`, `FLAGS` | SEO row cache; flag mirror |
-| Service binding | `OPS` | `microns-ops` |
-| R2 | `PRIVATE_FILES` | bucket `microns-private` (RFQ uploads/downloads for the `/api/s3` replacement) |
-| Rate limiting | `API_RATE_LIMIT` | Workers Rate Limiting API |
-| Vars | `SUPABASE_URL`, `SITE_ORIGIN` (= `https://www.micronshub.eu`), `PREVIEW_HOSTNAMES`, `SEO_STRICT_404` (= `"false"`), `R2_ACCOUNT_ID`, `LEGACY_S3_REGION` (= `eu-north-1`) | `SITE_ORIGIN` replaces hardcoded origins in ported handlers (api/sitemap.js:26) |
-| Secrets (names only) | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `TURNSTILE_SECRET_KEY`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY` | Set with `wrangler secret`; appended to the P0-2 consumer checklist the day they are created |
+| Service binding | `OPS` | `microns-ops`, named entrypoint `OpsApi` (RPC `handle(request, call)`) |
+| R2 | `PRIVATE_FILES` | bucket `microns-private`, `"jurisdiction": "eu"` (RFQ uploads/downloads for the `/api/s3` replacement; code constant `R2_JURISDICTION` kept equal by a config test; D-1) |
+| Rate limiting | `API_RATE_LIMIT` (30/60 s, namespace `2001`), `API_RATE_LIMIT_MAIL` (5/60 s, `2002`), `API_RATE_LIMIT_BULK` (300/60 s, `2003`) | Workers Rate Limiting API; MAIL for mail keys, BULK for idempotent reads and upload presigns; both fall back to `API_RATE_LIMIT` when absent |
+| Vars | `SUPABASE_URL`, `SITE_ORIGIN` (= `https://www.micronshub.eu`), `PREVIEW_HOSTNAMES`, `SEO_STRICT_404` (= `"false"`), `DIRECTORY_INDEX_EMULATION`, `API_FORWARD_ORIGIN` (= `https://on-demand-craft-greece.vercel.app` from Phase 2), `API_FORWARD_TO_VERCEL` (= `"false"`), `R2_ACCOUNT_ID`, `LEGACY_S3_REGION` (= `eu-north-1`), `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `API_GATES_MODE`, `API_MACHINE_HOSTS` (= `""` in Phase 2) | `SITE_ORIGIN` replaces hardcoded origins in ported handlers (api/sitemap.js:26); legacy bucket names are vars, not constants in code (DV-10) |
+| Secrets (names only) | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `TURNSTILE_SECRET_KEY`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LEGACY_AWS_ACCESS_KEY_ID`, `LEGACY_AWS_SECRET_ACCESS_KEY`, `ACCESS_MACHINE_CLIENT_IDS` | Set with `wrangler secret`; appended to the P0-2 consumer checklist the day they are created |
 | Flags | `compatibility_flags: ["nodejs_compat"]`, `compatibility_date` `2026-09-01` | H-20 |
 
-Why `PRIVATE_FILES` and R2 S3 API keys both: presigned URLs need S3 API credentials (`aws4fetch` against the R2 S3 endpoint); the binding serves Worker-streamed downloads, `list` and `delete`. Presigning uploads for the `articles` scope into `microns-public` also uses the S3 API credentials, so the site needs no `PUBLIC_FILES` binding.
+Why `PRIVATE_FILES` and R2 S3 API keys both: presigned URLs need S3 API credentials (`aws4fetch` against the R2 S3 endpoint, `https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com` with the `eu` jurisdiction); the binding serves `head`, `list` and `delete`. In Phase 2 the `articles` scope presigns against legacy S3 with the same `LEGACY_AWS_*` pair; from P3-6 article uploads presign into `microns-public` with S3 API credentials for that bucket (the Phase 2 R2 token covers `microns-private` only), so the site needs no `PUBLIC_FILES` binding.
 
 ### 7.2 `microns-ops`
 
 | Kind | Name | Target / value |
 |---|---|---|
-| R2 | `PRIVATE_FILES`, `PUBLIC_FILES` | `microns-private`, `microns-public` |
-| KV | `FLAGS`, `SEO_CACHE` | `SEO_CACHE` keys purged on content publish |
+| Entrypoint | `OpsApi` (named `WorkerEntrypoint`) | RPC `handle(request, call)` from `microns-site`: checks `call.v`, takes the caller only from `call`, runs the Hono app; the default `fetch` answers 404 (Phase 2) |
+| R2 | `PRIVATE_FILES`, `PUBLIC_FILES` | `microns-private` (`"jurisdiction": "eu"`, as every binding of it), `microns-public` (Phase 4–5) |
+| KV | `FLAGS`, `SEO_CACHE` | Phase 4–5; `SEO_CACHE` keys purged on content publish. The Phase 2 ops Worker reads no flag |
 | Queues (producer + consumer) | `cad-jobs`, `translations`, `outbound-mail`, `scrapes`, `agent-events` | each with DLQ `<name>-dlq` (§9) |
 | Workflows | `rfq-intake` (`RfqIntakeWorkflow`), `quote` (`QuoteWorkflow`), `post-order` (`PostOrderWorkflow`), `content-daily` (`ContentDailyWorkflow`), `sitemap` (`SitemapWorkflow`), `ops-digest` (`OpsDigestWorkflow`) | §10 |
 | Durable Objects | `MaterialStock`, `RfqThread`, `SenderLimiter`, `CadRouter`, `MicronsMcp`, `CadContainer` | §11 |
@@ -360,7 +377,8 @@ Why `PRIVATE_FILES` and R2 S3 API keys both: presigned URLs need S3 API credenti
 | Custom Domain | `mcp.micronshub.eu` | Remote MCP (`MicronsMcp`) |
 | Vars | `SUPABASE_URL`, `SITE_ORIGIN` (= `https://www.micronshub.eu`), `AI_GATEWAY_ID` (= `microns`) | Needed by the ported code and the gateway client (added in [wrangler.jsonc.draft](wrangler.jsonc.draft)) |
 | Secrets (names only) | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY` (or AI Gateway BYOK), `GEMINI_API_KEY` (or BYOK), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GSC_SERVICE_ACCOUNT_JSON`, `APOLLO_API_KEY`, `XOMETRY_TOKEN`, `CAD_SHARED_SECRET`, `INDEXNOW_KEY`, `MCP_OAUTH_*` | `GSC_SERVICE_ACCOUNT_JSON` is a reserved name: today the GSC client reads its Google credentials from the database (api/_lib/gsc-client.js:4), so the secret is only needed if they move to a Worker secret |
-| Flags and limits | `nodejs_compat`, same compatibility date as the site; `limits.cpu_ms` 60,000 (draft) | H-18, H-20 |
+| Flags and limits | `nodejs_compat`, same compatibility date as the site; `limits.cpu_ms` 300,000 (DV-4; applies to RPC calls and queue consumers alike); `alias` `qrcode` → `qrcode/lib/server.js` | H-18, H-20 |
+| Phase 2 subset | Entrypoint, `SCRAPES` producer and consumer, the two vars, the ten Phase 2 secrets, `limits`, `alias`; `workers_dev` and `preview_urls` off, no routes. Deployed with `wrangler deploy` before the site (a service binding reaches the current deployment only), from `.github/workflows/cf-ops.yml` (manual dispatch) | workers/ops/wrangler.jsonc |
 
 Binding variable names for Queues, Workflows and Durable Objects (for example `CAD_JOBS`, `RFQ_INTAKE`, `RFQ_THREAD`) are set in [wrangler.jsonc.draft](wrangler.jsonc.draft). Cron Triggers on `microns-ops` (UTC; Phase 5 unless stated):
 
@@ -405,7 +423,9 @@ Refinement against plan.md (which proposed one bucket `microns-files`): two buck
 |---|---|---|---|---|---|
 | `microns-public` | `articles/<yyyy>/<mm>/<slug>.<ext>` | New article images | `/api/s3` `articles` scope (presigned PUT) | Public via `files.micronshub.eu` | 3 (P3-6) |
 | `microns-public` | `tenants/<slug>/…` | Tenant logos and assets | `microns-ops` / dashboard | Public | 4–5 |
-| `microns-private` | `rfq/<rfq_id>/<file_id>-<name>` | RFQ files: web-form uploads and e-mail attachments linked to an RFQ | `/api/s3` `rfq` scope (presigned PUT); `rfq-intake` step `copy-files` | Presigned GET or Worker-streamed; `CadRouter` | 2 (4 for e-mail) |
+| `microns-private` | `rfq/<rfqNumber>/<partFolder>/<safeName>` (`rfq/` + the key api/s3.js returns today) | RFQ files uploaded through `/api/s3`; the browser keeps today's key and `publicUrl`/`url` keep the legacy string format (DV-5, D-2) | `/api/s3` `rfq` scope (presigned PUT, 300 s, `Content-Type` signed) | Presigned GET; `CadRouter` | 2 |
+| `microns-private` | `rfq/<rfq_id>/<file_id>-<name>` | E-mail attachments linked to an RFQ | `rfq-intake` step `copy-files` | Presigned GET or Worker-streamed; `CadRouter` | 4 |
+| `microns-private` | `upload-counters/<folder>/…` | Per-folder count of upload URLs issued by the files API (advanced with a conditional write) | `/api/s3` `presign-upload` | Files API only | 2 |
 | `microns-private` | `email/<message_id_sha256>/raw.eml` | Raw inbound MIME | `microns-mail` | `rfq-intake` Workflow | 4 |
 | `microns-private` | `email/<message_id_sha256>/att/<n>-<name>` | Inbound attachments (STEP, STL, DXF, PDF) | `rfq-intake` step `store-attachments` | Workflows, dashboard | 4 |
 | `microns-private` | `cad/<job_id>/input/…`, `cad/<job_id>/output/…` | Input prefix reserved (`CadRouter` streams inputs from `rfq/…`); outputs: `result.json`, PDF, DXF, SVG, log | `CadRouter` | `quote` Workflow, dashboard | 4–5 |
@@ -416,11 +436,12 @@ Refinement against plan.md (which proposed one bucket `microns-files`): two buck
 | Topic | Rule | Evidence |
 |---|---|---|
 | Key hygiene | `<message_id_sha256>` because RFC Message-IDs contain `<`, `>`, `@`; `<name>` is sanitised; SHA-256 and content type stored as object metadata and in `rfq_files.sha256`, `rfq_files.content_type`, `rfq_files.r2_key` | [PLAN.md](PLAN.md) P4-1 |
-| Presigning | `aws4fetch` against the R2 S3 API; short expiry; bucket CORS for browser PUT from `www` and the preview hosts (P2-9) | brief §3 |
-| Legacy S3 | AWS S3 buckets (eu-north-1, `rfq` and `articles` scopes) stay READ-ONLY for existing keys and the 755 `*.amazonaws.com` article image URLs | api/s3.js:33-65; live 2026-09-30; H-17; PLAN.md Q11 |
+| Presigning | `aws4fetch` against the R2 S3 API (`allHeaders` so `Content-Type` is signed; signatures equal `@smithy/signature-v4` in golden tests); PUT 300 s, GET 3,600 s by default (at most 604,800 s); bucket CORS for browser PUT from `www` and the preview hosts from `workers/site/r2/cors.private.json` (P2-9) | brief §3; workers/shared/src/storage/s3-presign.ts |
+| Legacy S3 | AWS S3 buckets (eu-north-1, `rfq` and `articles` scopes) keep the existing keys and the 755 `*.amazonaws.com` article image URLs: no new `rfq` uploads (reads, lists and deletes through the files API); article uploads stay there until P3-6 (D-17) | api/s3.js:33-65; live 2026-09-30; H-17; PLAN.md Q11 |
+| Rollback copy | `scripts/r2-to-legacy-s3.mjs` (owner-run, dry run by default, `--since`, `--execute`) copies `rfq/<key>` from R2 to the legacy `rfq` bucket under `<key>` with the owner's own credentials | PLAN.md §5.2 rollback |
 | Split brain today | RFQ uploads go to S3 but downloads read the public Supabase bucket `rfq-files`; the files API serves both during the overlap | src/components/rfq/RfqFileDownload.tsx:47, :100; sheet-metal-service/config.py:10 |
 | Supabase Storage | `quote-files` (0 objects), `rfq-files` (3), `sitemaps` (17, 6.76 MB), `tenant-laserkritis` (0), all public; unchanged until Phase 5/6 | live 2026-09-30 |
-| Retention and residency | Proposal: lifecycle rule deletes `email/` objects after 90 days (RFQ-linked files are copied to `rfq/…`); create `microns-private` with jurisdiction `eu` at P2-9 (only possible at creation) | [AGENTS.md](AGENTS.md) §2.6 |
+| Retention and residency | Proposal: lifecycle rule deletes `email/` objects after 90 days (RFQ-linked files are copied to `rfq/…`); `microns-private` is created with jurisdiction `eu` at P2-9 (only possible at creation; every binding and the S3 endpoint carry it; D-1) | [AGENTS.md](AGENTS.md) §2.6 |
 | Message size | Queue messages carry R2 keys, never file bodies | §9 |
 
 ## 9. Queues
@@ -432,7 +453,7 @@ All queues are produced and consumed by `microns-ops`; binding variable names an
 | `cad-jobs` | `rfq-intake`, `quote` Workflows; dashboard re-run | `CadRouter` → backend (existing unfold service until Phase 5, then `CadContainer`) | `{v, job_id, idempotency_key, job_type: "analyse" \| "drawing_pdf" \| "flat_dxf" \| "flat_svg", tenant_id, rfq_id, rfq_file_id, input: {r2_key, sha256}, params, backend: "auto", deadline_s, reply: {workflow, instance_id, event_type}, run_id}` | 1 | 2 | 3 (= `max_instances`) | `cad-jobs-dlq` | 4 |
 | `translations` | `content-daily` Workflow (13 languages per article, plus backfill) | Translation via AI Gateway route `translate` | `{article_id, translation_id, target_lang, idempotency_key: "<translation_id>:<language>", run_id}` | 1 | 5 (retry delay 120 s) | 3 | `translations-dlq` | 5 |
 | `outbound-mail` | `send-campaign` port (one message per campaign recipient) | `SenderLimiter.acquire` → Resend or Gmail API | `{campaign_id, recipient_id, sender_account_id, provider: "resend" \| "gmail", template_id, idempotency_key, run_id}` | 10 | 3 | 2 | `outbound-mail-dlq` | 5 |
-| `scrapes` | `/api/tender-scan`, `/api/funded-startups` POST, `/api/gsc` bulk actions, collector Cron Triggers, directory scans | Scan and collector handlers | `{kind: "tender-scan" \| "funded-scan" \| "gsc-bulk-inspect" \| "gsc-submit-indexing" \| "reddit" \| "hn" \| "tenders" \| "directory", params, run_id}` | 1 | 3 | 2 | `scrapes-dlq` | 2 (scans, GSC); 4–5 (collectors) |
+| `scrapes` | Phase 2: `/api/tender-scan` POST from a machine caller only (answered 200 with `queued` and `run_id`; DV-3). Later: `/api/funded-startups` POST, `/api/gsc` bulk actions (Phase 5), collector Cron Triggers, directory scans | Scan and collector handlers, run unchanged through the shim (synthetic `POST /api/<function>`, deadline 840 s); status < 500 → ack, 5xx, timeout or throw → retry after 300 s | `{v: 1, kind: "tender-scan" \| "funded-scan" (built in Phase 2) \| "gsc-bulk-inspect" \| "gsc-submit-indexing" \| "reddit" \| "hn" \| "tenders" \| "directory", params, run_id, enqueued_at, requested_by}` (in Phase 2 `run_id` is a UUID, not yet an `agent_runs` row) | 1 | 3 (retry delay 300 s) | 2 | `scrapes-dlq` | 2 (machine tender scans); 4–5 (collectors, funded scan, GSC) |
 | `agent-events` | `microns-ops` for `microns-mail` replies (`replies@`, via `OPS`), Workflows, Durable Objects | Reply attribution, Telegram cards, `EVENTS` data points | `{type: "inbound-reply" \| …, inbound_email_id?, rfq_id?, order_id?, payload, run_id}` | 25 (timeout 10 s) | 3 | default | `agent-events-dlq` | 4 |
 
 DLQ handling: DLQs have no consumer; the weekly ops digest lists their backlog and re-drive is a manual task ([AGENTS.md](AGENTS.md) §2.5).
@@ -556,7 +577,8 @@ Every call carries `cf-aig-metadata: {"agent":…,"run_id":…,"tenant_id":…}`
 | Application | Hostname / path | Policies | Used by | Phase |
 |---|---|---|---|---|
 | `microns-site` preview | `microns-site.<account>.workers.dev` and its version preview URLs, including the `staging` alias (host format CF docs, re-check at execution) | Allow: owner identity; Service Auth: service token for CI tools (`CF-Access-Client-Id` / `CF-Access-Client-Secret`) | `scripts/seo-parity.mjs`, `scripts/verify-ssr.sh`, Playwright, Lighthouse, the owner | 1 |
-| Machine-only API path | `www.micronshub.eu/api/tender-scan` (no browser caller in `src/`) | Service Auth: service token for `tender-collector`; Allow: owner | `tender-collector` (supabase/functions/tender-collector/index.ts:68) | 2 (effective when `www` is on Cloudflare) |
+| `microns-site` preview, machine callers | Same application as above | Service Auth: `microns-machine-collector`, `microns-machine-mcp` (one token per consumer, each revocable alone) | `tender-collector`, the local MCP server (tests against the preview) | 2 |
+| `microns-machine-api` | `api.micronshub.eu` (not a path on `www`: `/api/tender-scan` also has a browser caller, TenderMonitorPage.tsx:240; DV-7) | Service Auth: `microns-machine-collector`, `microns-machine-mcp`; Allow: owner | `tender-collector` (supabase/functions/tender-collector/index.ts:68), the local MCP server | 3 (runbook, before the `www` flip; D-3) |
 | Remote MCP | `mcp.micronshub.eu` | Access + OAuth for MCP clients; Allow: owner identity | Claude on desktop and mobile | 4 (flag `mcp.remote`) |
 | Dashboard (optional) | `www.micronshub.eu/dashboard*` | Allow: staff identities | Staff | 6 |
 | `workers.dev` | `microns-ops`, `microns-mail`: `workers_dev` off; `microns-site` production URL off after Phase 3 or kept behind the preview application | — | — | 1–3 |
@@ -566,7 +588,8 @@ Every call carries `cf-aig-metadata: {"agent":…,"run_id":…,"tenant_id":…}`
 | An Access application protects a hostname and path; a request without an Access identity or service token never reaches the Worker | Paths also called by browsers without Access (forms, dashboard fetches, e-mail links) are not placed behind Access; they are gated in the Worker (Turnstile, Supabase JWT, rate limits) per the private gate matrix |
 | Dashboard pages are client-routed | Access on `/dashboard*` gates full page loads only; in-app navigation and API calls rely on the Supabase JWT checks |
 | Access pricing | Free up to 50 users (list price, re-check at execution) |
-| Machine callers on dual-use paths (local MCP server) | Staff Supabase JWT or the remote MCP tools; final mapping in the private gate matrix (PLAN.md P2-7) |
+| Machine callers on dual-use paths (`tender-collector`, local MCP server) | Each consumer sends its own Access service token; the Worker verifies the Access assertion and maps the token to its consumer (`ACCESS_MACHINE_CLIENT_IDS`), and accepts a machine caller only on preview hosts and on hosts in `API_MACHINE_HOSTS` (empty in Phase 2, `api.micronshub.eu` from Phase 3; DV-19). The CI token passes the preview's Access application but is not an API credential (DV-16); final mapping in the private gate matrix (PLAN.md P2-7) |
+| Access context across a service binding | Not propagated (CF docs, fetched 2026-10-02): the site verifies the caller and sends it to `microns-ops` inside the RPC call |
 
 H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate callers, and several RLS policies are broader than intended. Phase 2 adds Supabase-JWT/Access gates, Turnstile and rate limits; Phase 6 remediates RLS. Details: private security note. Related hazards H-5, H-7, H-15 and H-30 are indexed in [README.md](README.md) and registered in [RISKS.md](RISKS.md). Until the Phase 6 RLS remediation, agents authorise staff actions through Access and staff checks, not tenant roles ([PLAN.md](PLAN.md) §5.4).
 
@@ -591,8 +614,8 @@ H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate 
 | Browser SPA | Anon key + user session | supabase-js | As today (RLS) | Unchanged (src/integrations/supabase/client.ts:5-15) |
 | `microns-site` SEO handler | `SUPABASE_ANON_KEY` | REST GET `/rest/v1/…` | `service_pages`, `content_pages`, `articles` (published rows) | 1–2 REST calls per uncached page on most page types (for example article + translation map, middleware.ts:122, :145); 2.5 s timeout on service and content page reads (middleware.ts:194); cached per §17 |
 | `microns-site` sitemap routes | `SUPABASE_ANON_KEY` | Storage public object, REST fallback | `sitemaps` bucket, then R2 `sitemaps/…` from Phase 5 | api/sitemap.js:25, :236 |
-| `microns-site` local API | `SUPABASE_SERVICE_ROLE_KEY` (server-side only) | REST | Marketing tracking tables (`track`) | Service role never reaches the browser |
-| `microns-site` gates | User JWT | Supabase Auth (JWKS or `/auth/v1/user`, CF docs and Supabase docs, re-check at execution) | — | Result cached per token for its lifetime |
+| `microns-site` local API | `SUPABASE_SERVICE_ROLE_KEY` (server-side only) | REST | Marketing tracking tables (`track`); lookups the gates need | Service role never reaches the browser |
+| `microns-site` gates | User JWT | `GET /auth/v1/user` after a local shape and expiry pre-check; roles read as an array from `user_roles` with the caller's own JWT | `user_roles` | Result cached per isolate for at most 60 s and never past the token's expiry; no JWT secret in any Worker; a JWKS path is built but dormant (the project's JWKS is empty, live 2026-10-02); Supabase Auth unreachable → 503 (fail closed) |
 | `microns-ops` | `SUPABASE_SERVICE_ROLE_KEY` | supabase-js over REST | Ops, agent and inventory tables | Server-side only |
 | `microns-ops` bulk upserts (optional) | Hyperdrive `SUPABASE_DB` (connection string stored in the Hyperdrive config, never in a file) | Postgres wire | `xometry_offers` upserts (the Python scanner uses psycopg today) | Session-mode pooling; CF docs, re-check at execution |
 | `microns-mail` | `SUPABASE_SERVICE_ROLE_KEY` | REST | `inbound_emails` | Insert only |
@@ -614,13 +637,13 @@ H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate 
 | Cache API | Sitemap responses | 1 h, matching `s-maxage=3600` today | Expiry; per data centre | api/sitemap.js:392-396; H-12 |
 | HTML | Not cached at the edge | `Cache-Control: public, max-age=0, must-revalidate` | — (no Cache Rule; HTML, JSON and XML are not cached by default) | middleware.ts:674; CF docs (verified 2026-09-27) |
 | Static assets | Served by Workers Static Assets; hashed `/assets/*` | Platform defaults; `_headers` only if the baseline needs immutable caching or the `Content-Type` values of vercel.json:173-184 | New version on deploy | H-28 |
-| KV `FLAGS` | Flag values | Read with a short `cacheTtl` (60 s in Phase 1); synced every minute from `feature_flags`. The SEO handler waits at most 500 ms for `seo.strict_404`, then uses var `SEO_STRICT_404` | Sync job | PLAN.md P4-2; workers/site/src/flags.ts |
+| KV `FLAGS` | Flag values | Read with a short `cacheTtl` (60 s since Phase 1); synced every minute from `feature_flags`. The SEO handler waits at most 500 ms for `seo.strict_404`, then uses var `SEO_STRICT_404`; `api.forward_to_vercel` (Phase 2) falls back to var `API_FORWARD_TO_VERCEL` when the key is missing, malformed or KV fails | Sync job | PLAN.md P4-2; workers/site/src/flags.ts |
 
 ## 18. Observability
 
 | Signal | Where | Content | Consumer |
 |---|---|---|---|
-| Workers Logs | All three Workers | Structured JSON per request: route step, `X-Seo-Source`, cache layer hit, Supabase latency, status; errors for shell failures (H-4) | Phase 1–3 gates (zero 5xx), debugging |
+| Workers Logs | All three Workers | Structured JSON per request: route step, `X-Seo-Source`, cache layer hit, Supabase latency, status; errors for shell failures (H-4). From Phase 2 one `api` line per `/api` request in `microns-site` and in `microns-ops` with a shared `requestId`, gate decisions in report mode, `scrapes` outcomes and `nest` CPU; never tokens, cookies, bodies or e-mail addresses | Phase 1–3 gates (zero 5xx), debugging |
 | Analytics Engine `microns_events` (`EVENTS`) | `microns-ops` | One data point per agent step: agent, `run_id`, tokens, cost, outcome, latency | Ops digest, dashboards |
 | `agent_runs` table | Supabase | One row per run: agent, trigger, `idempotency_key` UNIQUE, status, `cost_cents`, tokens, times, error, human action | Dashboard, ops digest, Phase 5 output parity (H-29) |
 | AI Gateway logs | Gateway `microns` | Per call with `cf-aig-metadata` | Cost per agent and per RFQ (Phase 4 gate) |
@@ -634,13 +657,14 @@ Web Analytics automatic setup stays off (it injects a script into HTML at the ed
 | Environment | Host | Data | Deployed by | Protection |
 |---|---|---|---|---|
 | Local | `wrangler dev` | Production Supabase, anon reads only | Developer | — |
-| Preview | `microns-site.<account>.workers.dev` + version preview URLs | Production Supabase (single project); write paths tested with marked test records (P2-12) | `wrangler versions upload` | Access + `X-Robots-Tag: noindex` |
+| Preview | `microns-site.<account>.workers.dev` + version preview URLs | Production Supabase (single project); write paths tested with dedicated test users and seeded test RFQs only, removed after each run; mail-sending tests opt-in (`E2E_SEND_MAIL=1`) to test sinks; preview uploads land in R2 while their `rfq_files` rows land in production, so non-test objects are copied back to legacy S3 before Phase 3 (P2-12) | `wrangler versions upload`; `microns-ops` with `wrangler deploy` | Access + `X-Robots-Tag: noindex` |
 | Staging | Preview alias `staging` (`wrangler versions upload --preview-alias staging`) | As preview | Manual workflow | Access + `noindex` |
 | Production | Routes on `micronshub.eu` from Phase 3 | Production | `wrangler versions deploy` of the version ID that passed the gates | Zone settings ([SEO_PARITY.md](SEO_PARITY.md)) |
 
 | Stage | Pipeline | Gate |
 |---|---|---|
-| Phase 1–2 | `.github/workflows/cf-preview.yml`: manual dispatch only; pinned Node and package manager (P0-7); `vite build`; `wrangler versions upload --preview-alias staging`; secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (names only) | Parity diff, `verify-ssr.sh`, Playwright, Lighthouse, size report (PLAN.md §5.1) |
+| Phase 1–2 | `.github/workflows/cf-preview.yml`: manual dispatch only; pinned Node and package manager (P0-7); `vite build`; `wrangler versions upload --preview-alias staging`; secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (names only). Phase 2 adds: `workers/shared` install, secret `VITE_TURNSTILE_SITE_KEY` passed to `vite build` (the run stops early when it is empty), a prerender guard that fails when `dist/**/*.html` contains Turnstile markup, and the bundle guard after the dry run | Parity diff, `verify-ssr.sh`, Playwright, Lighthouse, size report (PLAN.md §5.1); Phase 2: T1/T2 suites, bundle guard, `tests/e2e/api.spec.ts` (PLAN.md §5.2) |
+| Phase 2 (`microns-ops`) | `.github/workflows/cf-ops.yml`: manual dispatch only; install, typecheck, tests, dry run with metafile; `wrangler deploy` only when the input `deploy` is true (deployed, not version-uploaded, and before the site, because a service binding reaches the current deployment only) | T1 suite, `qrcode` server-build check, size report |
 | From Phase 3 | Deploy job (added later, manual trigger): upload a version → parity diff preview vs production → promote the same version ID only if 0 unexplained differences; gradual percentage deploys where useful (CF docs, re-check at execution) | Parity = 0 for `microns-site`; unit and e2e tests for `microns-ops`, `microns-mail`, `microns-cad` |
 | Branch safety | No Worker code is pushed before P0-1 gates `auto-merge-claude.yml` (.github/workflows/auto-merge-claude.yml:3-6, :26-30); Vercel keeps deploying `main` until Phase 6 | H-2 |
 
@@ -648,8 +672,10 @@ Web Analytics automatic setup stays off (it injects a script into HTML at the ed
 
 | Limit | Value | Design consequence | Source |
 |---|---|---|---|
-| CPU per request | 30 s default, 5 min max (`limits.cpu_ms`) | `nest` on `microns-ops` with raised `cpu_ms`; CAD in the Container | CF docs (verified 2026-09-27); H-18 |
-| Startup time | 1 s | SEO Worker kept small; size report gate | CF docs (verified 2026-09-27); H-27 |
+| CPU per request | 30 s default, 5 min max (`limits.cpu_ms`); applies to queue consumers too; not enforced locally | `nest` on `microns-ops` with `cpu_ms` 300,000; CAD in the Container; CPU measured on the preview only | CF docs (verified 2026-09-27; re-read 2026-10-02); H-18 |
+| Worker size | 64 MiB uncompressed on Free and Paid; no compressed size limit | Size is not the binding limit; startup is. Phase 2 dry runs: `microns-site` 3,366.23 KiB (gzip 728.01 KiB), `microns-ops` 3,743.75 KiB (gzip 725.78 KiB); a bundle guard keeps ops-only code out of the site | CF docs (fetched 2026-10-02) |
+| Startup time | 1 s | SEO Worker kept small; size report gate; API handlers imported lazily per route | CF docs (verified 2026-09-27); H-27 |
+| Service bindings (RPC) | Each call counts as a subrequest; at most 32 Worker invocations per request; serialised RPC payload 32 MiB (streams for more); the target must be deployed; Access context is not propagated | `microns-ops` deployed before the site; the caller travels in the RPC call | CF docs (fetched 2026-10-02) |
 | Subrequests; simultaneous outgoing connections | 10,000 per request; 6 at a time | Fan-out goes through Queues and Workflows; scrapers cap concurrency at 6 | CF docs (verified 2026-09-27) |
 | Memory | 128 MB per isolate | 6.2 MB sitemap streamed, not built in memory twice | CF docs (verified 2026-09-27); H-12 |
 | Cron / Queue consumer wall time | 15 min | Long jobs become Workflows (steps have no wall-time limit) | CF docs (verified 2026-09-27) |
@@ -658,7 +684,7 @@ Web Analytics automatic setup stays off (it injects a script into HTML at the ed
 | `_redirects` | 2,000 static + 100 dynamic rules; not applied to Worker responses | In-Worker table instead | CF docs (verified 2026-09-27) |
 | Custom Domains | No wildcards; not on a hostname with an existing CNAME | Routes for `www` and `*` | CF docs (verified 2026-09-27) |
 | Email Routing | Subdomains supported, 30 per zone, catch-all only on the apex; inbound size example 25 MiB | Explicit `rfq@`/`replies@` addresses | CF docs (verified 2026-09-27) |
-| Zone rate limiting | Free plan: 1 rule, 10 s window, IP | One rule on `/api/*` plus the `API_RATE_LIMIT` binding and Turnstile | CF docs (verified 2026-09-27) |
+| Zone rate limiting | Free plan: 1 rule, 10 s window, IP | One rule on `/api/*` plus the three rate-limit bindings (`API_RATE_LIMIT`, `_MAIL`, `_BULK`) and Turnstile | CF docs (verified 2026-09-27) |
 | Static Assets per-file size and file count | Not verified | `occt-import-js.wasm` (≈ 7.3 MB) and the 210 prerendered files must fit | CF docs, re-check at execution |
 
 ## 21. DNS and DNSSEC procedure
@@ -758,5 +784,7 @@ flowchart LR
 | Apex redirect status, HTTP → HTTPS status, HSTS values | §5, runbook S11/S13 (baseline P0-3; H-11, H-24) | Both |
 | Directory indexes for `/laserkritis/` and `/zohoverify/` (router step 5); `/sitemap-complete.xml` as a rewrite (vercel.json:135-136) vs the 301 described in the api/sitemap.js:5-6 comment (router step 2) | §6.2 | Claude (from the baseline) |
 | KV minimum TTL, Queue limits, Workflow instance id limits, Cron Trigger limits, preview-alias host format, Static Assets file limits | §7, §9, §10, §14, §17, §20 | Claude |
-| AI Gateway spend caps, authentication and dynamic routes; Supabase JWT verification method (JWKS vs `/auth/v1/user`) | §13, §16 | Claude |
+| AI Gateway spend caps, authentication and dynamic routes; Supabase JWT verification method (`/auth/v1/user` built in Phase 2; JWKS path dormant until the project publishes keys) | §13, §16 | Claude |
+| CPU limit of an RPC callee, the error on CPU exhaustion, version overrides on RPC calls; `nest` CPU per fixture on the preview | §6.4, §20 (PLAN.md §5.2 D-6, D-15) | Both |
+| Vercel's request-body cut-off, its bytes for invalid JSON and default `Cache-Control` on `/api/*`, `maxDuration`; whether a handler-set CORS header or the platform header wins | §6.4 (PLAN.md §5.2 D-12, D-15; P0-3) | Both |
 | Supabase plan tier and REST throughput | §16 (PLAN.md Q2) | Dimitris |

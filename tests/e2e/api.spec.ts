@@ -782,7 +782,10 @@ test.describe('preview: files on R2 and legacy S3', () => {
     test.skip(!fresh, 'needs seed.freshRfqNumber refreshed by the seed reset block within 30 minutes');
     const typeRefused = await api('/api/s3?action=presign-upload', { method: 'POST', json: { fileName: 'a.exe', contentType: 'application/octet-stream', prefix: `${fresh}/part` } });
     await expectError(typeRefused, 400, 'file_type_not_allowed');
-    const ok = await api('/api/s3?action=presign-upload', { method: 'POST', json: { fileName: `e2e-${RUN_ID}.step`, contentType: 'application/octet-stream', prefix: `${fresh}/part` } });
+    // Callers other than staff declare the file size (the upload URL signs it as Content-Length).
+    const noSize = await api('/api/s3?action=presign-upload', { method: 'POST', json: { fileName: `e2e-${RUN_ID}.step`, contentType: 'application/octet-stream', prefix: `${fresh}/part` } });
+    await expectError(noSize, 400, 'size_required');
+    const ok = await api('/api/s3?action=presign-upload', { method: 'POST', json: { fileName: `e2e-${RUN_ID}.step`, contentType: 'application/octet-stream', prefix: `${fresh}/part`, size: 1 } });
     expect(ok.status()).toBe(200);
   });
 });

@@ -23,7 +23,7 @@ Conventions:
 3. **SEO handler ported, not rewritten**: the ~280-line orchestrator of `middleware.ts` is copied into `workers/site`; `middleware/*` is imported unchanged; `Cache-Control` and `X-Seo-Source` stay byte-identical (middleware.ts:670-677).
 4. **In-Worker redirect table instead of `_redirects`**: one table generated from the 25 `vercel.json` redirects (vercel.json:2-128) and the client map (src/components/SEORedirects.tsx:14-73), status 308 as on Vercel, matched on raw and NFC-decoded paths, dead mojibake source kept byte-identical.
 5. **Soft-404 parity first, then a flag**: unknown slugs keep returning 200 through cutover (H-9); flag `seo.strict_404` (deploy default var `SEO_STRICT_404 = "false"`) returns 404 + shell for unknown-slug classes after 2 weeks of flat GSC coverage (Q5).
-6. **`/api/*` split with a rollback flag**: the browser-facing subset runs in `microns-site`, the rest goes over service binding `OPS` to `microns-ops`, long jobs go to Queues, Workflows or the Container. Handlers are reused through an Express-compatible shim over Hono. Flag `api.forward_to_vercel` sends all `/api/*` back to Vercel.
+6. **`/api/*` split with a rollback flag**: the browser-facing subset runs in `microns-site`, the rest goes over service binding `OPS` to `microns-ops`, long jobs go to Queues, Workflows or the Container. Handlers are reused unchanged through a `@vercel/node`-compatible shim shared by both Workers (Hono routes it inside `microns-ops`). Flag `api.forward_to_vercel` sends all `/api/*` back to Vercel.
 7. **Auth gates arrive with the port**: Phase 2 adds Supabase-JWT / Access gates, Turnstile and rate limits to all `/api/*` write paths (H-6); RLS remediation is Phase 6.
 8. **Zone first, site second**: the zone moves from Papaki to Cloudflare with every record DNS-only; the DS record is removed at Papaki before the NS change and Cloudflare DNSSEC is enabled afterwards (C9; live 2026-09-30). The site flips later, record by record.
 9. **Route, not Custom Domain, for `www`**: a Workers Route `www.micronshub.eu/*` on a proxied placeholder record keeps rollback a single record flip; the apex becomes a Single Redirect Rule with the status seen in the baseline; `*.micronshub.eu` gets a proxied wildcard record plus a Workers Route. Cloudflare for SaaS is deferred (no custom domains exist; live 2026-09-30).
@@ -68,7 +68,7 @@ Effort figures are the task sums in §4 and §5; plan.md (2026-09-27) figures in
 |---|---|---|---|---|---|
 | 0 Audit + pre-flight | Audit deliverables (this folder); P0-1…P0-9 | Deliverables merged; PLAN.md approved; P0-1…P0-9 done; baseline stored | — | Audit done; pre-flight ≈ 3.2 d [0.5 d] | Both |
 | 1 Site + SEO Worker | `workers/site` on `*.workers.dev` only: Static Assets, SEO handler, redirect table, sitemap routes, preview noindex + Access, parity tool | Parity diff 0 unexplained; `dist/` list identical; `verify-ssr.sh` green on preview; Playwright `seo.spec` green; Lighthouse ≥ Vercel on 5 URLs; smoke green; bundle sizes within limits | Delete the Worker; revert commits (no production impact) | ≈ 3.7 d [3–4 d] | Claude (Dimitris: Access, auth test) |
-| 2 API port | `workers/ops` + site `/api/*` router; Express shim; R2 for new objects; auth gates, Turnstile, rate limits; Svix webhook; callers repointed | All API e2e paths pass on preview; R2 round trip; webhook test; tracking URLs identical; forward flag proven both ways | Before cutover: none needed. After: `api.forward_to_vercel` on (≈ 1 min) | ≈ 7 d [5–7 d] | Claude (Dimitris: buckets, keys, secrets) |
+| 2 API port | `workers/ops` + site `/api/*` router; `@vercel/node` shim; R2 for new objects; auth gates, Turnstile, rate limits; Svix webhook; callers repointed | All API e2e paths pass on preview; R2 round trip; webhook test; tracking URLs identical; forward flag proven both ways | Before cutover: none needed. After: `api.forward_to_vercel` on (≈ 1 min) | ≈ 7 d [5–7 d] | Claude (Dimitris: buckets, keys, secrets) |
 | 3 Zone + cutover | Zone to Cloudflare (DS removal, NS move, DNSSEC); `www` Route flip, apex redirect rule, wildcard Route; bot/cache settings; 48 h observation | 48 h GSC coverage and crawl stats flat; `verify-ssr.sh` green on production; zero 5xx; mail test; Resend and GSC verified; DNSSEC validates | Record flips back to Vercel (≈ 10 min); NS rollback only per §6.3 | ≈ 3.25 d + DS wait + 48 h [2–3 d + 48 h] | Both |
 | 4 Agent layer | Supabase additions; flags; AI Gateway; `microns-mail`; `rfq-intake`, `quote`, `post-order` Workflows; Vectorize; scrapers; remote MCP; dashboard pages | One real RFQ end to end with approval gate; cost per RFQ measured; every agent behind a flag; SEO parity unchanged | Per-agent flag off (≈ 1–2 min) | ≈ 14.5 d [2–3 weeks] | Claude (Dimitris: approvals, accounts) |
 | 5 Consolidate compute | Article pipeline Workflow + translation Queue; collectors; marketing crons; Xometry scanner; CAD Container; dead edge functions removed; ported pg_cron jobs unscheduled | 7 days of output parity; old schedulers disabled, not deleted | Re-activate pg_cron jobs / GitHub Action / VPS URL (≈ 15 min) | ≈ 9 d + 7-day window [1–2 weeks] | Both |
@@ -164,80 +164,88 @@ Route split (paths and query shapes unchanged):
 | Path | Actions | Target | Execution |
 |---|---|---|---|
 | `/api/emails` | `contact`, `email`, `rfq`, `rfq-pdf` (api/emails.js:370-376) | `microns-site` local | Request |
-| `/api/s3` | `presign-upload`, `presign-download`, `delete`, `delete-folder`, `list` (api/s3.js:155-227) | `microns-site` local. `rfq` scope: new objects in R2 `microns-private` (`aws4fetch` against the R2 S3 API), reads fall back to legacy S3 (`LEGACY_S3_REGION` = `eu-north-1`). `articles` scope: stays on legacy S3 until `files.micronshub.eu` serves `microns-public` (P3-6) | Request |
+| `/api/s3` | `presign-upload`, `presign-download`, `delete`, `delete-folder`, `list` (api/s3.js:155-227) | `microns-site` local (files API re-implemented with `aws4fetch`; statuses and bodies of api/s3.js). `rfq` scope: new objects in R2 `microns-private` under `rfq/` + today's key (DV-5), reads fall back to legacy S3 (`LEGACY_S3_REGION` = `eu-north-1`, bucket vars `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`). `articles` scope: stays on legacy S3 until `files.micronshub.eu` serves `microns-public` (P3-6, D-17) | Request |
 | `/api/marketing?action=track` and `/api/track` | Open pixel, click, unsubscribe (api/marketing.js:2-3; vercel.json:151-153) | `microns-site` local, byte-identical responses | Request |
 | `/api/marketing` | `webhook`, `google-auth`, `apollo-enrich` (api/marketing.js:58-66) | `microns-ops` via `OPS` | Request |
-| `/api/notifications` | `partner` (default), `production-status` (api/notifications.js:265-272) | `microns-site` local | Request |
+| `/api/notifications` | `partner` (default), `production-status` (api/notifications.js:265-272) | `microns-ops` via `OPS`: api/notifications.js imports nesting and inventory at module scope (api/notifications.js:9-11), so every action runs in ops (DV-1) | Request |
 | `/api/notifications` | 19 `inv-*` actions (lib/inventory/index.js:480-530) | `microns-ops` via `OPS`, keeping `lib/inventory` and `qrcode` out of the site bundle | Request |
-| `/api/notifications?action=nest` | `nest` (api/notifications.js:266-267) | `microns-ops` with raised `limits.cpu_ms` (50 s budget, lib/nesting/nester.js:286; CPU max 5 min, CF docs verified 2026-09-27) | Request, CPU-bound |
-| `/api/gsc` | All actions | `microns-ops`; bulk inspection and indexing batches on Queue `scrapes` | Request + Queue |
+| `/api/notifications?action=nest` | `nest` (api/notifications.js:266-267) | `microns-ops` with `limits.cpu_ms` 300,000 (DV-4): the 50 s budget (lib/nesting/nester.js:286) never trips when deployed, because `Date.now()` advances only on I/O, and local CPU passes 30 s near 700 part instances (probe 2026-10-02); an `OPS` rejection answers 504 JSON `TIMEOUT` | Request, CPU-bound |
+| `/api/gsc` | All actions | `microns-ops`, synchronous in Phase 2; bulk inspection and indexing batches move to Queue `scrapes` in Phase 5 (DV-3) | Request |
 | `/api/tenders`, `/api/connector-status` | CRUD, CSV, stats, connector status (vercel.json:155-157) | `microns-ops` | Request |
-| `/api/tender-scan` | POST scan | `microns-ops`: enqueue on `scrapes`, answer 2xx at once with the JSON keys `tender-collector` reads (supabase/functions/tender-collector/index.ts:75-80) | Queue |
-| `/api/funded-startups` | CRUD, POST scan | `microns-ops`; scan on Queue `scrapes` | Request + Queue |
+| `/api/tender-scan` | POST scan | `microns-ops`: a machine caller's POST is validated, enqueued on `scrapes` and answered 200 at once with every key `tender-collector` reads (supabase/functions/tender-collector/index.ts:75-80) at zero plus `queued` and `run_id`; staff and dashboard callers run synchronously (DV-3) | Queue (machine) / Request |
+| `/api/funded-startups` | CRUD, POST scan | `microns-ops`; scan synchronous in Phase 2 (DV-3) | Request |
 | `/api/scrape-website`, `/api/scrape-company-profile`, `/api/scan-directory` | Fetch and parse | `microns-ops`; at most 6 concurrent outbound connections (CF docs, verified 2026-09-27) | Request |
 | `/api/sitemap`, `/sitemap*.xml` | Sitemaps | `microns-site` (Phase 1) | Request + Cache API |
-| Any `/api/*` | — | Flag `api.forward_to_vercel` on: proxied unchanged (method, path, query, body, headers) to the Vercel production deployment host `on-demand-craft-greece.vercel.app` (live 2026-09-30; server-side origin only, never linked; P0-4 confirms it is not behind Deployment Protection) | Rollback |
+| Any `/api/*` | — | Flag `api.forward_to_vercel` on (all paths, a path list, or preview / production hosts only), and any path outside the `/api` catalogue: proxied unchanged and ungated (method, path, query, body, headers) to var `API_FORWARD_ORIGIN` = `https://on-demand-craft-greece.vercel.app`, the Vercel production deployment host (live 2026-09-30; server-side origin only, never linked; P0-4 confirms it is not behind Deployment Protection). Not `www`: once `www` routes to the Worker the forward refuses its own host | Rollback |
 
-Express-compatible shim over Hono (`workers/ops/src/compat/express-shim.ts`, also used by the site-local handlers):
+`@vercel/node`-compatible shim (core `workers/shared/src/compat/vercel-node.ts`, used by both Workers; `workers/ops/src/compat/express-shim.ts` is its Hono adapter; DV-2):
 
 | Vercel behaviour today | Shim behaviour |
 |---|---|
-| `req.query`, incl. params added by rewrites (`?action=`, `?type=`, `?lang=`, `?connectors=true`; vercel.json:129-157) | Built from the URL; the router adds the rewrite params before calling the handler |
-| `req.body` auto-parsed JSON with string fallback | Parsed by `Content-Type`; the raw body is kept for signature checks (H-15) |
+| `req.query`, incl. params added by rewrites (`?action=`, `?type=`, `?lang=`, `?connectors=true`; vercel.json:129-157) | Built from the URL; the router merges the rewrite params before calling the handler (request keys win) |
+| `req.body` parsed by `@vercel/node` 17.0.0 (JSON, text, form, octet-stream; invalid JSON throws on every read) | Same semantics by `Content-Type`; the raw body is kept for signature checks (H-15) |
 | `req.headers`, `req.method` | Lower-cased header object and method from the `Request` |
-| `res.status().json()/send()/end(Buffer)/redirect()/setHeader()` | Builds one `Response`; `Buffer` via `nodejs_compat` (H-20) |
-| Module-scope `process.env` reads (api/s3.js:33-65 and others) | `nodejs_compat` with `process.env` populated from vars and secrets (compatibility date ≥ 2025-04-01; api-lib audit); proven by shim tests in P2-2 |
-| Platform CORS on `/api/(.*)` (vercel.json:163-172) and per-function `OPTIONS` | One CORS middleware emitting the same headers (parity, H-28); tightened in Phase 6 (H-21) |
+| `res.status().json()/send()/end(Buffer)/redirect()/setHeader()` | Builds one `Response` with the `@vercel/node` defaults (type, charset, weak ETag); `Buffer` via `nodejs_compat` (H-20) |
+| Module-scope `process.env` reads (api/s3.js:33-65 and others) | `nodejs_compat` with `process.env` populated from vars and secrets (compatibility date ≥ 2025-04-01; api-lib audit); handler modules imported lazily per route, so a module-scope failure answers 500 on that route only; proven by shim tests in P2-2 |
+| Function payload limit 4.5 MB | 413 `{"error":"payload_too_large"}` above 4,718,592 bytes, before any handler; exact Vercel cut-off re-checked at P2-12 |
+| Function duration (`maxDuration` to confirm in P0-3) | 30 s in the site, 300 s in ops; then 504 `text/plain` |
+| Platform CORS on `/api/(.*)` (vercel.json:163-172) and per-function `OPTIONS` | Phase 1 `finalise()` sets the same headers on every `/api/*` answer; handlers answer their own `OPTIONS` (parity, H-28); allow-list mode built, switched on after the Phase 3 observation window (D-9; H-21) |
 | `VERCEL_URL` for the Google OAuth redirect (api/marketing.js:46-47) | Explicit `GOOGLE_REDIRECT_URI` |
 
-Gate classes (the per-route matrix is in the private note):
+Gate classes (the per-route matrix is in the private note; gates run in the `microns-site` router for both Workers, report or enforce per class through var `API_GATES_MODE`):
 
 | Caller | Gate added in Phase 2 |
 |---|---|
-| Public browser forms (contact, quote request, quote pop-up) | Turnstile + Workers Rate Limiting binding `API_RATE_LIMIT`; one zone rate-limiting rule on `/api/*` from Phase 3 (Free plan allows 1 rule; CF docs, verified 2026-09-27) |
-| Signed-in customers, partners, staff | Supabase JWT verified in the Worker, role checked per route |
-| Machine callers (`tender-collector`, the local MCP server, CI tools) | Cloudflare Access service token (`CF-Access-Client-Id` / `CF-Access-Client-Secret`) |
-| Third-party webhooks (Resend) | Svix signature verification (H-15) |
-| Links inside sent e-mails (pixel, click, unsubscribe) | No login by design, because the URLs are already in sent e-mails (H-14); rate limit only |
+| Public browser forms (`src/components/contact/ContactForm.tsx`, `src/components/quote-form/MultiStepQuoteForm.tsx`; DV-6) | Turnstile on `/api/emails`, token in request header `X-Turnstile-Token` (no site key → no widget; a form always submits and the server decides) + Workers Rate Limiting bindings `API_RATE_LIMIT` (30/60 s), `API_RATE_LIMIT_MAIL` (5/60 s), `API_RATE_LIMIT_BULK` (300/60 s); one zone rate-limiting rule on `/api/*` from Phase 3 (Free plan allows 1 rule; CF docs, verified 2026-09-27) |
+| Signed-in customers, partners, staff | Supabase JWT verified in the Worker (`/auth/v1/user` after a local pre-check), roles read from `user_roles`, checked per route; the frontend sends the session token in `Authorization` |
+| Machine callers (`tender-collector`, the local MCP server) | One Cloudflare Access service token per consumer (`microns-machine-collector`, `microns-machine-mcp`; `CF-Access-Client-Id` / `CF-Access-Client-Secret`), accepted only on preview hosts and on hosts in `API_MACHINE_HOSTS` (`api.micronshub.eu` from Phase 3, D-3; DV-7, DV-19). The CI token passes the preview's Access application but is not an API credential (DV-16) |
+| Third-party webhooks (Resend) | Svix signature verification in `microns-ops` on the raw bytes (H-15) |
+| Links inside sent e-mails (pixel, click, unsubscribe) | No login by design, because the URLs are already in sent e-mails (H-14); rate limit only; one edge case switchable (D-16) |
 
 Details: private security note (delivered to the owner out of band, not in this public repo).
 
 | ID | Task | Owner | Effort | Refs |
 |---|---|---|---|---|
-| P2-1 | Scaffold `workers/ops` (Hono) from the draft; service binding `OPS` on `microns-site` | Claude | 0.25 d | — |
-| P2-2 | Express-compatible shim + unit tests (every row of the table above) | Claude | 0.75 d | H-20 |
-| P2-3 | Site `/api/*` router: local vs `OPS` vs forward; CORS middleware; `api.forward_to_vercel` read from KV `FLAGS` (the `feature_flags` table arrives in Phase 4) | Claude | 0.5 d | H-28 |
-| P2-4 | Site-local handlers: `emails` (Resend), `files` (R2 + legacy S3, same response shapes as api/s3.js), `notifications` (`partner`, `production-status`), `track` | Claude | 1 d | H-14, H-17 |
-| P2-5 | Ops routes through the shim: `gsc` (RSA-SHA256 signing via `node:crypto`), `tenders`, `connector-status`, scrape and scan routes, `funded-startups`, marketing `webhook`/`google-auth`/`apollo-enrich`, `inv-*`, `nest` | Claude | 0.75 d | H-18, H-20 |
-| P2-6 | Long-running work on Queue `scrapes`: `tender-scan`, funded-startups scan, GSC bulk actions; `nest` with raised `limits.cpu_ms` | Claude | 0.5 d | H-18 |
-| P2-7 | Gates: `workers/site/src/auth/{supabase-jwt,turnstile,rate-limit,access}.ts`, applied per the private matrix | Claude | 0.75 d | H-6 |
+| P2-1 | Scaffold `workers/ops` (Hono inside the named entrypoint `OpsApi`) from the draft; service binding `OPS` on `microns-site` with `"entrypoint": "OpsApi"` (DV-8); source-only package `workers/shared` for code both Workers import | Claude | 0.25 d | — |
+| P2-2 | `@vercel/node`-compatible shim (`workers/shared/src/compat/vercel-node.ts`) + Hono adapter (`workers/ops/src/compat/express-shim.ts`) + unit tests (every row of the table above; DV-2) | Claude | 0.75 d | H-20 |
+| P2-3 | Site `/api/*` router: local vs `OPS` vs forward; CORS through Phase 1 `finalise()` (allow-list mode built, not wired); `api.forward_to_vercel` read from KV `FLAGS` with var `API_FORWARD_TO_VERCEL` as fallback (the `feature_flags` table arrives in Phase 4) | Claude | 0.5 d | H-28 |
+| P2-4 | Site-local handlers: `emails` (Resend), `files` (R2 + legacy S3, same response shapes as api/s3.js), `track` (DV-1: no site-local `notifications`) | Claude | 1 d | H-14, H-17 |
+| P2-5 | Ops routes through the shim: `gsc` (RSA-SHA256 signing via `node:crypto`), `tenders`, `connector-status`, scrape and scan routes, `funded-startups`, marketing `webhook`/`google-auth`/`apollo-enrich`, every `/api/notifications` action (`partner`, `production-status`, `inv-*`, `nest`) | Claude | 0.75 d | H-18, H-20 |
+| P2-6 | Queue `scrapes` for tender scans a machine caller starts; the funded-startups scan and GSC bulk actions stay synchronous, their queue kinds follow in Phase 5 (DV-3); `nest` with `limits.cpu_ms` 300,000 (DV-4) | Claude | 0.5 d | H-18 |
+| P2-7 | Gates: `workers/site/src/auth/{supabase-jwt,turnstile,rate-limit,access}.ts` plus `gate.ts` and `policy.ts`, over the primitives in `workers/shared/src/auth/`, applied per the private matrix; report or enforce per class (`API_GATES_MODE`) | Claude | 0.75 d | H-6 |
 | P2-8 | Resend webhook verification to Resend's Svix scheme; explicit `GOOGLE_REDIRECT_URI`; Dimitris confirms the Resend webhook URL and the Google OAuth redirect list | Both | 0.35 d | H-15 |
-| P2-9 | Accounts and secrets: create R2 buckets `microns-public` and `microns-private` (CORS for browser uploads from www and preview hosts), R2 API token, Turnstile widget, Access service token for machine callers; set Worker secrets by the names in [wrangler.jsonc.draft](wrangler.jsonc.draft); append each consumer to the P0-2 checklist the same day | Dimitris | 0.5 d | H-7 |
-| P2-10 | Frontend: Turnstile widget in `src/pages/Contact.tsx`, `src/pages/QuoteRequestForm.tsx`, `src/components/quote-popup/QuotePopup.tsx`; `src/components/rfq/RfqFileDownload.tsx` reads through the files API and keeps its current `rfq-files` path as fallback (C12; RfqFileDownload.tsx:47, :100). Every frontend change must work against both the Vercel API and the Worker API, because `main` deploys to Vercel production | Claude | 0.5 d | H-17 |
-| P2-11 | Repoint callers: `mcp-server/src/index.ts` uses one `SITE_URL` (www) instead of the apex defaults at :1288, :1327, :1550 and sends Access service-token headers; `tender-collector` sends the machine-caller credential (edge-function change built from the live source of P0-5; `SITE_URL` stays `https://www.micronshub.eu`, supabase/functions/tender-collector/index.ts:5) | Both | 0.35 d | H-14, H-26 |
-| P2-12 | Tests and gate run: `tests/e2e/api.spec.ts` (every endpoint and action in [INVENTORY.md](INVENTORY.md)), R2 round trip, webhook test vector, `OPTIONS` parity, forward-flag test, size report for both Workers | Both | 0.75 d | H-27, H-28 |
+| P2-9 | Accounts and secrets: create R2 buckets `microns-public` and `microns-private` (`-J eu`, D-1; bucket CORS from `workers/site/r2/cors.private.json`), R2 API token, legacy S3 key for the Worker, queue `scrapes`, Turnstile widget (Cloudflare test keys in Phase 2, real keys at S11), Access service tokens `microns-machine-collector` and `microns-machine-mcp`; set Worker secrets by the names in [wrangler.jsonc.draft](wrangler.jsonc.draft); deploy `microns-ops` before the site; append each consumer and the rate-limit namespaces to the P0-2 checklist the same day | Dimitris | 0.5 d | H-7 |
+| P2-10 | Frontend: Turnstile widget in `src/components/contact/ContactForm.tsx` and `src/components/quote-form/MultiStepQuoteForm.tsx` (DV-6); `Authorization` with the session token on signed-in API calls (`src/utils/apiAuth.ts`); `src/components/rfq/RfqFileDownload.tsx` reads through the files API and keeps its current `rfq-files` path as fallback (C12; RfqFileDownload.tsx:47, :100). Every frontend change must work against both the Vercel API and the Worker API, because `main` deploys to Vercel production: changes add only request headers or optional body fields | Claude | 0.5 d | H-17 |
+| P2-11 | Repoint callers: `mcp-server/src/index.ts` uses one `SITE_URL` instead of the apex defaults at :1288, :1327, :1550, sends its Access service-token headers only to a host behind Access, never follows redirects, and `export_tenders_csv` returns the CSV (DV-12); `tender-collector` sends its machine token (edge-function change built from the live source of P0-5; `SITE_URL` stays `https://www.micronshub.eu`, supabase/functions/tender-collector/index.ts:5, until `api.micronshub.eu` exists) | Both | 0.35 d | H-14, H-26 |
+| P2-12 | Tests and gate run: T1 (vitest per package) and T2 (both Workers under local workerd with an upstream stub); `tests/e2e/api.spec.ts` (every endpoint and action in [INVENTORY.md](INVENTORY.md); modes `local`, `preview`, `compare`), R2 round trip, webhook test vector, `OPTIONS` parity, forward-flag test, size report and bundle guard for both Workers | Both | 0.75 d | H-27, H-28 |
 
 File-level change list:
 
 | Change | Path | Note |
 |---|---|---|
-| New | `workers/ops/wrangler.jsonc`, `workers/ops/src/index.ts` | Hono app |
-| New | `workers/ops/src/compat/express-shim.ts`, `workers/ops/test/express-shim.test.ts` | — |
-| New | `workers/ops/src/routes/{gsc,tenders,tender-scan,scrape,scan-directory,funded-startups,marketing,inventory}.ts` | Wrap `api/*.js`, `api/_lib/*`, `lib/*` through the shim |
-| New | `workers/ops/src/queues/scrapes.ts` | Consumer for scans and GSC batches |
-| New | `workers/site/src/api/{router,emails,files,notifications,track}.ts` | Site-local subset |
-| New | `workers/site/src/auth/{supabase-jwt,turnstile,rate-limit,access}.ts` | Gates |
-| New | `tests/e2e/api.spec.ts` | Runs against the preview with Access headers |
-| Changed | `workers/site/wrangler.jsonc` | `OPS`, `PRIVATE_FILES`, `API_RATE_LIMIT`, vars `R2_ACCOUNT_ID`, `LEGACY_S3_REGION` |
-| Changed | `package.json`, lockfile | `hono`, `aws4fetch` |
-| Changed | `src/pages/Contact.tsx`, `src/pages/QuoteRequestForm.tsx`, `src/components/quote-popup/QuotePopup.tsx` | Turnstile widget |
+| New | `workers/shared/**` (own `package.json` and lockfile, no build step) | `src/compat/{vercel-node,vercel-rewrite,etag,ambient.d}.ts`, `src/http/{rpc,json,log,env-check,cors}.ts`, `src/auth/{supabase-jwt,access-jwt,turnstile,svix,rate-limit}.ts`, `src/storage/{s3-presign,s3-xml}.ts`; imported by both Workers by relative path |
+| New | `workers/ops/wrangler.jsonc`, `workers/ops/src/{index,app,env}.ts`, own `package.json` and lockfile (`hono`) | `OpsApi` entrypoint, Hono app, queue consumer |
+| New | `workers/ops/src/compat/express-shim.ts`, `workers/ops/test/**` | Hono adapter over the shared shim |
+| New | `workers/ops/src/routes/{gsc,tenders,tender-scan,scrape,scan-directory,funded-startups,marketing,notifications,marketing-webhook,google-auth}.ts` | Wrap `api/*.js`, `api/_lib/*`, `lib/*` through the shim (DV-11: `notifications.ts`, no `inventory.ts`) |
+| New | `workers/ops/src/queues/{messages,scrapes}.ts`, `workers/ops/scripts/nest-fixture.mjs` | Producer and consumer for machine tender scans (kinds `tender-scan`, `funded-scan`); `nest` request bodies of 80 to 1,200 part instances |
+| New | `workers/site/src/api/{resolve,router,emails,files,track,ops-client}.ts` | Catalogue and action resolver, router, site-local subset, `OPS` RPC client (DV-11: no site `notifications.ts`) |
+| New | `workers/site/src/auth/{gate,policy,constraints,db,tracking,supabase-jwt,turnstile,rate-limit,access}.ts` | Gates |
+| New | `workers/site/scripts/check-bundle.mjs`, `workers/site/vitest.t2.config.ts`, `workers/site/test/integration/**`, `workers/site/r2/cors.private.json`, `.dev.vars.example` in both Workers | Bundle guard, T2 harness, R2 bucket CORS for the owner |
+| New | `tests/e2e/api.spec.ts`, `tests/e2e/api/**`, `tests/frontend-api/**` | e2e in modes `local`, `preview`, `compare` (refuses production hosts); per-call Access headers to the base origin only; tests of the new frontend helpers |
+| New | `scripts/r2-to-legacy-s3.mjs`, `.github/workflows/cf-ops.yml` | Owner-run rollback copy (dry run by default); manual-dispatch CI and deploy for `microns-ops` |
+| Changed | `workers/site/wrangler.jsonc` | `OPS` (entrypoint `OpsApi`), `PRIVATE_FILES` (jurisdiction `eu`), `API_RATE_LIMIT`, `API_RATE_LIMIT_MAIL`, `API_RATE_LIMIT_BULK`, vars `R2_ACCOUNT_ID`, `LEGACY_S3_REGION`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`, `API_FORWARD_TO_VERCEL`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `API_GATES_MODE`, `API_MACHINE_HOSTS`, `API_FORWARD_ORIGIN` value; Phase 2 secrets |
+| Changed | `workers/site/src/{env,flags}.ts`, `workers/site/src/api/forward.ts`, `workers/site/src/compat/api-modules.d.ts`, `workers/site/package.json` (scripts) | Phase 2 `Env` fields (all optional), `getFlagValue`, flag check + dispatch; Phase 1 router, SEO, sitemap and preview files and tests unchanged |
+| Changed | `package.json` (root) | Scripts only (`cf:install`, `cf:test:all`, `cf:typecheck:all`, `cf:t2`, `cf:dev:all`, `cf:dry:ops`, `cf:e2e:api`); the root lockfile is unchanged (DV-15) |
+| Changed | `.github/workflows/cf-preview.yml` | `workers/shared` install, `VITE_TURNSTILE_SITE_KEY`, prerender guard, bundle guard |
+| Changed | `src/components/contact/ContactForm.tsx`, `src/components/quote-form/MultiStepQuoteForm.tsx`, `src/utils/emailService.ts`; new `src/components/security/TurnstileWidget.tsx`, `src/utils/turnstile.ts` | Turnstile widget, loaded only after the visitor interacts with a form and never during the prerender (DV-6) |
+| Changed | New `src/utils/apiAuth.ts`; `src/utils/{s3Api,awsS3Storage,inventoryApi,partnerNotificationUtils,rfqPdfEmailService}.ts` and the staff pages that call `/api/*` | `Authorization` header, optional `size` in the presign body, documents opened inside the click |
 | Changed | `src/components/rfq/RfqFileDownload.tsx` | Files API with fallback |
-| Changed | `src/utils/awsS3Storage.ts`, `src/utils/rfqFileStorage.ts`, `src/utils/articleImageStorage.ts` | Only if a response shape must change; target is no change |
-| Changed | `mcp-server/src/index.ts` | `SITE_URL` and Access headers only |
-| Changed | `supabase/functions/tender-collector/index.ts` | Caller credential header; deployed by Dimitris |
-| Changed | `.env.example`, `docs/AWS_S3_VERCEL_GUIDE.md` | `VITE_AWS_*` names removed (already out of the bundle, vite.config.ts:67-72) |
+| Unchanged | `src/utils/rfqFileStorage.ts`, `src/utils/articleImageStorage.ts` | No response shape changed |
+| Changed | `mcp-server/src/index.ts`, `mcp-server/README.md` | `SITE_URL`, Access headers, CSV export |
+| Changed | `supabase/functions/tender-collector/index.ts` | Built from the live source; Access headers and `queued`/`run_id` logging; deployed by Dimitris |
+| Changed | `.env.example`, `docs/AWS_S3_VERCEL_GUIDE.md` | `VITE_AWS_*` names removed (already out of the bundle, vite.config.ts:67-72); Turnstile test site key in `.env.example` |
 | Deleted | — | Nothing |
-| Untouched | `vercel.json`, `middleware.ts`, `api/*` (incl. `api/marketing.js`) | The Vercel copy stays the rollback target; the Resend webhook URL reaches the fixed Worker handler from Phase 3 |
+| Untouched | `vercel.json`, `middleware.ts`, `middleware/*`, `api/*` (incl. `api/marketing.js`), `index.html`, `vite.config.ts`, root lockfile | The Vercel copy stays the rollback target; the Resend webhook URL reaches the Worker handler from Phase 3 |
 | Untouched | `lib/*` | Imported by `microns-ops` as is |
 
 Exit gate:
@@ -245,21 +253,70 @@ Exit gate:
 1. `tests/e2e/api.spec.ts` green on the preview for every endpoint and action.
 2. R2 round trip: presign-upload → PUT → presign-download → GET returns identical bytes (SHA-256); an existing legacy S3 object downloads through the same API.
 3. A Svix-signed Resend test event is accepted; unsigned and wrongly signed events are rejected.
-4. Tracking pixel, click and unsubscribe URLs (with test IDs) return the same status, headers and body as Vercel.
+4. Tracking pixel, click and unsubscribe URLs (with test IDs, seeded separately per platform and per case) return the same status, headers and body as Vercel: on `www` in Phase 2 and through the apex redirect in Phase 3 (S13) (DV-13).
 5. `OPTIONS` on every `/api/*` path matches Vercel.
-6. Every write path answers requests without the required credential as the private gate matrix specifies; rate limits and Turnstile verified with test keys.
-7. `api.forward_to_vercel` on: every `/api/*` request is served by Vercel through the Worker (proves H-1 does not block Worker egress); off: served locally.
+6. Every write path answers requests without the required credential as the private gate matrix specifies; rate limits and Turnstile verified with test keys (on preview hosts only, where the Worker accepts the Cloudflare test secret; a test secret on any other host fails closed).
+7. `api.forward_to_vercel` on: every routed `/api/*` request is served by Vercel through the Worker (proves H-1 does not block Worker egress); off: served locally. `/api/sitemap` stays local in both states, because router step 2 answers it before the `/api` router (DV-17).
 8. The MCP server and a `tender-collector`-shaped request succeed against the preview with their credentials.
 9. Size reports for `microns-site` and `microns-ops` within limits; `microns-site` bundle contains no `@aws-sdk`, `pdf-lib` or nesting code (H-27).
 10. No `VITE_AWS_*` name remains in `.env.example`, docs or Worker config.
 
-Rollback: before Phase 3 no production traffic reaches the Worker API; revert commits. After Phase 3, set `api.forward_to_vercel` on in KV `FLAGS` (≈ 1 min for KV propagation, CF docs, re-check at execution); full site rollback is the Phase 3 record flip. Objects written to R2 while the Worker served uploads must then be copied to the legacy S3 bucket under the same key (volume is small: 2 RFQs to date, live 2026-09-30).
+Rollback: before Phase 3 no production traffic reaches the Worker API; revert commits. Frontend changes reach Vercel production through `main` and are built to work against both APIs. After Phase 3, set `api.forward_to_vercel` on in KV `FLAGS` (≈ 1 min for KV propagation, CF docs, re-check at execution; var `API_FORWARD_TO_VERCEL` = `"true"` does the same while the KV key is absent); the forward goes to `API_FORWARD_ORIGIN` (the Vercel deployment host); full site rollback is the Phase 3 record flip. Objects written to R2 while the Worker served uploads must then be copied to the legacy S3 bucket under the same key, without the `rfq/` prefix: `scripts/r2-to-legacy-s3.mjs --since <ISO>` (dry run by default, `--execute` copies, owner's own credentials) (volume is small: 2 RFQs to date, live 2026-09-30).
 
-Dependencies: Phase 1 gate; P0-2; P0-8; Q1, Q11, Q19.
+Dependencies: Phase 1 gate; P0-2; P0-8; Q1, Q11, Q19; owner defaults D-1…D-17 below.
 
 Risk refs: H-1, H-6, H-7, H-14, H-15, H-17, H-18, H-20, H-21, H-26, H-27, H-28.
 
 Effort total: ≈ 7 d (plan: 5–7 d).
+
+Build record (2026-10-04): the Phase 2 code is built and tested locally; nothing is deployed. This section was brought in line with the build on that date under the owner's delegation of doc approval (§2, "Plan changes"). Exit-gate status with local evidence: [workers/site/README.md](../../workers/site/README.md), "Phase 2 exit gate". Gates 9 and 10 pass locally; gates 1–8 have local evidence and need the preview run after the owner steps of P2-9.
+
+Deviations from this section as first written (DV-1…DV-19; security changes at summary level, details in the private note):
+
+| # | Planned | Built | Why |
+|---|---|---|---|
+| DV-1 | `partner`, `production-status` site-local (P2-4; ARCHITECTURE.md §6.4) | Every `/api/notifications` action in `microns-ops` | api/notifications.js imports nesting and inventory at module scope (api/notifications.js:9-11); the site would carry `pdf-lib`, `qrcode` and nesting (gate item 9) |
+| DV-2 | Express-compatible shim at `workers/ops/src/compat/express-shim.ts`, also used by the site | Core `workers/shared/src/compat/vercel-node.ts` with `@vercel/node` 17.0.0 semantics; the PLAN path is its Hono adapter | Production runs `@vercel/node`, not Express; a file inside `workers/ops` cannot be a site dependency without coupling the two installs |
+| DV-3 | P2-6: funded-startups scan and GSC bulk actions on Queue `scrapes`; every `tender-scan` answered at once | Queue only for tender scans a machine caller starts; everything else synchronous; GSC kinds in Phase 5 | Interactive callers print the counts; `tender-collector` aborts at 25 s (supabase/functions/tender-collector/index.ts:8, :75-80); GSC jobs need a path without a user token (api/gsc.js:190) |
+| DV-4 | `limits.cpu_ms` 60,000 (wrangler.jsonc.draft; ARCHITECTURE.md §6.4, §7.2) | 300,000 | Local CPU passes 30 s near 700 part instances; the nester's 50 s budget never trips when deployed |
+| DV-5 | R2 keys `rfq/<rfq_id>/<file_id>-<name>` for the `/api/s3` replacement | `rfq/` + today's key | The browser stores and passes back today's key (`<rfqNumber>/<partFolder>/<safeName>`); the planned layout stays for Phase 4 e-mail RFQs |
+| DV-6 | P2-10: Turnstile in `src/pages/Contact.tsx`, `src/pages/QuoteRequestForm.tsx`, `src/components/quote-popup/QuotePopup.tsx` | `src/components/contact/ContactForm.tsx`, `src/components/quote-form/MultiStepQuoteForm.tsx`; `src/utils/s3Api.ts` and a shared auth-header helper added to the file list | The three planned files submit no routed form |
+| DV-7 | ARCHITECTURE.md §14: Access application on `www.micronshub.eu/api/tender-scan` ("no browser caller") | Dropped; machine host `api.micronshub.eu` from Phase 3 | The dashboard calls that path too (src/pages/dashboard/TenderMonitorPage.tsx:240) |
+| DV-8 | `OPS` binding without `entrypoint` (wrangler.jsonc.draft) | `"entrypoint": "OpsApi"` (RPC) | The verified caller travels in the RPC call, never in a header |
+| DV-9 | Ops `secrets.required` with the Phase 5 names (wrangler.jsonc.draft) | Phase 2 names only | A listed secret that does not exist blocks every deploy |
+| DV-10 | Forward target and legacy bucket names as constants in code (wrangler.jsonc.draft) | Vars `API_FORWARD_ORIGIN`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET` | Values come from P0-4; tests override them; not secret |
+| DV-11 | Route file `routes/inventory.ts`; site `api/notifications.ts` | `routes/notifications.ts`, `routes/scrape.ts`; no site notifications module | DV-1 |
+| DV-12 | P2-11: MCP `export_tenders_csv` returns a link | Fetches `/api/tenders?export=csv` and returns the CSV (cut at 200 KB with a note) | The old `/api/tenders-export` path no longer exists (api/tenders.js:50) |
+| DV-13 | Exit gate 4 wording | Run on `www` in Phase 2 and through the apex redirect in Phase 3 (S13) | Sent e-mails carry apex links (ARCHITECTURE.md §5) |
+| DV-14 | Gate-related behaviour | Documented changes: one tracking-link edge case (switchable, D-16), the Gmail-connect flow, recipient checks, upload constraints for callers other than staff, JSON-only bodies with string fields on some write paths, a Resend webhook retry of an event already recorded is acknowledged with 200 without re-processing, `delete-folder` matches whole folders only (prefix normalised to end in `/`) | Gates for H-6; every other existing behaviour is ported unchanged (D-7) |
+| DV-15 | `hono`, `aws4fetch` in the root `package.json` and lockfile (file list) | Per-package dependencies (`workers/ops`, `workers/shared`); the root `package.json` gets scripts only | The root lockfile and the Vercel install stay unchanged |
+| DV-16 | "CI tools" among the machine callers with an Access service token | The CI token passes the preview's Access application but is not an API credential; e2e writes use a test staff user's session | One credential per consumer, each revocable alone |
+| DV-17 | Exit gate 7: "every `/api/*` request" served by Vercel with the flag on | `/api/sitemap` stays local; gate 7 checks the routed endpoints | Router step 2 answers it before the `/api` router (workers/site/src/index.ts:82-90) |
+| DV-18 | "New uploads go to R2"; legacy S3 read-only | Article uploads stay on legacy S3 until P3-6, as the route table above says | `files.micronshub.eu` is connected in P3-6; the owner confirms or picks the alternative (D-17) |
+| DV-19 | Access service token for machine callers, implicitly on `www` | Machine callers accepted only on preview hosts and on hosts in `API_MACHINE_HOSTS` (empty in Phase 2; `api.micronshub.eu` from Phase 3) | An Access application on `www` paths would also stop the dashboard callers; hosts of the zone are never preview hosts (workers/site/src/preview.ts:52-56) |
+| Doc | workers/site/README.md "10 MB after compression … Free limit is 3 MB"; ARCHITECTURE.md §20 | 64 MiB uncompressed on both plans, no compressed limit; startup (1 s) is the binding limit | CF docs (fetched 2026-10-02); both files corrected |
+
+Defaults chosen for the owner (D-1…D-17; each is built as stated and can be changed before the step named):
+
+| # | Decision | Default built | Changed through | Decide before |
+|---|---|---|---|---|
+| D-1 | R2 jurisdiction of `microns-private` (only at bucket creation) | `eu` in every binding and in `R2_JURISDICTION` (a config test keeps them equal) | Bucket created without `-J eu`, both set to `''` | P2-9 bucket creation |
+| D-2 | R2 key layout for `/api/s3` uploads | `rfq/` + today's key; `publicUrl`/`url` keep the legacy string format; `rfq/<rfq_id>/<file_id>-<name>` for Phase 4 e-mail RFQs (Q11) | Code (`workers/site/src/api/files.ts`) | P2-9 |
+| D-3 | Machine credential | Cloudflare Access service tokens, one per consumer (`microns-machine-collector`, `microns-machine-mcp`): preview hosts now, `api.micronshub.eu` (Access application `microns-machine-api`) from Phase 3. Alternative: a Worker-checked shared secret on `www` | `API_MACHINE_HOSTS`; Access dashboard | Phase 3 runbook, before the `www` flip |
+| D-4 | Queue scope | Only tender scans a machine caller starts; funded scan and GSC bulk synchronous | Code | Phase 5 |
+| D-5 | `/api/notifications` placement | Every action in `microns-ops` | — | — |
+| D-6 | `nest` CPU | `cpu_ms` 300,000 without an instance cap; Container only if a real order exceeds it | Measured CPU per fixture on the preview | P2-12 |
+| D-7 | Existing defects | Ported unchanged, except the webhook retry acknowledgement and the `delete-folder` prefix | — | — |
+| D-8 | Gate-specific settings (one check in report mode, upload limits, tenant-admin access, timing before the flip) | Defaults in the private security note | `API_GATES_MODE`; code | Phase 3 S11 |
+| D-9 | Allow-list CORS | Built and tested, not wired; switched on after the Phase 3 observation window (not Phase 6) | Code and a var added with the switch | After the Phase 3 observation window |
+| D-10 | New names | Used as proposed: host `api.micronshub.eu`; Access application `microns-machine-api`; tokens `microns-machine-collector`, `microns-machine-mcp`; vars `API_FORWARD_TO_VERCEL`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `API_GATES_MODE`, `API_MACHINE_HOSTS`, `LEGACY_S3_RFQ_BUCKET`, `LEGACY_S3_ARTICLES_BUCKET`; bindings `API_RATE_LIMIT_MAIL` (namespace `2002`), `API_RATE_LIMIT_BULK` (`2003`); secret `ACCESS_MACHINE_CLIENT_IDS`; Supabase and MCP secrets `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`; build variable `VITE_TURNSTILE_SITE_KEY`; entrypoint `OpsApi`; `workers/shared/**`, `.github/workflows/cf-ops.yml`, `scripts/r2-to-legacy-s3.mjs` | Rename before the first deploy | P2-9 |
+| D-11 | Unknown `/api/*` paths | Forwarded to Vercel until P0-3 shows Vercel's answer (expected: the SPA shell with 200), then served locally | Code | After P0-3 |
+| D-12 | CORS header precedence when a handler sets the same header | Phase 1 behaviour: `finalise()` sets the vercel.json values | Code | After P0-3 |
+| D-13 | FR tender connector reads a remote JSON file of unknown size | Measured on the preview; streamed or capped only if large | Code | P2-12 |
+| D-14 | `marketing_settings.tracking_domain` → `https://www.micronshub.eu` | Not done by the build | Data change by the owner | Before the next campaign |
+| D-15 | Re-checks: RPC callee `cpu_ms`, error on CPU exhaustion, version overrides on RPC, `@vercel/node` production bytes for invalid JSON and default `Cache-Control`, Vercel `maxDuration` | Measured on the preview and in the P0-3 capture | — | P2-12; P0-3 |
+| D-16 | One tracking-link edge case from the `www` flip | Switchable (`API_GATES_MODE` token `redirect=report` or `redirect=enforce`): preview `enforce`; production `redirect=report` at S11 (today's behaviour, logged), because only today's behaviour guarantees that links in sent e-mails keep working byte-identically | `API_GATES_MODE` | Phase 3 S11 |
+| D-17 | Article image uploads | Legacy S3 from the flip until P3-6 (route table above). Alternative: connect `files.micronshub.eu` to `microns-public` before S11 and switch article uploads at the flip | Code (files API) | Phase 3 S11 |
 
 ### 5.3 Phase 3: zone + cutover
 
@@ -580,7 +637,7 @@ Anchors: **T** = NS switch at Papaki; **C** = `www` flip (earliest T + 3 d). Own
 | One R2 bucket `microns-files` | `microns-public` + `microns-private` | See §7 |
 | Custom Domain for `www` (plan §8b, Phase 3) | Workers Route | Plan §8 table and CF docs |
 | AI Gateway routes with fixed model IDs | Role-based routes; models chosen at Phase 4/5 start | Model IDs age quickly |
-| `notifications` partner/inventory CRUD in `microns-site` | `partner` and `production-status` local; `inv-*` and `nest` in `microns-ops` | Keeps `lib/inventory`, `qrcode` and nesting out of the site bundle (H-27) |
+| `notifications` partner/inventory CRUD in `microns-site` | Every `/api/notifications` action in `microns-ops` (planned: `partner` and `production-status` local; changed in the Phase 2 build, §5.2 DV-1) | Keeps `lib/inventory`, `qrcode` and nesting out of the site bundle (H-27); api/notifications.js imports them at module scope |
 | Delete `public/cookie-consent.html` in Phase 1 | Phase 6, after a log check | It is a reachable static URL; deleting it in Phase 1 would fail the parity gate |
 | Close H-5 before the agent layer | Agents do not trust tenant roles; H-5 closed in the Phase 6 RLS remediation | RLS changes are scheduled in Phase 6 |
 | 17 draft questions | 23 questions (Q4 answered) | Final list in §9 |

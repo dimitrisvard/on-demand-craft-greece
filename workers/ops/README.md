@@ -1,6 +1,6 @@
 # microns-ops
 
-Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`).
+Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2; ARCHITECTURE.md §6.4, §7.2, §9). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`). Every `/api/notifications` action runs here, because `api/notifications.js` imports nesting and inventory at module scope (PLAN.md §5.2 DV-1).
 
 ## How requests reach it
 
@@ -86,3 +86,25 @@ From the repository root, after `npm ci`:
 | Command | `wrangler deploy` (workflow `.github/workflows/cf-ops.yml` with `deploy: true`), not `wrangler versions upload`: a service binding reaches the current deployment only |
 | Before the first deploy | `npx wrangler queues create scrapes`; every name of `secrets.required` set with `npx wrangler secret put` (the first `put` creates the Worker) |
 | CI | `cf-ops.yml` runs on manual dispatch only: install, typecheck, tests, dry run; deploy only when the input `deploy` is true |
+
+## Status (2026-10-04, local)
+
+Nothing is deployed. Phase 2 exit gate as a whole: `workers/site/README.md`, "Phase 2 exit gate".
+
+| Check | Result |
+|---|---|
+| Typecheck (`npm run typecheck`) | exit 0 |
+| T1 (`npm test`) | 10 files, 171 tests green |
+| T2 (`npm run test:integration`) | 4 green: `inv-label` returns a PDF, `nest` with the 80-instance fixture returns `groups`, a machine `tender-scan` gets the queued answer, site → ops RPC with a STAFF caller |
+| Dry run (`npm run build:dry`) | 3,743.75 KiB, gzip 725.78 KiB; `qrcode` resolves to `lib/server.js` |
+| `cf-ops.yml` | The only trigger is `workflow_dispatch` (YAML check) |
+
+## Owner items (Phase 2)
+
+| Item | Detail |
+|---|---|
+| Queue | `npx wrangler queues create scrapes` before the first deploy (`scrapes-dlq` is created automatically) |
+| Secrets | Every name of `secrets.required` with `npx wrangler secret put`; `RESEND_WEBHOOK_SECRET` is a test signing secret in Phase 2 (the real Resend endpoint is pointed at `www` at Phase 3 S11); `GOOGLE_REDIRECT_URI` = `https://www.micronshub.eu/api/marketing?action=google-auth&step=callback`, registered in Google Cloud |
+| Deploy | `cf-ops.yml` with `deploy: true` (or `npx wrangler deploy` here), before the site preview |
+| `nest` CPU | Run the fixtures (80, 400, 800, 1,200 part instances) through the preview and read the CPU per invocation from the Workers Logs of `microns-ops`; decide whether a Container is needed (PLAN.md §5.2 D-6). CPU limits are not enforced locally |
+| Re-checks | Whether the callee's own `cpu_ms` governs an RPC call, the error on CPU exhaustion, version overrides on RPC (PLAN.md §5.2 D-15) |

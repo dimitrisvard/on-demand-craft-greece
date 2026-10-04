@@ -82,9 +82,9 @@ Included quotas and overage prices are Workers Paid figures (LP) unless stated. 
 | Workers AI (`@cf/baai/bge-m3` for the `embed` route) | 10,000 neurons/day; bge-m3 = 1,075 neurons per M input tokens (≈ 9.3M tokens/day free) | $0.011 per 1,000 neurons ($0.012 per M bge-m3 tokens) | < 1M tokens | $0 |
 | AI Gateway (`microns`) | Core features free (analytics, caching, rate limits); logs for gateways created after 2026-09-24 follow Workers Logs pricing | Workers Logs price | 0.7k / 3.5k / 16.5k requests | $0 |
 | Email Routing + `microns-mail` | Email Routing free on all plans; Worker invocations counted as requests (conservative) | — | 30 / 300 / 1,200 messages | $0 |
-| Access (preview host, `mcp.micronshub.eu`) | Zero Trust Free up to 50 users (Cloudflare Zero Trust plans page, search result 2026-09-30; re-check) | Standalone Access ≈ $3 per user (same source; re-check) | 1–3 users plus service tokens | $0 |
-| Turnstile | Free plan: 20 widgets, unlimited challenges | — | 2 widgets | $0 |
-| Workers Rate Limiting (`API_RATE_LIMIT`) | No separate line on the Workers pricing page (re-check) | — | — | $0 |
+| Access (preview host, `api.micronshub.eu` from Phase 3, `mcp.micronshub.eu`) | Zero Trust Free up to 50 users (Cloudflare Zero Trust plans page, search result 2026-09-30; re-check) | Standalone Access ≈ $3 per user (same source; re-check) | 1–3 users plus service tokens (CI, `microns-machine-collector`, `microns-machine-mcp`) | $0 |
+| Turnstile | Free plan: 20 widgets, unlimited challenges | — | 1 widget for the two forms (test keys in Phase 2) | $0 |
+| Workers Rate Limiting (`API_RATE_LIMIT`, `API_RATE_LIMIT_MAIL`, `API_RATE_LIMIT_BULK`) | No separate line on the Workers pricing page (re-check) | — | — | $0 |
 | Analytics Engine (`microns_events`) | 10M data points, 1M read queries; billing not active yet | $0.25 per M points; $1.00 per M queries | < 0.1M points | $0 |
 | Workers Logs | 20M events/month, 7-day retention | $0.60 per M | ≈ 2 per request: 0.9M / 3.2M / 14.4M | $0 |
 | Hyperdrive `SUPABASE_DB` (optional) | Unlimited queries on Workers Paid | — | Xometry upserts | $0 |
@@ -114,7 +114,7 @@ All rows are A unless a source is given. Basis: ≈ 2,610 public URLs (CANON cou
 | 15 | Cron invocations/month | 52,800 | 52,800 | 52,800 | CANON §6 per day: 07:00 → 1; */15 → 96; */30 (reddit tier2 + hn share one expression) → 48; hourly → 24; 06:00 → 1; Xometry 7; Monday 06:30 → 0.14; every minute → 1,440; */10 → 144; sum 1,761.1 × 30 |
 | 16 | Queue messages/day | 316 | 1,122 | 7,430 | Reddit 168 ticks × 1 / 5 / 40 due subreddits (cap 40, supabase/functions/reddit-collector/index.ts:263-264); HN 48 / 96 / 144; tenders 26 connectors; Xometry 7; translations 13; `cad-jobs` 4 / 30 / 120; `agent-events` 20 / 50 / 200; `outbound-mail` 30 / 60 / 200 |
 | 17 | Queue operations/month | 28k | 101k | 669k | Row 16 × 3 ops × 30 (messages < 64 KB) |
-| 18 | `microns-ops` CPU/month | 1.1M ms | 4.0M ms | 20.4M ms | Crons 52,800 × 10 ms; consumers row 16 × 30 × 50 ms; API row 14 × 30 × 20 ms; `nest` 0 / 1 / 5 per day × 50 s (H-18; `cpu_ms` 60000, wrangler.jsonc.draft:255) |
+| 18 | `microns-ops` CPU/month | 1.1M ms | 4.0M ms | 20.4M ms | Crons 52,800 × 10 ms; consumers row 16 × 30 × 50 ms; API row 14 × 30 × 20 ms; `nest` 0 / 1 / 5 per day × 50 s (H-18; `limits.cpu_ms` 300,000 since Phase 2 is a cap, CPU is billed as used; real CPU per run read from the preview logs at P2-12) |
 | 19 | Workflow runs/month | 112 | 544 | 1,984 | `rfq-intake` 30 / 300 / 1,200; `quote` 15 / 150 / 600; `post-order` 3 / 30 / 120; `content-daily` 30; `sitemap` 30; `ops-digest` 4.3 (expected = AGENTS.md §8 planning load) |
 | 20 | Workflow steps/month | 1.6k | 7.4k | 26.7k | Steps per run: `rfq-intake` 13 (AGENTS.md §3.1), `quote` 15, `post-order` 10, `content-daily` 25, `sitemap` 5, `ops-digest` 5 |
 | 21 | CAD bursts/day × jobs per burst | 2 × 2 | 10 × 3 | 40 × 3 | A; 3 jobs per quote (AGENTS.md §3.2) |
