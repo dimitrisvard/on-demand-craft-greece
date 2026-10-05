@@ -4,9 +4,10 @@ name: Cloudflare ops Worker (microns-ops)
 #
 # Installs the root, workers/shared and workers/ops packages, type-checks and tests microns-ops, bundles it with
 # `wrangler deploy --dry-run` (metafile + qrcode check + size), and only when the input `deploy` is true runs
-# `wrangler deploy`. microns-ops has no public surface (workers_dev and preview_urls off, no routes): it is reached
-# only through the site's service binding OPS and its queue consumer. It must be deployed (not version-uploaded),
-# because a service binding reaches the target's current deployment only, and it is deployed before the site.
+# `wrangler deploy`. microns-ops has no public surface (workers_dev and preview_urls off; its only route is the
+# Phase 4 MCP host below): it is reached through the site's service binding OPS, its queue consumers and that
+# host. It must be deployed (not version-uploaded), because a service binding reaches the target's current
+# deployment only, and it is deployed before the site.
 #
 # Repository secrets (names only; Settings -> Secrets and variables -> Actions):
 #   CLOUDFLARE_API_TOKEN    API token with "Workers Scripts: Edit" (and Queues) on the account
@@ -14,6 +15,13 @@ name: Cloudflare ops Worker (microns-ops)
 # Worker secrets (secrets.required in workers/ops/wrangler.jsonc) are set once on the Worker with
 # `npx wrangler secret put <NAME>` in workers/ops, never here. The queue "scrapes" must exist before the first
 # deploy (`npx wrangler queues create scrapes`); scrapes-dlq is created automatically.
+#
+# Phase 4 (agent layer, PLAN.md §5.4): microns-ops also has the Custom Domain mcp.micronshub.eu (remote MCP), the
+# Workflows rfq-intake, quote and post-order, the Durable Objects of migration tag v1, two cron triggers and the
+# queues cad-jobs and agent-events. Before the first deploy with that config: the queues cad-jobs and agent-events
+# and the Vectorize index quotes-v1 must exist, and the FLAGS KV id and the Access identifiers must be filled in
+# wrangler.jsonc. CLOUDFLARE_API_TOKEN then also needs the permissions for Vectorize and for Workers Routes /
+# Custom Domains on the zone, as Cloudflare's token templates name them. The trigger stays workflow_dispatch.
 
 on:
   workflow_dispatch:

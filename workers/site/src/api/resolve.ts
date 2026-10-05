@@ -310,6 +310,8 @@ function resolveAction(endpoint: EndpointId, i: Input): Resolution {
     case 'scrape-company-profile':
     case 'scan-directory':
       return resolvePostOnly(i, 'post');
+    case 'agent':
+      return { action: '#unknown', rawAction: undefined };
   }
 }
 

@@ -1,0 +1,49 @@
+From: Piotr Nowak <p.nowak@example.com>
+To: rfq@example.com
+Subject: Zapytanie ofertowe - frezowanie CNC
+Date: Mon, 05 Oct 2026 11:00:00 +0200
+Message-ID: <zapytanie-cnc-12@mail.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b-pl1"
+
+--b-pl1
+Content-Type: multipart/related; boundary="b-pl2"
+
+--b-pl2
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+RHppZcWEIGRvYnJ5LDwvcD48cD5wcm9zaW15IG8gb2ZlcnTEmSBuYSBm
+cmV6b3dhbmllIENOQyAxMCBzenR1ayBvYnVkb3d5IChhbHVtaW5pdW0gNjA4MiwgdG9sZXJhbmNq
+YSAmcGx1c21uOzAsMDIgbW0pLjwvcD48cD5Nb2RlbCBTVEwgaSB6ZGrEmWNpZSB3IHphxYLEhWN6
+bmlrdS48L3A+PHA+UG96ZHJhd2lhbTxicj5QaW90ciBOb3dhazxicj5Qcnp5a8WCYWQgU3AuIHog
+by5vLjwvcD48aW1nIHNyYz0iY2lkOmxvZ28tMSI+PC9ib2R5PjwvaHRtbD4=
+
+--b-pl2
+Content-Type: image/png; name="logo.png"
+Content-Disposition: inline; filename="logo.png"
+Content-ID: <logo-1>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+
+--b-pl2--
+--b-pl1
+Content-Type: application/sla; name="obudowa.stl"
+Content-Disposition: attachment; filename="obudowa.stl"
+Content-Transfer-Encoding: base64
+
+c3ludGhldGljIGJpbmFyeSBzdGwgZm9yIHRlc3RzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAgQQAA
+AAAAAAAAAAAAAAAAIEEAAAAAAAA=
+
+--b-pl1
+Content-Type: image/png; name="zdjecie.png"
+Content-Disposition: attachment; filename="zdjecie.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6
+kgAAAABJRU5ErkJggg==
+
+--b-pl1--

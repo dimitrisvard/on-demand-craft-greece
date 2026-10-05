@@ -1,0 +1,88 @@
+{
+  "$comment": "Shape of an LLM fixture: test/fixtures/llm/<prompt id>/<first 16 hex of request_sha256>.json (T1 FakeLlm, the T2 stub, eval:synthetic) and eval/samples/*.json. request_sha256 is the SHA-256 hex of the canonical user content (src/ports/llm.ts llmContentSha256). response is a Messages API response body. expected (optional) holds ground-truth output fields for scoring: a field whose output value is {value, confidence} is compared by its value. schema (optional) is the output schema of a fixture whose prompt has no schema file under src/agents/prompts/ (eval/samples only).",
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string"
+    },
+    "request_sha256": {
+      "type": "string"
+    },
+    "case": {
+      "type": "string"
+    },
+    "status": {
+      "type": "integer"
+    },
+    "user": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "pdf",
+              "image"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "base64": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array"
+        },
+        "usage": {
+          "type": "object"
+        },
+        "stop_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "usage",
+        "stop_reason"
+      ]
+    },
+    "expected": {
+      "type": "object"
+    },
+    "schema": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "prompt",
+    "request_sha256",
+    "response"
+  ],
+  "additionalProperties": false
+}

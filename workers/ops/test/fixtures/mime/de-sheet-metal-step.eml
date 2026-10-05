@@ -1,0 +1,33 @@
+From: Hans =?UTF-8?Q?M=C3=BCller?= <h.mueller@example.de>
+To: rfq@example.com
+Subject: =?UTF-8?B?QW5mcmFnZSBLYW50dGVpbGUgV2lua2VsIFctMjA=?=
+Date: Mon, 05 Oct 2026 09:02:00 +0200
+Message-ID: <anfrage-w20-4711@mail.example.de>
+Authentication-Results: mx.example.net; spf=pass smtp.mailfrom=example.de; dkim=pass header.d=example.de; dmarc=pass header.from=example.de
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b-de1"
+
+--b-de1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+U2VociBnZWVocnRlIERhbWVuIHVuZCBIZXJyZW4sCgpiaXR0ZSBzZW5kZW4gU2llIHVucyBlaW4g
+QW5nZWJvdCBmw7xyIDIwMCBTdMO8Y2sgS2FudHRlaWwgV2lua2VsIFctMjAgKEFia2FudHVuZyA5
+MMKwKS4KV2Vya3N0b2ZmOiAxLjQzMDEsIEJsZWNoZGlja2UgMSw1IG1tLCBPYmVyZmzDpGNoZSBn
+ZXNjaGxpZmZlbi4KRGllIFNURVAtRGF0ZWkgaXN0IGltIEFuaGFuZy4KCk1pdCBmcmV1bmRsaWNo
+ZW4gR3LDvMOfZW4KSGFucyBNw7xsbGVyCkJlaXNwaWVsIE1ldGFsbGJhdSBHbWJICk11c3RlcnN0
+cmHDn2UgMSwgNzAxNzMgU3R1dHRnYXJ0ClVTdC1JZE5yLiBERTEyMzQ1Njc4OQo=
+
+--b-de1
+Content-Type: application/step; name="winkel_w20.step"
+Content-Disposition: attachment; filename="winkel_w20.step"
+Content-Transfer-Encoding: base64
+
+SVNPLTEwMzAzLTIxOwpIRUFERVI7CkZJTEVfREVTQ1JJUFRJT04oKCdTeW50aGV0aXNjaGVzIFRl
+c3R0ZWlsJyksJzI7MScpOwpGSUxFX05BTUUoJ3dpbmtlbC5zdGVwJywnMjAyNi0xMC0wMVQxMDow
+MDowMCcsKCdFeGFtcGxlJyksKCdFeGFtcGxlJyksJycsJycsJycpOwpGSUxFX1NDSEVNQSgoJ0FV
+VE9NT1RJVkVfREVTSUdOIHsgMSAwIDEwMzAzIDIxNCAxIDEgMSAxIH0nKSk7CkVORFNFQzsKREFU
+QTsKIzE9Q0FSVEVTSUFOX1BPSU5UKCcnLCgwLiwwLiwwLikpOwojMj1DQVJURVNJQU5fUE9JTlQo
+JycsKDEwMC4sMC4sMC4pKTsKIzM9Q0FSVEVTSUFOX1BPSU5UKCcnLCgxMDAuLDQwLiwwLikpOwpF
+TkRTRUM7CkVORC1JU08tMTAzMDMtMjE7Cg==
+--b-de1--

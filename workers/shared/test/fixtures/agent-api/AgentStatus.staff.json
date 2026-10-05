@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "ok": true,
+  "actions": [
+    "decision",
+    "status",
+    "start",
+    "file"
+  ],
+  "principal": "STAFF"
+}

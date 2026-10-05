@@ -52,6 +52,7 @@ export const ENDPOINT_TARGETS: TargetTable = {
   'scrape-website': 'ops',
   'scrape-company-profile': 'ops',
   'scan-directory': 'ops',
+  agent: 'ops',
 };
 
 /** Dispatch key: the concrete module behind a target. */

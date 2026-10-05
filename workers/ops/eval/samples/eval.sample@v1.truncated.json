@@ -1,0 +1,68 @@
+{
+  "prompt": "eval.sample@v1",
+  "request_sha256": "6183a46229a123f4e3c2fe47e9fdb9474728eddd8bc3b611ebc8e66978e8d9e4",
+  "case": "truncated",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>Bitte Angebot fuer 3 Frästeile, Alu 6082, Toleranz +/-0,05.</untrusted_email>"
+    }
+  ],
+  "response": {
+    "id": "msg_sample",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"rfq\",\"lang"
+      }
+    ],
+    "stop_reason": "max_tokens",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 420,
+      "output_tokens": 256,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "de",
+    "injection_suspected": false
+  },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "rfq",
+          "techpilot",
+          "reply",
+          "auto_reply",
+          "spam",
+          "other"
+        ]
+      },
+      "language": {
+        "type": "string"
+      },
+      "injection_suspected": {
+        "type": "boolean"
+      },
+      "confidence": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "kind",
+      "language",
+      "injection_suspected",
+      "confidence"
+    ],
+    "additionalProperties": false
+  }
+}

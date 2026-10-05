@@ -1,0 +1,16 @@
+{
+  "kind": "step",
+  "thickness_mm": 2,
+  "flat": {
+    "width_mm": 180,
+    "height_mm": 120,
+    "area_mm2": 21287.86,
+    "cut_length_mm": 662.73,
+    "pierces": 1
+  },
+  "bends": {
+    "count": 2
+  },
+  "bbox_mm": null,
+  "volume_mm3": null
+}

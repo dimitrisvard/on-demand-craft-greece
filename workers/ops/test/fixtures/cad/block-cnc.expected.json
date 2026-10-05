@@ -1,0 +1,12 @@
+{
+  "kind": "step",
+  "thickness_mm": null,
+  "flat": null,
+  "bends": null,
+  "bbox_mm": {
+    "x": 100,
+    "y": 40,
+    "z": 10
+  },
+  "volume_mm3": null
+}

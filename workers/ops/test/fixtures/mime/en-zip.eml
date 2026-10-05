@@ -1,0 +1,35 @@
+From: Olivia Grant <olivia.grant@example.com>
+To: rfq@example.com
+Subject: Request for quotation - bracket set
+Date: Mon, 05 Oct 2026 12:00:00 +0100
+Message-ID: <rfq-zip-set-9@mail.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b-zip"
+
+--b-zip
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SGksCgpwbGVhc2UgcXVvdGUgdGhlIGJyYWNrZXQgc2V0IGluIHRoZSBhdHRhY2hlZCBhcmNoaXZl
+OiAxMDAgcGNzIG9mIGVhY2ggcGFydCwgUzM1NSBzdGVlbCAzIG1tLCBsYXNlciBjdXQgYW5kIGJl
+bnQuCgpUaGFua3MsCk9saXZpYSBHcmFudApFeGFtcGxlIEVuZ2luZWVyaW5nIEx0ZAo=
+
+--b-zip
+Content-Type: application/zip; name="parts.zip"
+Content-Disposition: attachment; filename="parts.zip"
+Content-Transfer-Encoding: base64
+
+UEsDBBQAAAgIAAAAAAAQ+Ymq4wAAAG0BAAASAAAAcGFydHMvYnJhY2tldC5zdGVwdZBPS8QwEMXv
+/RSBPUwK6ZJJFw8GD6EZ3YBNlyZ6XeoSUPxD2c1BEb+7bN0VCsq8wxx+b+bxXOgqlLWsK4W6WJOx
+1Ovi2t3S1lJoereJrvOcQ/h4y48pP+1YTofMxmGfoRSgNEJ5MnjTEoeH/bB7Tnl5yGkEAUqqiwpl
+JTGivJRHgeBA78Pr+JKgnO0APzpfDM2aWsM5mLvYtV1091Msd+PZJ0Mm2RSdKVwxPM0XlKUuyNtA
+jS6siUYXC7xqTB8pOOO3m875yAEEl0sx6WhYqD8RlDOo/h9a/VLn3+Rt5Wb1fgNQSwMEFAAACAgA
+AAAAAD4rw9tFAAAAeQAAAA8AAABwYXJ0cy9wbGF0ZS5keGZlijEKwDAMA3c9ptiesqcqGIoz2P9/
+S2jSpXSSjjtBspePgIFRXs6E4PYgGgQqkENge1ShtlgXf8NX/dO2W8aZ7M8ZFyZQSwMEFAAACAgA
+AAAAAN6PSc8PAAAADQAAAB0AAABfX01BQ09TWC9wYXJ0cy8uX2JyYWNrZXQuc3RlcCtKLc4vLUpO
+VUjLL8oGAFBLAQIUAxQAAAgIAAAAAAAQ+Ymq4wAAAG0BAAASAAAAAAAAAAAAAACkgQAAAABwYXJ0
+cy9icmFja2V0LnN0ZXBQSwECFAMUAAAICAAAAAAAPivD20UAAAB5AAAADwAAAAAAAAAAAAAApIET
+AQAAcGFydHMvcGxhdGUuZHhmUEsBAhQDFAAACAgAAAAAAN6PSc8PAAAADQAAAB0AAAAAAAAAAAAA
+AKSBhQEAAF9fTUFDT1NYL3BhcnRzLy5fYnJhY2tldC5zdGVwUEsFBgAAAAADAAMAyAAAAM8BAAAA
+AA==
+--b-zip--

@@ -1,0 +1,62 @@
+{
+  "description": "KV mirror vectors (PHASE4_SPEC.md §4.13 'KV mirror (P4-2) contract'). Run by test.mjs against the SQL functions with the reference tick (flags-sync.mjs) and by workers/ops/test/flags against microns-ops' flagsSyncTick over the in-memory RPCs. Both start from the 13 flag rows the migration seeds. 'kv' values are the raw KV text; null = key absent. Key lists compare as sets.",
+  "admin_user": "11111111-1111-4111-8111-111111111111",
+  "other_tenant": "bb71e74e-4273-496f-a75b-319357666ebc",
+  "seed_cases": [
+    { "name": "valid record: enabled and value kept", "key": "api.forward_to_vercel", "kv": "{\"enabled\":true,\"value\":{\"hosts\":[\"preview\"]}}",
+      "result": "imported", "row": { "enabled": true, "value": { "hosts": ["preview"] } }, "kv_after": { "enabled": true, "value": { "hosts": ["preview"] } } },
+    { "name": "valid record: off, no value", "key": "seo.strict_404", "kv": "{\"enabled\":false}",
+      "result": "imported", "row": { "enabled": false, "value": {} }, "kv_after": { "enabled": false, "value": {} } },
+    { "name": "valid record: a top-level mode goes into value.mode", "key": "agent.rfq_intake", "kv": "{\"enabled\":true,\"mode\":\"assist\"}",
+      "result": "imported", "row": { "enabled": true, "value": { "mode": "assist", "min_confidence": 0.7, "ack": false } },
+      "kv_after": { "enabled": true, "mode": "assist", "value": { "mode": "assist", "min_confidence": 0.7, "ack": false } } },
+    { "name": "valid record: KV wins key by key over the seeded value", "key": "agent.quote", "kv": "{\"enabled\":false,\"value\":{\"follow_up_days\":[2]}}",
+      "result": "imported", "row": { "enabled": false, "value": { "mode": "assist", "follow_up_days": [2], "campaign_replies": false } },
+      "kv_after": { "enabled": false, "mode": "assist", "value": { "mode": "assist", "follow_up_days": [2], "campaign_replies": false } } },
+    { "name": "valid record with an extra top-level key", "key": "agent.ops_digest", "kv": "{\"enabled\":false,\"value\":{\"ads_upload\":true},\"note\":\"set by hand\"}",
+      "result": "imported", "row": { "enabled": false, "value": { "ads_upload": true } }, "kv_after": { "enabled": false, "value": { "ads_upload": true } } },
+    { "name": "absent key: marked in sync, KV not written", "key": "agent.post_order", "kv": null,
+      "result": "absent", "row": { "enabled": false, "value": { "mode": "assist" } }, "kv_after": null },
+    { "name": "malformed: not JSON", "key": "mcp.remote", "kv": "on", "result": "invalid", "row": { "enabled": false, "value": { "writes": false } } },
+    { "name": "malformed: the JSON literal null", "key": "agent.growth.hn", "kv": "null", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: no boolean enabled", "key": "agent.growth.reddit", "kv": "{\"on\":true}", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: enabled as text", "key": "agent.growth.tenders", "kv": "{\"enabled\":\"true\"}", "result": "invalid",
+      "row": { "enabled": false, "value": { "relevance": false, "llm_cap": 20 } } },
+    { "name": "malformed: value not an object", "key": "agent.growth.scrapers", "kv": "{\"enabled\":true,\"value\":[1]}", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: unknown mode", "key": "agent.growth.xometry", "kv": "{\"enabled\":true,\"mode\":\"yolo\"}", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: an array", "key": "agent.content_daily", "kv": "[]", "result": "invalid", "row": { "enabled": false, "value": {} } }
+  ],
+  "scenario": {
+    "kv": {
+      "seo.strict_404": "{\"enabled\":false}",
+      "api.forward_to_vercel": "{\"enabled\":true,\"value\":{\"hosts\":[\"preview\"]}}",
+      "mcp.remote": "{\"on\":true}"
+    },
+    "steps": [
+      { "op": "tick", "name": "first tick imports the hand-set keys and writes them in the canonical shape",
+        "expect": { "imported": ["api.forward_to_vercel", "seo.strict_404"], "absent_count": 10, "invalid": ["mcp.remote"],
+                    "written": ["api.forward_to_vercel", "seo.strict_404"], "stale": [], "failed": [],
+                    "kv": { "api.forward_to_vercel": { "enabled": true, "value": { "hosts": ["preview"] } }, "agent.quote": null } } },
+      { "op": "tick", "name": "steady state: nothing written, the invalid key reported again",
+        "expect": { "imported": [], "absent_count": 0, "invalid": ["mcp.remote"], "written": [], "stale": [], "failed": [] } },
+      { "op": "edit", "key": "agent.quote", "set": { "enabled": true, "updated_by": "$admin" } },
+      { "op": "tick", "name": "an edited row is written once",
+        "expect": { "written": ["agent.quote"], "invalid": ["mcp.remote"],
+                    "kv": { "agent.quote": { "enabled": true, "mode": "assist", "value": { "mode": "assist", "follow_up_days": [3, 4, 7], "campaign_replies": false } } } } },
+      { "op": "edit", "key": "mcp.remote", "set": { "updated_by": "$admin" } },
+      { "op": "tick", "name": "saving the malformed key unchanged makes the table value win",
+        "expect": { "written": ["mcp.remote"], "invalid": [], "kv": { "mcp.remote": { "enabled": false, "value": { "writes": false } } } } },
+      { "op": "race", "key": "agent.post_order", "first": { "enabled": true }, "then": { "enabled": false }, "expect_mark": false },
+      { "op": "tick", "name": "a row that changed between batch and mark converges on the next tick",
+        "expect": { "written": ["agent.post_order"], "kv": { "agent.post_order": { "enabled": false, "mode": "assist", "value": { "mode": "assist" } } } } },
+      { "op": "kv_fail_next", "key": "agent.growth.hn" },
+      { "op": "edit", "key": "agent.growth.hn", "set": { "enabled": true } },
+      { "op": "tick", "name": "a failed put is reported and the row stays unsynced", "expect": { "written": [], "failed": ["agent.growth.hn"] } },
+      { "op": "tick", "name": "the failed put is retried on the next tick", "expect": { "written": ["agent.growth.hn"], "failed": [],
+        "kv": { "agent.growth.hn": { "enabled": true, "value": {} } } } },
+      { "op": "insert", "key": "agent.quote", "tenant": "$other_tenant", "set": { "enabled": true } },
+      { "op": "tick", "name": "another tenant's row is written under t:<tenant>:<key>",
+        "expect": { "written": ["t:$other_tenant:agent.quote"], "kv": { "t:$other_tenant:agent.quote": { "enabled": true, "value": {} } } } }
+    ]
+  }
+}

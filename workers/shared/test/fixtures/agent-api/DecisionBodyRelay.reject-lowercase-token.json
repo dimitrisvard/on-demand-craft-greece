@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "token": "abcdefghijklmnopqrstuvwx27",
+  "code": "dis",
+  "tg": {
+    "user_id": 1,
+    "chat_id": 1,
+    "message_id": 1
+  }
+}

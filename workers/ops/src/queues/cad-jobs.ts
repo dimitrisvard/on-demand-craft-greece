@@ -1,0 +1,381 @@
+// Consumer of the queue "cad-jobs": one CAD job per delivery (lease from CadRouter, backend run under the job
+// deadline, outputs to R2 cad/<job_id>/output/, cad_jobs row final, RfqThread.cadJobFinal exactly once).
+//
+// Steps per message
+//   1 Load     the cad_jobs row by job_id (the row is the record; the message only names it). A missing row or a
+//              malformed message is acknowledged and logged; a final row is acknowledged (duplicate delivery); a row
+//              another delivery is running (dispatched/running within the deadline plus 60 s) is retried later.
+//   2 Run row  agent_runs (agent 'cad', trigger 'queue', idempotency key = job id) through rpc/agent_run_begin.
+//   3 Reuse    a succeeded job with the same idempotency key (any RFQ): its result and outputs are copied (the R2
+//              objects are referenced, not copied).
+//   4 Input    R2 head of the input: missing -> failed 'invalid_input'; above 50 MB -> failed 'too_large'; an input
+//              above its inline cap is never parsed (failed 'too_large: inline_too_large' when inline was the only
+//              backend for it).
+//   5 Lease    CadRouter.acquire; while no slot is free the consumer waits up to LEASE_WAIT_MS in this invocation,
+//              then retries the message with the router's delay (the last delivery fails 'unavailable' instead).
+//   6 Claim    conditional update queued -> dispatched (attempts + 1, backend), then running.
+//   7 Run      backend.run under AbortSignal.timeout(min(deadline_s, 300) s), input streamed from R2.
+//   8 Store    artefacts and result.json to cad/<job_id>/output/; on failure log.txt (code and short message).
+//   9 Finish   succeeded / failed (not retryable) / back to queued with message.retry() (retryable, deliveries
+//              left) / timed_out or failed on the last delivery; release the lease (backend_down for unreachable
+//              services); RfqThread(rfq_id).cadJobFinal(job_id, status) once the row is final; closeRun; one
+//              Analytics Engine point (event 'cad_job').
+// Rules
+//   - A row becomes final exactly once, so cadJobFinal is called once per job; retries never pass through a final
+//     status. Messages that throw unexpectedly are retried; after the queue's retries they land in cad-jobs-dlq and
+//     the dispatcher marks the row dead_letter.
+//   - Log lines carry ids, codes and sizes only (never file names or service answers).
+
+import { formatLogLine } from '../../../shared/src/http/log';
+import { EMPTY_USAGE, closeRun, openRun } from '../agents/runs';
+import { isBackendDown } from '../cad/backends/http-unfold';
+import { missingCadConfig } from '../cad/registry';
+import { cadRouter, notifyCadJobFinal, type CadRouterClient } from '../cad/router-client';
+import {
+  INLINE_CAPS,
+  INLINE_TOO_LARGE,
+  JOB_DEADLINE_S,
+  MAX_INPUT_BYTES,
+  cadKindOf,
+  cadOutputKey,
+  isFinalCadStatus,
+  type BackendName,
+  type CadFinalStatus,
+  type CadInput,
+  type CadKind,
+  type CadOutcome,
+} from '../cad/types';
+import { claimCadJob, findReusable, getCadJob, patchCadJob, type CadJobRow } from '../db/repos/cad-jobs';
+import { LOG_PREFIX, type OpsEnv } from '../env';
+import { makePorts, type Ports } from '../ports/index';
+import { LEASE_GRACE_S } from '../do/cad-router';
+import type { CadJobMessageV1 } from './messages';
+
+/** Deliveries of one message: the queue's max_retries (2, wrangler.jsonc) + 1. */
+export const MAX_DELIVERIES = 3;
+/** Longest in-invocation wait for a free backend slot before the message is retried. */
+export const LEASE_WAIT_MS = 120_000;
+/** Delay of a retry while another delivery runs the job. */
+export const BUSY_RETRY_S = 60;
+/** log.txt and the stored error stay short. */
+export const LOG_MAX_CHARS = 4000;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export interface CadConsumerDeps {
+  ports?: Ports;
+  router?: CadRouterClient;
+  /** Waits ms (default setTimeout); tests pass a virtual clock. */
+  sleep?: (ms: number) => Promise<void>;
+  leaseWaitMs?: number;
+  notifyFinal?: (rfqId: string, jobId: string, status: CadFinalStatus) => Promise<void>;
+}
+
+/** v 1 with a uuid job_id (everything else is read from the row). */
+export function isCadJobMessage(body: unknown): body is CadJobMessageV1 {
+  if (typeof body !== 'object' || body === null) return false;
+  const m = body as Partial<CadJobMessageV1>;
+  return m.v === 1 && typeof m.job_id === 'string' && UUID.test(m.job_id);
+}
+
+function log(event: string, fields: Record<string, string | number | boolean | undefined>): void {
+  console.log(formatLogLine(LOG_PREFIX, event, fields));
+}
+
+function errorText(outcome: Extract<CadOutcome, { ok: false }>): string {
+  return `${outcome.code}: ${outcome.message}`.slice(0, LOG_MAX_CHARS);
+}
+
+/** The message as the job row describes it (row values win over message values). */
+function jobFromRow(row: CadJobRow, m: CadJobMessageV1): CadJobMessageV1 {
+  const params = row.params as Partial<CadJobMessageV1['params']>;
+  return {
+    ...m,
+    idempotency_key: row.idempotency_key,
+    job_type: row.job_type,
+    tenant_id: row.tenant_id,
+    rfq_id: row.rfq_id,
+    rfq_file_id: row.rfq_file_id,
+    quote_workflow_id: row.quote_workflow_id,
+    input: { ...m.input, store: 'r2', r2_key: row.input_r2_key, sha256: row.input_sha256 },
+    params: {
+      material: typeof params.material === 'string' ? params.material : m.params?.material ?? 'steel',
+      thickness_override: typeof params.thickness_override === 'number' ? params.thickness_override : 0,
+      k_factor_override: typeof params.k_factor_override === 'number' ? params.k_factor_override : 0,
+      drawing_size: params.drawing_size === 'A4' ? 'A4' : 'A3',
+      process: params.process ?? m.params?.process ?? 'other',
+    },
+    backend: m.backend ?? 'auto',
+    deadline_s: Math.min(Number.isFinite(m.deadline_s) && m.deadline_s > 0 ? m.deadline_s : JOB_DEADLINE_S, JOB_DEADLINE_S),
+  };
+}
+
+interface Finish {
+  status: CadFinalStatus;
+  backend: BackendName | null;
+  outcome: string;
+  error?: string;
+  duration_ms: number;
+}
+
+class Job {
+  private lease: { id: string; backend: BackendName } | null = null;
+  private runId: string | null = null;
+
+  constructor(
+    private readonly env: OpsEnv,
+    private readonly ports: Ports,
+    private readonly deps: Required<Pick<CadConsumerDeps, 'sleep' | 'leaseWaitMs' | 'notifyFinal'>> & { router: () => CadRouterClient },
+    private readonly message: Message<CadJobMessageV1>,
+  ) {}
+
+  private now(): Date {
+    return this.ports.clock.now();
+  }
+
+  async handle(): Promise<void> {
+    const body = this.message.body;
+    if (!isCadJobMessage(body)) {
+      log('cad job message rejected', { reason: 'shape' });
+      this.message.ack();
+      return;
+    }
+    const row = await getCadJob(this.ports.db, body.job_id);
+    if (!row) {
+      log('cad job row missing', { job_id: body.job_id });
+      this.message.ack();
+      return;
+    }
+    if (isFinalCadStatus(row.status)) {
+      this.message.ack();
+      return;
+    }
+    const job = jobFromRow(row, body);
+    if (row.status === 'dispatched' || row.status === 'running') {
+      const started = row.started_at ? Date.parse(row.started_at) : NaN;
+      if (Number.isFinite(started) && this.now().getTime() - started < (job.deadline_s + LEASE_GRACE_S) * 1000) {
+        this.message.retry({ delaySeconds: BUSY_RETRY_S });
+        return;
+      }
+      // An earlier delivery stopped without finishing (its lease has expired): the job is queued again.
+      await this.ports.db.update('cad_jobs', { status: 'queued' }, { filters: [['id', 'eq', row.id], ['status', 'in', ['dispatched', 'running']]] });
+      row.status = 'queued';
+    }
+
+    const run = await openRun(this.ports.db, {
+      agent: 'cad',
+      trigger: 'queue',
+      idempotency_key: row.id,
+      subject_type: 'cad_job',
+      subject_id: row.id,
+      parent_run_id: row.requested_by_run_id ?? undefined,
+      tenant_id: row.tenant_id,
+    });
+    this.runId = run.run_id;
+
+    // 3 Reuse
+    const reusable = await findReusable(this.ports.db, row.idempotency_key, row.id);
+    if (reusable) {
+      await patchCadJob(this.ports.db, row.id, {
+        status: 'succeeded',
+        backend: reusable.backend,
+        result: reusable.result,
+        output_r2_keys: reusable.output_r2_keys,
+        finished_at: this.now().toISOString(),
+        duration_ms: 0,
+        error: null,
+      });
+      await this.finish(row, job, { status: 'succeeded', backend: reusable.backend, outcome: 'reused', duration_ms: 0 }, { reused_from: reusable.id });
+      return;
+    }
+
+    // 4 Input
+    const head = await this.ports.blob.head(row.input_r2_key);
+    if (!head) return this.failFinal(row, job, 'invalid_input', 'input object missing', null);
+    if (head.size > MAX_INPUT_BYTES) return this.failFinal(row, job, 'too_large', 'input above 50 MB', null);
+    const kind: CadKind = cadKindOf(job.input.file_name || row.input_r2_key, job.input.content_type ?? '');
+    let candidates = this.ports.cad.candidates(job, kind);
+    const inlineCapped = kind !== 'other' && head.size > INLINE_CAPS[kind];
+    if (inlineCapped && candidates.includes('inline')) {
+      candidates = candidates.filter((c) => c !== 'inline');
+      if (candidates.length === 0) return this.failFinal(row, job, 'too_large', INLINE_TOO_LARGE, null);
+    }
+    if (candidates.length === 0) {
+      const missing = kind === 'step' && job.job_type === 'analyse' && ['sheet_metal', 'mixed'].includes(job.params.process) ? missingCadConfig(this.env) : [];
+      if (missing.length > 0) return this.failFinal(row, job, 'config_missing', missing.join(', '), null);
+      return this.failFinal(row, job, 'unsupported', `${job.job_type} of ${kind} (${job.params.process})`, null);
+    }
+
+    // 5 Lease
+    const router = this.deps.router();
+    let waited = 0;
+    for (;;) {
+      const granted = await router.acquire({ job_id: row.id, backend_candidates: candidates, deadline_s: job.deadline_s });
+      if (granted.granted) {
+        this.lease = { id: granted.lease_id, backend: granted.backend };
+        break;
+      }
+      if (waited >= this.deps.leaseWaitMs) {
+        if (this.message.attempts >= MAX_DELIVERIES) return this.failFinal(row, job, 'unavailable', 'no backend slot', null);
+        this.message.retry({ delaySeconds: granted.retry_after_s });
+        return;
+      }
+      const pause = Math.min(granted.retry_after_s * 1000, this.deps.leaseWaitMs - waited);
+      await this.deps.sleep(pause);
+      waited += pause;
+    }
+    const backendName = this.lease.backend;
+    const backend = this.ports.cad.get(backendName);
+    if (!backend) {
+      await this.releaseLease({ ok: false });
+      return this.failFinal(row, job, 'unsupported', `backend ${backendName} not registered`, null);
+    }
+
+    // 6 Claim
+    if (!(await claimCadJob(this.ports.db, row, backendName, this.now()))) {
+      await this.releaseLease({ ok: false });
+      this.message.ack();
+      return;
+    }
+    await patchCadJob(this.ports.db, row.id, { status: 'running' });
+
+    // 7 Run
+    const started = Date.now();
+    const blob = this.ports.blob;
+    const input: CadInput = {
+      fileName: job.input.file_name || row.input_r2_key.split('/').pop() || 'input',
+      kind,
+      contentType: job.input.content_type || 'application/octet-stream',
+      sizeBytes: head.size,
+      sha256: row.input_sha256,
+      open: async () => {
+        const object = await blob.get(row.input_r2_key);
+        if (!object) throw new Error('input object missing');
+        return object.body;
+      },
+    };
+    let outcome: CadOutcome;
+    try {
+      outcome = await backend.run(job, input, AbortSignal.timeout(job.deadline_s * 1000));
+    } catch {
+      outcome = { ok: false, retryable: true, code: 'backend_error', message: 'backend threw' };
+    }
+    const duration_ms = Date.now() - started;
+
+    // 8 Store
+    if (outcome.ok) {
+      const keys: string[] = [];
+      for (const a of outcome.artefacts) {
+        const key = cadOutputKey(row.id, a.name);
+        await blob.put(key, a.body, { contentType: a.contentType });
+        keys.push(key);
+      }
+      const resultKey = cadOutputKey(row.id, 'result.json');
+      await blob.put(resultKey, new TextEncoder().encode(JSON.stringify(outcome.result)).buffer as ArrayBuffer, { contentType: 'application/json' });
+      keys.unshift(resultKey);
+      await patchCadJob(this.ports.db, row.id, {
+        status: 'succeeded',
+        result: outcome.result,
+        output_r2_keys: keys,
+        finished_at: this.now().toISOString(),
+        duration_ms,
+        error: null,
+      });
+      await this.releaseLease({ ok: true });
+      await this.finish(row, job, { status: 'succeeded', backend: backendName, outcome: 'ok', duration_ms });
+      return;
+    }
+
+    await blob.put(cadOutputKey(row.id, 'log.txt'), new TextEncoder().encode(errorText(outcome)).buffer as ArrayBuffer, { contentType: 'text/plain; charset=utf-8' });
+    await this.releaseLease({ ok: false, retryable: outcome.retryable, backend_down: isBackendDown(outcome) });
+    if (outcome.retryable && this.message.attempts < MAX_DELIVERIES) {
+      await patchCadJob(this.ports.db, row.id, { status: 'queued', error: errorText(outcome), duration_ms });
+      this.ports.events.point({ event: 'cad_job', run_id: this.runId ?? row.id, agent: 'cad', step: job.job_type, route: backendName, outcome: `retry_${outcome.code}`, tenant_id: row.tenant_id, latency_ms: duration_ms, attempt: this.message.attempts, bytes: head.size });
+      this.message.retry();
+      return;
+    }
+    const status: CadFinalStatus = outcome.code === 'timeout' ? 'timed_out' : 'failed';
+    await patchCadJob(this.ports.db, row.id, { status, error: errorText(outcome), finished_at: this.now().toISOString(), duration_ms, output_r2_keys: [cadOutputKey(row.id, 'log.txt')] });
+    await this.finish(row, job, { status, backend: backendName, outcome: outcome.code, error: errorText(outcome), duration_ms });
+  }
+
+  private async releaseLease(outcome: { ok: boolean; retryable?: boolean; backend_down?: boolean }): Promise<void> {
+    const lease = this.lease;
+    if (!lease) return;
+    this.lease = null;
+    try {
+      await this.deps.router().release(lease.id, outcome);
+    } catch {
+      log('cad lease release failed', { backend: lease.backend });
+    }
+  }
+
+  /** Releases a held lease after an unexpected error (the message is retried by the caller). */
+  async abandon(): Promise<void> {
+    await this.releaseLease({ ok: false, retryable: true });
+  }
+
+  private async failFinal(row: CadJobRow, job: CadJobMessageV1, code: string, message: string, backend: BackendName | null): Promise<void> {
+    const error = `${code}: ${message}`.slice(0, LOG_MAX_CHARS);
+    await patchCadJob(this.ports.db, row.id, { status: 'failed', error, finished_at: this.now().toISOString(), duration_ms: 0 });
+    await this.finish(row, job, { status: 'failed', backend, outcome: code, error, duration_ms: 0 });
+  }
+
+  private async finish(row: CadJobRow, job: CadJobMessageV1, f: Finish, extra: Record<string, unknown> = {}): Promise<void> {
+    if (row.rfq_id) {
+      try {
+        await this.deps.notifyFinal(row.rfq_id, row.id, f.status);
+      } catch {
+        log('cad job final notice failed', { job_id: row.id });
+      }
+    }
+    if (this.runId) {
+      await closeRun(
+        this.ports.db,
+        this.runId,
+        {
+          status: f.status === 'succeeded' ? 'succeeded' : 'failed',
+          ...(f.error ? { error: f.error } : {}),
+          output: { job_id: row.id, job_type: job.job_type, backend: f.backend, status: f.status, outcome: f.outcome, duration_ms: f.duration_ms, ...extra },
+        },
+        { ...EMPTY_USAGE, by_step: {} },
+      );
+    }
+    this.ports.events.point({
+      event: 'cad_job',
+      run_id: this.runId ?? row.id,
+      agent: 'cad',
+      step: job.job_type,
+      route: f.backend ?? 'none',
+      outcome: f.outcome,
+      tenant_id: row.tenant_id,
+      latency_ms: f.duration_ms,
+      attempt: this.message.attempts,
+    });
+    log('cad job finished', { job_id: row.id, status: f.status, backend: f.backend ?? 'none', outcome: f.outcome, ms: f.duration_ms });
+    this.message.ack();
+  }
+}
+
+export async function cadJobsConsumer(batch: MessageBatch<CadJobMessageV1>, env: OpsEnv, ctx: ExecutionContext, deps: CadConsumerDeps = {}): Promise<void> {
+  void ctx;
+  const ports = deps.ports ?? makePorts(env);
+  let router: CadRouterClient | undefined = deps.router;
+  const resolved = {
+    sleep: deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    leaseWaitMs: deps.leaseWaitMs ?? LEASE_WAIT_MS,
+    notifyFinal: deps.notifyFinal ?? ((rfqId: string, jobId: string, status: CadFinalStatus) => notifyCadJobFinal(env, rfqId, jobId, status)),
+    router: () => (router ??= cadRouter(env)),
+  };
+  for (const message of batch.messages) {
+    const job = new Job(env, ports, resolved, message);
+    try {
+      await job.handle();
+    } catch (error) {
+      await job.abandon();
+      const name = error instanceof Error ? error.name : 'error';
+      log('cad job delivery failed', { error: name, attempt: message.attempts });
+      message.retry();
+    }
+  }
+}

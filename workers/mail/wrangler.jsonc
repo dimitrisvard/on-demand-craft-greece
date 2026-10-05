@@ -1,0 +1,37 @@
+// microns-mail: Email Worker of rfq.micronshub.eu (Email Routing rules for rfq@ and replies@ point here).
+// Stores the raw MIME in R2, writes the inbound_emails row and hands the mail to microns-ops over the service
+// binding OPS (named entrypoint MailIngest: startIntake, ingestReply). Never parses the body, never logs addresses
+// or subjects. No workers.dev URL, no preview URLs, no routes (the routing rules are set in the dashboard).
+// Deploy order: microns-ops first (it must export MailIngest), then this Worker.
+//
+// Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put them in
+// workers/mail/.dev.vars (gitignored; template .dev.vars.example). The repository is public: never write a value
+// here. Optional secrets MAIL_COPY_TO and MAIL_FALLBACK_TO (verified destination addresses) are checked per use.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "microns-mail",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "ALLOWED_RCPT": "rfq@rfq.micronshub.eu,replies@rfq.micronshub.eu",
+    "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+    "AGENT_TENANT_ID": "00000000-0000-0000-0000-000000000001"
+  },
+  "r2_buckets": [
+    { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
+  ],
+  "services": [
+    { "binding": "OPS", "service": "microns-ops", "entrypoint": "MailIngest" }
+  ],
+  // A deploy is refused until every name exists. Locally only these names are loaded from .dev.vars.
+  "secrets": {
+    "required": ["SUPABASE_SERVICE_ROLE_KEY"]
+  }
+}

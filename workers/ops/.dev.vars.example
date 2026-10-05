@@ -13,3 +13,11 @@ GOOGLE_CLIENT_ID=dummy-not-a-secret
 GOOGLE_CLIENT_SECRET=dummy-not-a-secret
 GOOGLE_REDIRECT_URI=dummy-not-a-secret
 APOLLO_API_KEY=dummy-not-a-secret
+# Phase 4 (agent layer): optional secrets, checked where they are used and not in secrets.required, so a plain
+# `wrangler dev` does not load them; the T2 profile 'agents' adds them to its generated config.
+AI_GATEWAY_TOKEN=dummy-not-a-secret
+CAD_UNFOLD_URL=dummy-not-a-secret
+CAD_SHARED_SECRET=dummy-not-a-secret
+AGENT_APPROVAL_SECRET=dummy-not-a-secret
+CAD_ACCESS_CLIENT_ID=dummy-not-a-secret
+CAD_ACCESS_CLIENT_SECRET=dummy-not-a-secret

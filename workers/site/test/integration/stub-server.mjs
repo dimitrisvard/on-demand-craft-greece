@@ -16,9 +16,22 @@
 //                              headers only as "<present>")
 //   POST /__stub/access-keys   {keys: [public JWK, ...]} added to the certs answer
 // Run alone: node test/integration/stub-server.mjs [port]
+//
+// Profile 'agents' (Phase 4): startStub({modules}) mounts stub modules (./stubs/*.mjs: provider stubs and the
+// mini-PostgREST). A module has `prefixes` and `handle(req, res, url, body) -> Promise<boolean>` (true when it
+// answered) and `reset()`. Order for a request: recorded call -> a canned /__stub/routes registration (wins) -> the
+// first module whose prefix matches and that answers -> the defaults below. Control paths under /__stub/ that are not
+// built in go to the modules too, and POST /__stub/reset also resets every module. Profile 'api' mounts no module,
+// so its answers stay as above. agentStubModules() builds one fresh instance of every module file present.
 
+import { existsSync } from 'node:fs';
 import http from 'node:http';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const STUBS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'stubs');
+/** Stub module files of the profile 'agents' (each optional: a file another unit has not written yet is skipped). */
+export const AGENT_STUB_MODULES = ['anthropic', 'resend', 'telegram', 'gmail', 'google-token', 'unfold', 'postgrest'];
 
 const RECORDED_HEADERS = ['content-type', 'accept', 'prefer', 'x-forwarded-host', 'range', 'content-profile', 'accept-profile'];
 const PRESENCE_HEADERS = ['authorization', 'apikey', 'cf-access-jwt-assertion', 'cookie'];
@@ -50,7 +63,31 @@ function recordedHeaders(req) {
 }
 
 export function createStubState() {
-  return { routes: [], calls: [], accessKeys: [] };
+  return { routes: [], calls: [], accessKeys: [], modules: [] };
+}
+
+/** One fresh instance of every agent stub module present (factory createStubModule() or createPostgrest()). */
+export async function agentStubModules(names = AGENT_STUB_MODULES) {
+  const modules = [];
+  for (const name of names) {
+    const file = path.join(STUBS_DIR, `${name}.mjs`);
+    if (!existsSync(file)) continue;
+    const mod = await import(pathToFileURL(file).href);
+    const factory = mod.createStubModule ?? mod.createPostgrest ?? null;
+    const instance = factory ? factory() : mod;
+    const prefixes = instance.prefixes ?? mod.prefixes ?? [];
+    if (typeof instance.handle !== 'function') throw new Error(`stub module ${name} has no handle()`);
+    modules.push({ name, prefixes, handle: instance.handle, reset: instance.reset ?? (() => {}), instance });
+  }
+  return modules;
+}
+
+async function moduleAnswer(state, req, res, url, body) {
+  for (const m of state.modules) {
+    if (!m.prefixes.some((p) => url.pathname.startsWith(p))) continue;
+    if (await m.handle(req, res, url, body)) return true;
+  }
+  return false;
 }
 
 function matchRoute(state, method, pathAndQuery) {
@@ -78,6 +115,7 @@ async function control(state, req, res, pathname) {
   if (req.method === 'POST' && pathname === '/__stub/reset') {
     state.routes.length = 0;
     state.calls.length = 0;
+    for (const m of state.modules) m.reset();
     return send(res, 204);
   }
   if (req.method === 'GET' && pathname === '/__stub/calls') return send(res, 200, state.calls);
@@ -87,6 +125,10 @@ async function control(state, req, res, pathname) {
       if (!state.accessKeys.some((k) => k.kid === key.kid)) state.accessKeys.push(key);
     }
     return send(res, 204);
+  }
+  if (state.modules.length) {
+    const url = new URL(req.url ?? '/', 'http://stub.local');
+    if (await moduleAnswer(state, req, res, url, await readBody(req))) return undefined;
   }
   return send(res, 404, { error: 'unknown stub control path' });
 }
@@ -115,8 +157,9 @@ function defaultAnswer(req, res, url, body) {
   return send(res, 404, { error: 'no stub route', path: pathname });
 }
 
-export function startStub({ port = 0, host = '127.0.0.1' } = {}) {
+export function startStub({ port = 0, host = '127.0.0.1', modules = [] } = {}) {
   const state = createStubState();
+  state.modules = modules;
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${host}`);
@@ -125,6 +168,7 @@ export function startStub({ port = 0, host = '127.0.0.1' } = {}) {
       state.calls.push({ method: req.method, path: url.pathname + url.search, headers: recordedHeaders(req) });
       const route = matchRoute(state, req.method, url.pathname + url.search);
       if (route) return send(res, route.status, route.body, route.headers);
+      if (state.modules.length && (await moduleAnswer(state, req, res, url, body))) return undefined;
       if (url.pathname === '/cdn-cgi/access/certs') return send(res, 200, { keys: state.accessKeys, public_certs: [] });
       return defaultAnswer(req, res, url, body);
     } catch (err) {

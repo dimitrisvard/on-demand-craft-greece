@@ -3,9 +3,16 @@
 // consumer of the queue "scrapes".
 // Phase 2 subset of the "workers/ops/wrangler.jsonc" object of docs/migration/wrangler.jsonc.draft.
 //
-// Reachable only through the site's service binding OPS (named entrypoint OpsApi, RPC) and the queue consumer:
-// no workers.dev URL, no preview URLs, no routes. Deploy with `wrangler deploy` (not `versions upload`): a service
-// binding reaches the target's current deployment only. Deploy order: ops first, then the site.
+// Reachable through the site's service binding OPS (named entrypoint OpsApi, RPC), the mail Worker's service
+// binding (named entrypoint MailIngest, Phase 4), the queue consumers, the cron triggers and, from Phase 4, the
+// Custom Domain mcp.micronshub.eu (remote MCP; every other host answers 404): no workers.dev URL, no preview URLs.
+// Deploy with `wrangler deploy` (not `versions upload`): a service binding reaches the target's current deployment
+// only. Deploy order: ops first, then the site and the mail Worker.
+//
+// Phase 4 (agent layer) bindings need their resources before the first deploy with this file: queues cad-jobs and
+// agent-events, Vectorize index quotes-v1 (1,024 dimensions, cosine), the FLAGS KV namespace id (same namespace as
+// microns-site) and the mcp.micronshub.eu zone. Phase 4 secrets are optional and checked where they are used, so
+// they are not in secrets.required.
 //
 // Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put them in
 // workers/ops/.dev.vars (gitignored; template .dev.vars.example). The repository is public: never write a value here.
@@ -34,11 +41,78 @@
   },
   "vars": {
     "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
-    "SITE_ORIGIN": "https://www.micronshub.eu"
+    "SITE_ORIGIN": "https://www.micronshub.eu",
+    // Phase 4 (agent layer). No provider override var (AGENT_STUBS, AGENT_LLM_BASE_URL, *_API_BASE,
+    // GOOGLE_TOKEN_URL) ever appears here: only generated T2 configs set them.
+    "AI_GATEWAY_ID": "microns",
+    "AGENT_TENANT_ID": "00000000-0000-0000-0000-000000000001",
+    "QUOTE_FROM": "MicronsHub Quotations <info@micronshub.eu>",
+    "QUOTE_REPLY_TO": "replies@rfq.micronshub.eu",
+    "MESSAGE_ID_DOMAIN": "rfq.micronshub.eu",
+    "CAD_BACKEND_DEFAULT": "vps",
+    "MCP_HOSTNAME": "mcp.micronshub.eu",
+    "MCP_ROUTE": "/mcp",
+    // Identifiers of the Access application in front of the MCP host (not secrets); set at deploy time.
+    "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
+    "MCP_ACCESS_AUD": "<ACCESS_AUD_MCP>",
+    "SCRAPER_USER_AGENT": "MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)",
+    // JSON object host -> permission reference recorded by the owner; empty = no host is permitted.
+    "SCRAPER_PERMITTED_HOSTS": "{}"
+  },
+  // ----- Phase 4: agent layer -----
+  // Agent flags are read from the KV mirror of public.feature_flags (same namespace as microns-site).
+  "kv_namespaces": [
+    { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+  ],
+  // Raw mail, attachments, RFQ files, CAD outputs, quote and traveller PDFs (bucket created in Phase 2).
+  "r2_buckets": [
+    { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
+  ],
+  "workflows": [
+    { "name": "rfq-intake", "binding": "RFQ_INTAKE", "class_name": "RfqIntakeWorkflow" },
+    { "name": "quote", "binding": "QUOTE", "class_name": "QuoteWorkflow" },
+    { "name": "post-order", "binding": "POST_ORDER", "class_name": "PostOrderWorkflow" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "RFQ_THREAD", "class_name": "RfqThread" },
+      { "name": "MATERIAL_STOCK", "class_name": "MaterialStock" },
+      { "name": "CAD_ROUTER", "class_name": "CadRouter" }
+    ]
+  },
+  // A migration tag is never edited after it was deployed; a later class gets a new tag.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter"] }
+  ],
+  "vectorize": [
+    { "binding": "QUOTES_INDEX", "index_name": "quotes-v1" }
+  ],
+  "ai": { "binding": "AI" },
+  "browser": { "binding": "BROWSER" },
+  "analytics_engine_datasets": [
+    { "binding": "EVENTS", "dataset": "microns_events" }
+  ],
+  // Remote MCP: 60 calls per 60 s per user.
+  "ratelimits": [
+    { "name": "MCP_RATE_LIMIT", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
+  ],
+  "routes": [
+    { "pattern": "mcp.micronshub.eu", "custom_domain": true }
+  ],
+  // Prompt files are bundled as text, fonts and the logo as bytes.
+  "rules": [
+    { "type": "Data", "globs": ["**/*.ttf", "**/*.png"], "fallthrough": true },
+    { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
+  ],
+  // UTC. Every minute: flag mirror sync; every 10 minutes: dispatcher (Gmail poller, orphans, parked runs).
+  "triggers": {
+    "crons": ["* * * * *", "*/10 * * * *"]
   },
   "queues": {
     "producers": [
-      { "binding": "SCRAPES", "queue": "scrapes" }
+      { "binding": "SCRAPES", "queue": "scrapes" },
+      { "binding": "CAD_JOBS", "queue": "cad-jobs" },
+      { "binding": "AGENT_EVENTS", "queue": "agent-events" }
     ],
     // One scan per invocation, at most two at once; a failed scan is retried after 5 minutes, three times, then
     // kept in scrapes-dlq (created automatically when missing). max_retries must equal MAX_RETRIES in
@@ -51,6 +125,22 @@
         "max_concurrency": 2,
         "retry_delay": 300,
         "dead_letter_queue": "scrapes-dlq"
+      },
+      // Phase 4: one CAD job per invocation, up to three at once (CadRouter limits each backend further).
+      {
+        "queue": "cad-jobs",
+        "max_batch_size": 1,
+        "max_retries": 2,
+        "max_concurrency": 3,
+        "dead_letter_queue": "cad-jobs-dlq"
+      },
+      // Phase 4: replies, order events, parked-run resumes and cards; per-message ack/retry.
+      {
+        "queue": "agent-events",
+        "max_batch_size": 25,
+        "max_batch_timeout": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "agent-events-dlq"
       }
     ]
   },

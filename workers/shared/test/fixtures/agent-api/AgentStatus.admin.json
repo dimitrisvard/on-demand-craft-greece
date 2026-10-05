@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "ok": true,
+  "actions": [
+    "decision",
+    "status",
+    "flag",
+    "start",
+    "file"
+  ],
+  "principal": "ADMIN"
+}

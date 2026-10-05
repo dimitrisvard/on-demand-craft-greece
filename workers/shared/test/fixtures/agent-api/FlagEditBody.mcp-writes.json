@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "key": "mcp.remote",
+  "expected_rev": 0,
+  "enabled": true,
+  "writes": false
+}

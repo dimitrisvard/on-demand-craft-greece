@@ -1,0 +1,68 @@
+{
+  "prompt": "eval.sample@v1",
+  "request_sha256": "a9b2e4c56a9969c0712bf0608a1a752c19a7a725df84a07875180076b59b77db",
+  "case": "rfq-en",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>Hello, please quote 50 laser-cut brackets, 2 mm S235, drawing attached. Regards, Example GmbH</untrusted_email>"
+    }
+  ],
+  "response": {
+    "id": "msg_sample",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\": \"rfq\", \"language\": \"en\", \"injection_suspected\": false, \"confidence\": 0.94}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 420,
+      "output_tokens": 40,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "en",
+    "injection_suspected": false
+  },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "rfq",
+          "techpilot",
+          "reply",
+          "auto_reply",
+          "spam",
+          "other"
+        ]
+      },
+      "language": {
+        "type": "string"
+      },
+      "injection_suspected": {
+        "type": "boolean"
+      },
+      "confidence": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "kind",
+      "language",
+      "injection_suspected",
+      "confidence"
+    ],
+    "additionalProperties": false
+  }
+}

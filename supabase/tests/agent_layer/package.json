@@ -1,0 +1,19 @@
+{
+  "name": "agent-layer-sql-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests for supabase/migrations/*_agent_layer.sql on PGlite (Postgres 18.3 and 16.4)",
+  "scripts": {
+    "test": "node test.mjs --engine=pglite",
+    "test:pg16": "node test.mjs --engine=pglite16",
+    "test:rpc-parity": "node test.mjs --engine=pglite --rpc-parity"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "pg": "8.23.1",
+    "pglite-pg16": "npm:@electric-sql/pglite@0.2.17"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "dxf",
+  "thickness_mm": null,
+  "flat": {
+    "width_mm": 200,
+    "height_mm": 100,
+    "area_mm2": 19843.93,
+    "cut_length_mm": 662.73,
+    "pierces": 2
+  },
+  "bends": {
+    "count": 1
+  },
+  "bbox_mm": null,
+  "volume_mm3": null,
+  "_note": "circles are tessellated into 32 segments by the parser, so areas and lengths are those of the 32-gon"
+}

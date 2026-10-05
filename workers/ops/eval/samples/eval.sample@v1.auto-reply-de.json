@@ -1,0 +1,68 @@
+{
+  "prompt": "eval.sample@v1",
+  "request_sha256": "2ff6df465bf1a2c3c227951aac9586ac1be3d0ba56d239bd7ecff74cf7aff06c",
+  "case": "auto-reply-de",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>Ich bin bis 12.10. nicht im Buero. Ihre Nachricht wird nicht weitergeleitet.</untrusted_email>"
+    }
+  ],
+  "response": {
+    "id": "msg_sample",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\": \"auto_reply\", \"language\": \"de\", \"injection_suspected\": false, \"confidence\": 0.97}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 420,
+      "output_tokens": 40,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "auto_reply",
+    "language": "de",
+    "injection_suspected": false
+  },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "rfq",
+          "techpilot",
+          "reply",
+          "auto_reply",
+          "spam",
+          "other"
+        ]
+      },
+      "language": {
+        "type": "string"
+      },
+      "injection_suspected": {
+        "type": "boolean"
+      },
+      "confidence": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "kind",
+      "language",
+      "injection_suspected",
+      "confidence"
+    ],
+    "additionalProperties": false
+  }
+}

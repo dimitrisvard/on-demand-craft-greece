@@ -1,0 +1,98 @@
+name: Cloudflare mail Worker (microns-mail)
+
+# Phase 4 of the Cloudflare migration (docs/migration/PLAN.md §5.4, P4-4). Manual dispatch only.
+#
+# Installs the workers/shared and workers/mail packages, type-checks and tests microns-mail, bundles it with
+# `wrangler deploy --dry-run` (metafile check: no npm package in the bundle, inputs only from mail, shared and the
+# shared authentication-results module of ops; size printed), and only when the input `deploy` is true runs
+# `wrangler deploy`. microns-mail has no public surface (workers_dev and preview_urls off, no routes): Email
+# Routing rules for rfq@ and replies@ on rfq.micronshub.eu deliver to it, and it reaches microns-ops through the
+# service binding OPS (named entrypoint MailIngest). Deploy microns-ops first (it must export MailIngest), then this
+# Worker.
+#
+# Repository secrets (names only; Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN    API token with "Workers Scripts: Edit" on the account
+#   CLOUDFLARE_ACCOUNT_ID   Cloudflare account ID
+# Worker secrets are set once on the Worker with `npx wrangler secret put <NAME>` in workers/mail, never here:
+# SUPABASE_SERVICE_ROLE_KEY (required), MAIL_COPY_TO and MAIL_FALLBACK_TO (optional, verified destinations).
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Run wrangler deploy after the checks (false = checks and dry run only)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cf-mail
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  mail:
+    name: Check, bundle and (optionally) deploy microns-mail
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Guard - deploy secrets present
+        if: ${{ inputs.deploy }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing repository secrets::Set these repository secrets before deploying:$missing. Nothing was built or deployed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            workers/shared/package-lock.json
+            workers/mail/package-lock.json
+
+      - name: Install workers/shared dependencies
+        working-directory: workers/shared
+        run: npm ci
+
+      - name: Install workers/mail dependencies
+        working-directory: workers/mail
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: workers/mail
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: workers/mail
+        run: npm test
+
+      - name: Dry run bundle (metafile check, size)
+        working-directory: workers/mail
+        run: npm run build:dry
+
+      - name: Deploy microns-mail
+        if: ${{ inputs.deploy }}
+        working-directory: workers/mail
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy

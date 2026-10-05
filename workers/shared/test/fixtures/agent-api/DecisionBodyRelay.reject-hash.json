@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "token_sha256": "270036a11a9956bd2b1ca5ea43f02902928e49dc3fc3cbc342c7afb0197048a1",
+  "code": "dis",
+  "tg": {
+    "user_id": 1,
+    "chat_id": 1,
+    "message_id": 1
+  }
+}

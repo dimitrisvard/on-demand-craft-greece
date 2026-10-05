@@ -1,0 +1,2 @@
+# Line endings fixed per file (the generated Supabase types are written with LF; a Windows checkout keeps them LF).
+src/integrations/supabase/types.ts text eol=lf

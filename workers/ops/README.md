@@ -108,3 +108,45 @@ Nothing is deployed. Phase 2 exit gate as a whole: `workers/site/README.md`, "Ph
 | Deploy | `cf-ops.yml` with `deploy: true` (or `npx wrangler deploy` here), before the site preview |
 | `nest` CPU | Run the fixtures (80, 400, 800, 1,200 part instances) through the preview and read the CPU per invocation from the Workers Logs of `microns-ops`; decide whether a Container is needed (PLAN.md §5.2 D-6). CPU limits are not enforced locally |
 | Re-checks | Whether the callee's own `cpu_ms` governs an RPC call, the error on CPU exhaustion, version overrides on RPC (PLAN.md §5.2 D-15) |
+
+## Phase 4: agent layer
+
+The agent layer adds three Workflows (`RfqIntakeWorkflow`, `QuoteWorkflow`, `PostOrderWorkflow`), three Durable
+Objects (`RfqThread`, `MaterialStock`, `CadRouter`, migration tag `v1`), the named entrypoint `MailIngest` (RPC
+target of `microns-mail`), the queues `cad-jobs` and `agent-events`, the crons `* * * * *` (flag mirror) and
+`*/10 * * * *` (dispatcher), the routes `/api/agent/*` and the remote MCP host `mcp.micronshub.eu`. Nothing of it
+runs until its flag is on (`public.feature_flags`, mirrored to KV `FLAGS`; every flag is off at first).
+
+### Rules
+
+| Rule | Where |
+|---|---|
+| Every Phase 4 binding, var and secret is optional in `OpsEnv` and checked where it is used (`need()`): a missing name fails that step with `config_missing`, never an unrelated request or deploy | `src/env.ts`, `src/agents/config.ts` |
+| Every external effect (LLM, embeddings, Vectorize, CAD, browser, Resend, Telegram, Gmail, Supabase, R2, Analytics Engine, clock) goes through a port; `makePorts(env)` builds the production adapters, or the stub adapters named in `AGENT_STUBS` (generated test configs only), and refuses `AGENT_STUBS` while `AI` or `QUOTES_INDEX` is bound | `src/ports/` |
+| Agent flags are read from KV with `cacheTtl` 30 s and fail closed (missing, malformed or unreadable = off) | `src/agents/flags.ts` |
+| Every run has one `agent_runs` row (`rpc/agent_run_begin`), closed with status, usage and `cost_cents` (> 0 whenever an LLM call was made); a failed Workflow run waits on a failure card (Retry restarts from the failed step, Dismiss closes it) | `src/agents/runs.ts` |
+| LLM calls: Anthropic Messages API through the AI Gateway (provider-native endpoint, keys stored in the gateway, `cf-aig-authorization`, five metadata keys, payload logging off); `extract` = Sonnet 5.5 with server-side refusal fallback, `classify` = Haiku 4.5; structured outputs only | `src/agents/gateway.ts`, `src/ports/llm.ts`, `src/agents/prices.ts` |
+| Approvals: single-use tokens, only their SHA-256 stored; one decision path `decide()` for the dashboard (hash under a staff JWT), the Telegram relay (raw token, signed request) and MCP | `src/agents/approval.ts`, `src/agents/decision.ts`, `src/routes/agent.ts` |
+| Prompts: files `src/agents/prompts/<agent>/<step>.v<N>.md` + `.schema.json`, released files frozen by `LOCK.json`; the module that runs a prompt registers its two files with `registerPromptSource()` | `src/agents/prompts/registry.ts` |
+
+### Run and test
+
+| Task | Command (in `workers/ops`) |
+|---|---|
+| Unit tests (T1) including the agent layer | `npm test` (kernel: `npx vitest run test/kernel`) |
+| Integration tests, profile `agents` (site primary, ops and mail as secondary Workers, provider stubs, mini-PostgREST) | `npm run test:integration:agents` |
+| Offline evaluation of the prompts (replay, no network) | `npm run eval:synthetic` (details: `eval/README.md`) |
+| Live evaluation (owner only, real gateway, private golden set) | `npm run eval:live` (`eval/README.md`, `scripts/eval/README.md`) |
+| Bundle check with the Phase 4 rules | `npm run build:dry` (`CHECK_BUNDLE_PHASE=2 node scripts/check-bundle.mjs` runs the Phase 2 rules only) |
+| Quote PDF samples, MCP parity (opt-in) | `npm run pdf:samples`, `npm run mcp:parity` |
+
+### Owner order (after the Phase 4 code is merged)
+
+Resources before the first ops deploy with this `wrangler.jsonc`: queues `cad-jobs` and `agent-events`; Vectorize
+index `quotes-v1` (1,024 dimensions, cosine) with its metadata indexes created before any insert; the `FLAGS` KV
+namespace id of microns-site in place of `<KV_ID_FLAGS>`; the zone for the `mcp.micronshub.eu` Custom Domain; the
+AI Gateway `microns` with authentication on before a provider key is stored. Then the migration
+(`supabase/migrations/*_agent_layer.sql`, dry run with `ROLLBACK` first), the optional secrets
+(`AI_GATEWAY_TOKEN`, `CAD_UNFOLD_URL`, `CAD_SHARED_SECRET`, `AGENT_APPROVAL_SECRET`), the deploy (ops, then mail,
+then the site) and the flags stage by stage. The full list with commands is the owner checklist of the Phase 4
+build specification.

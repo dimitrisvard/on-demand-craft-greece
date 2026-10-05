@@ -1,0 +1,5 @@
+# Template for workers/mail/.dev.vars (local `wrangler dev` only; the real file is gitignored).
+# Only the names listed in secrets.required of wrangler.jsonc are loaded. MAIL_COPY_TO and MAIL_FALLBACK_TO are
+# optional verified destination addresses; they are set as secrets only so that no address sits in this public
+# repository. To use them locally, list them in secrets.required of a local copy of the config and add them here.
+SUPABASE_SERVICE_ROLE_KEY=dummy-not-a-secret

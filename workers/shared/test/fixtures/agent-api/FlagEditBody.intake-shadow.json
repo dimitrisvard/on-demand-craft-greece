@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "key": "agent.rfq_intake",
+  "expected_rev": 3,
+  "enabled": true,
+  "mode": "shadow"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "microns-mail",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8789",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:dry": "wrangler deploy --dry-run --outdir .wrangler/dry --metafile .wrangler/dry/meta.json && node scripts/check-bundle.mjs",
+    "check-bundle": "node scripts/check-bundle.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.145.0"
+  }
+}

@@ -1,0 +1,11 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('synthetic bracket for the unfold stub'),'2;1');
+FILE_NAME('bracket-sheet.step','2026-10-05T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('',(0.0,0.0,0.0));
+#2=CARTESIAN_POINT('',(80.0,60.0,40.0));
+ENDSEC;
+END-ISO-10303-21;
