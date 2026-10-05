@@ -6,9 +6,9 @@ import { bindingFor, rateKey } from '../../shared/src/auth/rate-limit';
 import { ACTION_RULES, ALL_ACTION_IDS, machinesFor, parseGateModes, userScopeOf, type ActionId } from '../src/auth/policy';
 
 describe('ACTION_RULES', () => {
-  it('has a rule for each of the 34 action IDs', () => {
-    expect(ALL_ACTION_IDS).toHaveLength(34);
-    expect(new Set(ALL_ACTION_IDS).size).toBe(34);
+  it('has a rule for each of the 41 action IDs (34 of Phase 2, AG-1…AG-7 of Phase 4)', () => {
+    expect(ALL_ACTION_IDS).toHaveLength(41);
+    expect(new Set(ALL_ACTION_IDS).size).toBe(41);
   });
 
   it('allows machine callers exactly as listed', () => {
@@ -26,9 +26,11 @@ describe('ACTION_RULES', () => {
     expect(byAccess('public')).toEqual(['MK-1', 'MK-2', 'MK-4', 'MK-6']);
     expect(byAccess('turnstile')).toEqual(['EM-1', 'EM-2']);
     expect(byAccess('turnstile-or-staff')).toEqual(['EM-3']);
-    expect(byAccess('admin')).toEqual(['MK-5', 'NT-7']);
+    expect(byAccess('admin')).toEqual(['AG-4', 'MK-5', 'NT-7']);
     expect(byAccess('admin-json')).toEqual(['MK-3']);
     expect(byAccess('files')).toEqual(['S3-1', 'S3-2', 'S3-3']);
+    expect(byAccess('relay')).toEqual(['AG-2']);
+    expect(byAccess('signed-link')).toEqual(['AG-3']);
   });
 
   it('Turnstile actions: contact form and quote form on email, contact only on contact, quote on rfq', () => {
@@ -82,5 +84,27 @@ describe('parseGateModes', () => {
 
   it('reads a comma list, ignoring case, spaces, unknown classes and unknown modes', () => {
     expect(parseGateModes(' Turnstile = REPORT , redirect=report,bogus=report,rate=maybe,auth')).toEqual({ ...enforceAll, turnstile: 'report', redirect: 'report' });
+  });
+});
+
+describe('Phase 4 rows AG-1…AG-7 (/api/agent/*)', () => {
+  const AG: ActionId[] = ['AG-1', 'AG-2', 'AG-3', 'AG-4', 'AG-5', 'AG-6', 'AG-7'];
+
+  it('access per row; no machine caller of the policy', () => {
+    expect(Object.fromEntries(AG.map((id) => [id, ACTION_RULES[id].access]))).toEqual({
+      'AG-1': 'staff', 'AG-2': 'relay', 'AG-3': 'signed-link', 'AG-4': 'admin', 'AG-5': 'staff', 'AG-6': 'staff', 'AG-7': 'staff',
+    });
+    for (const id of AG) expect(ACTION_RULES[id].machines, id).toBeUndefined();
+  });
+
+  it('signed-in rows count against u:<uid>:agent on the default binding; relay and link rows have no user scope', () => {
+    for (const id of ['AG-1', 'AG-4', 'AG-5', 'AG-6', 'AG-7'] as ActionId[]) {
+      expect(rateKey('u', 'uid', userScopeOf(id, 'POST')!), id).toBe('u:uid:agent');
+      expect(bindingFor(rateKey('u', 'uid', userScopeOf(id, 'GET')!)), id).toBe('default');
+    }
+    expect(userScopeOf('AG-2', 'POST')).toBeUndefined();
+    expect(userScopeOf('AG-3', 'GET')).toBeUndefined();
+    expect(bindingFor(rateKey('m', 'telegram', 'agent'))).toBe('default');
+    expect(bindingFor(['file', '203.0.113.9'].join(':'))).toBe('default');
   });
 });

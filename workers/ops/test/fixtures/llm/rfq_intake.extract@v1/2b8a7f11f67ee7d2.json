@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.extract@v1",
+  "request_sha256": "2b8a7f11f67ee7d2b0a914b02cc9db140745e28edb9293c57f3b0e04c70a2bab",
+  "case": "de-sheet-metal-step",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Anfrage Kantteile Winkel W-20\nFrom: Hans Müller <h.mueller@example.de>\n\nSehr geehrte Damen und Herren,\n\nbitte senden Sie uns ein Angebot für 200 Stück Kantteil Winkel W-20 (Abkantung 90°).\nWerkstoff: 1.4301, Blechdicke 1,5 mm, Oberfläche geschliffen.\nDie STEP-Datei ist im Anhang.\n\nMit freundlichen Grüßen\nHans Müller\nBeispiel Metallbau GmbH\nMusterstraße 1, 70173 Stuttgart\nUSt-IdNr. DE123456789\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"winkel_w20.step\" kind=\"step\" size_bytes=\"367\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"company\":{\"value\":\"Beispiel Metallbau GmbH\",\"confidence\":0.95},\"contact_first_name\":{\"value\":\"Hans\",\"confidence\":0.95},\"contact_last_name\":{\"value\":\"Müller\",\"confidence\":0.95},\"contact_email\":{\"value\":\"h.mueller@example.de\",\"confidence\":0.97},\"phone\":{\"value\":null,\"confidence\":0},\"vat_id\":{\"value\":\"DE123456789\",\"confidence\":0.95},\"country\":{\"value\":\"DE\",\"confidence\":0.95},\"deadline\":{\"value\":null,\"confidence\":0},\"language\":\"de\",\"notes\":\"\",\"injection_suspected\":false,\"parts\":[{\"name\":\"Kantteil Winkel W-20\",\"quantity\":{\"value\":200,\"confidence\":0.95},\"material\":{\"value\":\"1.4301\",\"confidence\":0.95},\"thickness_mm\":{\"value\":1.5,\"confidence\":0.95},\"finish\":{\"value\":\"geschliffen\",\"confidence\":0.9},\"tolerance\":{\"value\":null,\"confidence\":0},\"process_hint\":\"sheet_metal\",\"attachment_refs\":[1]}]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 1400,
+      "output_tokens": 520,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 1050
+    }
+  },
+  "expected": {
+    "company": "Beispiel Metallbau GmbH",
+    "country": "DE",
+    "deadline": null
+  }
+}

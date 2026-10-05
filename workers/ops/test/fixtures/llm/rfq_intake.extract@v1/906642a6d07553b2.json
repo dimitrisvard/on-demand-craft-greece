@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.extract@v1",
+  "request_sha256": "906642a6d07553b2fc5a0abdc105a816d295a5a7545929c1e7a8e01d18a194b0",
+  "case": "en-no-attachment",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Quote for turned shafts\nFrom: Mark Taylor <mark.taylor@example.com>\n\nGood afternoon,\n\ncould you quote 500 turned shafts, stainless steel 1.4305, diameter 12 mm, length 80 mm, tolerance h7 on the bearing seat?\n\nRegards,\nMark Taylor\nExample Motion Ltd\n</untrusted_email>\n<attachments>\nnone\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"company\":{\"value\":\"Example Motion Ltd\",\"confidence\":0.9},\"contact_first_name\":{\"value\":\"Mark\",\"confidence\":0.95},\"contact_last_name\":{\"value\":\"Taylor\",\"confidence\":0.95},\"contact_email\":{\"value\":\"mark.taylor@example.com\",\"confidence\":0.97},\"phone\":{\"value\":null,\"confidence\":0},\"vat_id\":{\"value\":null,\"confidence\":0},\"country\":{\"value\":null,\"confidence\":0},\"deadline\":{\"value\":null,\"confidence\":0},\"language\":\"en\",\"notes\":\"\",\"injection_suspected\":false,\"parts\":[{\"name\":\"turned shaft\",\"quantity\":{\"value\":500,\"confidence\":0.95},\"material\":{\"value\":\"1.4305\",\"confidence\":0.95},\"thickness_mm\":{\"value\":null,\"confidence\":0},\"finish\":{\"value\":null,\"confidence\":0},\"tolerance\":{\"value\":\"h7\",\"confidence\":0.9},\"process_hint\":\"cnc\",\"attachment_refs\":[]}]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 1400,
+      "output_tokens": 520,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 1050
+    }
+  },
+  "expected": {
+    "company": "Example Motion Ltd",
+    "country": null,
+    "deadline": null
+  }
+}

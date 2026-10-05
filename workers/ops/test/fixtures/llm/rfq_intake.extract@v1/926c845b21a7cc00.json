@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.extract@v1",
+  "request_sha256": "926c845b21a7cc00d829102268e1104f2727f748f3163cfdb07e9c47e1038909",
+  "case": "techpilot",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Fwd: Neue Anfrage: Drehteile 1.0718\nFrom: Platform Notifications <noreply@example.de>\n\n---------- Forwarded message ---------\nVon: Techpilot <noreply@example.de>\nBetreff: Neue Anfrage: Drehteile 1.0718\n\nNeue Anfrage über die Plattform:\nFirma: Muster Antriebstechnik GmbH (DE)\nAnsprechpartner: Frau Petra Schmidt, p.schmidt@example.de\nTeile: 1.000 Stück Drehteile, Werkstoff 1.0718, Ø20 x 45 mm\nAngebotsfrist: 20.10.2026\n</untrusted_email>\n<attachments>\nnone\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"company\":{\"value\":\"Muster Antriebstechnik GmbH\",\"confidence\":0.95},\"contact_first_name\":{\"value\":\"Petra\",\"confidence\":0.9},\"contact_last_name\":{\"value\":\"Schmidt\",\"confidence\":0.9},\"contact_email\":{\"value\":\"p.schmidt@example.de\",\"confidence\":0.95},\"phone\":{\"value\":null,\"confidence\":0},\"vat_id\":{\"value\":null,\"confidence\":0},\"country\":{\"value\":\"DE\",\"confidence\":0.95},\"deadline\":{\"value\":\"2026-10-20\",\"confidence\":0.9},\"language\":\"de\",\"notes\":\"\",\"injection_suspected\":false,\"parts\":[{\"name\":\"Drehteile\",\"quantity\":{\"value\":1000,\"confidence\":0.95},\"material\":{\"value\":\"1.0718\",\"confidence\":0.95},\"thickness_mm\":{\"value\":null,\"confidence\":0},\"finish\":{\"value\":null,\"confidence\":0},\"tolerance\":{\"value\":null,\"confidence\":0},\"process_hint\":\"cnc\",\"attachment_refs\":[]}]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 1400,
+      "output_tokens": 520,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 1050
+    }
+  },
+  "expected": {
+    "company": "Muster Antriebstechnik GmbH",
+    "country": "DE",
+    "deadline": "2026-10-20"
+  }
+}

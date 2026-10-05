@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "4012ffebdf12aae7b32391ff523d692d022883b3f5745b23bf09ba9fae47b03c",
+  "case": "no-message-id",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Price request for spacers\nFrom: Nina Larsen <nina.larsen@example.com>\n\nHi,\n\nplease quote 1,000 spacers, POM-C, outer diameter 10 mm, inner 5 mm, length 6 mm.\n\nNina Larsen\nExample Plastics AS\n</untrusted_email>\n<attachments>\nnone\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"rfq\",\"language\":\"en\",\"injection_suspected\":false,\"confidence\":0.93}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "en",
+    "injection_suspected": false
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "prompt": "post_order.reorder_draft@v1",
+  "request_sha256": "54a04e10645efdc0b5d74a6d9b966cb95628e90ae82b254296ee8437e7b1f500",
+  "case": "post-order-shortfall",
+  "user": [
+    {
+      "type": "text",
+      "text": "<reorder>\n{\n \"po_number\": \"PO-1001\",\n \"materials\": [\n  {\n   \"name\": \"Steel sheet · S235JR · 2 mm\",\n   \"grade\": \"S235JR\",\n   \"thickness_mm\": 2,\n   \"missing\": \"0.05 m2 missing\",\n   \"low_stock_alert\": false,\n   \"supplier\": \"Example Steel Supply\",\n   \"supplier_sku\": \"S235-2-1000\"\n  }\n ]\n}\n</reorder>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"subject\":\"Request: S235JR 2 mm sheet\",\"body_text\":\"Hello,\\n\\nplease send us your offer and delivery time for S235JR 2 mm sheet (article S235-2-1000), 0.05 m2.\\n\\nKind regards\\nMicrons Hub\"}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 700,
+      "output_tokens": 120,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "subject": "Request: S235JR 2 mm sheet",
+    "body_text": "Hello,\n\nplease send us your offer and delivery time for S235JR 2 mm sheet (article S235-2-1000), 0.05 m2.\n\nKind regards\nMicrons Hub"
+  }
+}

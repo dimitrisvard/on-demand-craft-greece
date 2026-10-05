@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "language": { "type": "string" },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "qa_checks": { "type": "array", "items": { "type": "string" } },
+    "injection_suspected": { "type": "boolean" }
+  },
+  "required": ["language", "notes", "qa_checks", "injection_suspected"],
+  "additionalProperties": false
+}

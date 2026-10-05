@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "2b8a7f11f67ee7d2b0a914b02cc9db140745e28edb9293c57f3b0e04c70a2bab",
+  "case": "de-sheet-metal-step",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Anfrage Kantteile Winkel W-20\nFrom: Hans Müller <h.mueller@example.de>\n\nSehr geehrte Damen und Herren,\n\nbitte senden Sie uns ein Angebot für 200 Stück Kantteil Winkel W-20 (Abkantung 90°).\nWerkstoff: 1.4301, Blechdicke 1,5 mm, Oberfläche geschliffen.\nDie STEP-Datei ist im Anhang.\n\nMit freundlichen Grüßen\nHans Müller\nBeispiel Metallbau GmbH\nMusterstraße 1, 70173 Stuttgart\nUSt-IdNr. DE123456789\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"winkel_w20.step\" kind=\"step\" size_bytes=\"367\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"rfq\",\"language\":\"de\",\"injection_suspected\":false,\"confidence\":0.96}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "de",
+    "injection_suspected": false
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "5136258afdaeea950c029aafb900301a0bba647a9f77dd1a1da40147361cab05",
+  "case": "dmarc-fail",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Urgent quotation request\nFrom: Accounts <accounts@example.com>\n\nPlease quote 10 parts urgently and confirm by reply.\n</untrusted_email>\n<attachments>\nnone\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"other\",\"language\":\"en\",\"injection_suspected\":false,\"confidence\":0.55}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "other",
+    "language": "en",
+    "injection_suspected": false
+  }
+}

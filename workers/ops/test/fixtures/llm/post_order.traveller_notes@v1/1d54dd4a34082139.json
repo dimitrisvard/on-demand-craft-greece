@@ -1,0 +1,46 @@
+{
+  "prompt": "post_order.traveller_notes@v1",
+  "request_sha256": "1d54dd4a34082139ff891619bbabc914bfa9654ce9632f8abc62afd9062acc58",
+  "case": "post-order-shortfall",
+  "user": [
+    {
+      "type": "text",
+      "text": "<order_items>\n[\n {\n  \"pos\": 1,\n  \"part\": \"Bracket\",\n  \"quantity\": 10,\n  \"process\": \"sheet_metal\",\n  \"material\": \"S235JR\",\n  \"thickness_mm\": 2,\n  \"finish\": \"powder_coating\",\n  \"tolerance\": \"ISO 2768-m\",\n  \"geometry\": \"flat 200 x 150 mm, 2 bend(s)\",\n  \"description\": \"Process: Sheet Metal\\nMaterial: Steel (S235JR)\\nThickness: 2 mm\\nComments: deburr all edges, powder coat after bending\"\n },\n {\n  \"pos\": 2,\n  \"part\": \"Cover\",\n  \"quantity\": 5,\n  \"process\": \"cnc\",\n  \"material\": \"EN AW-6082\",\n  \"thickness_mm\": 10,\n  \"finish\": null,\n  \"tolerance\": \"±0.05 mm\",\n  \"geometry\": null,\n  \"description\": \"Process: CNC\\nMaterial: EN AW-6082\"\n },\n {\n  \"pos\": 3,\n  \"part\": \"Spare washer\",\n  \"quantity\": 3,\n  \"process\": null,\n  \"material\": null,\n  \"thickness_mm\": null,\n  \"finish\": null,\n  \"tolerance\": null,\n  \"geometry\": null,\n  \"description\": null\n }\n]\n</order_items>"
+    },
+    {
+      "type": "text",
+      "text": "<partner>\n{\"language\":\"de\",\"due_date\":\"2026-10-20\"}\n</partner>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"language\":\"de\",\"notes\":[\"Alle Kanten entgraten.\",\"Pulverbeschichtung erst nach dem Biegen.\"],\"qa_checks\":[\"Biegewinkel von Teil 1 gegen die Zeichnung prüfen.\"],\"injection_suspected\":false}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 700,
+      "output_tokens": 120,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "language": "de",
+    "notes": [
+      "Alle Kanten entgraten.",
+      "Pulverbeschichtung erst nach dem Biegen."
+    ],
+    "qa_checks": [
+      "Biegewinkel von Teil 1 gegen die Zeichnung prüfen."
+    ],
+    "injection_suspected": false
+  }
+}

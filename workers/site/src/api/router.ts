@@ -16,6 +16,12 @@
 //               does on every /api/* answer), noindex and the HEAD handling
 // Errors: a throw in steps 3-7 (gate, handler before res.end(), module load) answers 500 text/plain "Internal
 // Server Error" and is logged with the endpoint and request id; handler answers are never rewritten.
+//
+// Endpoint 'agent' (Phase 4, /api/agent/*; src/api/resolve.ts): step 2 caps the body at AGENT_BODY_MAX_BYTES
+// (65,536; 413 {"error":"payload_too_large"}); its sentinels are answered here and never dispatched (#unknown: 404
+// {"error":"not_found"}, #method: 405 {"error":"method_not_allowed"} with Allow); every agent answer carries
+// Cache-Control: no-store unless the answer sets its own (file downloads: private, no-store). The target is always
+// microns-ops, never the forward.
 
 import { describeError, MAX_FUNCTION_BODY_BYTES, parseQuery, parseVercelBody } from '../../../shared/src/compat/vercel-node';
 import { configError, missingNames } from '../../../shared/src/http/env-check';
@@ -30,8 +36,29 @@ import { handleEmails } from './emails';
 import { handleFiles, type FilesEnv } from './files';
 import { forwardToVercel } from './forward';
 import { callOps } from './ops-client';
-import { actionForLog, cataloguePathOf, endpointOfPath, isSentinel, resolveApi, type ResolvedApi } from './resolve';
+import { actionForLog, AGENT_METHODS, cataloguePathOf, endpointOfPath, isSentinel, resolveApi, type ResolvedApi } from './resolve';
 import { handleTrack } from './track';
+import type { AgentAction } from '../../../shared/src/agent-api';
+
+/** Request body cap of /api/agent/* (bytes). */
+export const AGENT_BODY_MAX_BYTES = 65_536;
+
+/** An agent answer with Cache-Control: no-store unless it already sets Cache-Control. */
+export function agentNoStore(response: Response): Response {
+  if (response.headers.has('cache-control')) return response;
+  const out = new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
+  out.headers.set('Cache-Control', 'no-store');
+  return out;
+}
+
+/** The site's own answer to an agent sentinel: 404 for an unknown action, 405 with Allow for another method. */
+function agentSentinelAnswer(r: ResolvedApi): Response {
+  if (r.action === '#method') {
+    const allow = AGENT_METHODS[r.rawAction as AgentAction] ?? 'GET';
+    return apiError(405, 'method_not_allowed', { Allow: allow });
+  }
+  return apiError(404, 'not_found');
+}
 
 export type Target = 'local' | 'ops' | 'forward';
 
@@ -123,13 +150,14 @@ async function drain(reader: ReadableStreamDefaultReader<Uint8Array>, alreadyRea
   }
 }
 
-// Step 2: reads the body once and refuses more than MAX_FUNCTION_BODY_BYTES (a declared Content-Length above the
-// limit, or the first byte over it); nothing over the limit is kept in memory.
-async function readBodyCapped(request: Request): Promise<BodyRead> {
+// Step 2: reads the body once and refuses more than `limit` bytes (MAX_FUNCTION_BODY_BYTES; agent endpoint:
+// AGENT_BODY_MAX_BYTES), a declared Content-Length above the limit or the first byte over it; nothing over the limit
+// is kept in memory.
+async function readBodyCapped(request: Request, limit: number = MAX_FUNCTION_BODY_BYTES): Promise<BodyRead> {
   if (!request.body) return { ok: true, bytes: EMPTY };
   const reader = request.body.getReader();
   const declared = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_FUNCTION_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > limit) {
     await drain(reader, 0);
     return { ok: false };
   }
@@ -139,7 +167,7 @@ async function readBodyCapped(request: Request): Promise<BodyRead> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_FUNCTION_BODY_BYTES) {
+    if (total > limit) {
       await drain(reader, total);
       return { ok: false };
     }
@@ -188,7 +216,8 @@ export function createRouteApi(table: TargetTable): (request: Request, env: Env,
     const started = Date.now();
     const requestId = crypto.randomUUID();
     const fields: LogFields = {};
-    const done = (response: Response): Response => {
+    const done = (answer: Response): Response => {
+      const response = fields.endpoint === 'agent' ? agentNoStore(answer) : answer;
       // Step 8.
       logLine(LOG_PREFIX, 'api', {
         endpoint: fields.endpoint,
@@ -217,7 +246,7 @@ export function createRouteApi(table: TargetTable): (request: Request, env: Env,
     // 2. Body, buffered once.
     let bytes = EMPTY;
     if (method !== 'GET' && method !== 'HEAD') {
-      const read = await readBodyCapped(request);
+      const read = await readBodyCapped(request, endpoint === 'agent' ? AGENT_BODY_MAX_BYTES : MAX_FUNCTION_BODY_BYTES);
       if (!read.ok) return done(apiError(413, 'payload_too_large'));
       bytes = read.bytes;
     }
@@ -226,6 +255,8 @@ export function createRouteApi(table: TargetTable): (request: Request, env: Env,
       // 3. Resolve.
       const r = resolveApi(request, bytes);
       fields.action = actionForLog(r.action);
+      // Agent sentinels: answered by the site, never dispatched.
+      if (r.endpoint === 'agent' && isSentinel(r.action)) return done(agentSentinelAnswer(r));
       const target = targetIn(table, r);
       fields.target = target;
       const dispatch = dispatchOf(r, target);

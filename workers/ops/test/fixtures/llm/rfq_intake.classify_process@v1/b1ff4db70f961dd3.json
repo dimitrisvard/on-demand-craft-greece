@@ -1,0 +1,34 @@
+{
+  "prompt": "rfq_intake.classify_process@v1",
+  "request_sha256": "b1ff4db70f961dd39926a16862d977e18db802388e1f040e868ceb32acc40a62",
+  "case": "pl-stl-image",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Zapytanie ofertowe - frezowanie CNC\nFrom: Piotr Nowak <p.nowak@example.com>\n\nDzień dobry,\n\nprosimy o ofertę na frezowanie CNC 10 sztuk obudowy (aluminium 6082, tolerancja ±0,02 mm).\n\nModel STL i zdjęcie w załączniku.\n\nPozdrawiam\nPiotr Nowak\nPrzykład Sp. z o.o.\n</untrusted_email>\n<attachments>\n<attachment n=\"2\" name=\"obudowa.stl\" kind=\"stl\" size_bytes=\"134\"/>\n<attachment n=\"3\" name=\"zdjecie.png\" kind=\"image\" size_bytes=\"70\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"process\":\"cnc\",\"confidence\":0.92,\"signals\":[\"frezowanie CNC\",\"±0,02 mm\"]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 610,
+      "output_tokens": 30,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "process": "cnc"
+  }
+}

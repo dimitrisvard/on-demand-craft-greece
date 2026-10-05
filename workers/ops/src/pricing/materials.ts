@@ -66,6 +66,21 @@ export const DENSITY_KG_M3: Readonly<Record<MaterialFamily, number>> = Object.fr
   titanium: 4430,
 });
 
+/** Material names of the unfold service's K-factor table (sheet-metal-service/config.py:22-29). */
+const UNFOLD_MATERIAL: Readonly<Record<MaterialFamily, string>> = Object.freeze({
+  steel: 'steel',
+  stainless: 'stainless_steel',
+  aluminium: 'aluminum',
+  copper: 'copper',
+  brass: 'brass',
+  titanium: 'steel',
+});
+
+/** The unfold service's material name for a family (its default 'steel' when unknown). */
+export function unfoldMaterial(family: string | null): string {
+  return family && family in UNFOLD_MATERIAL ? UNFOLD_MATERIAL[family as MaterialFamily] : 'steel';
+}
+
 /** Normalised form used for alias comparison. */
 export function normaliseGradeText(text: string): string {
   return String(text ?? '')

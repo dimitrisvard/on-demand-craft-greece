@@ -1,0 +1,8 @@
+{
+  "classify_process.v1.md": "bcf510c0c4b6f3fec3bca5aae3c8b7416c7f7504422b838be3c24f0de58fec86",
+  "classify_process.v1.schema.json": "59078a13b1895a6c0caae18225f3b02df8b06b99d6dad6adee62f3047fbbe5ea",
+  "extract.v1.md": "233e86d011aa49b45686b000703cc24262ef3729c6774462de8c117e175b7505",
+  "extract.v1.schema.json": "e092ab333e62b792d4160b4772c9483c6cc0c4159ea9303bc5a0357b1ace15ac",
+  "triage.v1.md": "b057fa100066ba3a747fdb8e003f9083df5d7cb92e5469660d7a0e74c816d45f",
+  "triage.v1.schema.json": "d23037fa7a7d4079e1ad2e9de3bb4e698a067dd8b9a54526914d6456390c5951"
+}

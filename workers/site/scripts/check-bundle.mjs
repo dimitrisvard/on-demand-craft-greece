@@ -7,6 +7,12 @@
 //   - a file under lib/nesting/ or lib/inventory/
 //   - a repo-root API handler other than the site's own: api/s3, api/notifications, api/gsc, api/tenders,
 //     api/tender-scan, api/funded-startups, api/scrape-*, api/scan-directory
+//   - (Phase 4) an agent-layer package under node_modules/: @anthropic-ai/*, agents, @modelcontextprotocol/*,
+//     postal-mime, @pdf-lib/fontkit, @cloudflare/puppeteer. postal-mime is allowed only while every input outside
+//     postal-mime that imports it belongs to the resend package (the dependency of the site's own mail handler,
+//     api/emails.js, which imports postal-mime at module scope); any other importer fails the guard
+//   - (Phase 4) a source file of microns-ops (workers/ops/src/): the site reaches the agent layer only over the OPS
+//     service binding
 // and prints the size report (bundle size, gzip size, largest packages).
 //
 // Usage (from workers/site):
@@ -32,6 +38,9 @@ const DEFAULT_METAFILE = `${OUT_DIR}/meta.json`;
 const FORBIDDEN_PACKAGES = /(^|\/)node_modules\/(@aws-sdk|@smithy|pdf-lib|@pdf-lib|qrcode|pngjs|makerjs|dxf-parser|clipper-lib)\//;
 const FORBIDDEN_LIB = /(^|\/)lib\/(nesting|inventory)\//;
 const FORBIDDEN_API = /^api\/(s3|notifications|gsc|tenders|tender-scan|funded-startups|scrape-[^/]*|scan-directory)\.(js|mjs|cjs|ts)$/;
+// Phase 4: packages of the agent layer (microns-ops) and the ops sources themselves.
+const FORBIDDEN_AGENT_PACKAGES = /(^|\/)node_modules\/(@anthropic-ai\/[^/]+|agents|@modelcontextprotocol\/[^/]+|postal-mime|@pdf-lib\/fontkit|@cloudflare\/puppeteer)\//;
+const FORBIDDEN_OPS_SOURCE = /^workers\/ops\/src\//;
 
 function parseArgs(argv) {
   const args = { build: false, metafile: DEFAULT_METAFILE };
@@ -73,7 +82,31 @@ export function forbiddenReason(repoPath) {
   if (FORBIDDEN_PACKAGES.test(repoPath)) return 'ops-only package';
   if (!repoPath.includes('node_modules/') && FORBIDDEN_LIB.test(repoPath)) return 'ops-only lib';
   if (FORBIDDEN_API.test(repoPath)) return 'handler outside the site';
+  if (FORBIDDEN_AGENT_PACKAGES.test(repoPath)) return 'agent-layer package';
+  if (FORBIDDEN_OPS_SOURCE.test(repoPath)) return 'microns-ops source';
   return null;
+}
+
+const POSTAL_MIME = /(^|\/)node_modules\/postal-mime\//;
+const RESEND = /(^|\/)node_modules\/resend\//;
+
+/** Repo paths of the inputs outside postal-mime that import a postal-mime file (metafile import graph). */
+export function postalMimeImporters(inputs) {
+  const importers = new Set();
+  for (const [input, info] of inputs) {
+    const from = repoRelative(input);
+    if (POSTAL_MIME.test(from)) continue;
+    for (const imported of info.imports ?? []) {
+      if (POSTAL_MIME.test(repoRelative(imported.path ?? ''))) importers.add(from);
+    }
+  }
+  return [...importers].sort();
+}
+
+/** forbiddenReason() with the resend exception for postal-mime (see the header). */
+export function forbiddenReasonInBundle(repoPath, importersOfPostalMime) {
+  if (POSTAL_MIME.test(repoPath) && importersOfPostalMime.every((i) => RESEND.test(i))) return null;
+  return forbiddenReason(repoPath);
 }
 
 function packageOf(repoPath) {
@@ -100,9 +133,10 @@ function main() {
   const inputs = Object.entries(meta.inputs ?? {});
   const forbidden = [];
   const sizes = new Map();
+  const postalImporters = postalMimeImporters(inputs);
   for (const [input, info] of inputs) {
     const repoPath = repoRelative(input);
-    const reason = forbiddenReason(repoPath);
+    const reason = forbiddenReasonInBundle(repoPath, postalImporters);
     if (reason) forbidden.push(`${repoPath} (${reason})`);
     const pkg = packageOf(repoPath);
     sizes.set(pkg, (sizes.get(pkg) ?? 0) + (info.bytes ?? 0));

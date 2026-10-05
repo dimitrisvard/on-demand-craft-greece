@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "ba6081f114250c465bc54e47a9c5d6362ed8878af8d763237d8273578bf03438",
+  "case": "en-zip",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Request for quotation - bracket set\nFrom: Olivia Grant <olivia.grant@example.com>\n\nHi,\n\nplease quote the bracket set in the attached archive: 100 pcs of each part, S355 steel 3 mm, laser cut and bent.\n\nThanks,\nOlivia Grant\nExample Engineering Ltd\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"parts.zip\" kind=\"zip\" size_bytes=\"685\"/>\n<attachment n=\"2\" name=\"bracket.step\" kind=\"step\" size_bytes=\"365\" from_archive=\"1\"/>\n<attachment n=\"3\" name=\"plate.dxf\" kind=\"dxf\" size_bytes=\"121\" from_archive=\"1\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"rfq\",\"language\":\"en\",\"injection_suspected\":false,\"confidence\":0.96}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "en",
+    "injection_suspected": false
+  }
+}

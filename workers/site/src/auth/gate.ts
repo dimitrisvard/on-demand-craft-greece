@@ -13,7 +13,22 @@
 // Report mode (API_GATES_MODE) turns a refusal of that class into a log line and lets the request through as the
 // caller it is (ANON when it has no valid credential); body format rules and the always-on recipient rule of
 // partner notifications are never reported.
+//
+// /api/agent/* (Phase 4, action IDs AG-1…AG-7 of ./policy.ts): a decision carrying a relay header is AG-2 (the
+// relay path decides, a session is not considered), any other decision AG-1. Request bodies must have the exact
+// shape of workers/shared/src/agent-api.ts, else 400 {"error":"bad_request"} (never reported): the dashboard never
+// sends a raw approval token, and the relay never sends a token hash. AG-2 and AG-3 need AGENT_APPROVAL_SECRET
+// (AgentSiteEnv, ./agent-hmac.ts): missing, they answer 500 for that request only; every other agent row works
+// without it. A refused relay request answers 401 {"error":"unauthorized"}; a refused link or file key 403
+// {"error":"forbidden"}, without detail. microns-ops checks the principal, the body and the key again.
 
+import {
+  FLAG_EDIT_KEY_RE,
+  isDecisionBodyDashboard,
+  isDecisionBodyRelay,
+  isFlagEditBody,
+  isStartBody,
+} from '../../../shared/src/agent-api';
 import { rateKey } from '../../../shared/src/auth/rate-limit';
 import { isAllowedOrigin } from '../../../shared/src/http/cors';
 import { configError, missingNames } from '../../../shared/src/http/env-check';
@@ -22,6 +37,7 @@ import type { Principal } from '../../../shared/src/http/rpc';
 import type { ResolvedApi } from '../api/resolve';
 import type { Env } from '../env';
 import { machineAuth } from './access';
+import { hasRelayHeaders, staffFileKey, verifyFileLink, verifyRelayRequest, type AgentSiteEnv } from './agent-hmac';
 import { inventoryRequestRules, mailBodyRules } from './body';
 import {
   ANONYMOUS_FILE_CONSTRAINTS,
@@ -574,13 +590,125 @@ async function scrapeGate(c: Ctx): Promise<GateOutcome> {
   return allowWith(c, caller.principal);
 }
 
+// ----- /api/agent/* (Phase 4) -----
+
+const RELAY: Principal = { class: 'MACHINE', machine: 'telegram' };
+
+/** The request body as JSON (whatever the Content-Type), or undefined when it is not JSON. */
+function agentJsonBody(r: ResolvedApi): unknown {
+  if (r.bodyBytes.byteLength === 0) return undefined;
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(r.bodyBytes)) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+function singleQuery(r: ResolvedApi, name: string): string {
+  const value = r.query[name];
+  return typeof value === 'string' ? value : '';
+}
+
+/** Body format refusal of the agent rows (never reported). */
+function badAgentBody(c: Ctx): GateOutcome {
+  return denyWith(c, apiError(400, 'bad_request'));
+}
+
+function approvalSecret(c: Ctx): string | undefined {
+  const value = (c.env as AgentSiteEnv).AGENT_APPROVAL_SECRET;
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/** AG-1: a staff session deciding with run_id + token_sha256. */
+async function dashboardDecisionGate(c: Ctx): Promise<GateOutcome> {
+  const caller = await callerWithRate(c, 'STAFF');
+  if (caller.kind === 'stop') return caller.outcome;
+  const body = agentJsonBody(c.r);
+  // A raw approval token is a relay credential; a session never presents one.
+  if (isRecord(body) && Object.prototype.hasOwnProperty.call(body, 'token')) return badAgentBody(c);
+  if (!isDecisionBodyDashboard(body)) return badAgentBody(c);
+  return allowWith(c, caller.principal);
+}
+
+/** AG-2: the Telegram relay's signed request with the raw token and the button code. */
+async function relayDecisionGate(c: Ctx): Promise<GateOutcome> {
+  const secret = approvalSecret(c);
+  if (!secret) return configDeny(c, ['AGENT_APPROVAL_SECRET']);
+  const check = await verifyRelayRequest(c.request.headers, c.r.bodyBytes, secret, Date.now());
+  if (!check.ok) {
+    console.log(`${LOG_PREFIX} gate relay_refused ${check.reason}`);
+    return refuse(c, 'auth', 401, 'unauthorized') ?? allowWith(c, ANON);
+  }
+  const limited = await rateCheck(c, rateKey('m', 'telegram', 'agent'));
+  if (limited) return limited;
+  const body = agentJsonBody(c.r);
+  // A token hash is the dashboard's reference; the relay presents the raw token only.
+  if (isRecord(body) && Object.prototype.hasOwnProperty.call(body, 'token_sha256')) return badAgentBody(c);
+  if (!isDecisionBodyRelay(body)) return badAgentBody(c);
+  return allowWith(c, RELAY);
+}
+
+/** AG-3: a signed partner download link (no session). */
+async function signedFileGate(c: Ctx): Promise<GateOutcome> {
+  const secret = approvalSecret(c);
+  if (!secret) return configDeny(c, ['AGENT_APPROVAL_SECRET']);
+  const limited = await rateCheck(c, ['file', c.ip].join(':'));
+  if (limited) return limited;
+  const valid = await verifyFileLink(secret, singleQuery(c.r, 'k'), singleQuery(c.r, 'exp'), singleQuery(c.r, 'sig'), Date.now());
+  if (!valid) return refuse(c, 'auth', 403, 'forbidden') ?? allowWith(c, ANON);
+  return allowWith(c, ANON);
+}
+
+/** AG-4: an admin editing an agent flag (agent.* or mcp.remote; never 'auto' for quote or post-order). */
+async function flagEditGate(c: Ctx): Promise<GateOutcome> {
+  const caller = await callerWithRate(c, 'ADMIN');
+  if (caller.kind === 'stop') return caller.outcome;
+  const body = agentJsonBody(c.r);
+  if (!isRecord(body)) return badAgentBody(c);
+  if (typeof body.key === 'string' && !FLAG_EDIT_KEY_RE.test(body.key)) {
+    return refuse(c, 'data', 403, 'forbidden') ?? allowWith(c, caller.principal);
+  }
+  if (!isFlagEditBody(body)) return badAgentBody(c);
+  if (body.writes !== undefined && body.key !== 'mcp.remote') return badAgentBody(c);
+  if (body.mode === 'auto' && (body.key === 'agent.quote' || body.key === 'agent.post_order')) {
+    return refuse(c, 'data', 403, 'forbidden') ?? allowWith(c, caller.principal);
+  }
+  return allowWith(c, caller.principal);
+}
+
+/** AG-6: staff starting a quote or an intake run; the relay test card is admin only. */
+async function startGate(c: Ctx): Promise<GateOutcome> {
+  const caller = await callerWithRate(c, 'STAFF');
+  if (caller.kind === 'stop') return caller.outcome;
+  const body = agentJsonBody(c.r);
+  if (!isStartBody(body)) return badAgentBody(c);
+  if (body.kind === 'test_card' && caller.principal.class !== 'ADMIN') {
+    return refuse(c, 'auth', 403, 'forbidden') ?? allowWith(c, caller.principal);
+  }
+  return allowWith(c, caller.principal);
+}
+
+/** AG-7: a staff preview of a stored artefact under the fixed key patterns. */
+async function staffFileGate(c: Ctx): Promise<GateOutcome> {
+  const caller = await callerWithRate(c, 'STAFF');
+  if (caller.kind === 'stop') return caller.outcome;
+  if (staffFileKey(c.url.search) === null) return refuse(c, 'data', 403, 'forbidden') ?? allowWith(c, caller.principal);
+  return allowWith(c, caller.principal);
+}
+
 // ----- entry point -----
 
 export async function applyGate(r: ResolvedApi, request: Request, env: Env, ctx: ExecutionContext): Promise<GateOutcome> {
   void ctx;
-  const id = actionIdOf(r);
+  const policyId = actionIdOf(r);
   // Sentinels are dispatched before the gate; anything else without an ID is a resolver/policy mismatch.
-  if (!id) throw new Error(`gate: no action id for endpoint ${r.endpoint}`);
+  if (!policyId) throw new Error(`gate: no action id for endpoint ${r.endpoint}`);
+  // A decision with a relay header is the relay's (AG-2).
+  const id: ActionId = policyId === 'AG-1' && hasRelayHeaders(request.headers) ? 'AG-2' : policyId;
   const c: Ctx = {
     r,
     request,
@@ -650,5 +778,19 @@ export async function applyGate(r: ResolvedApi, request: Request, env: Env, ctx:
     case 'FS-1':
     case 'FS-3':
       return staffGate(c);
+    case 'AG-1':
+      return dashboardDecisionGate(c);
+    case 'AG-2':
+      return relayDecisionGate(c);
+    case 'AG-3':
+      return signedFileGate(c);
+    case 'AG-4':
+      return flagEditGate(c);
+    case 'AG-5':
+      return staffGate(c);
+    case 'AG-6':
+      return startGate(c);
+    case 'AG-7':
+      return staffFileGate(c);
   }
 }

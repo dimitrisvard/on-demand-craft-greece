@@ -266,10 +266,10 @@ export function drawTable(c: DocContext, at: Cursor, t: { columns: TableColumn[]
 }
 
 /** Label/value rows in a shaded box (e.g. totals), right-aligned values; the last row can be highlighted. */
-export function drawKeyValueBox(c: DocContext, at: Cursor, rows: Array<{ label: string; value: string; highlight?: boolean }>, o?: { width_mm?: number }): Cursor {
+export function drawKeyValueBox(c: DocContext, at: Cursor, rows: Array<{ label: string; value: string; highlight?: boolean }>, o?: { width_mm?: number; row_mm?: number }): Cursor {
   const box = contentBox();
   const width = (o?.width_mm ?? 80) * MM;
-  const rowHeight = 6.5 * MM;
+  const rowHeight = (o?.row_mm ?? 6.5) * MM;
   let cursor = ensureSpace(c, at, rows.length * rowHeight + 2 * MM);
   const x = box.right - width;
   for (const row of rows) {
@@ -278,8 +278,9 @@ export function drawKeyValueBox(c: DocContext, at: Cursor, rows: Array<{ label: 
     cursor.page.drawRectangle({ x, y: cursor.y - rowHeight, width, height: rowHeight, color: row.highlight ? COLORS.teal : COLORS.greyBg, borderColor: COLORS.greyLine, borderWidth: 0.5 });
     const label = fitText(font, row.label, 9, width / 2);
     const value = fitText(font, row.value, 9, width / 2 - 4 * MM);
-    cursor.page.drawText(label, { x: x + 3 * MM, y: cursor.y - rowHeight + 2.2 * MM, size: 9, font, color });
-    cursor.page.drawText(value, { x: x + width - 3 * MM - textWidth(font, value, 9), y: cursor.y - rowHeight + 2.2 * MM, size: 9, font, color });
+    const baseline = cursor.y - rowHeight / 2 - 1.1 * MM;
+    cursor.page.drawText(label, { x: x + 3 * MM, y: baseline, size: 9, font, color });
+    cursor.page.drawText(value, { x: x + width - 3 * MM - textWidth(font, value, 9), y: baseline, size: 9, font, color });
     cursor = { page: cursor.page, y: cursor.y - rowHeight };
   }
   return { page: cursor.page, y: cursor.y - 3 * MM };

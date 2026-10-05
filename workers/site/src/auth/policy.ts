@@ -1,7 +1,9 @@
 // Gate policy: one action ID per resolved /api action, and the rule each ID follows.
 //   access      who may call: 'public' (no credential), 'turnstile' (public form with a Turnstile token),
 //               'turnstile-or-staff', 'files' (per-action file rules), 'staff', 'admin', 'admin-json'
-//               (ADMIN; a JSON request from anyone else is refused, a page navigation goes on as that caller)
+//               (ADMIN; a JSON request from anyone else is refused, a page navigation goes on as that caller),
+//               'relay' (the Telegram relay's signed request, src/auth/agent-hmac.ts), 'signed-link' (a signed
+//               partner download link, src/auth/agent-hmac.ts)
 //   machines    Access service-token callers allowed besides staff (only on preview hosts and API_MACHINE_HOSTS);
 //               `machineActions` narrows them to some actions of the ID
 //   userScope   last part of the signed-in rate key u:<uid>:<scope> (':r' idempotent reads and ':up' upload
@@ -9,16 +11,29 @@
 // Gate modes come from API_GATES_MODE ("<class>=report|enforce", comma list). Without the var only the recipient
 // check reports; with the var every class it does not name enforces. Report mode logs
 // "[microns-site] gate would deny <actionId> <code>" and lets the request through.
+//
+// Phase 4, endpoint 'agent' (/api/agent/*):
+//   AG-1  decision, dashboard       STAFF or ADMIN session; body DecisionBodyDashboard        rate u:<uid>:agent
+//   AG-2  decision, Telegram relay  signed relay request (X-Microns-Timestamp/-Signature);    rate m:telegram:agent
+//                                   body DecisionBodyRelay
+//   AG-3  file, signed link         k, exp and sig verified                                   rate file:<ip>
+//   AG-4  flag                      ADMIN session                                             rate u:<uid>:agent
+//   AG-5  status                    STAFF or ADMIN session                                    rate u:<uid>:agent
+//   AG-6  start                     STAFF or ADMIN session ('test_card': ADMIN)               rate u:<uid>:agent
+//   AG-7  file, staff preview       STAFF or ADMIN session, fixed key patterns                rate u:<uid>:agent
+// actionIdOf() gives AG-1 for every decision; the gate takes AG-2 when the request carries a relay header.
 
 import type { ResolvedApi } from '../api/resolve';
 
 export type ActionId = 'EM-1' | 'EM-2' | 'EM-3' | 'EM-4' | 'S3-1' | 'S3-2' | 'S3-3' | 'S3-4' | 'S3-5' | 'S3-6'
   | 'MK-1' | 'MK-2' | 'MK-3' | 'MK-4' | 'MK-5' | 'MK-6' | 'MK-7' | 'NT-1' | 'NT-2' | 'NT-3' | 'NT-4' | 'NT-5' | 'NT-6' | 'NT-7'
-  | 'GS-1' | 'TD-1' | 'TD-2' | 'TS-1' | 'FS-1' | 'FS-2' | 'FS-3' | 'SC-1' | 'SC-2' | 'SC-3';
+  | 'GS-1' | 'TD-1' | 'TD-2' | 'TS-1' | 'FS-1' | 'FS-2' | 'FS-3' | 'SC-1' | 'SC-2' | 'SC-3'
+  // Phase 4: /api/agent/*
+  | 'AG-1' | 'AG-2' | 'AG-3' | 'AG-4' | 'AG-5' | 'AG-6' | 'AG-7';
 
 export type MachineName = 'collector' | 'mcp';
 
-export type Access = 'public' | 'turnstile' | 'turnstile-or-staff' | 'files' | 'staff' | 'admin' | 'admin-json';
+export type Access = 'public' | 'turnstile' | 'turnstile-or-staff' | 'files' | 'staff' | 'admin' | 'admin-json' | 'relay' | 'signed-link';
 
 export interface ActionRule {
   access: Access;
@@ -64,6 +79,13 @@ export const ACTION_RULES: Readonly<Record<ActionId, ActionRule>> = {
   'SC-1': { access: 'staff', machines: ['mcp'], userScope: 'scrape-website' },
   'SC-2': { access: 'staff', userScope: 'scrape-company-profile' },
   'SC-3': { access: 'staff', machines: ['mcp'], userScope: 'scan-directory' },
+  'AG-1': { access: 'staff', userScope: 'agent' },
+  'AG-2': { access: 'relay' },
+  'AG-3': { access: 'signed-link' },
+  'AG-4': { access: 'admin', userScope: 'agent' },
+  'AG-5': { access: 'staff', userScope: 'agent' },
+  'AG-6': { access: 'staff', userScope: 'agent' },
+  'AG-7': { access: 'staff', userScope: 'agent' },
 };
 
 export const ALL_ACTION_IDS = Object.keys(ACTION_RULES) as ActionId[];
@@ -92,6 +114,12 @@ const NOTIFICATION_IDS: Readonly<Record<string, ActionId>> = {
 };
 const TENDER_READS = ['connectors', 'stats', 'export', 'id', 'list'];
 const FUNDED_READS = ['stats', 'feeds', 'export', 'id', 'list'];
+const AGENT_IDS: Readonly<Record<string, ActionId>> = { decision: 'AG-1', flag: 'AG-4', status: 'AG-5', start: 'AG-6' };
+
+/** file: a request with a `sig` query parameter is a signed partner link (AG-3), any other a staff preview (AG-7). */
+function agentFileId(r: ResolvedApi): ActionId {
+  return Object.prototype.hasOwnProperty.call(r.query, 'sig') ? 'AG-3' : 'AG-7';
+}
 
 function lookup(table: Readonly<Record<string, ActionId>>, key: string | undefined): ActionId | null {
   return key !== undefined && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
@@ -132,6 +160,8 @@ export function actionIdOf(r: ResolvedApi): ActionId | null {
       return 'SC-2';
     case 'scan-directory':
       return 'SC-3';
+    case 'agent':
+      return action === 'file' ? agentFileId(r) : lookup(AGENT_IDS, action);
     default:
       return null;
   }

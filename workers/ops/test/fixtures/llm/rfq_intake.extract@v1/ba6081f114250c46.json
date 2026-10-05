@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.extract@v1",
+  "request_sha256": "ba6081f114250c465bc54e47a9c5d6362ed8878af8d763237d8273578bf03438",
+  "case": "en-zip",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Request for quotation - bracket set\nFrom: Olivia Grant <olivia.grant@example.com>\n\nHi,\n\nplease quote the bracket set in the attached archive: 100 pcs of each part, S355 steel 3 mm, laser cut and bent.\n\nThanks,\nOlivia Grant\nExample Engineering Ltd\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"parts.zip\" kind=\"zip\" size_bytes=\"685\"/>\n<attachment n=\"2\" name=\"bracket.step\" kind=\"step\" size_bytes=\"365\" from_archive=\"1\"/>\n<attachment n=\"3\" name=\"plate.dxf\" kind=\"dxf\" size_bytes=\"121\" from_archive=\"1\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"company\":{\"value\":\"Example Engineering Ltd\",\"confidence\":0.95},\"contact_first_name\":{\"value\":\"Olivia\",\"confidence\":0.95},\"contact_last_name\":{\"value\":\"Grant\",\"confidence\":0.95},\"contact_email\":{\"value\":\"olivia.grant@example.com\",\"confidence\":0.97},\"phone\":{\"value\":null,\"confidence\":0},\"vat_id\":{\"value\":null,\"confidence\":0},\"country\":{\"value\":null,\"confidence\":0},\"deadline\":{\"value\":null,\"confidence\":0},\"language\":\"en\",\"notes\":\"\",\"injection_suspected\":false,\"parts\":[{\"name\":\"bracket.step\",\"quantity\":{\"value\":100,\"confidence\":0.95},\"material\":{\"value\":\"S355\",\"confidence\":0.95},\"thickness_mm\":{\"value\":3,\"confidence\":0.95},\"finish\":{\"value\":null,\"confidence\":0},\"tolerance\":{\"value\":null,\"confidence\":0},\"process_hint\":\"sheet_metal\",\"attachment_refs\":[2]},{\"name\":\"plate.dxf\",\"quantity\":{\"value\":100,\"confidence\":0.95},\"material\":{\"value\":\"S355\",\"confidence\":0.95},\"thickness_mm\":{\"value\":3,\"confidence\":0.95},\"finish\":{\"value\":null,\"confidence\":0},\"tolerance\":{\"value\":null,\"confidence\":0},\"process_hint\":\"sheet_metal\",\"attachment_refs\":[3]}]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 1400,
+      "output_tokens": 520,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 1050
+    }
+  },
+  "expected": {
+    "company": "Example Engineering Ltd",
+    "country": null,
+    "deadline": null
+  }
+}

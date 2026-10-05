@@ -10,7 +10,14 @@
 //
 // Body values are read exactly as the handlers read req.body (@vercel/node semantics, parseVercelBody), from the
 // same bytes the handler will receive.
+//
+// Endpoint 'agent' (Phase 4, /api/agent/*, served by microns-ops): a request whose canonical path is /api/agent or
+// lies under /api/agent/ is this endpoint, whatever the catalogue says; it has no Vercel handler, so it is never
+// forwarded. The action is the one path segment after /api/agent/ when it is one of AGENT_ACTIONS, else #unknown
+// (the site answers 404 {"error":"not_found"}); a known action with another method is #method (the site answers 405
+// with Allow). Neither sentinel is dispatched. The function URL is /api/agent/<action> with the query as sent.
 
+import { AGENT_ACTIONS, type AgentAction } from '../../../shared/src/agent-api';
 import { parseQuery, parseVercelBody, type BodyView } from '../../../shared/src/compat/vercel-node';
 import { functionUrlFor } from '../../../shared/src/compat/vercel-rewrite';
 import type { EndpointId } from '../../../shared/src/http/rpc';
@@ -99,9 +106,35 @@ export function cataloguePathOf(pathname: string): string | null {
   return CATALOGUE.has(canonical) ? canonical : null;
 }
 
+/** Prefix of the agent endpoint (Phase 4). */
+export const AGENT_PATH_PREFIX = '/api/agent/';
+
+/** Method of each agent action. */
+export const AGENT_METHODS: Readonly<Record<AgentAction, 'GET' | 'POST'>> = Object.freeze({
+  decision: 'POST',
+  status: 'GET',
+  flag: 'POST',
+  start: 'POST',
+  file: 'GET',
+});
+
+/** True when the canonical spelling of the path is /api/agent or lies under /api/agent/. */
+export function isAgentPath(pathname: string): boolean {
+  return `${canonicalApiPath(pathname)}/`.startsWith(AGENT_PATH_PREFIX);
+}
+
+/** The agent action a path names (one known segment after /api/agent/), or null. */
+export function agentActionOfPath(pathname: string): AgentAction | null {
+  const canonical = canonicalApiPath(pathname);
+  if (!canonical.startsWith(AGENT_PATH_PREFIX)) return null;
+  const segment = canonical.slice(AGENT_PATH_PREFIX.length);
+  return (AGENT_ACTIONS as readonly string[]).includes(segment) ? (segment as AgentAction) : null;
+}
+
 /** Catalogue lookup by path only (incl. /api/track and /api/connector-status and every spelling of a catalogue
- *  path); null: forward with the body unread. */
+ *  path); null: forward with the body unread. Paths of the agent endpoint are tested first. */
 export function endpointOfPath(pathname: string): EndpointId | null {
+  if (isAgentPath(pathname)) return 'agent';
   const path = cataloguePathOf(pathname);
   return path === null ? null : (CATALOGUE.get(path) ?? null);
 }
@@ -311,15 +344,42 @@ function resolveAction(endpoint: EndpointId, i: Input): Resolution {
     case 'scan-directory':
       return resolvePostOnly(i, 'post');
     case 'agent':
+      // Resolved by resolveAgent() before this switch is reached.
       return { action: '#unknown', rawAction: undefined };
   }
 }
 
 const EMPTY = new Uint8Array(0);
 
+/** Resolution of an /api/agent/* request (rules in the header). */
+function resolveAgent(request: Request, url: URL, bodyBytes: Uint8Array): ResolvedApi {
+  const method = request.method.toUpperCase();
+  const bytes = method === 'GET' || method === 'HEAD' ? EMPTY : bodyBytes;
+  const known = agentActionOfPath(url.pathname);
+  const canonical = canonicalApiPath(url.pathname);
+  const rawAction = canonical.startsWith(AGENT_PATH_PREFIX) ? canonical.slice(AGENT_PATH_PREFIX.length) : '';
+  const functionUrl = `${known === null ? '/api/agent' : `${AGENT_PATH_PREFIX}${known}`}${url.search}`;
+  let action: string;
+  if (known === null) action = '#unknown';
+  else if (method !== AGENT_METHODS[known]) action = '#method';
+  else action = known;
+  return {
+    endpoint: 'agent',
+    publicPath: url.pathname,
+    functionUrl,
+    method,
+    query: parseQuery(functionUrl),
+    body: parseVercelBody(request.headers.get('content-type'), bytes),
+    bodyBytes: bytes,
+    action,
+    rawAction,
+  };
+}
+
 /** Called only when endpointOfPath() is not null. */
 export function resolveApi(request: Request, bodyBytes: Uint8Array): ResolvedApi {
   const url = new URL(request.url);
+  if (isAgentPath(url.pathname)) return resolveAgent(request, url, bodyBytes);
   const path = cataloguePathOf(url.pathname);
   const endpoint = path === null ? undefined : CATALOGUE.get(path);
   if (path === null || endpoint === undefined) throw new Error(`resolveApi: ${url.pathname} is not an /api endpoint of the catalogue`);

@@ -1,0 +1,34 @@
+{
+  "prompt": "rfq_intake.classify_process@v1",
+  "request_sha256": "23dd279b8b441e53d7c0d8c2bd4dc8bdb4f7b80200eaee20b826e7a9579e0fcf",
+  "case": "en-step-pdf",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: RFQ: 50 laser-cut brackets\nFrom: Anna Becker <anna.becker@example.com>\n\nHello,\n\nplease send us a quotation for the attached bracket.\n\nPart: Bracket BR-100\nQuantity: 50 pcs\nMaterial: S235JR steel, 2 mm sheet\nFinish: powder coated RAL 9005\nTolerance: ISO 2768-m\nWe need the parts by 30 October 2026.\n\nBest regards\nAnna Becker\nPurchasing, Example Fabrication Ltd\nPhone +44 20 7946 0000\nVAT GB123456789\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"bracket.step\" kind=\"step\" size_bytes=\"365\"/>\n<attachment n=\"2\" name=\"drawing BR-100.pdf\" kind=\"pdf\" size_bytes=\"1723\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"process\":\"sheet_metal\",\"confidence\":0.9,\"signals\":[\"laser-cut\",\"2 mm sheet\"]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 610,
+      "output_tokens": 30,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "process": "sheet_metal"
+  }
+}

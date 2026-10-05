@@ -13,6 +13,8 @@
 //   {"enabled": false}                                  forward nothing
 // A missing key, a malformed value or a KV error falls back to the var API_FORWARD_TO_VERCEL: "true" forwards
 // everything; "false", empty or absent forwards nothing; any other value forwards nothing and is logged.
+// Paths that Vercel has no handler for are never forwarded, whatever the flag or the var says
+// (NEVER_FORWARDED_PREFIXES, matched on the canonical spelling of the path): /api/agent/* (Phase 4).
 //
 // forwardToVercel keeps method, path, query, body and end-to-end headers. Stripped: hop-by-hop headers (RFC 9110
 // §7.6.1), headers named in Connection, Host, Content-Length and every cf-* header (Cloudflare metadata, and the
@@ -24,11 +26,21 @@ import type { Env } from '../env';
 import { LOG_PREFIX } from '../env';
 import { getFlagValue } from '../flags';
 import { isPreviewHost } from '../preview';
+import { AGENT_PATH_PREFIX, canonicalApiPath } from './resolve';
 import { routeApi } from './router';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
 export const FORWARD_FLAG_KEY = 'api.forward_to_vercel';
+
+/** Path prefixes that are never forwarded to Vercel (one list; a prefix ends with '/'). */
+export const NEVER_FORWARDED_PREFIXES: readonly string[] = [AGENT_PATH_PREFIX];
+
+/** True when the canonical spelling of the path is a never-forwarded prefix or lies under one. */
+export function neverForwarded(pathname: string): boolean {
+  const canonical = `${canonicalApiPath(pathname)}/`;
+  return NEVER_FORWARDED_PREFIXES.some((prefix) => canonical.startsWith(prefix));
+}
 
 export const HOP_BY_HOP: ReadonlySet<string> = new Set([
   'connection',
@@ -118,6 +130,7 @@ function varSaysForward(env: Env): boolean {
 
 /** True when this /api request goes to Vercel (flag api.forward_to_vercel, else the var). */
 export async function shouldForward(env: Env, url: URL): Promise<boolean> {
+  if (neverForwarded(url.pathname)) return false;
   const flag = await getFlagValue(env, FORWARD_FLAG_KEY);
   if (flag === null) return varSaysForward(env);
   if (!flag.enabled) return false;

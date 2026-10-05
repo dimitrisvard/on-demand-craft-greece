@@ -1,0 +1,31 @@
+{
+  "prompt": "quote.cover_email@v1",
+  "request_sha256": "2042e1b31a707e9eb242575cd83f253d3f16d2d35781c23d05d420a05cdc52bc",
+  "case": "canonical-de-bracket",
+  "user": [
+    {
+      "type": "text",
+      "text": "<quote>\n{\"language\":\"de\",\"offer_no\":\"RFQ-05102026-7\",\"company\":\"Example Metall GmbH\",\"contact_first_name\":\"Erika\",\"contact_last_name\":\"Beispiel\",\"parts\":1,\"offer_date\":\"2026-10-05\",\"valid_until\":\"2026-10-19\",\"delivery_time\":\"21 working days\"}\n</quote>"
+    }
+  ],
+  "response": {
+    "id": "msg_quote_test",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"language\":\"de\",\"subject\":\"Ihr Angebot RFQ-05102026-7\",\"body_text\":\"Sehr geehrte Frau Beispiel,\\n\\nvielen Dank fuer Ihre Anfrage. Im Anhang finden Sie unser Angebot RFQ-05102026-7, gueltig bis 2026-10-19.\\n\\nBitte antworten Sie auf diese E-Mail, um das Angebot anzunehmen oder Aenderungen zu besprechen.\\n\\nMicrons Hub\",\"followup_1\":{\"subject\":\"Re: Ihr Angebot RFQ-05102026-7\",\"body_text\":\"Sehr geehrte Frau Beispiel,\\n\\nist unser Angebot gut angekommen? Wir beantworten gern Ihre Fragen.\\n\\nMicrons Hub\"},\"followup_2\":{\"subject\":\"Re: Ihr Angebot RFQ-05102026-7\",\"body_text\":\"Sehr geehrte Frau Beispiel,\\n\\nunser Angebot ist bis 2026-10-19 gueltig. Melden Sie sich gern bei Fragen.\\n\\nMicrons Hub\"}}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 900,
+      "output_tokens": 150,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  }
+}

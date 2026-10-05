@@ -129,4 +129,33 @@ export interface PricingV1 {
   total_net: number | null;
   complete: boolean;
   overrides: Array<{ line_no: number; unit_price: number; note?: string }>;
+  /** Active rules that can never apply (unit or currency), e.g. "bend_per_hit: unit 'EUR/m' is not ...". */
+  rule_warnings: string[];
+  /** Quote-level rule values the draft was priced with (approved edits are applied on the same basis). */
+  basis: { min_order_value: number | null; shipping_flat: number | null };
+  /** Similar past quote lines per line (Vectorize quotes-v1), shown to staff only. */
+  similar?: SimilarLine[];
+  /** Model review of the draft (quote.price_notes@v1): staff only, never on a card or in the customer mail. */
+  notes?: PriceNotes | null;
+}
+
+export interface SimilarHit {
+  quote_workflow_id: string;
+  line_no: number;
+  score: number;
+  unit_price_eur: number;
+  outcome: string;
+}
+
+export interface SimilarLine {
+  line_no: number;
+  hits: SimilarHit[];
+}
+
+/** Output of quote.price_notes@v1. */
+export interface PriceNotes {
+  assumptions: string[];
+  risks: string[];
+  suggestions: Array<{ line_no: number; kind: 'price' | 'lead_time' | 'process'; direction: 'up' | 'down' | 'none'; reason: string }>;
+  injection_suspected: boolean;
 }

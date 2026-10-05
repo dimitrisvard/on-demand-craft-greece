@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "process": {
+      "type": "string",
+      "enum": ["sheet_metal", "cnc", "mixed", "other"]
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["process", "confidence", "signals"],
+  "additionalProperties": false
+}

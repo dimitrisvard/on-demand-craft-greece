@@ -1,0 +1,312 @@
+{
+  "type": "object",
+  "properties": {
+    "company": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "contact_first_name": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "contact_last_name": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "contact_email": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "phone": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "vat_id": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "country": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "deadline": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "confidence"
+      ],
+      "additionalProperties": false
+    },
+    "language": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "value",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "material": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "value",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "thickness_mm": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "value",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "finish": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "value",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "tolerance": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "confidence": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "value",
+              "confidence"
+            ],
+            "additionalProperties": false
+          },
+          "process_hint": {
+            "type": "string",
+            "enum": [
+              "sheet_metal",
+              "cnc",
+              "unknown"
+            ]
+          },
+          "attachment_refs": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "quantity",
+          "material",
+          "thickness_mm",
+          "finish",
+          "tolerance",
+          "process_hint",
+          "attachment_refs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "injection_suspected": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "company",
+    "contact_first_name",
+    "contact_last_name",
+    "contact_email",
+    "phone",
+    "vat_id",
+    "country",
+    "deadline",
+    "language",
+    "notes",
+    "parts",
+    "injection_suspected"
+  ],
+  "additionalProperties": false
+}

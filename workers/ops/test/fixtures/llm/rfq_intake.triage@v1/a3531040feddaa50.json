@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "a3531040feddaa50a1aaef1613414c223a28394d228423aca2315fa31dd36ba4",
+  "case": "reply-known-quote",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Re: Quotation RFQ-05102026-1\nFrom: Anna Becker <anna.becker@example.com>\n\nThank you, we accept the quotation and will send the purchase order today.\n</untrusted_email>\n<attachments>\nnone\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"reply\",\"language\":\"en\",\"injection_suspected\":false,\"confidence\":0.95}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "reply",
+    "language": "en",
+    "injection_suspected": false
+  }
+}

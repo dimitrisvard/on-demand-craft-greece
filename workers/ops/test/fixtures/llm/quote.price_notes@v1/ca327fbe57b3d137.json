@@ -1,0 +1,31 @@
+{
+  "prompt": "quote.price_notes@v1",
+  "request_sha256": "ca327fbe57b3d137f7762f8440bd75f5a2e5d1bccf3f6f6c25185085c660f75a",
+  "case": "canonical-de-bracket",
+  "user": [
+    {
+      "type": "text",
+      "text": "<quote_lines>\n[{\"line_no\":1,\"process\":\"sheet_metal\",\"material\":\"S235JR\",\"thickness_mm\":2,\"qty\":20,\"finish\":\"powder_coating\",\"tolerance\":null,\"geometry\":{\"flat_mm\":[200,100],\"bends\":2,\"cut_length_mm\":700,\"bbox_mm\":null},\"unit_price_eur\":8.62,\"manual_reasons\":[]}]\n</quote_lines>\n<untrusted_rfq_notes>\nPlease quote 20 brackets, powder coated RAL 9005.\nPart 1: deburr all edges\n</untrusted_rfq_notes>\n<similar_quotes>\n[{\"line_no\":1,\"hits\":[]}]\n</similar_quotes>"
+    }
+  ],
+  "response": {
+    "id": "msg_quote_test",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"assumptions\":[\"Material read as S235JR from the part description.\",\"Powder coating priced on both faces of the flat part.\"],\"risks\":[\"The RAL colour is named only in the RFQ text.\"],\"suggestions\":[],\"injection_suspected\":false}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 900,
+      "output_tokens": 150,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  }
+}

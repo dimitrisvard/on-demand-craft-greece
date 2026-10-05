@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "type": "string",
+      "enum": ["won", "lost", "counter_offer", "question", "auto_reply", "other"]
+    },
+    "confidence": { "type": "number" },
+    "summary": { "type": "string" }
+  },
+  "required": ["outcome", "confidence", "summary"],
+  "additionalProperties": false
+}

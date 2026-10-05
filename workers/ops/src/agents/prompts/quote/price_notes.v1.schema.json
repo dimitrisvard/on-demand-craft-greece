@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "assumptions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "line_no": { "type": "integer" },
+          "kind": { "type": "string", "enum": ["price", "lead_time", "process"] },
+          "direction": { "type": "string", "enum": ["up", "down", "none"] },
+          "reason": { "type": "string" }
+        },
+        "required": ["line_no", "kind", "direction", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "injection_suspected": { "type": "boolean" }
+  },
+  "required": ["assumptions", "risks", "suggestions", "injection_suspected"],
+  "additionalProperties": false
+}

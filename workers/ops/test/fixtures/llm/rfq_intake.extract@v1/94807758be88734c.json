@@ -1,0 +1,44 @@
+{
+  "prompt": "rfq_intake.extract@v1",
+  "request_sha256": "94807758be88734cb54963262cd8f0bd1a951dfb9a48030525528460772ae734",
+  "case": "en-step-pdf",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: RFQ: 50 laser-cut brackets\nFrom: Anna Becker <anna.becker@example.com>\n\nHello,\n\nplease send us a quotation for the attached bracket.\n\nPart: Bracket BR-100\nQuantity: 50 pcs\nMaterial: S235JR steel, 2 mm sheet\nFinish: powder coated RAL 9005\nTolerance: ISO 2768-m\nWe need the parts by 30 October 2026.\n\nBest regards\nAnna Becker\nPurchasing, Example Fabrication Ltd\nPhone +44 20 7946 0000\nVAT GB123456789\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"bracket.step\" kind=\"step\" size_bytes=\"365\"/>\n<attachment n=\"2\" name=\"drawing BR-100.pdf\" kind=\"pdf\" size_bytes=\"1723\"/>\n</attachments>"
+    },
+    {
+      "type": "text",
+      "text": "<attachment n=\"2\" name=\"drawing BR-100.pdf\" kind=\"pdf\">2 pages</attachment>"
+    },
+    {
+      "type": "pdf",
+      "base64": "JVBERi0xLjcKJYGBgYEKCjEgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFsgNiAwIFIgOCAwIFIgXQovQ291bnQgMgo+PgplbmRvYmoKCjIgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDEgMCBSCj4+CmVuZG9iagoKMyAwIG9iago8PAovQ3JlYXRpb25EYXRlIChEOjIwMDAwMTAxMDAwMDAwWikKL01vZERhdGUgKEQ6MjAwMDAxMDEwMDAwMDBaKQo+PgplbmRvYmoKCjQgMCBvYmoKPDwKL1R5cGUgL0ZvbnQKL1N1YnR5cGUgL1R5cGUxCi9CYXNlRm9udCAvSGVsdmV0aWNhCi9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nCj4+CmVuZG9iagoKNSAwIG9iago8PAovRmlsdGVyIC9GbGF0ZURlY29kZQovTGVuZ3RoIDE5NAo+PgpzdHJlYW0KeJyN0MGKAjEMANB7vqJnQUyTNElhEXQ74MGL0B+QxZVd1oMifr+Z2ZOHAekhgYS8pFfYdsA0vtsZVrvT3+N0//k6Lg2ri6N5TTmn/g0kqe8hT605FUzmmPoFPkSMNJtp1UGNUKgQNc6MjIRKY1VZt1pM1qn/Ql/A0OEA1zm7mpA6FfVZW+nfbiFLTKbQs34SFmZi5iKb2AJNuHFEbdreswkRHUt1nbVFJruwxcWh+3hZ+Dx6kXOsj/ryKy/2E7QWUPAKZW5kc3RyZWFtCmVuZG9iagoKNiAwIG9iago8PAovVHlwZSAvUGFnZQovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9IZWx2ZXRpY2EtNzA5ODQ4MDc4OSA0IDAgUgovSGVsdmV0aWNhLTk3NDI2ODI1NjggNCAwIFIKL0hlbHZldGljYS0yMDAwODA1OTg2IDQgMCBSCj4+Ci9YT2JqZWN0IDw8Cj4+Ci9FeHRHU3RhdGUgPDwKPj4KPj4KL01lZGlhQm94IFsgMCAwIDU5NSA4NDIgXQovQW5ub3RzIFsgXQovQ29udGVudHMgWyA1IDAgUiBdCi9QYXJlbnQgMSAwIFIKPj4KZW5kb2JqCgo3IDAgb2JqCjw8Ci9GaWx0ZXIgL0ZsYXRlRGVjb2RlCi9MZW5ndGggMjA0Cj4+CnN0cmVhbQp4nJ3Qy0qDMRAF4P08RdZC6eTMLT+IYE2hCzdCXkCkSkUXFenzO6k7oV1INgmTYb45R9oM4jLP1xutd/uP0/778PK8WsJYfQFHqbWMV4KW8Uj1/LUW4xKNy/ikW9WA1whffOsBVhjQpQoLgx2z6uIbt1AwWnC+ww0swHJXxjuNG9oOeqLjJU1YwES8+UWN41fT06I5C+mp/gDOPoiI6X26OFR6zmXv3v+raWpcG9cr2aieNSaRqaSnze1TJFOQd5lZ+J/krmp+AHJLW8gKZW5kc3RyZWFtCmVuZG9iagoKOCAwIG9iago8PAovVHlwZSAvUGFnZQovUmVzb3VyY2VzIDw8Ci9Gb250IDw8Ci9IZWx2ZXRpY2EtOTc1MDQ2OTIwNyA0IDAgUgovSGVsdmV0aWNhLTc1NzI1MzM2ODYgNCAwIFIKL0hlbHZldGljYS04NDUwMTgwMTA3IDQgMCBSCj4+Ci9YT2JqZWN0IDw8Cj4+Ci9FeHRHU3RhdGUgPDwKPj4KPj4KL01lZGlhQm94IFsgMCAwIDU5NSA4NDIgXQovQW5ub3RzIFsgXQovQ29udGVudHMgWyA3IDAgUiBdCi9QYXJlbnQgMSAwIFIKPj4KZW5kb2JqCgp4cmVmCjAgOQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTYgMDAwMDAgbiAKMDAwMDAwMDA4MiAwMDAwMCBuIAowMDAwMDAwMTMyIDAwMDAwIG4gCjAwMDAwMDAyMTcgMDAwMDAgbiAKMDAwMDAwMDMxNSAwMDAwMCBuIAowMDAwMDAwNTgyIDAwMDAwIG4gCjAwMDAwMDA4MzMgMDAwMDAgbiAKMDAwMDAwMTExMCAwMDAwMCBuIAoKdHJhaWxlcgo8PAovU2l6ZSA5Ci9Sb290IDIgMCBSCi9JbmZvIDMgMCBSCj4+CgpzdGFydHhyZWYKMTM2MQolJUVPRg=="
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-sonnet-5-5",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"company\":{\"value\":\"Example Fabrication Ltd\",\"confidence\":0.95},\"contact_first_name\":{\"value\":\"Anna\",\"confidence\":0.95},\"contact_last_name\":{\"value\":\"Becker\",\"confidence\":0.95},\"contact_email\":{\"value\":\"anna.becker@example.com\",\"confidence\":0.98},\"phone\":{\"value\":\"+44 20 7946 0000\",\"confidence\":0.95},\"vat_id\":{\"value\":\"GB123456789\",\"confidence\":0.95},\"country\":{\"value\":\"GB\",\"confidence\":0.9},\"deadline\":{\"value\":\"2026-10-30\",\"confidence\":0.9},\"language\":\"en\",\"notes\":\"\",\"injection_suspected\":false,\"parts\":[{\"name\":\"Bracket BR-100\",\"quantity\":{\"value\":50,\"confidence\":0.95},\"material\":{\"value\":\"S235JR\",\"confidence\":0.95},\"thickness_mm\":{\"value\":2,\"confidence\":0.95},\"finish\":{\"value\":\"powder coated RAL 9005\",\"confidence\":0.9},\"tolerance\":{\"value\":\"ISO 2768-m\",\"confidence\":0.9},\"process_hint\":\"sheet_metal\",\"attachment_refs\":[1,2]}]}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 1400,
+      "output_tokens": 520,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 1050
+    }
+  },
+  "expected": {
+    "company": "Example Fabrication Ltd",
+    "country": "GB",
+    "deadline": "2026-10-30"
+  }
+}
