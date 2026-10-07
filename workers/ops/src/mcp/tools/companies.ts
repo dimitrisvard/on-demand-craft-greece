@@ -4,6 +4,12 @@
 //   - scan_directory and run_saved_search start a scan only while flag agent.growth.scrapers is on (the owner's
 //     switch for every scraper path; the queue consumer checks it again); otherwise they answer an error and
 //     open no run.
+//   - Every growth.scrapers run these tools open is closed by them or by the queue consumer: a failed queue send
+//     closes it 'failed' ('send_failed'); the in-call scan closes it itself, also when the scan throws ('failed',
+//     'scan_failed'), with the outcome of scrapers/service.ts directoryJobOutcome otherwise. The in-call scan runs
+//     under ctx.waitUntil and starts no page later than 35 s after its start (scanDirectory deadline); the tool
+//     waits for it at most 20 s and otherwise answers that the scan continues in the background (the run closes
+//     when it ends).
 //   - enrich_company_emails calls the ops /api/scrape-website handler in-process, at most 10 companies per call,
 //     at most 6 at once (shared limiter); every website URL must pass the shared scrape rules first.
 //   - get_saved_searches and run_saved_search use the live saved_searches columns (uuid id, result_count;
@@ -12,18 +18,26 @@
 
 import { z } from 'zod';
 import { directoryTargetAllowed, scrapeUrlsAllowed } from '../../../../shared/src/auth/scrape-rules';
+import { formatLogLine } from '../../../../shared/src/http/log';
 import { mapLimit } from '../../../../shared/src/limit';
 import { readFlag } from '../../agents/flags';
 import { EMPTY_USAGE, closeRun, openRun } from '../../agents/runs';
+import type { Db } from '../../db/postgrest';
+import { LOG_PREFIX } from '../../env';
 import { sendDirectoryScan } from '../../queues/directory-scan';
 import { MAX_PAGES } from '../../scrapers/context';
-import { runDirectoryJob } from '../../scrapers/service';
+import type { DirectorySource } from '../../scrapers/parsers/directory';
+import { directoryJobOutcome, runDirectoryJob, type DirectoryJobOutcome, type DirectoryJobResult } from '../../scrapers/service';
 import type { McpContext } from '../context';
 import { isoDate, maskEmail } from '../format';
 import { tool, type ToolDef, type ToolResult } from '../registry';
 
 /** Pages scanned inside the tool call; more are queued. */
 export const SYNC_PAGES_MAX = 3;
+/** Longest wait of the tool for its in-call scan (below the 25 s tool budget). */
+export const SCAN_WAIT_MS = 20_000;
+/** The in-call scan starts no page later than this after its start (ms). */
+export const SCAN_DEADLINE_MS = 35_000;
 /** Companies one enrich_company_emails call may scrape. */
 export const ENRICH_CALL_MAX = 10;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -54,6 +68,69 @@ async function openScanRun(ctx: McpContext, savedSearchId?: string): Promise<str
   return opened.run_id;
 }
 
+/** Closes a growth.scrapers run; a failed write is logged (the answer does not change). */
+async function closeScanRun(db: Db, runId: string, outcome: { status: 'succeeded' | 'failed' | 'skipped'; error?: string; output: Record<string, unknown> }): Promise<void> {
+  try {
+    await closeRun(db, runId, outcome, { ...EMPTY_USAGE, by_step: {} });
+  } catch (error) {
+    console.error(formatLogLine(LOG_PREFIX, 'scan run close failed', { run_id: runId, error: error instanceof Error ? error.name : typeof error }));
+  }
+}
+
+/** Queues a directory-scan job for an open run; a failed send closes the run 'failed' ('send_failed'). */
+async function queueScan(ctx: McpContext, runId: string, params: Parameters<typeof sendDirectoryScan>[1]['params']): Promise<boolean> {
+  try {
+    await sendDirectoryScan(ctx.env, { params, run_id: runId, requested_by: `${ctx.principal.class}:mcp` });
+    return true;
+  } catch (error) {
+    console.error(formatLogLine(LOG_PREFIX, 'scan queue send failed', { run_id: runId, error: error instanceof Error ? error.name : typeof error }));
+    await closeScanRun(ctx.ports().db, runId, { status: 'failed', error: 'send_failed', output: { source: params.source } });
+    return false;
+  }
+}
+
+interface InCallScan {
+  job: DirectoryJobResult | null;
+  outcome: DirectoryJobOutcome | { status: 'failed'; error: 'scan_failed' };
+  message?: string;
+}
+
+function scanOutput(source: DirectorySource, job: DirectoryJobResult | null): Record<string, unknown> {
+  if (!job) return { source };
+  const r = job.result;
+  const output: Record<string, unknown> = { source, pages: r.pages, companies_found: r.companies.length, stored: job.stored, stopped: r.stopped, robots: r.robots?.reason ?? null, errors: r.errors.length };
+  if (r.robots?.permission) output.permission = r.robots.permission;
+  if (job.paused) output.paused_host = job.paused;
+  return output;
+}
+
+/** Runs the in-call scan under ctx.waitUntil; it always closes its run (see the header). */
+function startInCallScan(ctx: McpContext, runId: string, url: string, source: DirectorySource, pages: number): Promise<InCallScan> {
+  const work = (async (): Promise<InCallScan> => {
+    const db = ctx.ports().db;
+    let scan: InCallScan;
+    try {
+      const scraper = ctx.scraper();
+      const job = await runDirectoryJob(scraper, db, { url, source, maxPages: pages, enrichProfiles: false, deadline: scraper.now() + SCAN_DEADLINE_MS }, ctx.deps.now);
+      scan = { job, outcome: directoryJobOutcome(job) };
+    } catch (error) {
+      console.error(formatLogLine(LOG_PREFIX, 'scan failed', { run_id: runId, error: error instanceof Error ? error.name : typeof error }));
+      scan = { job: null, outcome: { status: 'failed', error: 'scan_failed' }, message: error instanceof Error ? error.message : String(error) };
+    }
+    await closeScanRun(db, runId, { ...scan.outcome, output: scanOutput(source, scan.job) });
+    return scan;
+  })();
+  ctx.exec.waitUntil(work);
+  return work;
+}
+
+const SCAN_HEADLINES: Readonly<Record<string, string>> = {
+  succeeded: 'Directory scan complete',
+  host_blocked: 'Directory scan stopped: the directory refused the crawler, so the host is paused for 24 h',
+  robots_disallowed: 'Directory scan skipped',
+  pages_failed: 'Directory scan failed: no page could be read',
+};
+
 export const scanDirectory = tool({
   name: 'scan_directory',
   description: 'Scan Europages or wlw for companies matching a search URL. Returns a list of discovered companies and stores them in the database.',
@@ -65,6 +142,7 @@ export const scanDirectory = tool({
     enrichProfiles: z.boolean().optional().default(false).describe('Visit each company profile to get website URL and contact details (slower but more data)'),
   },
   async run({ url, maxPages, enrichProfiles }, ctx) {
+    const started = ctx.deps.now().getTime();
     const source = sourceOf(url);
     if (source === 'unknown') return err('URL not recognized. Supported: europages.co.uk/de/fr/etc, wlw.com/de');
     if (!directoryTargetAllowed(url)) return err('url_not_allowed: only Europages and wlw search URLs can be scanned');
@@ -73,30 +151,31 @@ export const scanDirectory = tool({
     const runId = await openScanRun(ctx);
 
     if (pages > SYNC_PAGES_MAX) {
-      await sendDirectoryScan(ctx.env, { params: { url, source, max_pages: pages, enrich_profiles: enrichProfiles }, run_id: runId, requested_by: `${ctx.principal.class}:mcp` });
+      if (!(await queueScan(ctx, runId, { url, source, max_pages: pages, enrich_profiles: enrichProfiles }))) {
+        return err(`the scan could not be queued (run_id ${runId}); try again later`);
+      }
       return { text: `Directory scan queued (run_id ${runId}): ${source.toUpperCase()}, up to ${pages} pages. The companies appear in get_companies when the background run ends.` };
     }
 
-    const scraper = ctx.scraper();
-    const db = ctx.ports().db;
-    const job = await runDirectoryJob(scraper, db, { url, source, maxPages: pages, enrichProfiles: false }, ctx.deps.now);
-    const r = job.result;
-    const status = r.stopped === 'robots' && r.pages === 0 ? 'skipped' : r.paused ? 'failed' : 'succeeded';
-    await closeRun(db, runId, {
-      status,
-      error: status === 'skipped' ? 'robots_disallowed' : status === 'failed' ? 'host_blocked' : undefined,
-      output: { source, pages: r.pages, companies_found: r.companies.length, stored: job.stored, stopped: r.stopped, robots: r.robots?.reason ?? null, ...(r.robots?.permission ? { permission: r.robots.permission } : {}) },
-    }, { ...EMPTY_USAGE, by_step: {} });
+    const wait = Math.max(0, SCAN_WAIT_MS - (ctx.deps.now().getTime() - started));
+    const scan = await Promise.race([startInCallScan(ctx, runId, url, source, pages), ctx.deps.sleep(wait).then(() => null)]);
+    if (scan === null) {
+      return { text: `Directory scan still running in the background (run_id ${runId}): ${source.toUpperCase()}, up to ${pages} pages. The companies appear in get_companies when the run ends.` };
+    }
+    if (!scan.job) return err(`the directory scan failed (run_id ${runId}): ${(scan.message ?? 'error').slice(0, 200)}`);
+    const r = scan.job.result;
+    const status = scan.outcome.status;
     const text = [
-      'Directory scan complete',
+      SCAN_HEADLINES[status === 'succeeded' ? 'succeeded' : scan.outcome.error ?? 'pages_failed'],
       `Source: ${source.toUpperCase()}`,
       `URL: ${url}`,
       `Pages scanned: ${r.pages} of up to ${pages}`,
       `Companies found: ${r.companies.length}`,
-      `Companies stored: ${job.stored}`,
+      `Companies stored: ${scan.job.stored}`,
       enrichProfiles ? 'Note: Profile enrichment requested - run enrich_company_emails separately for website scraping.' : '',
       r.errors.length > 0 ? `\nErrors:\n${r.errors.join('\n')}` : '',
       r.stopped === 'robots' ? 'The directory\'s robots.txt does not allow this crawler on these pages, and no permission for the host is recorded.' : '',
+      r.stopped === 'deadline' ? 'Stopped at the time budget of the call; scans of more than 3 pages run in the background.' : '',
     ].filter(Boolean).join('\n');
     return { text, isError: status !== 'succeeded' ? true : undefined };
   },
@@ -249,11 +328,9 @@ export const runSavedSearch = tool({
     if (!source || typeof ss.search_url !== 'string' || !directoryTargetAllowed(ss.search_url)) return err('the saved search URL is not a Europages or wlw search URL');
     if (!(await scrapersOn(ctx))) return err(SCRAPERS_OFF_MESSAGE);
     const runId = await openScanRun(ctx, saved_search_id);
-    await sendDirectoryScan(ctx.env, {
-      params: { url: ss.search_url, source, max_pages: SYNC_PAGES_MAX, enrich_profiles: false, saved_search_id },
-      run_id: runId,
-      requested_by: `${ctx.principal.class}:mcp`,
-    });
+    if (!(await queueScan(ctx, runId, { url: ss.search_url, source, max_pages: SYNC_PAGES_MAX, enrich_profiles: false, saved_search_id }))) {
+      return err(`the saved search could not be queued (run_id ${runId}); try again later`);
+    }
     return { text: `Saved search "${ss.name}" queued (run_id ${runId}, up to ${SYNC_PAGES_MAX} pages). Results arrive in get_companies and in the saved search's result count when the background run ends.` };
   },
 });

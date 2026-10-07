@@ -6,7 +6,7 @@
 // LLM fixtures: test/fixtures/llm/<prompt id>/<first 16 hex of the content hash>.json, written by
 // test/intake/llm-fixtures.test.ts with INTAKE_FIXTURES_WRITE=1 from the answers below (the content is whatever the
 // Workflow builds for the case, so a change of the prompt input changes the hash and the case fails until the
-// fixtures are written again). Every value is synthetic; addresses use example.com, example.de and example.gr.
+// fixtures are written again). Every value is synthetic; addresses use example.com and example.de.
 
 import { readFileSync } from 'node:fs';
 import { authResultsOfRaw, inReplyToOf, messageIdTokens, parseFrom, rawHeaderValues, subjectOf, trimmedMessageId } from '../../../mail/src/headers';
@@ -122,7 +122,7 @@ export const CASES: readonly IntakeCase[] = [
       company: f('Παράδειγμα Μεταλλικές Κατασκευές ΑΕ', 0.9),
       contact_first_name: f('Γιώργος', 0.9),
       contact_last_name: f('Παπαδόπουλος', 0.9),
-      contact_email: f('g.papadopoulos@example.gr', 0.97),
+      contact_email: f('g.papadopoulos@example.com', 0.97),
       country: f('GR', 0.8),
       language: 'el',
       parts: [part({ name: 'plate.dxf', qty: 30, material: '5754', t: 3, hint: 'sheet_metal', refs: [1] })],

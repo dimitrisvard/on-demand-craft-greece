@@ -211,9 +211,14 @@ describe('flagsSyncTick: write order and run records', () => {
     expect(run).toMatchObject({ status: 'failed', error: 'kv_put_failed' });
     expect((run!.output as { failed: string[] }).failed).toEqual(['agent.growth.hn']);
 
-    // A repeated invocation for the same minute writes the key but keeps the one run row.
-    await w.tick(minute(2));
-    expect(w.runs().filter((r) => r.idempotency_key === tickKey(minute(2)))).toHaveLength(1);
+    // A repeated invocation for the same minute writes the key but keeps the one run row as the first one recorded it.
+    const again = await w.tick(minute(2));
+    expect(again.written).toEqual(['agent.growth.hn']);
+    const rows = w.runs().filter((r) => r.idempotency_key === tickKey(minute(2)));
+    expect(rows).toHaveLength(1);
+    expect(again.run_id).toBe(run!.id);
+    expect(rows[0]).toMatchObject({ status: 'failed', error: 'kv_put_failed' });
+    expect((rows[0].output as { failed: string[]; written: string[] })).toMatchObject({ failed: ['agent.growth.hn'], written: [] });
     expect(w.flag('agent.growth.hn').kv_synced_rev).toBe(w.flag('agent.growth.hn').rev);
   });
 

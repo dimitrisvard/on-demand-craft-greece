@@ -21,11 +21,16 @@
 //                      QUOTE.create('quote-<rfq_id>-v<n>'); "already exists" -> created false.
 //          rfq_intake  agent.rfq_intake on (409 flag_off); the inbound_emails row exists (404) in mailbox 'rfq'
 //                      (400) with status received, needs_review or failed (409 stale); its intake run, when one
-//                      exists, is not waiting for a human (409 stale). RFQ_INTAKE.create('rfq-intake-<32 hex>');
-//                      "already exists": an instance that has ended is restarted from the beginning, after its
-//                      final run row is reopened (status running, human_action {channel dashboard, actor, verb
-//                      'rerun', decided_at}), because the intake's first step exits on a final run; a live
-//                      instance is left alone. created is true only for a new instance.
+//                      exists, is not waiting for a human (409 stale). The intake's first step exits on a final
+//                      run, so a final run row is reopened first (status running, human_action {channel
+//                      dashboard, actor, verb 'rerun', decided_at}), before any instance is created or restarted.
+//                      Then RFQ_INTAKE.create('rfq-intake-<32 hex>') (a new instance, also for a message whose
+//                      earlier instance is past its retention period); "already exists": an instance that has
+//                      ended is restarted from the beginning, a live instance is left alone. created is true only
+//                      for a new instance. When nothing was started (live instance) or create/restart fails, the
+//                      reopened row gets back its previous status, finished_at, error, parked_reason and
+//                      human_action, only while it is still running with this request's rerun (compare-and-set
+//                      on updated_at); a failure then answers 500.
 //          test_card   ADMIN; one 'eval' run (trigger dashboard, key 'test-card:<uuid>') waiting on a 'test' card
 //                      with the single verb 'dismiss' (approval.request sends it to Telegram); instance_id = run id.
 // file     key in parameter k: exactly one, no encoded slash or backslash, no '..' or backslash, and one of the
@@ -57,6 +62,7 @@ import { ConfigMissingError, need } from '../agents/config';
 import { readFlag } from '../agents/flags';
 import { isAlreadyExists, quoteInstanceId, rfqIntakeInstanceId } from '../agents/ids';
 import { openRun, type RunStatus } from '../agents/runs';
+import type { Filter } from '../db/postgrest';
 import { DEFAULT_TENANT_ID, getFlagRow, updateFlagIfRev, writeThrough } from '../db/repos/feature-flags';
 import { getInboundEmail, type InboundStatus } from '../db/repos/inbound-emails';
 import { LOG_PREFIX, type OpsEnv, type OpsHono } from '../env';
@@ -79,6 +85,24 @@ const ENDED_INSTANCE = new Set(['complete', 'errored', 'terminated']);
 const FINAL_RUN: readonly RunStatus[] = ['succeeded', 'failed', 'cancelled', 'skipped'];
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
+
+/** The intake run columns a rerun changes, as read before it. */
+type IntakeRunRow = {
+  id: string;
+  status: RunStatus;
+  finished_at: string | null;
+  error: string | null;
+  parked_reason: string | null;
+  human_action: Record<string, unknown> | null;
+};
+
+/** A final intake run reopened by this request: its previous columns and the rerun written. */
+interface ReopenedRun {
+  previous: IntakeRunRow;
+  human_action: { channel: 'dashboard'; actor: string; verb: 'rerun'; decided_at: string };
+}
+
+type IntakeStart = 'created' | 'running' | 'restarted';
 
 function ok(body: unknown): Response {
   return jsonResponse(200, body, NO_STORE);
@@ -137,6 +161,24 @@ async function instanceStatus(instance: WorkflowInstance): Promise<string | null
   } catch {
     return null;
   }
+}
+
+/**
+ * A new intake instance ('created'); when the id already exists, an ended instance is restarted from the beginning
+ * ('restarted') and a live or unreadable one is left alone ('running'). Throws what create, get or restart throw.
+ */
+async function createOrRestart<P>(workflow: Workflow<P>, id: string, params: P): Promise<IntakeStart> {
+  try {
+    await workflow.create({ id, params });
+    return 'created';
+  } catch (error) {
+    if (!isAlreadyExists(error)) throw error;
+  }
+  const instance = await workflow.get(id);
+  const state = await instanceStatus(instance);
+  if (state === null || !ENDED_INSTANCE.has(state)) return 'running';
+  await instance.restart();
+  return 'restarted';
 }
 
 export interface AgentAdminHandlers {
@@ -234,8 +276,8 @@ export function createAgentAdminHandlers(portsFor: (env: OpsEnv) => Ports = (env
     if (!row) return fail(404, 'not_found');
     if (row.mailbox !== 'rfq') return fail(400, 'bad_request');
     if (!RERUNNABLE_INBOUND.includes(row.status)) return fail(409, 'stale');
-    const runs = await ports.db.select<{ id: string; status: RunStatus }>('agent_runs', {
-      columns: 'id,status',
+    const runs = await ports.db.select<IntakeRunRow>('agent_runs', {
+      columns: 'id,status,finished_at,error,parked_reason,human_action',
       filters: [['agent', 'eq', 'rfq_intake'], ['idempotency_key', 'eq', row.message_id_sha256]],
       limit: 1,
     });
@@ -243,36 +285,64 @@ export function createAgentAdminHandlers(portsFor: (env: OpsEnv) => Ports = (env
     if (run?.status === 'waiting_human') return fail(409, 'stale');
     need(env, 'RFQ_INTAKE');
     const instance_id = rfqIntakeInstanceId(row.message_id_sha256);
+    // Reopened before the instance starts: its first step reads the run.
+    const reopened = run && FINAL_RUN.includes(run.status) ? await reopenRun(ports, run, uid) : null;
+    let started: IntakeStart;
     try {
-      await env.RFQ_INTAKE.create({ id: instance_id, params: { v: 1, inbound_email_id: row.id, message_id_sha256: row.message_id_sha256, tenant_id: row.tenant_id } });
-      log('agent start', { kind: 'rfq_intake', outcome: 'created' });
-      return ok({ v: 1, ok: true, instance_id, created: true } satisfies StartResult);
+      started = await createOrRestart(env.RFQ_INTAKE, instance_id, { v: 1, inbound_email_id: row.id, message_id_sha256: row.message_id_sha256, tenant_id: row.tenant_id });
     } catch (error) {
-      if (!isAlreadyExists(error)) throw error;
+      if (reopened) await restoreRun(ports, reopened);
+      log('agent start', { kind: 'rfq_intake', outcome: 'start_failed' });
+      throw error;
     }
-    const instance = await env.RFQ_INTAKE.get(instance_id);
-    const state = await instanceStatus(instance);
-    if (state === null || !ENDED_INSTANCE.has(state)) {
-      log('agent start', { kind: 'rfq_intake', outcome: 'running' });
-      return ok({ v: 1, ok: true, instance_id, created: false } satisfies StartResult);
-    }
-    if (run && FINAL_RUN.includes(run.status)) {
-      await ports.db.update(
+    if (started === 'running' && reopened) await restoreRun(ports, reopened);
+    log('agent start', { kind: 'rfq_intake', outcome: started });
+    return ok({ v: 1, ok: true, instance_id, created: started === 'created' } satisfies StartResult);
+  }
+
+  /** Sets a final intake run back to running with this user's rerun; null when the row is no longer final. */
+  async function reopenRun(ports: Ports, run: IntakeRunRow, uid: string): Promise<ReopenedRun | null> {
+    const human_action: ReopenedRun['human_action'] = { channel: 'dashboard', actor: `user:${uid}`, verb: 'rerun', decided_at: ports.clock.now().toISOString() };
+    const written = await ports.db.update(
+      'agent_runs',
+      { status: 'running', finished_at: null, error: null, parked_reason: null, approval_token_sha256: null, human_action },
+      { filters: [['id', 'eq', run.id], ['status', 'in', FINAL_RUN]], returning: 'id' },
+    );
+    return written.length > 0 ? { previous: run, human_action } : null;
+  }
+
+  /**
+   * Gives a reopened run back its previous columns, only while it is still running with the rerun this request
+   * wrote (read, then a PATCH conditional on the updated_at read). Never throws: the caller's outcome stands.
+   */
+  async function restoreRun(ports: Ports, reopened: ReopenedRun): Promise<void> {
+    const { previous, human_action } = reopened;
+    try {
+      const [current] = await ports.db.select<{ status: string; human_action: Record<string, unknown> | null; updated_at: string | null }>('agent_runs', {
+        columns: 'status,human_action,updated_at',
+        filters: [['id', 'eq', previous.id]],
+        limit: 1,
+      });
+      const ours =
+        current?.status === 'running' &&
+        current.human_action?.verb === human_action.verb &&
+        current.human_action?.actor === human_action.actor &&
+        current.human_action?.decided_at === human_action.decided_at;
+      if (!ours) {
+        log('agent start', { kind: 'rfq_intake', outcome: 'restore_skipped' });
+        return;
+      }
+      const filters: [Filter, ...Filter[]] = [['id', 'eq', previous.id], ['status', 'eq', 'running']];
+      if (typeof current.updated_at === 'string') filters.push(['updated_at', 'eq', current.updated_at]);
+      const written = await ports.db.update(
         'agent_runs',
-        {
-          status: 'running',
-          finished_at: null,
-          error: null,
-          parked_reason: null,
-          approval_token_sha256: null,
-          human_action: { channel: 'dashboard', actor: `user:${uid}`, verb: 'rerun', decided_at: ports.clock.now().toISOString() },
-        },
-        { filters: [['id', 'eq', run.id], ['status', 'in', FINAL_RUN]] },
+        { status: previous.status, finished_at: previous.finished_at, error: previous.error, parked_reason: previous.parked_reason, human_action: previous.human_action },
+        { filters, returning: 'id' },
       );
+      log('agent start', { kind: 'rfq_intake', outcome: written.length > 0 ? 'run_restored' : 'restore_skipped' });
+    } catch {
+      log('agent start', { kind: 'rfq_intake', outcome: 'restore_failed' });
     }
-    await instance.restart();
-    log('agent start', { kind: 'rfq_intake', outcome: 'restarted' });
-    return ok({ v: 1, ok: true, instance_id, created: false } satisfies StartResult);
   }
 
   async function startTestCard(c: Context<OpsHono>, ports: Ports): Promise<Response> {

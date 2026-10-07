@@ -278,6 +278,30 @@ async function runFlagVectors(step, check) {
   }
   await d1.close();
 
+  // A seed import call that fails for one row is reported for that row; the other rows are imported and mirrored in
+  // the same tick, and the next tick imports the row.
+  const d3 = await fresh();
+  const svc3 = (sql, params) => as(d3, who.service, async () => (await d3.q(sql, params)).rows);
+  let failOnce = true;
+  const svc3FailingSeed = (sql, params) => {
+    if (failOnce && /feature_flags_seed_from_kv/.test(sql) && params?.[0] === 'agent.content_daily') {
+      failOnce = false;
+      return Promise.reject(Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }));
+    }
+    return svc3(sql, params);
+  };
+  const kv3 = new FakeKV({ 'agent.content_daily': '{"enabled":true}', 'seo.strict_404': '{"enabled":true}' });
+  const t3 = await flagsSyncTick(svc3FailingSeed, kv3);
+  check(sameSet(t3.seed_failed, ['agent.content_daily']), 'seed: a failing import call is reported for its row only', t3.seed_failed);
+  check(sameSet(t3.imported, ['seo.strict_404']) && sameSet(t3.written, ['seo.strict_404']) && t3.absent.length === 11,
+    'seed: the other rows are imported and mirrored in the same tick', t3);
+  const [p3] = await svc3(`select kv_seed_pending p from public.feature_flags where key = 'agent.content_daily' and tenant_id = $1`, [T1]);
+  check(p3.p === true, 'seed: the row whose import call failed stays pending', p3);
+  const t3b = await flagsSyncTick(svc3FailingSeed, kv3);
+  check(sameSet(t3b.imported, ['agent.content_daily']) && sameSet(t3b.written, ['agent.content_daily']) && t3b.seed_failed.length === 0,
+    'seed: the next tick imports and mirrors that row', t3b);
+  await d3.close();
+
   // Scenario: ticks, edits, a race between batch and mark, a failed put, another tenant.
   const d2 = await fresh();
   const svc = (sql, params) => as(d2, who.service, async () => (await d2.q(sql, params)).rows);

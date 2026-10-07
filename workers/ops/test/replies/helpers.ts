@@ -139,12 +139,20 @@ export function seedQuotes(h: Harness): void {
   ]);
 }
 
-/** Stores a reply as microns-mail does (raw MIME in R2, inbound_emails row 'received') and returns the row id. */
-export async function storeReply(h: Harness, o: { n: number; mime: string; mailbox?: 'replies' | 'gmail' | 'rfq'; inReplyTo?: string | null; references?: string[]; subject?: string; messageId: string; from?: string; status?: string }): Promise<{ id: string; sha: string }> {
+/** auth_results of a message whose trusted Authentication-Results instance says dmarc=<dmarc> for `domain`. */
+export function authResults(domain: string | null, dmarc: 'pass' | 'fail' | 'none' = 'pass', trusted = true): Record<string, unknown> {
+  return { v: 1, trusted, authserv_id: 't1.example', spf: dmarc, dkim: dmarc, dmarc: trusted ? dmarc : 'none', dmarc_from_domain: trusted && domain ? domain : null, raw_count: 1 };
+}
+
+/** Stores a reply as microns-mail does (raw MIME in R2, inbound_emails row 'received') and returns the row id.
+ *  auth: the row's auth_results (default: an authenticated sender, dmarc=pass for the From domain; null: none, as
+ *  for a Gmail copy). */
+export async function storeReply(h: Harness, o: { n: number; mime: string; mailbox?: 'replies' | 'gmail' | 'rfq'; inReplyTo?: string | null; references?: string[]; subject?: string; messageId: string; from?: string; status?: string; auth?: Record<string, unknown> | null }): Promise<{ id: string; sha: string }> {
   const sha = String(o.n).padStart(2, '0').repeat(32);
   const key = `email/${sha}/raw.eml`;
   await h.bucket.put(key, o.mime);
   const mailbox = o.mailbox ?? 'replies';
+  const from = o.from ?? CUSTOMER;
   const [row] = h.ports.db.seed('inbound_emails', [
     {
       tenant_id: TENANT,
@@ -153,7 +161,8 @@ export async function storeReply(h: Harness, o: { n: number; mime: string; mailb
       mailbox,
       source: mailbox === 'gmail' ? 'gmail_poller' : 'email_routing',
       sender_account_id: mailbox === 'gmail' ? '9a000000-0000-4000-8000-00000000000a' : null,
-      from_email: o.from ?? CUSTOMER,
+      from_email: from,
+      auth_results: o.auth === undefined ? authResults(from.slice(from.lastIndexOf('@') + 1)) : o.auth,
       subject: o.subject ?? 'Re: Angebot',
       in_reply_to: o.inReplyTo ?? null,
       references_ids: o.references ?? [],

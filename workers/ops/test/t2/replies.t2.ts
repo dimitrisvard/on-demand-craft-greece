@@ -3,16 +3,19 @@
 //   - replies@ path: the canonical quote seed of test/quote/seed.ts runs to 'sent' (instance started, approval card
 //     claimed, 'quote-approved' through the Local Explorer); a customer reply injected into microns-mail through the
 //     Local Explorer (to replies@, In-Reply-To = our outbound Message-ID) -> MailIngest.ingestReply -> agent-events
-//     'inbound-reply' -> rule 1 -> row matched, reply run succeeded -> RfqThread.appendInbound -> 'customer-reply'
+//     'inbound-reply' -> rule 1; the local mail carries no trusted Authentication-Results instance, so the sender is
+//     not authenticated and the reply waits on its confirmation card (reply_pick, flag dmarc_fail, nothing forwarded)
+//     -> relay-signed decision a1 -> row matched, reply run succeeded -> RfqThread.appendInbound -> 'customer-reply'
 //     reaches the waiting quote instance: the Local Explorer instance details show the completed event step
 //     'wait-reply-s1-r0' and the instance goes on to classify the reply (a quote.classify_reply@v1 request at the
 //     Anthropic stub; what the quote does with the answer is the quote unit's Q-5)
 //   - dispatcher path: POST /cdn-cgi/local/explorer/api/local/scheduled?worker=microns-ops with
 //     {"cron":"*/10 * * * *"} runs the Gmail poller (token refresh at the Google token stub, inbox list, metadata and
 //     raw MIME at the Gmail stub): a reply to the closed quote of a second RFQ is stored (mailbox gmail, source
-//     gmail_poller) and matched by rule 1; a replies@ row left 'received' for 20 minutes is queued again and matched
-//     by the RFQ number in its subject (rule 3, notice card without buttons); no token or address in the poller's run
-//     output; a second tick stores and queues nothing new.
+//     gmail_poller) and matched by rule 1 (a Gmail copy has no authentication record: confirmation card, then a1);
+//     a replies@ row of an authenticated sender of the RFQ contact's domain left 'received' for 20 minutes is
+//     queued again and attached by the RFQ number in its subject (rule 3, notice card without buttons); no token or
+//     address in the poller's run output; a second tick stores and queues nothing new.
 // The stub client of the harness is loaded at run time by file URL.
 
 import { createHash } from 'node:crypto';
@@ -21,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CONTACT_EMAIL, COVER_ANSWER, FILE_1, QWID, RFQ_ID, seedRows, TENANT } from '../quote/seed';
-import { call, instance, JSON_HEADERS, llmRequests, logLines, r2Put, rows, rpc, seed, sendEvent, sendMail, setFlag, startInstance, telegramCalls, until, type Row, type Urls } from '../quote/t2-helpers';
+import { call, instance, JSON_HEADERS, llmRequests, logLines, r2Put, relayDecision, rows, rpc, seed, sendEvent, sendMail, setFlag, startInstance, telegramCalls, until, type Row, type Urls } from '../quote/t2-helpers';
 
 const ENABLED = Boolean(process.env.T2_STUB_URL) && process.env.T2_PROFILE === 'agents';
 
@@ -44,6 +47,16 @@ const ORPHAN_ID = '<orphan-reply-1@example.de>';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
+/** The token of the newest Telegram card whose text contains `marker` and that offers the code. */
+async function cardToken(u: Urls, marker: string, code: string): Promise<string> {
+  return until(`the card "${marker}"`, async () => {
+    const card = (await telegramCalls(u)).filter((c) => c.method === 'sendMessage' && String(c.body.text ?? '').includes(marker)).at(-1);
+    const data = ((card?.body.reply_markup as { inline_keyboard?: Array<Array<{ callback_data?: string }>> } | undefined)?.inline_keyboard ?? []).flat().map((b) => b.callback_data ?? '');
+    const hit = data.map((d) => new RegExp(`^ap:([A-Z2-7]{26}):${code}$`).exec(d)).find(Boolean);
+    return hit ? hit[1] : null;
+  }, 30_000);
+}
+
 async function cron(u: Urls, expression: string): Promise<void> {
   const res = await fetch(`${u.explorer}/local/scheduled?worker=microns-ops`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ cron: expression }) });
   if (!res.ok) throw new Error(`scheduled: ${res.status} ${await res.text()}`);
@@ -54,7 +67,7 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
   let registry = '';
   const u = (): Urls => own as Urls;
   const inboundBySha = async (s: string): Promise<Row | undefined> => (await rows(u(), 'inbound_emails')).find((r) => r.message_id_sha256 === s);
-  const replyRun = async (inboundId: string): Promise<Row | undefined> => (await rows(u(), 'agent_runs')).find((r) => r.agent === 'quote' && r.idempotency_key === `quote:inbound-reply:${inboundId}`);
+  const replyRun = async (inboundId: string): Promise<Row | undefined> => (await rows(u(), 'agent_runs')).find((r) => r.agent === 'quote.reply_poller' && r.idempotency_key === `inbound-reply:${inboundId}`);
 
   beforeAll(async () => {
     const harness = (await import(/* @vite-ignore */ new URL('../../../site/test/integration/harness.mjs', import.meta.url).href)) as {
@@ -91,7 +104,7 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
     if (registry) rmSync(registry, { recursive: true, force: true });
   });
 
-  it("replies@ with In-Reply-To of our quote mail: rule 1, row matched, 'customer-reply' reaches the waiting quote instance", async () => {
+  it("replies@ with In-Reply-To of our quote mail: rule 1, confirmation card (sender not authenticated), a1 -> row matched, 'customer-reply' reaches the waiting quote instance", async () => {
     // the quote runs to 'sent'
     await startInstance(u(), 'quote', QUOTE_INSTANCE, { v: 1, rfq_id: RFQ_ID, quote_version: 1, tenant_id: TENANT, trigger: 'dashboard' });
     const waiting = await until('the quote approval card', async () => {
@@ -116,9 +129,25 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
       text: 'Thank you for the offer. We are checking it internally and will come back to you.',
       headers: { 'In-Reply-To': OUR_ID, References: OUR_ID },
     });
+    const pending = await until('the reply row waiting on its confirmation card', async () => {
+      const r = await inboundBySha(mail.sha);
+      if (r && ['failed', 'rejected', 'matched'].includes(String(r.status))) throw new Error(`reply row ${String(r.status)}: ${String(r.error)}`);
+      return r && r.status === 'needs_review' ? r : null;
+    }, 60_000);
+    const pickRun = await until('the reply run waiting', async () => {
+      const r = await replyRun(String(pending.id));
+      return r && r.status === 'waiting_human' ? r : null;
+    }, 30_000);
+    expect(pickRun.output).toMatchObject({ card_kind: 'reply_pick', rule: 1, candidates: [{ rfq_id: RFQ_ID, quote_workflow_id: QWID }], sender: { authenticated: false } });
+    expect((pickRun.output as { card: { flags: string[] } }).card.flags).toContain('dmarc_fail');
+    const instanceBefore = await instance(u(), 'quote', QUOTE_INSTANCE);
+    expect(((instanceBefore.result?.steps ?? []) as Array<{ name?: string; success?: boolean }>).some((st) => String(st.name ?? '').startsWith('wait-reply-s1-r0') && st.success === true)).toBe(false);
+    const decision = await relayDecision(u(), await cardToken(u(), 'Confirm reply', 'a1'), 'a1');
+    expect(decision.status).toBe(200);
+    expect(await decision.json()).toMatchObject({ v: 1, ok: true, verb: 'attach_1', outcome: 'event_sent' });
     const matched = await until('the reply row matched', async () => {
       const r = await inboundBySha(mail.sha);
-      if (r && ['failed', 'rejected', 'needs_review'].includes(String(r.status))) throw new Error(`reply row ${String(r.status)}: ${String(r.error)}`);
+      if (r && ['failed', 'rejected'].includes(String(r.status))) throw new Error(`reply row ${String(r.status)}: ${String(r.error)}`);
       return r && r.status === 'matched' ? r : null;
     }, 60_000);
     expect(matched).toMatchObject({ mailbox: 'replies', kind: 'reply', rfq_id: RFQ_ID, quote_workflow_id: QWID, in_reply_to: OUR_ID });
@@ -127,7 +156,7 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
       const r = await replyRun(String(matched.id));
       return r && r.status === 'succeeded' ? r : null;
     }, 30_000);
-    expect(run).toMatchObject({ trigger: 'queue', subject_type: 'inbound_email', subject_id: matched.id, output: expect.objectContaining({ rule: 1, rfq_id: RFQ_ID, quote_workflow_id: QWID }) });
+    expect(run).toMatchObject({ trigger: 'queue', subject_type: 'inbound_email', subject_id: matched.id, output: expect.objectContaining({ rule: 1, decision: 'attach_1', rfq_id: RFQ_ID, quote_workflow_id: QWID }) });
     expect(JSON.stringify(run.output)).not.toContain(CONTACT_EMAIL);
 
     // the waiting quote instance received 'customer-reply' and went on to classify the reply
@@ -166,14 +195,14 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
     await r2Put(u(), `email/${orphanSha}/raw.eml`, new TextEncoder().encode(orphanRaw));
     const old = new Date(Date.now() - 20 * 60_000).toISOString();
     await seed(u(), {
-      inbound_emails: [{ tenant_id: TENANT, message_id: ORPHAN_ID, message_id_sha256: orphanSha, mailbox: 'replies', source: 'email_routing', from_email: CUSTOMER_2, subject: `Frage zu ${RFQ_2_NUMBER}`, received_at: old, created_at: old, raw_r2_key: `email/${orphanSha}/raw.eml`, status: 'received' }],
+      inbound_emails: [{ tenant_id: TENANT, message_id: ORPHAN_ID, message_id_sha256: orphanSha, mailbox: 'replies', source: 'email_routing', from_email: CUSTOMER_2, subject: `Frage zu ${RFQ_2_NUMBER}`, received_at: old, created_at: old, raw_r2_key: `email/${orphanSha}/raw.eml`, status: 'received', auth_results: { v: 1, trusted: true, authserv_id: 't2.example', spf: 'pass', dkim: 'pass', dmarc: 'pass', dmarc_from_domain: 'example.de', raw_count: 1 } }],
     });
 
     await cron(u(), '*/10 * * * *');
 
     // Gmail: refreshed token in memory, inbox list and history id, metadata of both, raw of the reply only
     const poller = await until('the poller run', async () => {
-      const r = (await rows(u(), 'agent_runs')).find((x) => x.agent === 'quote.reply_poller');
+      const r = (await rows(u(), 'agent_runs')).find((x) => x.agent === 'quote.reply_poller' && x.trigger === 'cron');
       if (r && r.status === 'failed') throw new Error(`poller run failed: ${String(r.error)}`);
       return r && r.status === 'succeeded' ? r : null;
     }, 60_000);
@@ -187,7 +216,19 @@ describe.skipIf(!ENABLED)('reply attribution in workerd (R-3, own harness instan
     expect(gmailCalls.some((p) => p.startsWith('/gmail/users/me/messages?'))).toBe(true);
     expect(gmailCalls).toContain('/gmail/users/me/profile');
 
-    // the stored Gmail copy is attributed by rule 1 to RFQ 2 (its quote is closed, so no Workflow event)
+    // the stored Gmail copy is attributed by rule 1 to RFQ 2 (its quote is closed, so no Workflow event); a Gmail
+    // copy has no authentication record, so it waits on its confirmation card (no new_rfq) until a1
+    const gmailWaiting = await until('the Gmail reply waiting on its card', async () => {
+      const r = await inboundBySha(sha(GMAIL_REPLY_ID));
+      if (r && ['failed', 'rejected', 'matched'].includes(String(r.status))) throw new Error(`gmail row ${String(r.status)}: ${String(r.error)}`);
+      return r && r.status === 'needs_review' ? r : null;
+    }, 60_000);
+    const gmailPick = await until('the Gmail reply run waiting', async () => {
+      const r = await replyRun(String(gmailWaiting.id));
+      return r && r.status === 'waiting_human' ? r : null;
+    }, 30_000);
+    expect(gmailPick.output).toMatchObject({ card_kind: 'reply_pick', rule: 1, allowed_verbs: ['attach_1', 'ignore'], candidates: [{ rfq_id: RFQ_2, quote_workflow_id: QW_2 }] });
+    expect((await relayDecision(u(), await cardToken(u(), `Confirm reply · ${RFQ_2_NUMBER}`, 'a1'), 'a1')).status).toBe(200);
     const gmailRow = await until('the Gmail reply matched', async () => {
       const r = await inboundBySha(sha(GMAIL_REPLY_ID));
       if (r && ['failed', 'rejected'].includes(String(r.status))) throw new Error(`gmail row ${String(r.status)}: ${String(r.error)}`);

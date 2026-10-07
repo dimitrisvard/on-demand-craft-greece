@@ -1,11 +1,12 @@
 // RP-2: the 10-minute dispatcher: orphan inbound rows (intake started in process, replies queued again), portal
 // and quote orders without a post-order run, parked runs (flag_off resumed when the flag is on again,
 // llm_unavailable after 30 minutes, budget and failure-card runs never), failure-card runs older than 14 days closed
-// 'failed' with the token cleared and the card edited, stuck CAD jobs dead-lettered; one failing job does not stop
-// the others.
+// 'failed' with the token cleared and the card edited, stuck CAD jobs dead-lettered; rows that are skipped never
+// hide newer rows (each job pages through its window); one failing job does not stop the others, and the Gmail
+// poller runs after every other job.
 
 import { describe, expect, it } from 'vitest';
-import { dispatcherTick, flagKeyFor } from '../../src/cron/dispatcher';
+import { BATCH, dispatcherTick, flagKeyFor } from '../../src/cron/dispatcher';
 import type { AgentEventV1 } from '../../src/queues/messages';
 import { harness, TENANT, type Harness } from '../replies/helpers';
 
@@ -36,8 +37,8 @@ describe('orphan inbound rows', () => {
     ]);
     h.ports.db.seed('agent_runs', [
       { agent: 'rfq_intake', trigger: 'email', idempotency_key: '4'.repeat(64), status: 'running' },
-      { agent: 'quote', trigger: 'queue', idempotency_key: `quote:inbound-reply:${id('2a', 5)}`, status: 'succeeded', finished_at: ago(MIN) },
-      { agent: 'quote', trigger: 'queue', idempotency_key: `quote:inbound-reply:${id('2a', 6)}`, status: 'running' },
+      { agent: 'quote.reply_poller', trigger: 'queue', idempotency_key: `inbound-reply:${id('2a', 5)}`, status: 'succeeded', finished_at: ago(MIN) },
+      { agent: 'quote.reply_poller', trigger: 'queue', idempotency_key: `inbound-reply:${id('2a', 6)}`, status: 'running' },
     ]);
     const report = await dispatcherTick(h.env, controller, { ports: h.ports });
     expect(h.intake.created.map((c) => c.id)).toEqual([`rfq-intake-${'1'.repeat(32)}`]);
@@ -80,6 +81,47 @@ describe('orders', () => {
       { v: 1, type: 'order-created', order_id: id('4a', 1), tenant_id: TENANT, source: 'portal' },
       { v: 1, type: 'order-created', order_id: id('4a', 2), tenant_id: TENANT, source: 'quote' },
     ]);
+  });
+});
+
+describe('windows: skipped rows never hide newer ones', () => {
+  it(`a portal order behind ${BATCH} older new orders that have post-order runs is sent`, async () => {
+    const h = setup();
+    const old = Array.from({ length: BATCH + 5 }, (_, i) => ({ id: id('4a', i + 1), title: `PO-${i + 1}`, status: 'new', created_at: ago((20 - i * 0.2) * DAY), tenant_id: TENANT }));
+    h.ports.db.seed('orders', [...old, { id: id('4b', 1), title: 'PO-NEW', status: 'new', created_at: ago(DAY / 24), tenant_id: TENANT }]);
+    h.ports.db.seed('agent_runs', old.map((o) => ({ agent: 'post_order', trigger: 'queue', idempotency_key: o.id, status: 'succeeded', finished_at: ago(DAY) })));
+    const report = await dispatcherTick(h.env, controller, { ports: h.ports });
+    expect(report.orders_sent).toBe(1);
+    expect(sent(h)).toEqual([{ v: 1, type: 'order-created', order_id: id('4b', 1), tenant_id: TENANT, source: 'portal' }]);
+  });
+
+  it(`at most ${BATCH} orders are sent per tick; the next tick sends the rest`, async () => {
+    const h = setup();
+    h.ports.db.seed('orders', Array.from({ length: BATCH + 3 }, (_, i) => ({ id: id('4a', i + 1), title: `PO-${i + 1}`, status: 'new', created_at: ago((20 - i * 0.1) * DAY), tenant_id: TENANT })));
+    expect((await dispatcherTick(h.env, controller, { ports: h.ports })).orders_sent).toBe(BATCH);
+    // the order-created consumer opens the runs; here the runs are seeded for the orders sent
+    h.ports.db.seed('agent_runs', sent(h).map((m) => ({ agent: 'post_order', trigger: 'queue', idempotency_key: (m as { order_id: string }).order_id, status: 'running' })));
+    h.events.sent.length = 0;
+    expect((await dispatcherTick(h.env, { ...controller, scheduledTime: NOW + 10 * MIN } as ScheduledController, { ports: h.ports })).orders_sent).toBe(3);
+  });
+
+  it('an orphan rfq row behind 120 older reply rows that wait for agent.quote is started', async () => {
+    const h = setup({ 'agent.quote': { enabled: false }, 'agent.rfq_intake': { enabled: true, value: { mode: 'shadow' } }, 'agent.post_order': { enabled: false } });
+    const replies = Array.from({ length: 120 }, (_, i) => ({ id: id('2c', i + 1), tenant_id: TENANT, message_id: `<r${i}@example.de>`, message_id_sha256: (i + 1).toString(16).padStart(64, '0'), mailbox: 'replies', from_email: 'a@example.de', received_at: ago(DAY - i * MIN), created_at: ago(DAY - i * MIN), status: 'received' }));
+    h.ports.db.seed('inbound_emails', [...replies, { id: id('2d', 1), tenant_id: TENANT, message_id: '<rfq@example.de>', message_id_sha256: 'f'.repeat(64), mailbox: 'rfq', from_email: 'b@example.de', received_at: ago(30 * MIN), created_at: ago(30 * MIN), status: 'received' }]);
+    const report = await dispatcherTick(h.env, controller, { ports: h.ports });
+    expect(report.intake_started).toBe(1);
+    expect(h.intake.created.map((c) => c.id)).toEqual([`rfq-intake-${'f'.repeat(32)}`]);
+    expect(sent(h)).toEqual([]);
+  });
+
+  it('a parked run behind 120 older parks whose flag is still off is resumed', async () => {
+    const h = setup({ 'agent.quote': { enabled: false }, 'agent.rfq_intake': { enabled: true }, 'agent.post_order': { enabled: false } });
+    h.ports.db.seed('agent_runs', Array.from({ length: 120 }, (_, i) => ({ agent: 'quote', trigger: 'workflow', idempotency_key: `q${i}`, status: 'waiting_human', parked_reason: 'flag_off', updated_at: ago(DAY - i * MIN) })));
+    const [late] = h.ports.db.seed('agent_runs', [{ agent: 'rfq_intake', trigger: 'workflow', idempotency_key: 'late', status: 'waiting_human', parked_reason: 'flag_off', updated_at: ago(MIN) }]);
+    const report = await dispatcherTick(h.env, controller, { ports: h.ports });
+    expect(report.resumed).toBe(1);
+    expect(sent(h)).toEqual([{ v: 1, type: 'resume-parked', run_id: late.id as string }]);
   });
 });
 
@@ -188,7 +230,20 @@ describe('isolation', () => {
     expect(report.errors).toEqual([]);
     expect(report.poller).toBe('ran');
     const run = h.ports.db.rows('agent_runs', ['agent', 'eq', 'quote.reply_poller'])[0];
-    expect(run).toMatchObject({ status: 'succeeded', output: { accounts: { [id('9a', 1)]: { errors: ['error'] } } } });
+    expect(run).toMatchObject({ trigger: 'cron', status: 'succeeded', output: { accounts: { [id('9a', 1)]: { errors: ['error'] } } } });
+  });
+
+  it('the Gmail poller runs after every other job: a poller that does not finish holds back no other job', async () => {
+    const h = setup();
+    h.ports.db.seed('orders', [{ id: id('4a', 1), title: 'PO-1', status: 'new', created_at: ago(DAY), tenant_id: TENANT }]);
+    h.ports.db.seed('inbound_emails', [{ id: id('2a', 3), tenant_id: TENANT, message_id: '<o3@example.de>', message_id_sha256: '3'.repeat(64), mailbox: 'replies', from_email: 'a@example.de', received_at: ago(20 * MIN), created_at: ago(20 * MIN), status: 'received' }]);
+    h.ports.db.seed('marketing_sender_accounts', [{ id: id('9a', 1), email: 'sales@example.com', provider: 'google_workspace', is_active: true, provider_config: {} }]);
+    let tokenAsked = false;
+    h.ports.gmail = { accessToken: () => { tokenAsked = true; return new Promise(() => undefined); } } as unknown as typeof h.ports.gmail;
+    void dispatcherTick(h.env, controller, { ports: h.ports });
+    for (let i = 0; i < 50 && !tokenAsked; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(tokenAsked).toBe(true);
+    expect(sent(h).map((m) => m.type).sort()).toEqual(['inbound-reply', 'order-created']);
   });
 
   it('a job that throws does not stop the others', async () => {

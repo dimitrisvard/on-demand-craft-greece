@@ -70,7 +70,7 @@ import { loadPrompt, registerPromptSource, selectPrompt, type PromptId } from '.
 import { addUsage, applyDailyCap, checkpointRun, closeRun, EMPTY_USAGE, failRun, isFinal, openRun, parkRun, usageColumns, type UsageAcc } from '../agents/runs';
 import { DbError } from '../db/postgrest';
 import { enqueueCadJob } from '../db/repos/cad-jobs';
-import { getInboundEmail, updateInboundEmail, type InboundEmailRow, type InboundKind } from '../db/repos/inbound-emails';
+import { bodyExcerpt, getInboundEmail, updateInboundEmail, type InboundEmailRow, type InboundKind } from '../db/repos/inbound-emails';
 import { agentFileRow, insertAgentFiles, type RfqFileRow } from '../db/repos/rfq-files';
 import { createEmailRfq, customerCandidates, getRfq } from '../db/repos/rfqs';
 import { LOG_PREFIX, type OpsEnv } from '../env';
@@ -429,7 +429,7 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
       const records = await storeAttachments(ports.blob, sha, mail.attachments);
       const text = stripQuoted(mail.text);
       await ports.blob.put(bodyTextKey(sha), new TextEncoder().encode(text.slice(0, EXTRACT_TEXT_CHARS)).buffer as ArrayBuffer, { contentType: 'text/plain; charset=utf-8' });
-      await updateInboundEmail(db, id, { attachments: records, body_excerpt: text.slice(0, 4000), status: 'parsed', error: null }, ['received', 'parsed', 'failed', 'needs_review']);
+      await updateInboundEmail(db, id, { attachments: records, body_excerpt: bodyExcerpt(text), status: 'parsed', error: null }, ['received', 'parsed', 'failed', 'needs_review']);
       const auth = authResultsOf(mail.headers.authentication_results ?? [], authserv);
       return { signals: mailSignals(mail, auth, records), attachments: records, text_chars: text.length, from_html: mail.from_html };
     });

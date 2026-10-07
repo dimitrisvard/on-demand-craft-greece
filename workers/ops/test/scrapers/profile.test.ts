@@ -82,4 +82,15 @@ describe('profile module rules', () => {
     expect(await scrapeProfile(deps, { url, source: 'europages' })).toMatchObject({ status: 429, body: { error: 'host_blocked' } });
     expect(requests).toHaveLength(1);
   });
+
+  it('every redirect target passes the robots gate before it is requested', async () => {
+    const robots = { body: 'User-agent: MicronsHubBot\nAllow: /BEISPIEL/\nDisallow: /intern/\n', headers: { 'content-type': 'text/plain' } };
+    const { fetch, requests } = routedFetch({
+      'https://www.europages.de/robots.txt': robots,
+      [url]: { status: 302, headers: { location: '/intern/profile-11.html' } },
+      'https://www.europages.de/intern/profile-11.html': { body: page('europages-profile-regex.html') },
+    });
+    expect(await scrapeProfile(testDeps(fetch), { url, source: 'europages' })).toMatchObject({ ok: false, status: 403, body: { error: 'robots_disallowed' } });
+    expect(requests.map((r) => r.url)).toEqual(['https://www.europages.de/robots.txt', url]);
+  });
 });

@@ -17,6 +17,7 @@ import {
   describeAgentError,
   probeAgentApi,
   STAFF_FILE_KEY_RE,
+  isStaffFileKey,
   validateQuoteEdits,
   type AgentApiClient,
 } from '@/utils/agentApi';
@@ -272,6 +273,24 @@ describe('stored files', () => {
     expect(STAFF_FILE_KEY_RE.source).toBe(
       '^(quotes\\/[0-9a-f-]{36}\\/v\\d+\\/quote\\.pdf|orders\\/[0-9a-f-]{36}\\/traveler\\.pdf|cad\\/[0-9a-f-]{36}\\/output\\/[a-z_.]+|email\\/[0-9a-f]{64}\\/(raw\\.eml|att\\/[0-9]+-[A-Za-z0-9._-]{1,100}))$',
     );
+  });
+
+  // Same vectors in workers/site/test/agent-hmac.test.ts and workers/ops/test/routes/agent-admin.test.ts.
+  const DOT_KEYS = [`cad/${RFQ}/output/..`, `cad/${RFQ}/output/a..b`, `email/${SHA}/att/1-..`, `email/${SHA}/att/1-a..b.pdf`, `email/${SHA}/att/12-..pdf`];
+
+  it("'..' anywhere in a key -> refused before any request; every vector otherwise fits STAFF_FILE_KEY_RE", async () => {
+    for (const key of DOT_KEYS) {
+      expect(STAFF_FILE_KEY_RE.test(key), key).toBe(true);
+      expect(isStaffFileKey(key), key).toBe(false);
+      expect(() => agentFileUrl(key), key).toThrow(AgentApiRequestError);
+    }
+    const { api, calls } = await client(STATUS_STAFF, () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }));
+    const probes = calls.length;
+    for (const key of DOT_KEYS) await expect(api.previewFile(key), key).rejects.toBeInstanceOf(AgentApiRequestError);
+    expect(calls).toHaveLength(probes);
+    // A single dot stays allowed.
+    expect(isStaffFileKey(`email/${SHA}/att/1-a.b.pdf`)).toBe(true);
+    expect(agentFileUrl(`cad/${RFQ}/output/flat.dxf`)).toBe(`/api/agent/file?k=cad/${RFQ}/output/flat.dxf`);
   });
 
   it('previewFile fetches with the session and returns an object URL; a refusal throws', async () => {

@@ -217,10 +217,15 @@ describe('customer replies', () => {
     return { h, result, step, inboundId };
   }
 
-  it('won with high confidence: one order through create_order_from_quote, order-created event, row won, vectors won', async () => {
-    const { h, result, inboundId } = await replyCase({ answer: { outcome: 'won', confidence: 0.95, summary: 'The customer accepts the offer.' } });
+  it('won, even at high confidence from the authenticated contact, waits for a person; "won" on the reply card creates one order, the event, row won, vectors won', async () => {
+    const { h, result, inboundId, step } = await replyCase({ answer: { outcome: 'won', confidence: 0.95, summary: 'The customer accepts the offer.' }, decisions: { 'reply-confirmed': [{ verb: 'won' }] } });
     expect(result).toMatchObject({ outcome: 'won', quote_workflow_id: QWID });
     expect(result.order_id).toMatch(/^[0-9a-f-]{36}$/);
+    // the reply card came first: every check passed, the decision was still a person's
+    const replyCard = h.ports.telegram.cards.find((c) => c.card.kind === 'reply' && c.card.allowed_verbs.length)?.card as CardV1;
+    expect(replyCard).toMatchObject({ allowed_verbs: ['won', 'lost', 'counter', 'ignore'], flags: [] });
+    expect(replyCard.lines.find((l) => l.label === 'Checks')?.value).toBe('reply to our e-mail: yes · sender authenticated: yes · RFQ contact: yes');
+    expect(step.trace().indexOf('request-reply-1:ok')).toBeLessThan(step.trace().indexOf('order-reply-1:ok'));
     const orders = h.ports.db.rows('orders');
     expect(orders).toHaveLength(1);
     expect(orders[0]).toMatchObject({ rfq_id: RFQ_ID, currency: 'EUR', status: 'new' });
@@ -230,10 +235,10 @@ describe('customer replies', () => {
     expect(quoteRow(h)).toMatchObject({ status: 'won', outcome_reason: 'customer_accepted' });
     expect([...(h.ports.vector.namespaces.get(TENANT)?.values() ?? [])].map((v) => v.metadata.outcome)).toEqual(['won']);
     const replyRun = runs(h).find((r) => r.idempotency_key === `${RFQ_ID}:v1:reply:${inboundId}`);
-    expect(replyRun).toMatchObject({ status: 'succeeded', llm_calls: 1, subject_type: 'inbound_email', subject_id: inboundId });
+    expect(replyRun).toMatchObject({ status: 'succeeded', llm_calls: 1, subject_type: 'inbound_email', subject_id: inboundId, approval_token_sha256: null });
     expect(Number(replyRun?.cost_cents)).toBeGreaterThan(0);
     const classified = h.ports.db.rows('inbound_emails', ['id', 'eq', inboundId])[0];
-    expect(classified.classification).toMatchObject({ quote_reply: { outcome: 'won', confidence: 0.95 } });
+    expect(classified.classification).toMatchObject({ quote_reply: { outcome: 'won', confidence: 0.95, injection_suspected: false } });
     // the model saw the reply text without the quoted history and without the sender's address
     const user = h.llm.users.find((u) => u.prompt === 'quote.classify_reply@v1')?.user[0];
     expect(user && user.type === 'text' ? user.text : '').toContain('Wir nehmen das Angebot an.');
@@ -242,7 +247,7 @@ describe('customer replies', () => {
     expect(h.ports.mailer.sent).toHaveLength(1);
   });
 
-  it('won survives a retried outcome step: the RPC answers the same order, one order and one event', async () => {
+  it('won survives a retried outcome step: the order step is not repeated, one RPC call, one order and one event', async () => {
     const h = harness();
     h.llm.answer('quote.classify_reply@v1', { outcome: 'won', confidence: 0.95, summary: 'Accepted.' });
     const inboundId = await seedReply(h, { subject: 'Re: offer', text: 'Accepted.' });
@@ -258,18 +263,21 @@ describe('customer replies', () => {
     };
     const step = new DecidingStep();
     step.sendEvent('customer-reply', { inbound_email_id: inboundId });
-    const { result } = await runCase(h, { step, decisions: approve });
+    const { result } = await runCase(h, { step, decisions: { ...approve, 'reply-confirmed': [{ verb: 'won' }] } });
     expect(result.outcome).toBe('won');
-    expect(h.ports.db.calls.filter((c) => c.method === 'rpc' && c.target === 'create_order_from_quote')).toHaveLength(2);
+    expect(failed).toBe(true);
+    expect(step.calls.find((c) => c.name === 'outcome-reply-1')).toMatchObject({ outcome: 'ok', attempts: 2 });
+    expect(h.ports.db.calls.filter((c) => c.method === 'rpc' && c.target === 'create_order_from_quote')).toHaveLength(1);
     expect(h.ports.db.rows('orders')).toHaveLength(1);
     expect(queue.sent).toHaveLength(1);
   });
 
-  it('lost with high confidence closes the quote lost', async () => {
+  it('lost with high confidence from the authenticated contact in the thread closes the quote lost without a card', async () => {
     const { h, result } = await replyCase({ answer: { outcome: 'lost', confidence: 0.9, summary: 'Ordered elsewhere.' } });
     expect(result.outcome).toBe('lost');
     expect(quoteRow(h)).toMatchObject({ status: 'lost', outcome_reason: 'customer_declined' });
     expect(h.ports.db.rows('orders')).toHaveLength(0);
+    expect(h.ports.telegram.cards.filter((c) => c.card.kind === 'reply' && c.card.allowed_verbs.length)).toEqual([]);
   });
 
   it('a counter-offer always asks a human (reply card); "counter" closes the quote as counter_offer', async () => {
@@ -313,6 +321,7 @@ describe('replay', () => {
     const first = new FakeStep();
     first.sendEvent('quote-approved', { verb: 'approve', actor: STAFF, channel: 'dashboard' });
     first.sendEvent('customer-reply', { inbound_email_id: probeReply });
+    first.sendEvent('reply-confirmed', { verb: 'won', actor: STAFF, channel: 'dashboard' });
     await runCase(probe, { step: first });
     const names = [...new Set(first.calls.filter((c) => c.kind === 'do').map((c) => c.name))];
     expect(names.length).toBeGreaterThan(20);
@@ -324,6 +333,7 @@ describe('replay', () => {
       const step = new FakeStep();
       step.sendEvent('quote-approved', { verb: 'approve', actor: STAFF, channel: 'dashboard' });
       step.sendEvent('customer-reply', { inbound_email_id: reply });
+      step.sendEvent('reply-confirmed', { verb: 'won', actor: STAFF, channel: 'dashboard' });
       step.crashAt(name);
       if (name === 'open-run' || name === 'daily-cap') {
         // Before the run row exists (or is checked) a failing step fails the instance; Workflows retries it.
@@ -341,7 +351,11 @@ describe('replay', () => {
       const keys = h.ports.mailer.sent.map((m) => m.idempotency_key);
       expect(keys, name).toEqual([`quote/${QWID}/send`]);
       expect(h.ports.db.rows('orders'), name).toHaveLength(1);
+      expect(h.ports.db.calls.filter((c) => c.method === 'rpc' && c.target === 'create_order_from_quote'), name).toHaveLength(1);
       expect(quoteRow(h).status, name).toBe('won');
+      // every run is closed: the failure card's run and the quote run included (exit gate: nothing left running)
+      expect(runs(h).filter((r) => r.status === 'running' || r.status === 'waiting_human').map((r) => `${String(r.idempotency_key)}:${String(r.status)}`), name).toEqual([]);
+      expect(mainRun(h)?.status, name).toBe('succeeded');
     }
   }, 180_000);
 });

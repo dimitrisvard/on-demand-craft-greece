@@ -144,4 +144,22 @@ describe('staff file keys', () => {
     expect(staffFileKey('?k=%E0%A4%A')).toBeNull();
     expect(staffFileKey(`?x=orders/${ORDER}/traveler.pdf`)).toBeNull();
   });
+
+  // Same vectors in workers/ops/test/routes/agent-admin.test.ts and tests/frontend-api/agentApi.test.ts.
+  const SHA = 'ab'.repeat(32);
+  const DOT_KEYS = [`cad/${ORDER}/output/..`, `cad/${ORDER}/output/a..b`, `email/${SHA}/att/1-..`, `email/${SHA}/att/1-a..b.pdf`, `email/${SHA}/att/12-..pdf`];
+
+  it("'..' anywhere in a key -> null; every vector otherwise fits STAFF_FILE_KEY_RE", () => {
+    expect(STAFF_FILE_KEY_RE.source).toBe(
+      '^(quotes\\/[0-9a-f-]{36}\\/v\\d+\\/quote\\.pdf|orders\\/[0-9a-f-]{36}\\/traveler\\.pdf|cad\\/[0-9a-f-]{36}\\/output\\/[a-z_.]+|email\\/[0-9a-f]{64}\\/(raw\\.eml|att\\/[0-9]+-[A-Za-z0-9._-]{1,100}))$',
+    );
+    for (const key of DOT_KEYS) {
+      expect(STAFF_FILE_KEY_RE.test(key), key).toBe(true);
+      expect(staffFileKey(`?k=${key}`), key).toBeNull();
+      expect(staffFileKey(`?k=${key.replace(/\./g, '%2E')}`), key).toBeNull();
+    }
+    // A single dot stays allowed.
+    expect(staffFileKey(`?k=email/${SHA}/att/1-a.b.pdf`)).toBe(`email/${SHA}/att/1-a.b.pdf`);
+    expect(staffFileKey(`?k=cad/${ORDER}/output/flat.dxf`)).toBe(`cad/${ORDER}/output/flat.dxf`);
+  });
 });

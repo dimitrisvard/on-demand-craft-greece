@@ -57,7 +57,7 @@ export async function setOrderPartner(db: Db, orderId: string, partnerId: string
   return current?.partner_id === partnerId;
 }
 
-/** Orders in status 'new' created at or after `since` (oldest first). */
+/** Orders in status 'new' created at or after `since` (oldest first, then by id: a stable page order). */
 export async function recentNewOrders(db: Db, since: Date, limit: number): Promise<Array<Pick<OrderRow, 'id' | 'rfq_id' | 'tenant_id' | 'created_at'>>> {
   return db.select('orders', {
     columns: 'id,rfq_id,tenant_id,created_at',
@@ -65,7 +65,7 @@ export async function recentNewOrders(db: Db, since: Date, limit: number): Promi
       ['status', 'eq', 'new'],
       ['created_at', 'gte', since.toISOString()],
     ],
-    order: [{ column: 'created_at', ascending: true }],
+    order: [{ column: 'created_at', ascending: true }, { column: 'id', ascending: true }],
     limit,
   });
 }

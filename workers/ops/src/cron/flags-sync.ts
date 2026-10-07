@@ -219,7 +219,7 @@ async function recordRun(db: Db, env: OpsEnv, at: number, s: FlagsSyncSummary, e
     tenant_id: env.AGENT_TENANT_ID ?? DEFAULT_TENANT_ID,
   });
   if (!run.created) return run.run_id;          // this minute was recorded already (a repeated invocation)
-  const failed = error !== null || s.failed.length > 0 || s.seed_failed.length > 0;
+  const failed = error !== null || s.failed.length > 0;
   await closeRun(db, run.run_id, {
     status: failed ? 'failed' : 'succeeded',
     ...(failed ? { error: error ?? 'kv_put_failed' } : {}),
@@ -261,7 +261,7 @@ export async function flagsSyncTick(env: OpsEnv, controller: ScheduledController
     failure = e;
   }
   const error = failure !== null ? `flags_sync_failed:${errorCode(failure)}`
-    : seedError !== null ? `flags_seed_failed:${errorCode(seedError)}` : null;
+    : s.seed_failed.length > 0 ? `flags_seed_failed:${errorCode(seedError)}` : null;
   const changed = s.imported.length + s.absent.length + s.invalid.length + s.seed_failed.length + s.written.length
     + s.stale.length + s.failed.length + (s.drift?.length ?? 0) > 0;
   if (changed || error !== null) {

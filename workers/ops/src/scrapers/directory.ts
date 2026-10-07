@@ -9,22 +9,27 @@
 //   3 a paused host (403/429/challenge in the last 24 h) answers 429 {"error":"host_blocked","retryAfter":<s>}.
 //   4 robots gate (robots.ts): disallowed -> 403 {"error":"robots_disallowed"} (a host named in
 //     SCRAPER_PERMITTED_HOSTS passes with its permission reference, which is logged).
-//   5 plain fetch with the crawler identity; 403, 429 or a challenge page pauses the host for 24 h and answers
-//     {"error":"host_blocked","retryAfter":86400} with the directory's status (403 for a challenge); other failures
-//     answer the handler's shapes (502 HTTP status, 502 non-HTML, 504 timeout, 502 fetch failure).
+//   5 plain fetch with the crawler identity; every same-host redirect target passes the robots gate before it is
+//     requested (a refused target answers 403 {"error":"robots_disallowed"}); 403, 429 or a challenge page pauses the
+//     host for 24 h and answers {"error":"host_blocked","retryAfter":86400} with the directory's status (403 for a
+//     challenge); other failures answer the handler's shapes (502 HTTP status, 502 non-HTML, 504 timeout, 502 fetch
+//     failure).
 //   6 parse with the ported parsers; when no company was found on a 200 page of a permitted host that needs client
 //     rendering and the invocation's browser budget is unused, the page is rendered once with Browser Run and
-//     parsed again (a refusal there pauses the host as in 5).
+//     parsed again (a refusal there pauses the host as in 5). With a deadline, the page is rendered only when the
+//     render timeout (20 s) still fits before it.
 //   7 the answer is the handler's 200 body (directoryPageBody), byte for byte.
 // Rules for a multi-page scan
 //   - pages 1..maxPages (at most 10) built with buildPageUrl; stop at the first page without companies, without a
 //     next page, or with a robots, pause or refusal answer; other page errors are collected and the scan goes on.
 //   - between two pages it waits at least 2.5 s (Europages) or 4 s (wlw), and at least the robots.txt Crawl-delay.
+//   - with a deadline (ms on the deps clock), a page starts only while its robots and page timeouts (20 s together)
+//     still fit before it; otherwise the scan stops with stopped 'deadline'.
 
 import { directoryTargetAllowed } from '../../../shared/src/auth/scrape-rules';
-import { BrowserBudget } from './browser';
-import { MAX_PAGES, PAGE_DELAY_MS, pauseRemaining, type ScraperDeps } from './context';
-import { fetchPage, type PageResult } from './fetch-page';
+import { BrowserBudget, RENDER_TIMEOUT_MS } from './browser';
+import { MAX_PAGES, PAGE_DELAY_MS, pauseRemaining, redirectGate, robotsDecision, type ScraperDeps } from './context';
+import { fetchPage, PAGE_TIMEOUT_MS, type PageResult } from './fetch-page';
 import {
   buildPageUrl,
   detectSource,
@@ -33,7 +38,10 @@ import {
   type DirectoryPageBody,
   type DirectorySource,
 } from './parsers/directory';
-import { hostOf, robotsAllows, type RobotsDecision } from './robots';
+import { hostOf, ROBOTS_TIMEOUT_MS, type RobotsDecision } from './robots';
+
+/** Time one page may take before its answer (robots.txt fetch and page fetch timeouts). */
+export const PAGE_START_MS = ROBOTS_TIMEOUT_MS + PAGE_TIMEOUT_MS;
 
 export const UNKNOWN_SOURCE_MESSAGE = 'URL not recognized as Europages or wlw. Supported: europages.co.uk, europages.de, wlw.com, wlw.de, etc.';
 
@@ -77,7 +85,7 @@ function blockedAnswer(deps: ScraperDeps, host: string, page: PageResult, robots
 /** One search page (see the rules above). */
 export async function scanDirectoryPage(
   deps: ScraperDeps,
-  input: { url: unknown; source?: unknown },
+  input: { url: unknown; source?: unknown; deadline?: number },
   budget: BrowserBudget = new BrowserBudget(),
 ): Promise<PageScan> {
   const url = input.url;
@@ -93,12 +101,18 @@ export async function scanDirectoryPage(
   const paused = await pauseRemaining(deps, host);
   if (paused > 0) return fail(429, { error: 'host_blocked', retryAfter: Math.ceil(paused / 1000) }, { paused: host });
 
-  const robots = await robotsAllows(url, { fetchImpl: deps.fetch, userAgent: deps.userAgent, permitted: deps.permitted, now: deps.now, cache: deps.robotsCache });
+  const robots = await robotsDecision(deps, url);
   deps.log('robots', { host, allowed: robots.allowed, reason: robots.reason, permission: robots.permission });
   if (!robots.allowed) return fail(403, { error: 'robots_disallowed' }, { robots });
 
   const meta = extractSearchMeta(url, source);
-  const page = await fetchPage(url, { userAgent: deps.userAgent, fetchImpl: deps.fetch });
+  const hops = redirectGate(deps, url);
+  const page = await fetchPage(url, { userAgent: deps.userAgent, fetchImpl: deps.fetch, allow: hops.allow });
+  if (page.error === 'robots_disallowed') {
+    const refused = hops.refused ?? { allowed: false, reason: 'robots_disallow' };
+    deps.log('robots', { host, allowed: false, reason: refused.reason, redirect: true });
+    return fail(403, { error: 'robots_disallowed' }, { robots: refused });
+  }
   if (page.error === 'timeout') return fail(504, { error: 'Request timed out fetching directory page' }, { robots });
   if (page.error === 'redirect_off_host') return fail(502, { error: 'redirect_off_host' }, { robots });
   if (page.error) return fail(502, { error: 'Failed to fetch directory' }, { robots });
@@ -110,8 +124,9 @@ export async function scanDirectoryPage(
 
   let body = directoryPageBody(page.html, url, source, meta);
   let rendered = false;
-  if (body.companies.length === 0 && robots.permission !== undefined && deps.browser && needsClientRendering(page.html) && budget.take()) {
-    const view = await deps.browser.render(url, { timeoutMs: 20_000, userAgent: deps.userAgent });
+  const renderFits = input.deadline === undefined || deps.now() + RENDER_TIMEOUT_MS <= input.deadline;
+  if (body.companies.length === 0 && robots.permission !== undefined && deps.browser && renderFits && needsClientRendering(page.html) && budget.take()) {
+    const view = await deps.browser.render(url, { timeoutMs: RENDER_TIMEOUT_MS, userAgent: deps.userAgent });
     rendered = true;
     deps.log('rendered', { host, status: view.status });
     if (view.status === 403 || view.status === 429 || (view.status === 200 && /captcha|challenge-platform|cf-challenge/i.test(view.html))) {
@@ -132,13 +147,13 @@ export interface DirectoryScanResult {
   /** Host paused during or before this scan. */
   paused: string | null;
   robots: RobotsDecision | null;
-  stopped: 'end' | 'limit' | 'empty' | 'robots' | 'paused' | 'refused';
+  stopped: 'end' | 'limit' | 'empty' | 'robots' | 'paused' | 'refused' | 'deadline';
 }
 
 /** Up to maxPages pages (at most 10) of one search (see the rules above). */
 export async function scanDirectory(
   deps: ScraperDeps,
-  input: { url: string; source: DirectorySource; maxPages: number },
+  input: { url: string; source: DirectorySource; maxPages: number; deadline?: number },
   budget: BrowserBudget = new BrowserBudget(),
 ): Promise<DirectoryScanResult> {
   const maxPages = Math.max(1, Math.min(MAX_PAGES, Math.floor(input.maxPages) || 1));
@@ -155,8 +170,12 @@ export async function scanDirectory(
     stopped: 'limit',
   };
   for (let pg = 1; pg <= maxPages; pg++) {
+    if (input.deadline !== undefined && deps.now() + PAGE_START_MS > input.deadline) {
+      result.stopped = 'deadline';
+      break;
+    }
     const pageUrl = buildPageUrl(input.url, pg, input.source);
-    const scan = await scanDirectoryPage(deps, { url: pageUrl, source: input.source }, budget);
+    const scan = await scanDirectoryPage(deps, { url: pageUrl, source: input.source, deadline: input.deadline }, budget);
     if (scan.robots && !result.robots) result.robots = scan.robots;
     if (!scan.ok) {
       result.errors.push(`Page ${pg}: ${scan.body.error}`);

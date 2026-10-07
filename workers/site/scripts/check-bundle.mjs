@@ -8,9 +8,10 @@
 //   - a repo-root API handler other than the site's own: api/s3, api/notifications, api/gsc, api/tenders,
 //     api/tender-scan, api/funded-startups, api/scrape-*, api/scan-directory
 //   - (Phase 4) an agent-layer package under node_modules/: @anthropic-ai/*, agents, @modelcontextprotocol/*,
-//     postal-mime, @pdf-lib/fontkit, @cloudflare/puppeteer. postal-mime is allowed only while every input outside
-//     postal-mime that imports it belongs to the resend package (the dependency of the site's own mail handler,
-//     api/emails.js, which imports postal-mime at module scope); any other importer fails the guard
+//     postal-mime, @pdf-lib/fontkit, @cloudflare/puppeteer. postal-mime is allowed only as a dependency of resend:
+//     at least one input imports it and every input outside postal-mime that imports it belongs to the resend
+//     package (the dependency of the site's own mail handler, api/emails.js, which imports postal-mime at module
+//     scope); any other importer, or none, fails the guard. The report names the resend importers when this applies
 //   - (Phase 4) a source file of microns-ops (workers/ops/src/): the site reaches the agent layer only over the OPS
 //     service binding
 // and prints the size report (bundle size, gzip size, largest packages).
@@ -103,9 +104,14 @@ export function postalMimeImporters(inputs) {
   return [...importers].sort();
 }
 
+/** True when postal-mime is in the bundle only as a dependency of resend (see the header). */
+export function postalMimeOnlyViaResend(importersOfPostalMime) {
+  return importersOfPostalMime.length > 0 && importersOfPostalMime.every((i) => RESEND.test(i));
+}
+
 /** forbiddenReason() with the resend exception for postal-mime (see the header). */
 export function forbiddenReasonInBundle(repoPath, importersOfPostalMime) {
-  if (POSTAL_MIME.test(repoPath) && importersOfPostalMime.every((i) => RESEND.test(i))) return null;
+  if (POSTAL_MIME.test(repoPath) && postalMimeOnlyViaResend(importersOfPostalMime)) return null;
   return forbiddenReason(repoPath);
 }
 
@@ -153,6 +159,9 @@ function main() {
   }
   lines.push('largest inputs by package:');
   for (const [pkg, bytes] of [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 12)) lines.push(`  ${kib(bytes).padStart(13)}  ${pkg}`);
+  if (inputs.some(([input]) => POSTAL_MIME.test(repoRelative(input))) && postalMimeOnlyViaResend(postalImporters)) {
+    lines.push(`postal-mime allowed as a dependency of resend only; importers: ${postalImporters.join(', ')}`);
+  }
   if (forbidden.length) {
     lines.push('forbidden inputs (code that belongs to microns-ops or to the legacy S3 handler):');
     for (const entry of forbidden) lines.push(`  ${entry}`);

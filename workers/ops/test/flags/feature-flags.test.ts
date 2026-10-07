@@ -66,6 +66,21 @@ describe('feature_flags repository', () => {
     expect((await listFlags(db)).map((r) => r.key)).toContain('mcp.remote');
   });
 
+  it("optimistic edit: a rev read from another tenant's row of the same key edits neither row", async () => {
+    const { db, tables } = setup();
+    const other = OTHER.toLowerCase();
+    insertRow(tables, 'feature_flags', { key: 'agent.quote', tenant_id: other, value: { mode: 'assist' } }, new Date('2026-10-05T07:00:00.000Z'));
+    const theirs = (await getFlagRow(db, 'agent.quote', other))!;
+    const ours = (await getFlagRow(db, 'agent.quote'))!;
+    expect(theirs.rev).not.toBe(ours.rev);
+    expect(await updateFlagIfRev(db, { key: 'agent.quote', expected_rev: theirs.rev, enabled: true, value: {}, updated_by: ADMIN })).toBeNull();
+    expect(await getFlagRow(db, 'agent.quote', other)).toMatchObject({ enabled: false, rev: theirs.rev, value: { mode: 'assist' } });
+    expect(await getFlagRow(db, 'agent.quote')).toMatchObject({ enabled: false, rev: ours.rev });
+    const edited = await updateFlagIfRev(db, { key: 'agent.quote', tenant_id: other, expected_rev: theirs.rev, enabled: true, value: theirs.value, updated_by: ADMIN });
+    expect(edited).toMatchObject({ tenant_id: other, enabled: true });
+    expect(await getFlagRow(db, 'agent.quote')).toMatchObject({ enabled: false, rev: ours.rev });
+  });
+
   it('write-through: kv_key, kv_value, put, then mark_synced; the KV record is the table row', async () => {
     const { db, kv, log } = setup();
     const before = (await getFlagRow(db, 'agent.quote'))!;

@@ -6,6 +6,8 @@
 //   - the signed request equals the site verifier's expectation (pinned vector shared with
 //     workers/site/test/agent-hmac.test.ts, and verifyRelayRequest of workers/site/src/auth/agent-hmac.ts)
 //   - answer text per status, exactly one answerCallbackQuery per callback, 200 to Telegram in every branch
+//   - a 200 counts only with a DecisionResult body (HTML page or other JSON -> failure alert); the relay's copy of
+//     isDecisionResult agrees with workers/shared/src/agent-api.ts on the shared fixtures and on variants
 //   - no bot token, approval token, signature or body in a log line
 // Globals (describe, it, expect, vi) come from the config; nothing reaches a network.
 
@@ -20,11 +22,27 @@ import {
   constantTimeEqual,
   decisionBody,
   handleAgentCallback,
+  isDecisionResult,
+  DECISION_OUTCOMES,
+  LABEL_MAX,
+  UUID_RE,
+  VERB_RE,
   signDecision,
   type AgentCallbackDeps,
   type CallbackQuery,
 } from '../../supabase/functions/telegram-leads-bot/agent-callback.ts';
-import { CALLBACK_DATA_RE as SHARED_CALLBACK_DATA_RE, VERB_CODES, callbackData, isDecisionBodyRelay } from '../../workers/shared/src/agent-api';
+import { readdirSync, readFileSync } from 'node:fs';
+import {
+  CALLBACK_DATA_RE as SHARED_CALLBACK_DATA_RE,
+  DECISION_OUTCOMES as SHARED_DECISION_OUTCOMES,
+  LABEL_MAX as SHARED_LABEL_MAX,
+  UUID_RE as SHARED_UUID_RE,
+  VERB_CODES,
+  VERB_RE as SHARED_VERB_RE,
+  callbackData,
+  isDecisionBodyRelay,
+  isDecisionResult as sharedIsDecisionResult,
+} from '../../workers/shared/src/agent-api';
 import { SeenSignatures, verifyRelayRequest } from '../../workers/site/src/auth/agent-hmac';
 
 // Same vector as workers/site/test/agent-hmac.test.ts (RELAY_VECTOR).
@@ -53,7 +71,10 @@ interface Recorded {
 type Answer = (call: Recorded, init: RequestInit) => Response | Promise<Response>;
 
 /** A fetch that records every call; decision requests get `decision`, Bot API calls 200 {"ok":true}. */
-function recorder(decision: Answer = () => json(200, { v: 1, ok: true, run_id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', verb: 'dismiss', outcome: 'dismissed', label: 'Dismissed' })) {
+/** A DecisionResult as microns-ops answers a relayed decision. */
+const RESULT = { v: 1, ok: true, run_id: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', verb: 'dismiss', outcome: 'dismissed', label: 'Dismissed' };
+
+function recorder(decision: Answer = () => json(200, RESULT)) {
   const calls: Recorded[] = [];
   const fetchFn = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const call: Recorded = { url: String(input), method: (init.method ?? 'GET').toUpperCase(), headers: new Headers(init.headers), body: typeof init.body === 'string' ? init.body : '' };
@@ -190,19 +211,83 @@ describe('handleAgentCallback', () => {
     }
   });
 
-  it('200 -> the label of the result (at most 200 characters); a 200 without a usable label -> "Done"', async () => {
+  it('200 with a DecisionResult -> its label (up to 200 characters); a blank label -> "Done"', async () => {
     const ok = recorder();
     expect(await handleAgentCallback(query(), deps(ok.fetchFn))).toBe('decided');
     expect(ok.answers()).toEqual([{ callback_query_id: 'cbq-1', text: 'Dismissed' }]);
     expect(ok.calls[ok.calls.length - 1].url).toBe(`${TELEGRAM_BASE}/bot${BOT_TOKEN}/answerCallbackQuery`);
 
-    const long = recorder(() => json(200, { label: 'x'.repeat(250) }));
-    await handleAgentCallback(query(), deps(long.fetchFn));
-    expect(long.answers()[0].text).toHaveLength(200);
+    const full = recorder(() => json(200, { ...RESULT, label: 'x'.repeat(200) }));
+    expect(await handleAgentCallback(query(), deps(full.fetchFn))).toBe('decided');
+    expect(full.answers()).toEqual([{ callback_query_id: 'cbq-1', text: 'x'.repeat(200) }]);
 
-    const notJson = recorder(() => new Response('<html>shell</html>', { status: 200, headers: { 'content-type': 'text/html' } }));
-    await handleAgentCallback(query(), deps(notJson.fetchFn));
-    expect(notJson.answers()).toEqual([{ callback_query_id: 'cbq-1', text: ANSWERS.done }]);
+    const blank = recorder(() => json(200, { ...RESULT, label: '  ' }));
+    expect(await handleAgentCallback(query(), deps(blank.fetchFn))).toBe('decided');
+    expect(blank.answers()).toEqual([{ callback_query_id: 'cbq-1', text: ANSWERS.done }]);
+  });
+
+  it('200 without a DecisionResult body (the SPA shell, other JSON) -> "Could not record" alert, logged as an unexpected answer', async () => {
+    const html = () => new Response('<!doctype html><html><body><div id="root"></div></body></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    const bodies: Array<[string, Answer]> = [
+      ['SPA shell (text/html)', html],
+      ['empty body', () => new Response('', { status: 200 })],
+      ['label only', () => json(200, { label: 'Dismissed' })],
+      ['ok only', () => json(200, { ok: true })],
+      ['JSON null', () => json(200, null)],
+      ['JSON array', () => json(200, [RESULT])],
+      ['an error body', () => json(200, { error: 'not_found' })],
+      ['v 2', () => json(200, { ...RESULT, v: 2 })],
+      ['ok false', () => json(200, { ...RESULT, ok: false })],
+      ['run_id not a UUID', () => json(200, { ...RESULT, run_id: 'run-1' })],
+      ['upper-case run_id', () => json(200, { ...RESULT, run_id: RESULT.run_id.toUpperCase() })],
+      ['verb with a space', () => json(200, { ...RESULT, verb: 'dis miss' })],
+      ['unknown outcome', () => json(200, { ...RESULT, outcome: 'decided' })],
+      ['label of 201 characters', () => json(200, { ...RESULT, label: 'x'.repeat(201) })],
+      ['label not a string', () => json(200, { ...RESULT, label: 7 })],
+      ['missing label', () => json(200, { v: 1, ok: true, run_id: RESULT.run_id, verb: 'dismiss', outcome: 'dismissed' })],
+      ['an extra key', () => json(200, { ...RESULT, extra: 1 })],
+    ];
+    for (const [name, answer] of bodies) {
+      const logs: string[] = [];
+      const rec = recorder(answer);
+      expect(await handleAgentCallback(query(), deps(rec.fetchFn, {}, logs)), name).toBe('failed');
+      expect(rec.decisions(), name).toHaveLength(1);
+      expect(rec.answers(), name).toEqual([{ callback_query_id: 'cbq-1', text: ANSWERS.failed, show_alert: true }]);
+      expect(logs, name).toEqual(['[telegram-leads-bot] agent decision refused: unexpected answer']);
+    }
+    expect(answerFor(200)).toEqual({ text: ANSWERS.failed, alert: true, outcome: 'failed' });
+    expect(answerFor(200, null)).toEqual({ text: ANSWERS.failed, alert: true, outcome: 'failed' });
+  });
+
+  it("the relay's isDecisionResult agrees with workers/shared/src/agent-api.ts (rules, fixtures and variants)", () => {
+    expect([...DECISION_OUTCOMES]).toEqual([...SHARED_DECISION_OUTCOMES]);
+    expect(UUID_RE.source).toBe(SHARED_UUID_RE.source);
+    expect(VERB_RE.source).toBe(SHARED_VERB_RE.source);
+    expect(LABEL_MAX).toBe(SHARED_LABEL_MAX);
+    const dir = new URL('../../workers/shared/test/fixtures/agent-api/', import.meta.url);
+    const fixtures = readdirSync(dir).filter((f) => f.startsWith('DecisionResult.'));
+    expect(fixtures.length).toBeGreaterThanOrEqual(3);
+    const samples: unknown[] = fixtures.map((f) => JSON.parse(readFileSync(new URL(f, dir), 'utf8')) as unknown);
+    for (const outcome of SHARED_DECISION_OUTCOMES) samples.push({ ...RESULT, outcome });
+    samples.push(
+      RESULT,
+      { ...RESULT, label: '' },
+      { ...RESULT, label: 'x'.repeat(200) },
+      { ...RESULT, label: 'x'.repeat(201) },
+      { ...RESULT, verb: 'confirm_sheet_metal' },
+      { ...RESULT, verb: 'Approve' },
+      { ...RESULT, v: '1' },
+      { ...RESULT, ok: 'true' },
+      { ...RESULT, extra: null },
+      { label: 'Dismissed' },
+      null,
+      'Dismissed',
+      [RESULT],
+    );
+    for (const sample of samples) expect(isDecisionResult(sample), JSON.stringify(sample)).toBe(sharedIsDecisionResult(sample));
+    // Both decide something: at least one sample passes and at least one is refused.
+    expect(samples.some((x) => isDecisionResult(x))).toBe(true);
+    expect(samples.some((x) => !isDecisionResult(x))).toBe(true);
   });
 
   it('answer text per status; failures as alerts; exactly one answer per callback', async () => {
@@ -261,7 +346,7 @@ describe('handleAgentCallback', () => {
     const calls: string[] = [];
     const fetchFn = (async (input: RequestInfo | URL) => {
       calls.push(String(input));
-      if (String(input) === DECISION_URL) return json(200, { label: 'Dismissed' });
+      if (String(input) === DECISION_URL) return json(200, RESULT);
       throw new TypeError('fetch failed');
     }) as typeof fetch;
     await expect(handleAgentCallback(query(), deps(fetchFn, {}, logs))).resolves.toBe('decided');
@@ -327,7 +412,7 @@ describe('index.ts webhook', () => {
 
   it('secret set and sent: a callback is relayed and answered once; Telegram gets 200 even when the decision fails', async () => {
     for (const status of [200, 409, 500]) {
-      const rec = recorder(() => json(status, status === 200 ? { label: 'Dismissed' } : { error: 'x' }));
+      const rec = recorder(() => json(status, status === 200 ? RESULT : { error: 'x' }));
       const handler = await loadFunction(FULL_ENV, rec.fetchFn);
       const res = await handler(update(callbackUpdate, WEBHOOK_SECRET));
       expect([res.status, await res.text()], String(status)).toEqual([200, 'OK']);

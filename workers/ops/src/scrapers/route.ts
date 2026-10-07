@@ -16,6 +16,9 @@
 //     request as succeeded, skipped ('robots_disallowed') or failed (the answer's error code); one scan_logs row
 //     (scan_type 'directory' or 'profile'; a paused host as error_message 'blocked:<host>'). No company row is written
 //     (the handlers do not write either). A bookkeeping failure is logged and never changes the answer.
+//   - A scan that throws (e.g. Browser Run unavailable) answers the handler's fetch-failure shape, 502
+//     {"error":"Failed to fetch directory"} or {"error":"Failed to fetch profile"}, and is recorded like any failed
+//     scan: run 'failed' ('scan_failed'), scan_logs status 'failed' with error_message 'scan_failed'.
 
 import type { Context } from 'hono';
 import { parseVercelBody, type VercelHandler } from '../../../shared/src/compat/vercel-node';
@@ -26,13 +29,16 @@ import { requestBytes, runVercel } from '../compat/express-shim';
 import { PostgrestDb, type Db } from '../db/postgrest';
 import { LOG_PREFIX, type OpsEnv, type OpsHono } from '../env';
 import { pauseMarker, scraperDeps, type ScraperDeps } from './context';
-import { scanDirectoryPage } from './directory';
+import { scanDirectoryPage, type PageScan } from './directory';
 import { extractSearchMeta } from './parsers/directory';
-import { scrapeProfile } from './profile';
+import { scrapeProfile, type ProfileScan } from './profile';
 import { hostOf, parsePermittedHosts } from './robots';
 import { writeScanLog } from './store';
 
 export type ScraperRouteKind = 'directory' | 'profile';
+
+/** The handlers' fetch-failure answers without their error text (api/scan-directory.js:399, api/scrape-company-profile.js:365). */
+const FETCH_FAILED: Readonly<Record<ScraperRouteKind, string>> = { directory: 'Failed to fetch directory', profile: 'Failed to fetch profile' };
 
 export interface ScraperRouteDeps {
   db(env: OpsEnv): Db;
@@ -107,13 +113,21 @@ async function runModule(c: Context<OpsHono>, kind: ScraperRouteKind, body: Reco
   }
 
   const started = deps.now();
-  const scraper = deps.scraper(env, db ?? undefined);
-  const scan = kind === 'directory'
-    ? await scanDirectoryPage(scraper, { url: body.url, source: body.source })
-    : await scrapeProfile(scraper, { url: body.url, source: body.source });
+  let scan: PageScan | ProfileScan;
+  let threw = false;
+  try {
+    const scraper = deps.scraper(env, db ?? undefined);
+    scan = kind === 'directory'
+      ? await scanDirectoryPage(scraper, { url: body.url, source: body.source })
+      : await scrapeProfile(scraper, { url: body.url, source: body.source });
+  } catch (error) {
+    threw = true;
+    console.error(formatLogLine(LOG_PREFIX, 'scraper route scan failed', { error: error instanceof Error ? error.name : typeof error, requestId: call.requestId }));
+    scan = { ok: false, status: 502, body: { error: FETCH_FAILED[kind] } };
+  }
   const url = String(body.url);
   const source = scan.ok ? scan.body.source : typeof body.source === 'string' ? body.source.slice(0, 40) : 'unknown';
-  const errorCode = scan.ok ? null : scan.body.error;
+  const errorCode = scan.ok ? null : threw ? 'scan_failed' : scan.body.error;
   const companies = scan.ok && 'companies' in scan.body ? scan.body.companies.length : 0;
   const paused = scan.ok ? undefined : scan.paused;
 

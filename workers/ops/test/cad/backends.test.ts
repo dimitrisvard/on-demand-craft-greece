@@ -11,10 +11,12 @@ import { ContainerBackend } from '../../src/cad/backends/container';
 import { dxfMetrics } from '../../src/cad/dxf-metrics';
 import { parseDXF } from '../../src/cad/inline/dxf-parser';
 import { multipartBody } from '../../src/cad/multipart';
-import { MapCadRegistry, makeCadRegistry, missingCadConfig } from '../../src/cad/registry';
+import { quietly } from '../../src/cad/quiet';
+import { MapCadRegistry, invalidCadConfig, makeCadRegistry, missingCadConfig } from '../../src/cad/registry';
 import { INLINE_CAPS, INLINE_TOO_LARGE, MB, cadKindOf, type CadInput, type CadKind, type CadResultV1 } from '../../src/cad/types';
 import type { OpsEnv } from '../../src/env';
 import type { CadJobMessageV1 } from '../../src/queues/messages';
+import { RecordingLogger, assertNoSecretsLogged } from '../helpers/recorders';
 
 const FIXTURES = new URL('../fixtures/cad/', import.meta.url).pathname;
 const bytes = (name: string): Uint8Array => new Uint8Array(readFileSync(FIXTURES + name));
@@ -267,6 +269,46 @@ describe('InlineBackend', () => {
     }
   });
 
+  it('the parsers write nothing to the logs: inline DXF, STL and STEP, and the DXF metrics of an unfold answer', async () => {
+    // a DXF whose layer names carry customer text (the copied parser prints layer names)
+    const layer = 'Kunde erika.beispiel@example.de';
+    const dxf = new TextEncoder().encode(['0', 'SECTION', '2', 'ENTITIES', '0', 'LINE', '8', layer, '10', '0', '20', '0', '11', '100', '21', '0', '0', 'LINE', '8', 'OUTLINE', '10', '100', '20', '0', '11', '100', '21', '50', '0', 'ENDSEC', '0', 'EOF', ''].join('\n'));
+    const logger = new RecordingLogger();
+    const stop = logger.start();
+    const outs: Array<{ ok: boolean }> = [];
+    try {
+      outs.push(await inline.run(job({}, { process: 'sheet_metal' }), inputOf(dxf, 'part.dxf'), AbortSignal.timeout(5000)));
+      outs.push(await inline.run(job({}, { process: 'cnc' }), inputOf(bytes('cube-10x20x30.stl'), 'cube.stl'), AbortSignal.timeout(5000)));
+      outs.push(await inline.run(job({}, { process: 'cnc' }), inputOf(bytes('block-cnc.step'), 'block.step'), AbortSignal.timeout(5000)));
+      const { fetcher } = unfoldFetcher(() => new Response(dxf, { status: 200, headers: { 'content-type': 'application/dxf', 'X-Part-Thickness': '2' } }));
+      outs.push(await backend(fetcher).run(job(), inputOf(bytes('bracket-sheet.step'), 'b.step'), AbortSignal.timeout(5000)));
+    } finally {
+      stop();
+    }
+    expect(outs.map((o) => o.ok)).toEqual([true, true, true, true]);
+    expect(logger.lines).toEqual([]);
+    assertNoSecretsLogged(logger.lines, [layer]);
+  });
+
+  it('quietly() restores the console after the call, also when it throws', () => {
+    const before = [console.log, console.info, console.debug, console.warn, console.error];
+    let inside: unknown[] = [];
+    expect(
+      quietly(() => {
+        inside = [console.log, console.info, console.debug, console.warn, console.error];
+        return 7;
+      }),
+    ).toBe(7);
+    expect(inside.slice(0, 4).every((f, i) => f !== before[i])).toBe(true);
+    expect(inside[4]).toBe(console.error);
+    expect(() =>
+      quietly(() => {
+        throw new Error('parse failed');
+      }),
+    ).toThrow('parse failed');
+    expect([console.log, console.info, console.debug, console.warn, console.error]).toEqual(before);
+  });
+
   it('a corrupt file is invalid_input (not retried)', async () => {
     const out = await inline.run(job({}, { process: 'cnc' }), inputOf(new TextEncoder().encode('0\nSECTION\n2\nENTITIES\n0\nENDSEC\n'), 'empty.dxf'), AbortSignal.timeout(5000));
     expect(out).toMatchObject({ ok: false, code: 'invalid_input', retryable: false });
@@ -337,6 +379,29 @@ describe('registry', () => {
     expect(r.candidates(job(), 'step')).toEqual([]);
     expect(r.candidates(job(), 'dxf')).toEqual(['inline']);
     expect(missingCadConfig({})).toEqual(['CAD_UNFOLD_URL', 'CAD_SHARED_SECRET']);
+  });
+
+  it('the vps backend is built only for an https: unfold URL; http: only in generated test configs (AGENT_STUBS)', async () => {
+    const { fetcher, captured } = unfoldFetcher(() => Response.json({ status: 'healthy' }));
+    const plain = { CAD_UNFOLD_URL: 'http://cad.example.test', CAD_SHARED_SECRET: 't1-cad-key' } as OpsEnv;
+    const r = makeCadRegistry(plain, { fetcher });
+    expect(r.get('vps')).toBeUndefined();
+    expect(r.candidates(job(), 'step')).toEqual([]);
+    expect(r.candidates(job(), 'dxf')).toEqual(['inline']);
+    expect(missingCadConfig(plain)).toEqual([]);
+    expect(invalidCadConfig(plain)).toEqual(['CAD_UNFOLD_URL']);
+    for (const value of ['ftp://cad.example.test', 'cad.example.test', 'not a url']) expect(invalidCadConfig({ CAD_UNFOLD_URL: value }), value).toEqual(['CAD_UNFOLD_URL']);
+    expect(invalidCadConfig(configured)).toEqual([]);
+    expect(invalidCadConfig({})).toEqual([]);
+    expect(captured).toEqual([]);
+
+    // the generated T2 config points the URL at the local http stub
+    const stubbed = { CAD_UNFOLD_URL: 'http://127.0.0.1:8790', CAD_SHARED_SECRET: 't1-cad-key', AGENT_STUBS: 'llm,embed,vector,browser' } as OpsEnv;
+    expect(invalidCadConfig(stubbed)).toEqual([]);
+    const vps = makeCadRegistry(stubbed, { fetcher }).get('vps');
+    expect(vps).toBeInstanceOf(HttpUnfoldBackend);
+    expect(await vps?.health(AbortSignal.timeout(5000))).toBe(true);
+    expect(captured.map((c) => c.url)).toEqual(['http://127.0.0.1:8790/api/v1/health']);
   });
 
   it('the container slot supports nothing until Phase 5', async () => {

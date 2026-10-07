@@ -14,7 +14,8 @@
 //              objects are referenced, not copied).
 //   4 Input    R2 head of the input: missing -> failed 'invalid_input'; above 50 MB -> failed 'too_large'; an input
 //              above its inline cap is never parsed (failed 'too_large: inline_too_large' when inline was the only
-//              backend for it).
+//              backend for it); a STEP sheet-metal analysis without a usable unfold backend fails 'config_missing'
+//              or 'config_invalid' with the names of the values concerned (cad/registry.ts).
 //   5 Lease    CadRouter.acquire; while no slot is free the consumer waits up to LEASE_WAIT_MS in this invocation,
 //              then retries the message with the router's delay (the last delivery fails 'unavailable' instead).
 //   6 Claim    conditional update queued -> dispatched (attempts + 1, backend), then running.
@@ -39,7 +40,7 @@
 import { formatLogLine } from '../../../shared/src/http/log';
 import { EMPTY_USAGE, closeRun, openRun } from '../agents/runs';
 import { isBackendDown } from '../cad/backends/http-unfold';
-import { missingCadConfig } from '../cad/registry';
+import { invalidCadConfig, missingCadConfig } from '../cad/registry';
 import { cadRouter, notifyCadJobFinal, type CadRouterClient } from '../cad/router-client';
 import {
   INLINE_CAPS,
@@ -231,8 +232,11 @@ class Job {
       if (candidates.length === 0) return this.failFinal(row, job, 'too_large', INLINE_TOO_LARGE, null);
     }
     if (candidates.length === 0) {
-      const missing = kind === 'step' && job.job_type === 'analyse' && ['sheet_metal', 'mixed'].includes(job.params.process) ? missingCadConfig(this.env) : [];
+      const needsVps = kind === 'step' && job.job_type === 'analyse' && ['sheet_metal', 'mixed'].includes(job.params.process);
+      const missing = needsVps ? missingCadConfig(this.env) : [];
       if (missing.length > 0) return this.failFinal(row, job, 'config_missing', missing.join(', '), null);
+      const invalid = needsVps ? invalidCadConfig(this.env) : [];
+      if (invalid.length > 0) return this.failFinal(row, job, 'config_invalid', invalid.join(', '), null);
       return this.failFinal(row, job, 'unsupported', `${job.job_type} of ${kind} (${job.params.process})`, null);
     }
 

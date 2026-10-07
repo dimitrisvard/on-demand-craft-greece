@@ -50,3 +50,19 @@ Log line, one per mail: `[microns-mail] mail <mailbox> <first 16 hex of the sha>
 2. Set `SUPABASE_SERVICE_ROLE_KEY`, and `MAIL_COPY_TO` / `MAIL_FALLBACK_TO` once their addresses are verified destinations.
 3. Email Routing on `rfq.micronshub.eu`: literal rules `rfq@` and `replies@` → Worker `microns-mail`; send one test mail; the stored `Authentication-Results` then gives the authserv-id to pin.
 4. R2 lifecycle rule on `microns-private`, prefix `email/`: delete after 90 days.
+
+The full owner order of Phase 4 (OW-1…OW-26) is summarised in docs/migration/PLAN.md §5.4, "Owner steps".
+
+## Status (2026-10-07, local)
+
+Nothing is deployed. Phase 4 exit gate as a whole: docs/migration/PLAN.md §5.4, build record.
+
+| Check | Result |
+|---|---|
+| Typecheck (`npm run typecheck`) | exit 0 |
+| T1 (`npm test`) | 25 tests green |
+| Dry run (`npm run build:dry`) | 17.15 KiB (gzip 5.63 KiB), 8 inputs; no `postal-mime`, no `@anthropic-ai/sdk` |
+| T2 (`npm --prefix workers/ops run test:integration:agents`) | `mail.t2` green inside the 11-file run: flag off keeps the row `received`, headers stored as given, one intake instance per message, `replies@` queued, unknown recipient rejected, no address or subject in the log, shadow copy forwarded |
+| `cf-mail.yml` | The only trigger is `workflow_dispatch` |
+
+Design record: docs/migration/PLAN.md §5.4 (DC-2: named entrypoint `MailIngest`; DF-23: this Worker writes the `inbound_emails` row; DF-47: shadow copy during `shadow` mode) and ARCHITECTURE.md §7.3.

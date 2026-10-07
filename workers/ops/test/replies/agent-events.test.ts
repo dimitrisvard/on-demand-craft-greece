@@ -1,13 +1,19 @@
 // RP-1 / R-1: the agent-events consumer: inbound replies through attribution rules 1-5 (attach, notice, "Which
-// RFQ?" card and its decisions through decide(), new RFQ, ignore), flag off, redelivery, the last-attempt failure,
-// order-created, resume-parked, notice cards; no token or address in any log line or run output.
+// RFQ?" card and its decisions through decide(), new RFQ, ignore), the sender check (rules 1-3 attach without a
+// human only for an authenticated sender, rule 3 also only from the RFQ contact's domain; otherwise a confirmation
+// card), flag off, redelivery, the last-attempt failures (reply and reply_pick decision), the reply run key,
+// order-created, resume-parked (not-found vs other Workflows errors), notice cards; no token or address in any log
+// line or run output.
 
 import { describe, expect, it } from 'vitest';
 import { decide } from '../../src/agents/decision';
-import { agentEventsConsumer, MAX_ATTEMPTS } from '../../src/queues/agent-events';
+import { readFlag } from '../../src/agents/flags';
+import { applyDailyCap, openRun } from '../../src/agents/runs';
+import { agentEventsConsumer, isInstanceNotFound, MAX_ATTEMPTS } from '../../src/queues/agent-events';
+import { attachWithoutConfirmation, senderCheck } from '../../src/replies/inbound';
 import type { AgentEventV1 } from '../../src/queues/messages';
 import { assertNoSecretsLogged, RecordingLogger } from '../helpers/recorders';
-import { batch, ctx, CUSTOMER, harness, message, OUT_A, QW_A, QW_B, RFQ_A, RFQ_B, replyMime, seedQuotes, STAFF_ACTOR, storeReply, TENANT, type Harness } from './helpers';
+import { authResults, batch, ctx, CUSTOMER, harness, message, OUT_A, QW_A, QW_B, RFQ_A, RFQ_B, replyMime, seedQuotes, STAFF_ACTOR, storeReply, TENANT, type Harness } from './helpers';
 
 async function deliver(h: Harness, body: AgentEventV1, attempts = 1) {
   const m = message(body, attempts);
@@ -48,7 +54,7 @@ describe('inbound-reply', () => {
     expect(h.bucket.objects.has(String(files[0].r2_key))).toBe(true);
     expect(h.threadCalls).toEqual([{ name: RFQ_A, method: 'appendInbound', args: [id, '<r1@example.de>'] }]);
     const [run] = runs(h);
-    expect(run).toMatchObject({ agent: 'quote', trigger: 'queue', idempotency_key: `quote:inbound-reply:${id}`, status: 'succeeded', subject_type: 'inbound_email', subject_id: id });
+    expect(run).toMatchObject({ agent: 'quote.reply_poller', trigger: 'queue', idempotency_key: `inbound-reply:${id}`, status: 'succeeded', subject_type: 'inbound_email', subject_id: id });
     expect(run.output).toMatchObject({ rule: 1, rfq_id: RFQ_A, quote_workflow_id: QW_A, attachments: 1, files: 1 });
   });
 
@@ -200,6 +206,148 @@ describe('inbound-reply', () => {
   });
 });
 
+describe('sender check of rules 1-3', () => {
+  it('senderCheck / attachWithoutConfirmation', () => {
+    const pass = { auth_results: authResults('example.de') as never, from_email: 'erika.beispiel@example.de' };
+    expect(senderCheck(pass, CUSTOMER)).toEqual({ authenticated: true, same_domain: true });
+    expect(senderCheck(pass, 'someone@example.com')).toEqual({ authenticated: true, same_domain: false });
+    expect(senderCheck(pass, null)).toEqual({ authenticated: true, same_domain: null });
+    // the trusted instance authenticated another domain than the From header
+    expect(senderCheck({ auth_results: authResults('example.com') as never, from_email: 'x@example.de' }, CUSTOMER).authenticated).toBe(false);
+    expect(senderCheck({ auth_results: authResults('example.de', 'fail') as never, from_email: 'x@example.de' }, CUSTOMER).authenticated).toBe(false);
+    expect(senderCheck({ auth_results: authResults('example.de', 'pass', false) as never, from_email: 'x@example.de' }, CUSTOMER).authenticated).toBe(false);
+    expect(senderCheck({ auth_results: null, from_email: 'x@example.de' }, CUSTOMER).authenticated).toBe(false);
+    expect(attachWithoutConfirmation(1, { authenticated: true, same_domain: false })).toBe(true);
+    expect(attachWithoutConfirmation(3, { authenticated: true, same_domain: false })).toBe(false);
+    expect(attachWithoutConfirmation(3, { authenticated: true, same_domain: null })).toBe(false);
+    expect(attachWithoutConfirmation(3, { authenticated: true, same_domain: true })).toBe(true);
+    expect(attachWithoutConfirmation(2, { authenticated: false, same_domain: true })).toBe(false);
+  });
+
+  it('rule 1 from a sender without an authenticated From domain: confirmation card (dmarc_fail), nothing copied or forwarded until attach_1', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const { id } = await storeReply(h, { n: 11, messageId: '<u1@example.de>', inReplyTo: OUT_A, auth: authResults('example.de', 'fail'), mime: replyMime({ messageId: '<u1@example.de>', inReplyTo: OUT_A, step: true }) });
+    await deliver(h, inbound(id));
+    expect(row(h, id)).toMatchObject({ status: 'needs_review', kind: 'reply' });
+    expect(h.ports.db.rows('rfq_files')).toHaveLength(0);
+    expect(h.threadCalls).toEqual([]);
+    const [run] = runs(h);
+    expect(run).toMatchObject({ agent: 'quote.reply_poller', status: 'waiting_human' });
+    expect(run.output).toMatchObject({ card_kind: 'reply_pick', rule: 1, allowed_verbs: ['attach_1', 'new_rfq', 'ignore'], candidates: [{ rfq_id: RFQ_A, quote_workflow_id: QW_A }] });
+    const card = h.ports.telegram.cards[0].card;
+    expect(card).toMatchObject({ kind: 'reply_pick', flags: ['dmarc_fail'] });
+    expect(card.title).toContain('Confirm reply · RFQ-01102026-1');
+    expect(card.lines).toContainEqual({ label: 'Sender check', value: 'not authenticated' });
+    // a human confirms: now the files are copied and the reply forwarded
+    const decided = await decide(h.env, h.ports, { channel: 'dashboard', actor: STAFF_ACTOR, run_id: run.id as string, token_sha256: run.approval_token_sha256 as string, verb: 'attach_1' });
+    expect(decided.ok).toBe(true);
+    await deliver(h, h.events.sent.at(-1)?.body as AgentEventV1);
+    expect(row(h, id)).toMatchObject({ status: 'matched', rfq_id: RFQ_A, quote_workflow_id: QW_A });
+    expect(h.ports.db.rows('rfq_files')).toHaveLength(1);
+    expect(h.threadCalls).toEqual([{ name: RFQ_A, method: 'appendInbound', args: [id, '<u1@example.de>'] }]);
+  });
+
+  it('rule 3 from an unauthenticated stranger naming an RFQ number: card with dmarc_fail, no file in that RFQ, nothing forwarded', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const subject = 'RFQ-02102026-2 updated drawing';
+    const from = 'someone@unknown.example.com';
+    const { id } = await storeReply(h, { n: 12, messageId: '<x12@unknown.example.com>', subject, from, auth: authResults('unknown.example.com', 'fail'), mime: replyMime({ messageId: '<x12@unknown.example.com>', subject, from, step: true }) });
+    await deliver(h, inbound(id));
+    expect(row(h, id)).toMatchObject({ status: 'needs_review', rfq_id: null });
+    expect(h.ports.db.rows('rfq_files')).toHaveLength(0);
+    expect(h.threadCalls).toEqual([]);
+    const card = h.ports.telegram.cards[0].card;
+    expect(card).toMatchObject({ kind: 'reply_pick', flags: ['dmarc_fail', 'low_confidence'] });
+    expect(runs(h)[0].output).toMatchObject({ rule: 3, candidates: [{ rfq_id: RFQ_B, quote_workflow_id: QW_B }] });
+    expect(JSON.stringify(card)).not.toContain(from);
+  });
+
+  it('rule 3 from an authenticated sender of another domain than the RFQ contact: card (low_confidence), not attached', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const from = 'buyer@example.com';
+    const { id } = await storeReply(h, { n: 13, messageId: '<x13@example.com>', subject: 'AW: RFQ-02102026-2', from, mime: replyMime({ messageId: '<x13@example.com>', subject: 'AW: RFQ-02102026-2', from }) });
+    await deliver(h, inbound(id));
+    expect(row(h, id).status).toBe('needs_review');
+    expect(h.threadCalls).toEqual([]);
+    const card = h.ports.telegram.cards[0].card;
+    expect(card.flags).toEqual(['low_confidence']);
+    expect(card.lines).toContainEqual({ label: 'Sender check', value: 'authenticated, domain differs from the RFQ contact' });
+  });
+
+  it('a Gmail copy of a rule 1 reply (no authentication record): confirmation card without new_rfq', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const { id } = await storeReply(h, { n: 14, mailbox: 'gmail', auth: null, messageId: '<g14@example.de>', inReplyTo: OUT_A, mime: replyMime({ messageId: '<g14@example.de>', inReplyTo: OUT_A }) });
+    await deliver(h, inbound(id));
+    expect(row(h, id).status).toBe('needs_review');
+    expect(h.threadCalls).toEqual([]);
+    expect(runs(h)[0].output).toMatchObject({ card_kind: 'reply_pick', allowed_verbs: ['attach_1', 'ignore'] });
+    expect(h.ports.telegram.cards[0].card.flags).toEqual(['dmarc_fail']);
+  });
+
+  it('rule 4 card of an unauthenticated sender carries dmarc_fail next to low_confidence', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const { id } = await storeReply(h, { n: 15, auth: null, messageId: '<r15@example.de>', subject: 'Frage', mime: replyMime({ messageId: '<r15@example.de>', subject: 'Frage' }) });
+    await deliver(h, inbound(id));
+    expect(h.ports.telegram.cards[0].card).toMatchObject({ kind: 'reply_pick', flags: ['dmarc_fail', 'low_confidence'] });
+  });
+});
+
+describe('reply runs and the quote agent', () => {
+  it('reply runs carry the reply key: the quote agent\'s daily count holds quote runs only', async () => {
+    const h = harness({ flags: { 'agent.quote': { enabled: true, value: { mode: 'assist', max_runs_per_day: 2 } }, 'agent.rfq_intake': { enabled: true, value: { mode: 'shadow' } } } });
+    seedQuotes(h);
+    for (const n of [21, 22, 23]) {
+      const { id } = await storeReply(h, { n, messageId: `<s${n}@example.net>`, from: `s${n}@example.net`, subject: 'Hello', mime: replyMime({ messageId: `<s${n}@example.net>`, from: `s${n}@example.net`, subject: 'Hello' }) });
+      await deliver(h, inbound(id));
+    }
+    expect(runs(h).map((r) => [r.agent, String(r.idempotency_key).split(':')[0]])).toEqual([['quote.reply_poller', 'inbound-reply'], ['quote.reply_poller', 'inbound-reply'], ['quote.reply_poller', 'inbound-reply']]);
+    const quoteRun = await openRun(h.ports.db, { agent: 'quote', trigger: 'workflow', idempotency_key: `${RFQ_A}:v2`, workflow_name: 'quote', workflow_instance_id: `quote-${RFQ_A}-v2`, tenant_id: TENANT });
+    expect(await applyDailyCap(h.env, h.ports, { run_id: quoteRun.run_id, agent: 'quote', flag: await readFlag(h.env, 'agent.quote', TENANT) })).toBe(false);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', quoteRun.run_id])[0].status).toBe('running');
+  });
+});
+
+describe('redelivery and last attempts of cards', () => {
+  it('a redelivered inbound-reply whose run waits on its card posts no second card and keeps the stored token hash', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const { id } = await storeReply(h, { n: 31, messageId: '<r31@example.de>', subject: 'Frage', mime: replyMime({ messageId: '<r31@example.de>', subject: 'Frage' }) });
+    await deliver(h, inbound(id));
+    const before = runs(h)[0];
+    expect(before.status).toBe('waiting_human');
+    const m = await deliver(h, inbound(id), 2);
+    expect(m.acked).toBe(true);
+    expect(h.ports.telegram.cards).toHaveLength(1);
+    expect(runs(h)).toHaveLength(1);
+    expect(runs(h)[0]).toMatchObject({ status: 'waiting_human', approval_token_sha256: before.approval_token_sha256 });
+  });
+
+  it('a reply_pick decision whose attach fails on every attempt: retried, then the last attempt closes the run failed and the row failed', async () => {
+    const h = harness();
+    seedQuotes(h);
+    const { id } = await storeReply(h, { n: 32, messageId: '<r32@example.de>', subject: 'Frage', mime: replyMime({ messageId: '<r32@example.de>', subject: 'Frage' }) });
+    await deliver(h, inbound(id));
+    const [run] = runs(h);
+    const decided = await decide(h.env, h.ports, { channel: 'dashboard', actor: STAFF_ACTOR, run_id: run.id as string, token_sha256: run.approval_token_sha256 as string, verb: 'attach_1' });
+    expect(decided.ok).toBe(true);
+    const decision = h.events.sent.at(-1)?.body as AgentEventV1;
+    (h.env.RFQ_THREAD as unknown as { get: (x: unknown) => unknown }).get = () => ({ appendInbound: async () => { throw new Error('instance cannot take events'); } });
+    const early = await deliver(h, decision, 1);
+    expect(early.retried).toBe(true);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', run.id as string])[0].status).toBe('running');
+    const last = await deliver(h, decision, MAX_ATTEMPTS);
+    expect(last.acked).toBe(true);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', run.id as string])[0]).toMatchObject({ status: 'failed', error: 'reply_pick_failed', approval_token_sha256: null });
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', run.id as string])[0].finished_at).toBeTruthy();
+    expect(row(h, id)).toMatchObject({ status: 'failed', error: 'reply_pick_failed' });
+  });
+});
+
 describe('order-created', () => {
   const ORDER = '4a000000-0000-4000-8000-00000000000a';
   it('agent.post_order on: post-order-<order_id> created once ("already exists" is success)', async () => {
@@ -248,6 +396,30 @@ describe('resume-parked and card', () => {
     expect(h.ports.db.rows('agent_runs', ['id', 'eq', ended.id as string])[0]).toMatchObject({ status: 'cancelled', error: 'instance_ended' });
     expect(h.ports.db.rows('agent_runs', ['id', 'eq', failedCard.id as string])[0]).toMatchObject({ status: 'waiting_human', parked_reason: 'failed' });
     expect(instance.calls).toEqual([]);
+  });
+
+  it('a Workflows error other than "not found" is retried and the run stays parked; only "not found" closes it', async () => {
+    expect(isInstanceNotFound(new Error('(instance.not_found) Instance does not exist'))).toBe(true);
+    expect(isInstanceNotFound(new Error('instance.not_found'))).toBe(true);
+    expect(isInstanceNotFound(new Error('internal error; reference = 0123'))).toBe(false);
+    const h = harness();
+    const instance = h.quote.ensure(`quote-${RFQ_A}-v1`);
+    const run = parkedRun(h, { instance: `quote-${RFQ_A}-v1` });
+    const realGet = h.quote.get.bind(h.quote);
+    (h.quote as unknown as { get: (id: string) => Promise<unknown> }).get = async () => {
+      throw new Error('internal error; reference = 0123');
+    };
+    const m = await deliver(h, { v: 1, type: 'resume-parked', run_id: run.id as string });
+    expect(m.retried).toBe(true);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', run.id as string])[0]).toMatchObject({ status: 'waiting_human', parked_reason: 'flag_off' });
+    // the retry reaches the instance
+    (h.quote as unknown as { get: (id: string) => Promise<unknown> }).get = realGet;
+    expect((await deliver(h, { v: 1, type: 'resume-parked', run_id: run.id as string }, 2)).acked).toBe(true);
+    expect(instance.calls).toEqual([{ method: 'sendEvent', args: { type: 'agent-resumed', payload: { run_id: run.id } } }]);
+    // an instance the runtime does not know: closed cancelled
+    const gone = parkedRun(h, { instance: `quote-${RFQ_B}-v9` });
+    expect((await deliver(h, { v: 1, type: 'resume-parked', run_id: gone.id as string })).acked).toBe(true);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', gone.id as string])[0]).toMatchObject({ status: 'cancelled', error: 'instance_ended' });
   });
 
   it('card: sent to Telegram without a token; a Bot API error is retried', async () => {

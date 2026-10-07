@@ -11,7 +11,7 @@ import { needsClientRendering, scanDirectory, scanDirectoryPage, UNKNOWN_SOURCE_
 import { buildPageUrl, directoryPageBody, extractSearchMeta } from '../../src/scrapers/parsers/directory';
 import type { BrowserPort } from '../../src/ports/index';
 import { MemoryDb } from '../helpers/memory-db';
-import { UA, page, routedFetch, savedRobots, testDeps } from './helpers';
+import { UA, page, routedFetch, savedRobots, testDeps, type TestDeps } from './helpers';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -200,6 +200,65 @@ describe('module rules', () => {
     expect(await scanDirectoryPage(deps, { url, source: 'wlw' })).toMatchObject({ status: 429, body: { error: 'host_blocked' }, paused: 'www.wlw.de' });
     expect(deps.pauses.remaining('www.wlw.de', deps.now())).toBe(HOST_PAUSE_MS);
   });
+
+  it('a rendered page that is a challenge (status 200) pauses the host: nothing parsed, no second fetch or render', async () => {
+    const renders: string[] = [];
+    const browser: BrowserPort = { render: async (u) => { renders.push(u); return { status: 200, html: page('challenge.html').replace('</body>', '<a href="/en/company/hidden-firm-1">x</a></body>') }; } };
+    const shell = routedFetch({ [url]: { body: page('spa-shell.html') } });
+    const deps = testDeps(shell.fetch, { permitted: new Map([['www.wlw.de', 'p']]), browser });
+    const scan = await scanDirectoryPage(deps, { url, source: 'wlw' }, new BrowserBudget());
+    expect(scan).toEqual(expect.objectContaining({ ok: false, status: 403, body: { error: 'host_blocked', retryAfter: 86400 }, paused: 'www.wlw.de' }));
+    expect(deps.pauses.remaining('www.wlw.de', deps.now())).toBe(HOST_PAUSE_MS);
+    const again = await scanDirectoryPage(deps, { url, source: 'wlw' }, new BrowserBudget());
+    expect(again).toMatchObject({ ok: false, status: 429, body: { error: 'host_blocked' } });
+    expect(shell.requests).toHaveLength(1);
+    expect(renders).toEqual([url]);
+  });
+
+  it('every redirect target passes the robots gate before it is requested', async () => {
+    const robots = { body: 'User-agent: MicronsHubBot\nAllow: /de/suche/\nDisallow: /de/firma/\n', headers: { 'content-type': 'text/plain' } };
+    const refused = routedFetch({
+      'https://www.wlw.de/robots.txt': robots,
+      [url]: { status: 301, headers: { location: '/de/firma/example-gmbh' } },
+      'https://www.wlw.de/de/firma/example-gmbh': { body: page('wlw-search-links.html') },
+    });
+    const deps = testDeps(refused.fetch);
+    expect(await scanDirectoryPage(deps, { url, source: 'wlw' })).toMatchObject({ ok: false, status: 403, body: { error: 'robots_disallowed' }, robots: { allowed: false, reason: 'robots_disallow' } });
+    expect(refused.requests.map((r) => r.url)).toEqual(['https://www.wlw.de/robots.txt', url]);
+    expect(deps.logs).toContainEqual({ event: 'robots', fields: { host: 'www.wlw.de', allowed: false, reason: 'robots_disallow', redirect: true } });
+    // In a multi-page scan the refusal stops the scan as a robots refusal.
+    const multi = await scanDirectory(testDeps(refused.fetch), { url, source: 'wlw', maxPages: 3 });
+    expect(multi).toMatchObject({ pages: 0, stopped: 'robots', errors: ['Page 1: robots_disallowed'] });
+
+    // An allowed target is followed.
+    const allowed = routedFetch({
+      'https://www.wlw.de/robots.txt': robots,
+      [url]: { status: 302, headers: { location: '/de/suche/cnc-fraesen' } },
+      'https://www.wlw.de/de/suche/cnc-fraesen': { body: page('wlw-search-links.html') },
+    });
+    const followed = await scanDirectoryPage(testDeps(allowed.fetch), { url, source: 'wlw' });
+    expect(followed.ok).toBe(true);
+    expect(allowed.requests.map((r) => r.url)).toEqual(['https://www.wlw.de/robots.txt', url, 'https://www.wlw.de/de/suche/cnc-fraesen']);
+  });
+
+  it('with a deadline, the page is rendered only when the render timeout still fits before it', async () => {
+    const renders: string[] = [];
+    const browser: BrowserPort = { render: async (u) => { renders.push(u); return { status: 200, html: page('spa-rendered.html') }; } };
+    let deps: TestDeps;
+    const shell = routedFetch({ [url]: { body: page('spa-shell.html') } });
+    const slow = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      await deps.sleep(16_000);
+      return shell.fetch(input, init);
+    }) as typeof fetch;
+    deps = testDeps(slow, { permitted: new Map([['www.wlw.de', 'p']]), browser });
+    const start = deps.now();
+    const late = await scanDirectoryPage(deps, { url, source: 'wlw', deadline: start + 35_000 });
+    expect(late).toMatchObject({ ok: true, rendered: false, body: { companies: [] } });
+    expect(renders).toEqual([]);
+    const fits = await scanDirectoryPage(deps, { url, source: 'wlw', deadline: deps.now() + 36_000 });
+    expect(fits).toMatchObject({ ok: true, rendered: true });
+    expect(renders).toEqual([url]);
+  });
 });
 
 describe('multi-page scans', () => {
@@ -251,5 +310,27 @@ describe('multi-page scans', () => {
 
     const empty = routedFetch({ 'https://www.wlw.de/robots.txt': { body: '' }, 'https://www.wlw.de/de/suche/cnc': { body: '<html></html>' } });
     expect(await scanDirectory(testDeps(empty.fetch), { url: 'https://www.wlw.de/de/suche/cnc', source: 'wlw', maxPages: 3 })).toMatchObject({ pages: 1, stopped: 'empty', companies: [] });
+  });
+
+  it('with a deadline, a page starts only while its robots and page timeouts (20 s) still fit before it', async () => {
+    const search = 'https://www.wlw.de/de/suche/cnc';
+    const pages = routedFetch(Object.fromEntries(Array.from({ length: 3 }, (_, i) => [
+      buildPageUrl(search, i + 1, 'wlw'),
+      { body: page('wlw-search-links.html').replace('</body>', `<a href="/de/suche/cnc/page/${i + 2}">next</a></body>`) },
+    ])));
+    let deps: TestDeps;
+    const tenSeconds = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      await deps.sleep(10_000);
+      return pages.fetch(input, init);
+    }) as typeof fetch;
+    deps = testDeps(tenSeconds, { permitted: new Map([['www.wlw.de', 'p']]) });
+    const start = deps.now();
+    // Page 1 at 0 s, page 2 at 14 s (10 s fetch + 4 s wlw delay); page 3 would start at 28 s, past 35 - 20 s.
+    const result = await scanDirectory(deps, { url: search, source: 'wlw', maxPages: 3, deadline: start + 35_000 });
+    expect(result).toMatchObject({ pages: 2, stopped: 'deadline', errors: [] });
+    expect(pages.requests.map((r) => r.url)).toEqual([search, buildPageUrl(search, 2, 'wlw')]);
+    // Without a deadline the same scan reads all three pages.
+    pages.requests.length = 0;
+    expect(await scanDirectory(deps, { url: search, source: 'wlw', maxPages: 3 })).toMatchObject({ pages: 3, stopped: 'limit' });
   });
 });

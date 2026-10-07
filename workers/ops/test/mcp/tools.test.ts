@@ -79,6 +79,22 @@ describe('new read tools', () => {
     await client.close();
   });
 
+  it('get_rfq lists the linked inbound e-mails with masked sender addresses', async () => {
+    const RFQ = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
+    const h = await mcpHarness({
+      sbRoute: ({ table }) => {
+        if (table === 'rfqs') return { body: { id: RFQ, rfq_number: 'RFQ-1', status: 'pending', parts_details: [] } };
+        if (table === 'inbound_emails') return { body: [{ id: 'e1', subject: 'Brackets', status: 'rfq_created', received_at: '2026-10-05T08:00:00Z', from_email: 'buyer.name@example.de' }] };
+        return undefined;
+      },
+    });
+    const client = await connectV1(h, await h.token());
+    const text = textOf(await client.callTool({ name: 'get_rfq', arguments: { rfq_id: RFQ } }));
+    expect(text).toContain('2026-10-05T08:00:00Z rfq_created | b***@example.de | Brackets');
+    expect(text).not.toContain('buyer.name@example.de');
+    await client.close();
+  });
+
   it('mcp_status answers the disabled text', async () => {
     const h = await mcpHarness({ flag: null });
     const client = await connectV1(h, await h.token());
@@ -180,11 +196,14 @@ describe('queued and in-process work', () => {
     const queued = textOf(await client.callTool({ name: 'scan_directory', arguments: { url: 'https://www.europages.de/companies/germany/cnc.html', maxPages: 25 } }));
     expect(queued).toContain('up to 10 pages');
     expect(q.sent()[0]).toMatchObject({ kind: 'directory-scan', params: { max_pages: 10, source: 'europages' } });
-    // In-call scan: the harness scraper answers 404 for robots.txt (no robots.txt -> allowed) and 404 for the page.
+    // In-call scan: the harness scraper answers 404 for robots.txt (no robots.txt -> allowed) and 404 for the page:
+    // no page read, so the run closes failed (pages_failed) and the answer is an error.
     const sync = await client.callTool({ name: 'scan_directory', arguments: { url: 'https://www.europages.de/companies/germany/laser.html', maxPages: 2 } });
     expect(textOf(sync)).toContain('Pages scanned: 0 of up to 2');
+    expect(sync.isError).toBe(true);
     const runs = h.ports.db.rows('agent_runs').filter((r) => r.agent === 'growth.scrapers');
-    expect(runs.map((r) => r.status).sort()).toEqual(['running', 'succeeded']);
+    expect(runs.map((r) => r.status).sort()).toEqual(['failed', 'running']);
+    expect(runs.find((r) => r.status === 'failed')).toMatchObject({ error: 'pages_failed', output: { pages: 0, errors: 2 } });
     expect(h.ports.db.rows('scan_logs')).toHaveLength(1);
     await client.close();
   });

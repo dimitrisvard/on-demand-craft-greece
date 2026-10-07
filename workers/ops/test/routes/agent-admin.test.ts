@@ -6,7 +6,9 @@
 //           when KV fails or is not bound, 413 / 400 bodies
 //   start   quote: flag off 409, RFQ missing 404, active quote 409, version increment, "already exists" created
 //           false, QUOTE missing 500; rfq_intake: flag off, mailbox, status and waiting-run rules, create, running
-//           instance left alone, ended instance restarted after its final run row is reopened; test_card: ADMIN
+//           instance left alone, ended instance restarted after its final run row is reopened, a final run reopened
+//           before create() too (instance past retention), a failed create/restart or a live instance gives the
+//           run back its previous columns (only while it still carries this request's rerun); test_card: ADMIN
 //           only, one waiting 'test' run with the verb 'dismiss' sent to Telegram
 //   file    key regex table, encoded separators and dot segments refused, headers per type, 404, 500 without R2
 // Plus the CHECK-LISTS rule: the status lists the handlers use equal the migration's lists.
@@ -360,7 +362,7 @@ function seedInbound(ports: AgentTestPorts, o: { status?: InboundStatus; mailbox
   ]);
 }
 
-function seedIntakeRun(ports: AgentTestPorts, status: RunStatus): string {
+function seedIntakeRun(ports: AgentTestPorts, status: RunStatus, extra: Record<string, unknown> = {}): string {
   const id = '5e6f7081-92a3-4b4c-8d5e-6f708192a3b4';
   ports.db.seed('agent_runs', [
     {
@@ -372,9 +374,17 @@ function seedIntakeRun(ports: AgentTestPorts, status: RunStatus): string {
       finished_at: status === 'running' || status === 'waiting_human' ? null : '2026-10-05T08:05:00Z',
       error: status === 'failed' ? 'extract_failed' : null,
       approval_token_sha256: status === 'waiting_human' ? 'cd'.repeat(32) : null,
+      ...extra,
     },
   ]);
   return id;
+}
+
+/** The columns a rerun changes and a failed start must give back. */
+const RERUN_COLUMNS = ['status', 'finished_at', 'error', 'parked_reason', 'human_action', 'approval_token_sha256'] as const;
+
+function rerunView(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(RERUN_COLUMNS.map((k) => [k, row[k] ?? null]));
 }
 
 describe('start rfq_intake', () => {
@@ -451,6 +461,104 @@ describe('start rfq_intake', () => {
       expect(run, ended).toMatchObject({ status: 'running', finished_at: null, error: null, parked_reason: null, approval_token_sha256: null });
       expect(run.human_action, ended).toEqual({ channel: 'dashboard', actor: `user:${STAFF.uid}`, verb: 'rerun', decided_at: s.ports.clock.now().toISOString() });
     }
+  });
+
+  it('a final run whose instance no longer exists (past retention) -> the run is reopened before create(); created true', async () => {
+    for (const status of ['skipped', 'failed', 'cancelled'] as const) {
+      const s = setup();
+      kvFlag(s, 'agent.rfq_intake', true);
+      seedInbound(s.ports, { status: 'needs_review' });
+      const runId = seedIntakeRun(s.ports, status, status === 'skipped' ? { error: 'daily_cap' } : {});
+      // The run status the new instance's open-run step would read when create() starts it.
+      const seenAtCreate: unknown[] = [];
+      const create = s.intake.create.bind(s.intake);
+      s.intake.create = async (o) => {
+        seenAtCreate.push(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0].status);
+        return create(o);
+      };
+      const res = await app(s.ports, STAFF, 'start').request('https://x/api/agent/start', post(body), s.env);
+      expect([res.status, await res.json()], status).toEqual([200, { v: 1, ok: true, instance_id: instanceId, created: true }]);
+      expect(seenAtCreate, status).toEqual(['running']);
+      expect(s.intake.created, status).toEqual([{ id: instanceId, params: { v: 1, inbound_email_id: INBOUND, message_id_sha256: SHA, tenant_id: DEFAULT_TENANT } }]);
+      const run = s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0];
+      expect(run, status).toMatchObject({ status: 'running', finished_at: null, error: null, parked_reason: null });
+      expect(run.human_action, status).toEqual({ channel: 'dashboard', actor: `user:${STAFF.uid}`, verb: 'rerun', decided_at: s.ports.clock.now().toISOString() });
+    }
+  });
+
+  const EARLIER_ACTION = { channel: 'telegram', actor: 'telegram:4242', verb: 'not_rfq', decided_at: '2026-10-05T08:04:00Z' };
+
+  it('restart() fails -> 500 and the run is final again with its previous status, finished_at, error, parked_reason and human_action', async () => {
+    for (const status of ['skipped', 'failed', 'cancelled'] as const) {
+      const s = setup();
+      kvFlag(s, 'agent.rfq_intake', true);
+      seedInbound(s.ports, { status: 'needs_review' });
+      const runId = seedIntakeRun(s.ports, status, { human_action: EARLIER_ACTION });
+      const before = rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0]);
+      const instance = s.intake.ensure(instanceId);
+      instance.status_ = 'complete';
+      instance.failures.set('restart', new Error('restart refused'));
+      const res = await app(s.ports, STAFF, 'start').request('https://x/api/agent/start', post(body), s.env);
+      expect(res.status, status).toBe(500);
+      expect(rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0]), status).toEqual(before);
+      expect(instance.calls, status).toEqual([]);
+      expect(logs.join('\n')).not.toContain(STAFF.uid as string);
+    }
+  });
+
+  it('create() fails with anything but "already exists" -> 500 and the reopened run is given back its previous columns', async () => {
+    const s = setup();
+    kvFlag(s, 'agent.rfq_intake', true);
+    seedInbound(s.ports, { status: 'failed' });
+    const runId = seedIntakeRun(s.ports, 'failed', { human_action: EARLIER_ACTION });
+    const before = rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0]);
+    s.intake.create = async () => {
+      throw new Error('workflow service unavailable');
+    };
+    const res = await app(s.ports, STAFF, 'start').request('https://x/api/agent/start', post(body), s.env);
+    expect(res.status).toBe(500);
+    expect(rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0])).toEqual(before);
+  });
+
+  it('a final run whose instance is live or unreadable -> created false, no restart, the run row unchanged', async () => {
+    for (const live of ['waiting', 'running', 'unreadable'] as const) {
+      const s = setup();
+      kvFlag(s, 'agent.rfq_intake', true);
+      seedInbound(s.ports, { status: 'needs_review' });
+      const runId = seedIntakeRun(s.ports, 'skipped', { human_action: EARLIER_ACTION });
+      const before = rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0]);
+      const instance = s.intake.ensure(instanceId);
+      if (live === 'unreadable') {
+        instance.status = async () => {
+          throw new Error('status unavailable');
+        };
+      } else {
+        instance.status_ = live;
+      }
+      const res = await app(s.ports, STAFF, 'start').request('https://x/api/agent/start', post(body), s.env);
+      expect([res.status, await res.json()], live).toEqual([200, { v: 1, ok: true, instance_id: instanceId, created: false }]);
+      expect(instance.calls, live).toEqual([]);
+      expect(rerunView(s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0]), live).toEqual(before);
+    }
+  });
+
+  it('a failed start does not overwrite a run that another rerun changed after the reopen', async () => {
+    const s = setup();
+    kvFlag(s, 'agent.rfq_intake', true);
+    seedInbound(s.ports, { status: 'needs_review' });
+    const runId = seedIntakeRun(s.ports, 'skipped');
+    const instance = s.intake.ensure(instanceId);
+    instance.status_ = 'complete';
+    const other = { channel: 'dashboard', actor: `user:${ADMIN.uid}`, verb: 'rerun', decided_at: '2026-10-05T09:00:30.000Z' };
+    instance.restart = async () => {
+      await s.ports.db.update('agent_runs', { human_action: other }, { filters: [['id', 'eq', runId]] });
+      throw new Error('restart refused');
+    };
+    const res = await app(s.ports, STAFF, 'start').request('https://x/api/agent/start', post(body), s.env);
+    expect(res.status).toBe(500);
+    const run = s.ports.db.rows('agent_runs', ['id', 'eq', runId])[0];
+    expect(run).toMatchObject({ status: 'running', finished_at: null });
+    expect(run.human_action).toEqual(other);
   });
 
   it('RFQ_INTAKE not bound -> 500 for this request only', async () => {
@@ -538,6 +646,27 @@ describe('staff file previews', () => {
     expect(staffFileKeyOf(`?k=${QUOTE_KEY}&k=${EML_KEY}`)).toBeNull();
     expect(staffFileKeyOf('?x=1')).toBeNull();
     expect(staffFileKeyOf('?k=%E0%A4%A')).toBeNull();
+  });
+
+  // Same vectors in workers/site/test/agent-hmac.test.ts and tests/frontend-api/agentApi.test.ts.
+  const DOT_KEYS = [`cad/${RFQ}/output/..`, `cad/${RFQ}/output/a..b`, `email/${SHA}/att/1-..`, `email/${SHA}/att/1-a..b.pdf`, `email/${SHA}/att/12-..pdf`];
+
+  it("'..' anywhere in a key -> null and 403; every vector otherwise fits STAFF_FILE_KEY_RE", async () => {
+    expect(STAFF_FILE_KEY_RE.source).toBe(
+      '^(quotes\\/[0-9a-f-]{36}\\/v\\d+\\/quote\\.pdf|orders\\/[0-9a-f-]{36}\\/traveler\\.pdf|cad\\/[0-9a-f-]{36}\\/output\\/[a-z_.]+|email\\/[0-9a-f]{64}\\/(raw\\.eml|att\\/[0-9]+-[A-Za-z0-9._-]{1,100}))$',
+    );
+    const s = setup();
+    for (const key of DOT_KEYS) {
+      expect(STAFF_FILE_KEY_RE.test(key), key).toBe(true);
+      expect(staffFileKeyOf(`?k=${key}`), key).toBeNull();
+      expect(staffFileKeyOf(`?k=${key.replace(/\./g, '%2E')}`), key).toBeNull();
+      await s.bucket.put(key, 'x');
+      const res = await app(s.ports, STAFF, 'file').request(`https://x/api/agent/file?k=${key}`, get, s.env);
+      expect([res.status, await res.json()], key).toEqual([403, { error: 'forbidden' }]);
+    }
+    expect(s.bucket.reads).toEqual([]);
+    // A single dot stays allowed.
+    expect(staffFileKeyOf(`?k=email/${SHA}/att/1-a.b.pdf`)).toBe(`email/${SHA}/att/1-a.b.pdf`);
   });
 
   it('a quote PDF is served inline; a raw e-mail as an octet-stream attachment; nosniff, private no-store, noindex', async () => {

@@ -183,6 +183,21 @@ describe('module path (flag on, host permitted)', () => {
     expect(net.pages.filter((p) => p.url.startsWith('https://example.com'))).toEqual([]);
   });
 
+  it('a scan that throws (Browser Run unavailable) answers the handler 502 shape and closes its run failed with a scan_logs row', async () => {
+    pageRoutes[SEARCH] = () => new Response(page('spa-shell.html'), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    const { env: base } = env({ flag: true });
+    const browser = { fetch: async () => { throw new Error('Browser Run: no browser available'); } } as unknown as Fetcher;
+    const e = { ...base, BROWSER: browser } as OpsEnv;
+    const res = await viaOps('scan-directory', e, jsonPost({ url: SEARCH }));
+    expect(res.status).toBe(502);
+    expect(JSON.parse(res.body)).toEqual({ error: 'Failed to fetch directory' });
+    expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(net.sb.find((r) => r.method === 'POST' && r.path.startsWith('/scan_logs'))?.body).toMatchObject({ scan_type: 'directory', status: 'failed', error_message: 'scan_failed', url: SEARCH });
+    const close = net.sb.find((r) => r.method === 'PATCH' && r.path.startsWith('/agent_runs'));
+    expect(decodeURIComponent(close?.path ?? '')).toContain(`id=eq.${RUN_ID}`);
+    expect(close?.body).toMatchObject({ status: 'failed', error: 'scan_failed', output: { route: 'directory', status: 502 } });
+  });
+
   it('a bookkeeping failure (PostgREST down) never changes the answer', async () => {
     sbStatus = 503;
     const { env: e } = env({ flag: true });

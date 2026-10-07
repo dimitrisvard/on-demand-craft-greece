@@ -86,12 +86,31 @@ export function harness(o: SeedOptions & { flag?: Record<string, unknown> | null
   return { env, ports, llm, kv, bucket, workflow: env.QUOTE as unknown as FakeWorkflow };
 }
 
+/** Authentication-Results record of a sender that passed DMARC for example.de (the trusted instance). */
+export const AUTH_PASS = { v: 1, trusted: true, authserv_id: 'mx.example.test', spf: 'pass', dkim: 'pass', dmarc: 'pass', dmarc_from_domain: 'example.de', raw_count: 1 };
+/** Authentication-Results record of a sender whose DMARC check failed. */
+export const AUTH_FAIL = { v: 1, trusted: true, authserv_id: 'mx.example.test', spf: 'fail', dkim: 'fail', dmarc: 'fail', dmarc_from_domain: 'example.de', raw_count: 1 };
+
+export interface ReplyOptions {
+  subject: string;
+  text: string;
+  n?: number;
+  /** From address (default: the RFQ contact). */
+  from?: string;
+  /** In-Reply-To (default: the quote's first Message-ID; null: none, e.g. a new mail naming the RFQ number). */
+  inReplyTo?: string | null;
+  references?: string[];
+  /** auth_results (default: DMARC pass for example.de). */
+  auth?: Record<string, unknown> | null;
+}
+
 /** Stores a customer reply as microns-mail does and returns its inbound_emails id. */
-export async function seedReply(h: QuoteHarness, o: { subject: string; text: string; n?: number }): Promise<string> {
+export async function seedReply(h: QuoteHarness, o: ReplyOptions): Promise<string> {
   const n = o.n ?? 1;
   const sha = String(n).padStart(2, '0').repeat(32);
   const key = `email/${sha}/raw.eml`;
-  await h.bucket.put(key, replyMime({ subject: o.subject, text: o.text, messageId: `<reply-${n}@example.de>` }));
+  const inReplyTo = o.inReplyTo === undefined ? `<q.${QWID}.0@rfq.micronshub.eu>` : o.inReplyTo;
+  await h.bucket.put(key, replyMime({ subject: o.subject, text: o.text, messageId: `<reply-${n}@example.de>`, inReplyTo }));
   const [row] = await h.ports.db.insert<{ id: string }>(
     'inbound_emails',
     {
@@ -100,9 +119,11 @@ export async function seedReply(h: QuoteHarness, o: { subject: string; text: str
       message_id_sha256: sha,
       mailbox: 'replies',
       source: 'email_routing',
-      from_email: 'erika.beispiel@example.de',
+      from_email: o.from ?? 'erika.beispiel@example.de',
       subject: o.subject,
-      in_reply_to: `<q.${QWID}.0@rfq.micronshub.eu>`,
+      in_reply_to: inReplyTo,
+      references_ids: o.references ?? (inReplyTo ? [inReplyTo] : []),
+      auth_results: o.auth === undefined ? AUTH_PASS : o.auth,
       received_at: '2026-10-07T08:00:00.000Z',
       raw_r2_key: key,
       status: 'matched',
@@ -115,13 +136,20 @@ export async function seedReply(h: QuoteHarness, o: { subject: string; text: str
 
 type Hook = (type: string, name: string) => Promise<void>;
 
-/** FakeStep whose waitForEvent first awaits a hook (which may decide a card and buffer the resulting event). */
+/** FakeStep whose waitForEvent first awaits a hook (which may decide a card and buffer the resulting event), and
+ *  whose do() first calls beforeDo with the step name (e.g. to switch a flag between two steps). */
 export class DecidingStep extends FakeStep {
   hook?: Hook;
+  beforeDo?: (name: string) => void;
 
   override async waitForEvent<T>(name: string, options: { type: string; timeout?: WorkflowTimeoutDuration | number }): Promise<WorkflowStepEvent<T>> {
     if (this.hook) await this.hook(options.type, name);
     return super.waitForEvent<T>(name, options);
+  }
+
+  override do<T>(name: string, ...args: unknown[]): Promise<T> {
+    this.beforeDo?.(name);
+    return super.do<T>(name, ...args);
   }
 }
 

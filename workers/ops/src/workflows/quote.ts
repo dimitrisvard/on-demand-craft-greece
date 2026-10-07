@@ -8,7 +8,8 @@
 //   load                quote_workflows row (on_conflict rfq_id,quote_version); RFQ parts and files (no address)
 //   ensure-cad          'analyse' jobs for R2-stored CAD files that have none; RfqThread.expectCadJobs/bindQuote
 //   await-cad           waitForEvent('cad-done', 2 hours); on timeout the lines without geometry are priced by hand
-//   drawings            'drawing_pdf' jobs for sheet-metal STEP parts (not awaited)
+//   drawings            'drawing_pdf' jobs for sheet-metal STEP parts (not awaited); agent.quote re-read first,
+//                       because the CAD wait can last 2 hours
 //   lines               quote lines from parts, files and CAD results (pricing/lines.ts)
 //   similar-quotes      bge-m3 embedding of each line + Vectorize quotes-v1 query (top 5, same process and family)
 //   price               pricing_rules + catalog_materials -> PricingV1 (pricing/calc.ts); stored on the row
@@ -27,16 +28,34 @@
 //                       RfqThread.registerOutbound
 //   index-quote         one vector per line (outcome 'open'); the quote's run closes 'succeeded'
 //   follow-ups          waits for 'customer-reply' (value.follow_up_days, default 3, 4, 7 days); follow-up 1 and 2
-//                       in the same thread (Idempotency-Key quote/<qwid>/fu<k>); after the last wait: expired
-//   reply-<n>           quote.classify_reply@v1; confidence >= 0.8 and not a counter-offer applies directly (won,
-//                       lost; questions get a notice), anything else asks a human (won / lost / counter / ignore)
-//   outcome             won: rpc/create_order_from_quote + agent-events 'order-created'; won / lost / counter_offer /
-//                       expired: row status, Vectorize outcome update
+//                       in the same thread (Idempotency-Key quote/<qwid>/fu<k>); after the last wait: expired.
+//                       Before each follow-up and before the expiry the RFQ is read again: an order for the RFQ, or
+//                       rfqs.status 'approved' (the portal's Accept Quote, the dashboard), ends the quote 'won'
+//                       (reason rfq_approved) with that order; nothing more is sent and no second order is created
+//   reply-<n>           reply-check (thread, sender, contact), then quote.classify_reply@v1. Applied without asking:
+//                       'lost' at confidence >= 0.8 when the reply answers one of this quote's own Message-IDs
+//                       (In-Reply-To or References), its sender passed DMARC (trusted Authentication-Results, header
+//                       From aligned) and From is the RFQ contact; 'question' / 'other' at >= 0.8 get a notice;
+//                       'auto_reply' is ignored. Everything else waits for a human on a reply card (won / lost /
+//                       counter / ignore): every 'won' (an order is created only after a person chose it), every
+//                       counter-offer, low confidence, a failed check (flag dmarc_fail when the sender is not
+//                       authenticated) and a reply whose text carries a delimiter of the model's data blocks
+//                       (flag injection_suspected)
+//   outcome             won: order-<tag> (rpc/create_order_from_quote, its own step, so a retried event send never
+//                       calls it again), then agent-events 'order-created'; won / lost / counter_offer / expired:
+//                       row status, Vectorize outcome update
 // Runs: the quote run covers draft to send; each follow-up, reply and the final expiry has its own short run
 // (keys '<rfq_id>:v<n>:fu<k>', ':reply:<inbound_email_id>', ':expire'), so no run stays 'running' while the
 // Workflow waits days for the customer. Every step runs inside one try/catch: a step that throws ends in step
-// 'fail-run', which puts the current run behind a failure card (Retry restarts the instance from that step) and
-// marks the quote 'failed'. LLM steps park the run as 'budget' (gateway 429) or 'llm_unavailable' (retries used up).
+// 'fail-run', which puts the run the step belongs to behind a failure card (Retry restarts the instance from that
+// step) and marks the quote 'failed'; a step that opens a phase run belongs to that phase run, so the closed quote
+// run is never reopened. When a retried run goes back to waiting for the customer, the quote returns from 'failed'
+// to 'sent' / 'follow_up'. The wait times are computed from the clock reading of the step before each wait.
+// LLM steps park the run as 'budget' (gateway 429) or 'llm_unavailable' (retries used up).
+// Flag: every side-effecting step re-reads agent.quote first and parks its run while the flag is off (flag-<step>):
+// before CAD jobs, drawings, each model call, the PDF, the approval, write-rfq, each send and each outcome.
+// Model input: untrusted text (reply, RFQ notes) only inside its delimited block with tag-like sequences
+// neutralised; JSON blocks escape '<', so no value can close or open a block.
 // Step results carry ids, numbers and short business fields only: e-mail texts and addresses are read by the step
 // that needs them (recipient, buyer block, reply text) and never returned. Nothing here logs an address or a token.
 
@@ -51,7 +70,7 @@ import type { DecisionEventPayload } from '../agents/decision';
 import { readFlag, type AgentFlag } from '../agents/flags';
 import { quoteInstanceId } from '../agents/ids';
 import { loadPrompt, registerPromptSource, selectPrompt, type PromptId } from '../agents/prompts/registry';
-import { addUsage, applyDailyCap, checkpointRun, closeRun, EMPTY_USAGE, failRun, isFinal, openRun, parkRun, type UsageAcc } from '../agents/runs';
+import { addUsage, applyDailyCap, checkpointRun, closeRun, EMPTY_USAGE, failRun, isFinal, openRun, parkRun, type OpenRun, type UsageAcc } from '../agents/runs';
 import { cadKindOf, isFinalCadStatus } from '../cad/types';
 import { DbError, type Db } from '../db/postgrest';
 import { cadJobsOf, enqueueCadJob, type CadJobRow } from '../db/repos/cad-jobs';
@@ -70,6 +89,7 @@ import {
   type QuoteStatus,
 } from '../db/repos/quote-workflows';
 import { LOG_PREFIX, type OpsEnv } from '../env';
+import { dmarcPass, type AuthResults } from '../mail-in/auth-results';
 import { parseMime } from '../mail-in/parse';
 import { stripQuoted } from '../mail-in/quote-strip';
 import { uuidV5 } from '../mail-in/safe-name';
@@ -85,7 +105,8 @@ import { rulesVersion } from '../pricing/rules';
 import type { LineInput, PriceNotes, PricingV1, QuoteProcess, SimilarLine } from '../pricing/types';
 import { makePorts, type JsonSchemaObject, type LlmContent, type LlmUsage, type Ports, type QuoteVectorMeta } from '../ports/index';
 import type { AgentEventV1 } from '../queues/messages';
-import { DB, EMBED, LLM_CLASSIFY, LLM_EXTRACT, NOTIFY, PDF, PURE, SEND } from './steps';
+import { normaliseMessageId } from '../replies/match';
+import { DB, EMBED, LLM_CLASSIFY, LLM_EXTRACT, NOTIFY, PDF, SEND } from './steps';
 import notesPrompt from '../agents/prompts/quote/price_notes.v1.md';
 import notesSchema from '../agents/prompts/quote/price_notes.v1.schema.json';
 import coverPrompt from '../agents/prompts/quote/cover_email.v1.md';
@@ -137,6 +158,34 @@ export interface ClassifyReplyV1 {
   outcome: 'won' | 'lost' | 'counter_offer' | 'question' | 'auto_reply' | 'other';
   confidence: number;
   summary: string;
+}
+
+/** Thread and sender checks of a customer reply (booleans and the masked sender only; no address). */
+export interface ReplyChecks {
+  /** In-Reply-To or References names one of this quote's outbound Message-IDs. */
+  in_thread: boolean;
+  /** Trusted DMARC pass whose header.from is the domain of From (mail-in/auth-results.ts dmarcPass). */
+  sender_authenticated: boolean;
+  /** From is the RFQ's contact address (case-insensitive). */
+  sender_is_contact: boolean;
+  /** maskEmail() of From. */
+  sender_masked: string | null;
+}
+
+/** What happens with a classified reply: applied directly, a notice, nothing, or a person decides on a card. */
+export type ReplyRoute = 'apply' | 'notice' | 'ignore' | 'card';
+
+/**
+ * The route of a classified reply (rules in the header): only 'lost' is ever applied without a person, and only from
+ * the authenticated RFQ contact in this quote's thread; 'won' and counter-offers always go to the reply card.
+ */
+export function replyRoute(c: { outcome: ClassifyReplyV1['outcome']; confidence: number }, checks: ReplyChecks, injectionSuspected: boolean): ReplyRoute {
+  if (injectionSuspected) return 'card';
+  if (c.outcome === 'won' || c.outcome === 'counter_offer') return 'card';
+  if (!(c.confidence >= DIRECT_CONFIDENCE)) return 'card';
+  if (c.outcome === 'lost') return checks.in_thread && checks.sender_authenticated && checks.sender_is_contact ? 'apply' : 'card';
+  if (c.outcome === 'question' || c.outcome === 'other') return 'notice';
+  return 'ignore';
 }
 
 /** quote_workflows.drafts: the approved texts of this version. */
@@ -339,6 +388,24 @@ async function hashObject(ports: Ports, key: string): Promise<{ sha256: string; 
 
 // ----- model inputs (pure: the same data always gives the same content, and so the same fixture hash) -----
 
+/** Untrusted text for a delimited block: every tag-like sequence ('<', optional '/', then a letter, '_', '!' or
+ *  '?') starts with '‹' instead, so the text can neither close its own block nor open another one. */
+export function neutralise(text: string): string {
+  return String(text ?? '').replace(/<(?=\s*\/?\s*[A-Za-z_!?])/g, '‹');
+}
+
+/** JSON for a delimited block, '<' written as the JSON escape u+003c (same JSON value), so no string in it can
+ *  close the block. */
+export function blockJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+/** True when untrusted text carries a delimiter of the model's data blocks (the reply is then flagged
+ *  injection_suspected and always decided by a person). */
+export function hasBlockDelimiter(text: string): boolean {
+  return /<\s*\/?\s*(untrusted_[a-z_]+|quote_lines|similar_quotes|quote|attachments?)\b/i.test(String(text ?? ''));
+}
+
 /** User content of quote.price_notes@v1. */
 export function notesContent(lines: readonly LineInput[], pricing: PricingV1, notesText: string, similar: readonly SimilarLine[]): LlmContent[] {
   const table = pricing.lines.map((l, i) => {
@@ -363,9 +430,9 @@ export function notesContent(lines: readonly LineInput[], pricing: PricingV1, no
     {
       type: 'text',
       text: [
-        `<quote_lines>\n${JSON.stringify(table)}\n</quote_lines>`,
-        `<untrusted_rfq_notes>\n${notesText.slice(0, NOTES_TEXT_CHARS)}\n</untrusted_rfq_notes>`,
-        `<similar_quotes>\n${JSON.stringify(hits)}\n</similar_quotes>`,
+        `<quote_lines>\n${blockJson(table)}\n</quote_lines>`,
+        `<untrusted_rfq_notes>\n${neutralise(notesText.slice(0, NOTES_TEXT_CHARS))}\n</untrusted_rfq_notes>`,
+        `<similar_quotes>\n${blockJson(hits)}\n</similar_quotes>`,
       ].join('\n'),
     },
   ];
@@ -395,12 +462,12 @@ export function coverContent(d: { language: string; offer_no: string; company: s
     valid_until: d.valid_until,
     delivery_time: DEFAULT_CONDITIONS.delivery_time,
   };
-  return [{ type: 'text', text: `<quote>\n${JSON.stringify(quote)}\n</quote>` }];
+  return [{ type: 'text', text: `<quote>\n${blockJson(quote)}\n</quote>` }];
 }
 
 /** User content of quote.classify_reply@v1. */
 export function replyContent(subject: string | null, text: string): LlmContent[] {
-  return [{ type: 'text', text: `<untrusted_email>\nSubject: ${clean(subject, 300)}\n\n${clean(text, REPLY_TEXT_CHARS)}\n</untrusted_email>` }];
+  return [{ type: 'text', text: `<untrusted_email>\nSubject: ${neutralise(clean(subject, 300))}\n\n${neutralise(clean(text, REPLY_TEXT_CHARS))}\n</untrusted_email>` }];
 }
 
 /** The stored drafts of a cover-email answer (one-line subjects, bounded bodies). */
@@ -440,6 +507,18 @@ interface RunCtx {
   acc: UsageAcc;
 }
 
+/** An order of the RFQ that exists already (the RFQ was accepted outside the quote e-mails), or none. */
+interface ExistingOrder {
+  order_id: string | null;
+  po_number: string | null;
+}
+
+/** A phase run being opened: its key suffix and subject (a failure of the opening step goes on this run). */
+interface PhaseRef {
+  phase: string;
+  subject?: { type: string; id: string };
+}
+
 interface Snapshot {
   qwid: string;
   /** The row was already final (cancelled, rejected, ...): the instance ends. */
@@ -472,9 +551,16 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
   const tenant = p.tenant_id;
   let current = 'open-run';
   let qwid: string | null = null;
+  /** The current run (the quote run, then each phase run while it is open); the quote run once open-run returned. */
+  let cur: RunCtx = { id: '', acc: { ...EMPTY_USAGE, by_step: {} } };
+  /** The run the current step belongs to: a run context, or the phase run a '<phase>-run' step is opening. */
+  let owner = null as RunCtx | PhaseRef | null;
+  /** Follow-ups recorded so far (the waiting status of the quote is 'follow_up' once one was sent). */
+  let followUps = 0;
 
-  const run = <T>(name: string, cfg: WorkflowStepConfig, fn: () => Promise<T>): Promise<T> => {
+  const run = <T>(name: string, cfg: WorkflowStepConfig, fn: () => Promise<T>, stepOwner?: RunCtx | PhaseRef): Promise<T> => {
     current = name;
+    owner = stepOwner ?? cur;
     return step.do(name, cfg, fn as () => Promise<Rpc.Serializable<T>>) as Promise<T>;
   };
   const log = (outcome: string) => console.log(formatLogLine(LOG_PREFIX, 'quote', { rfq_id: rfqId, version, outcome }));
@@ -501,7 +587,7 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
     return { run_id: r.run_id, final: isFinal(r.status), prompts, follow_up_days: followUpDays(flag.value) };
   });
   const main: RunCtx = { id: opened.run_id, acc: { ...EMPTY_USAGE, by_step: {} } };
-  let cur: RunCtx = main;
+  cur = main;
   if (opened.final) {
     log('exists');
     return { outcome: 'exists', run_id: main.id };
@@ -573,6 +659,8 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
   const llmStep = async <V, R>(base: string, metaStep: string, cfg: WorkflowStepConfig, prompt: PromptId, input: () => Promise<LlmContent[]>, after: (value: V) => Promise<R>): Promise<R> => {
     for (let k = 1; ; k++) {
       const name = k === 1 ? base : `${base}-${k}`;
+      // each model call is a side effect (cost, data to the provider): the flag is read again before every attempt
+      await flagGate(k === 1 ? base : `${base}-r${k}`);
       const ctx = cur;
       let reason: 'budget' | 'llm_unavailable';
       try {
@@ -604,26 +692,45 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
     }
   };
 
-  /** Opens a short run of the post-send phase (follow-up, reply, expiry) and makes it current. */
-  const openPhaseRun = async (name: string, key: string, subject?: { type: string; id: string }): Promise<{ ctx: RunCtx; final: boolean }> => {
-    const r = await run(`${name}-run`, DB, async () => {
-      const o = await openRun(db, {
-        agent: AGENT,
-        trigger: 'workflow',
-        idempotency_key: `${rfqId}:v${version}:${key}`,
-        workflow_name: 'quote',
-        workflow_instance_id: instanceId,
-        parent_run_id: main.id,
-        subject_type: subject?.type ?? 'quote_workflow',
-        subject_id: subject?.id ?? (qwid as string),
-        prompt_version: prompts.reply,
-        tenant_id: tenant,
-      });
-      return { run_id: o.run_id, final: isFinal(o.status) };
-    });
+  /** A quote that a failure marked 'failed' goes back to its waiting status once its retried run continues. */
+  const restoreWaiting = async (): Promise<void> => {
+    if (!qwid) return;
+    await patchQuoteWorkflow(db, qwid, { status: followUps > 0 ? 'follow_up' : 'sent', error: null }, ['failed']);
+  };
+
+  /** agent_runs fields of a phase run (child of the quote run). */
+  const phaseRunFields = (ref: PhaseRef): OpenRun => ({
+    agent: AGENT,
+    trigger: 'workflow',
+    idempotency_key: `${rfqId}:v${version}:${ref.phase}`,
+    workflow_name: 'quote',
+    workflow_instance_id: instanceId,
+    parent_run_id: main.id,
+    subject_type: ref.subject?.type ?? 'quote_workflow',
+    subject_id: ref.subject?.id ?? (qwid as string),
+    prompt_version: prompts.reply,
+    tenant_id: tenant,
+  });
+
+  /** Opens a short run of the post-send phase (follow-up, reply, expiry) and makes it current. The opening step
+   *  belongs to that phase run (a failure there goes on it, never on the closed quote run); `at` is its clock
+   *  reading, the base of the next wait when the phase was already over. */
+  const openPhaseRun = async (name: string, key: string, subject?: { type: string; id: string }): Promise<{ ctx: RunCtx; final: boolean; at: number }> => {
+    const ref: PhaseRef = { phase: key, ...(subject ? { subject } : {}) };
+    const r = await run(
+      `${name}-run`,
+      DB,
+      async () => {
+        const o = await openRun(db, phaseRunFields(ref));
+        const final = isFinal(o.status);
+        if (!final) await restoreWaiting();
+        return { run_id: o.run_id, final, at: ports.clock.now().getTime() };
+      },
+      ref,
+    );
     const ctx: RunCtx = { id: r.run_id, acc: { ...EMPTY_USAGE, by_step: {} } };
     cur = ctx;
-    return { ctx, final: r.final };
+    return { ctx, final: r.final, at: r.at };
   };
 
   try {
@@ -681,6 +788,7 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
     const quoteDate = new Date(snap.quote_date);
 
     // 3 ensure-cad
+    await flagGate('ensure-cad');
     const cad = await run('ensure-cad', DB, async () => {
       const jobs = await cadJobsOf(db, { rfq_id: rfqId });
       const covered = new Set(jobs.filter((j) => j.job_type === 'analyse' && j.rfq_file_id).map((j) => j.rfq_file_id as string));
@@ -723,7 +831,8 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
       }
     }
 
-    // 5 drawings (not awaited)
+    // 5 drawings (not awaited); the CAD wait can last hours, so the flag is read again first
+    await flagGate('drawings');
     await run('drawings', DB, async () => {
       const jobs = await cadJobsOf(db, { rfq_id: rfqId });
       const haveDrawing = new Set(jobs.filter((j) => j.job_type === 'drawing_pdf').map((j) => j.input_sha256));
@@ -837,6 +946,7 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
       await ports.blob.put(quotePdfKey(rfqId, version), pdf.bytes.buffer.slice(pdf.bytes.byteOffset, pdf.bytes.byteOffset + pdf.bytes.byteLength) as ArrayBuffer, { contentType: 'application/pdf', sha256: pdf.sha256 });
       return { pdf_sha256: pdf.sha256, pages: pdf.pages };
     };
+    await flagGate('draft-pdf');
     const firstPdf = await run('draft-pdf', PDF, async () => {
       const r = await renderStore(pricing);
       await patchQuoteWorkflow(db, snap.qwid, { pricing, quote_pdf_r2_key: quotePdfKey(rfqId, version), pdf_sha256: r.pdf_sha256, total_amount: pricing.total_net, current_step: 'draft-pdf' }, LIVE_STATUSES);
@@ -1027,59 +1137,103 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
       return usage;
     };
 
-    // 17 index-quote, then the quote run closes
+    // 17 index-quote, then the quote run closes (its clock reading is the time base of the first wait)
     const indexed = await run('index-quote', EMBED, async () => indexLines('open', main, 'index-quote'));
     if (indexed) main.acc = addUsage(main.acc, indexed, 'index-quote');
-    await run('close-send', DB, async () => {
+    const closedAt = await run('close-send', DB, async () => {
       await closeRun(db, main.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, sent: true, lines: pricing.lines.length, total_net: pricing.total_net } }, main.acc);
-      return true;
+      await restoreWaiting();
+      return ports.clock.now().getTime();
     });
 
-    /** Final outcome of the quote under the current phase run (order for 'won', row status, vectors, run closed). */
-    const finalise = async (tag: string, outcome: 'won' | 'lost' | 'counter_offer' | 'expired', reason: string): Promise<QuoteResult> => {
+    /** The RFQ accepted outside this quote's e-mails (the portal's Accept Quote, the dashboard): its first order, or
+     *  no order when only rfqs.status says 'approved'; null while the RFQ is not accepted. */
+    const acceptedElsewhere = (name: string): Promise<ExistingOrder | null> =>
+      run(name, DB, async () => {
+        const order = (
+          await db.select<{ id: string; po_number: string | null }>('orders', { columns: 'id,po_number', filters: [['rfq_id', 'eq', rfqId]], order: [{ column: 'created_at', ascending: true }], limit: 1 })
+        )[0];
+        if (order) return { order_id: order.id, po_number: order.po_number ?? null };
+        const rfq = (await db.select<{ status: string | null }>('rfqs', { columns: 'status', filters: [['id', 'eq', rfqId]], limit: 1 }))[0];
+        return rfq?.status === 'approved' ? { order_id: null, po_number: null } : null;
+      });
+
+    /**
+     * Final outcome of the quote under the current phase run: flag gate; for 'won' the order (order-<tag>, its own
+     * step, so a retried outcome step never calls the RPC again) unless the RFQ was accepted elsewhere (`existing`:
+     * that order is kept, none is created and no event is sent, the dispatcher starts post-order for it); row
+     * status, notice, vectors, run closed.
+     */
+    const finalise = async (tag: string, outcome: 'won' | 'lost' | 'counter_offer' | 'expired', reason: string, existing?: ExistingOrder): Promise<QuoteResult> => {
+      await flagGate(`outcome-${tag}`);
       const ctx = cur;
-      const done = await run(`outcome-${tag}`, DB, async () => {
-        let order: { order_id: string; po_number: string | null } | null = null;
-        if (outcome === 'won') {
+      const created =
+        outcome === 'won' && !existing
+          ? await run(`order-${tag}`, DB, async () => {
+              need(env, 'AGENT_EVENTS');
+              const res = await db.rpc<unknown>('create_order_from_quote', { p_quote_workflow_id: snap.qwid });
+              const row = (Array.isArray(res) ? res[0] : res) as { order_id?: string; po_number?: string | null } | undefined;
+              if (!row?.order_id) throw new NonRetryableError('order_missing');
+              return { order_id: row.order_id, po_number: row.po_number ?? null };
+            })
+          : null;
+      const order: ExistingOrder | null = created ?? existing ?? null;
+      await run(`outcome-${tag}`, DB, async () => {
+        if (created) {
           need(env, 'AGENT_EVENTS');
-          const res = await db.rpc<unknown>('create_order_from_quote', { p_quote_workflow_id: snap.qwid });
-          const row = (Array.isArray(res) ? res[0] : res) as { order_id?: string; po_number?: string | null } | undefined;
-          if (!row?.order_id) throw new NonRetryableError('order_missing');
-          order = { order_id: row.order_id, po_number: row.po_number ?? null };
-          const message: AgentEventV1 = { v: 1, type: 'order-created', order_id: row.order_id, tenant_id: tenant, source: 'quote' };
+          const message: AgentEventV1 = { v: 1, type: 'order-created', order_id: created.order_id, tenant_id: tenant, source: 'quote' };
           await env.AGENT_EVENTS.send(message, { contentType: 'json' });
         }
         await patchQuoteWorkflow(db, snap.qwid, { status: outcome, outcome_reason: reason, current_step: `outcome-${tag}`, last_event_at: ports.clock.now().toISOString() }, LIVE_STATUSES);
         if (outcome === 'won' || outcome === 'counter_offer') {
-          await sendNotice(
-            quoteNotice({
-              run_id: ctx.id,
-              site_origin: env.SITE_ORIGIN,
-              rfq_number: snap.rfq_number,
-              version,
-              company: snap.company,
-              country: snap.country,
-              text: outcome === 'won' ? `Customer accepted: order ${order?.po_number ?? ''} created` : 'Customer asked for changes (counter-offer): revise the quote on the dashboard',
-            }),
-          );
+          const text =
+            outcome === 'counter_offer'
+              ? 'Customer asked for changes (counter-offer): revise the quote on the dashboard'
+              : existing
+                ? `RFQ accepted on the portal or dashboard${order?.po_number ? ` (order ${order.po_number})` : ''}: no further follow-ups`
+                : `Customer accepted: order ${order?.po_number ?? ''} created`;
+          await sendNotice(quoteNotice({ run_id: ctx.id, site_origin: env.SITE_ORIGIN, rfq_number: snap.rfq_number, version, company: snap.company, country: snap.country, text }));
         }
-        return order;
+        return true;
       });
       const usage = await run(`index-outcome-${tag}`, EMBED, async () => indexLines(outcome === 'counter_offer' ? 'counter_offer' : outcome, ctx, `index-outcome-${tag}`));
       if (usage) ctx.acc = addUsage(ctx.acc, usage, `index-outcome-${tag}`);
       await run(`close-${tag}`, DB, async () => {
-        await closeRun(db, ctx.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, outcome, ...(done ? { order_id: done.order_id } : {}) } }, ctx.acc);
+        await closeRun(db, ctx.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, outcome, reason, ...(order?.order_id ? { order_id: order.order_id } : {}) } }, ctx.acc);
         return true;
       });
       log(outcome);
-      return { outcome, run_id: ctx.id, quote_workflow_id: snap.qwid, ...(done ? { order_id: done.order_id } : {}) };
+      return { outcome, run_id: ctx.id, quote_workflow_id: snap.qwid, ...(order?.order_id ? { order_id: order.order_id } : {}) };
     };
 
-    /** A customer reply: classification, then a direct outcome or a human decision. */
-    const handleReply = async (inboundId: string, n: number): Promise<QuoteResult | null> => {
-      const { ctx, final } = await openPhaseRun(`reply-${n}`, `reply:${inboundId}`, UUID.test(inboundId) ? { type: 'inbound_email', id: inboundId } : undefined);
-      if (final) return null;
-      const cls = await llmStep<ClassifyReplyV1, { outcome: ClassifyReplyV1['outcome']; confidence: number }>(
+    /** A customer reply: checks, classification, then a direct outcome, a notice or a person's decision (rules in
+     *  the header). Returns the final result, or the clock reading after the reply when the quote keeps waiting. */
+    const handleReply = async (inboundId: string, n: number): Promise<{ done: QuoteResult } | { at: number }> => {
+      const { ctx, final, at } = await openPhaseRun(`reply-${n}`, `reply:${inboundId}`, UUID.test(inboundId) ? { type: 'inbound_email', id: inboundId } : undefined);
+      if (final) return { at };
+      const checks = await run<ReplyChecks>(`reply-check-${n}`, DB, async () => {
+        const row = (
+          await db.select<{ from_email: string | null; in_reply_to: string | null; references_ids: string[] | null; auth_results: AuthResults | null }>('inbound_emails', {
+            columns: 'from_email,in_reply_to,references_ids,auth_results',
+            filters: [['id', 'eq', inboundId]],
+            limit: 1,
+          })
+        )[0];
+        if (!row) throw new NonRetryableError('inbound_email_missing');
+        const ours = new Set(((await getQuoteWorkflow(db, snap.qwid))?.outbound_message_ids ?? []).map(normaliseMessageId).filter(Boolean));
+        const ids = [row.in_reply_to, ...(Array.isArray(row.references_ids) ? row.references_ids : [])].map((id) => normaliseMessageId(id ?? '')).filter(Boolean);
+        const from = String(row.from_email ?? '').trim().toLowerCase();
+        const contact = String((await readContact(db, rfqId)).email ?? '').trim().toLowerCase();
+        return {
+          in_thread: ids.some((id) => ours.has(id)),
+          sender_authenticated: dmarcPass(row.auth_results, row.from_email),
+          sender_is_contact: Boolean(from) && from === contact,
+          sender_masked: row.from_email ? maskEmail(row.from_email) : null,
+        };
+      });
+      // set by the classification step's input (same step, so the cached result carries it)
+      let delimiter = false;
+      const cls = await llmStep<ClassifyReplyV1, { outcome: ClassifyReplyV1['outcome']; confidence: number; injection_suspected: boolean }>(
         `classify-reply-${n}`,
         'classify-reply',
         LLM_CLASSIFY,
@@ -1092,66 +1246,75 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
             const raw = await ports.blob.get(row.raw_r2_key);
             if (raw) text = stripQuoted((await parseMime(await new Response(raw.body).arrayBuffer())).text);
           }
+          delimiter = hasBlockDelimiter(`${row.subject ?? ''}\n${text}`);
           return replyContent(row.subject, text);
         },
         async (v) => {
           const confidence = Math.min(1, Math.max(0, Number(v.confidence) || 0));
-          await db.update('inbound_emails', { classification: { quote_reply: { outcome: v.outcome, confidence, summary: clean(v.summary, 300), prompt: prompts.reply } }, quote_workflow_id: snap.qwid }, { filters: [['id', 'eq', inboundId]] });
-          return { outcome: v.outcome, confidence };
+          await db.update(
+            'inbound_emails',
+            { classification: { quote_reply: { outcome: v.outcome, confidence, summary: clean(v.summary, 300), injection_suspected: delimiter, prompt: prompts.reply } }, quote_workflow_id: snap.qwid },
+            { filters: [['id', 'eq', inboundId]] },
+          );
+          return { outcome: v.outcome, confidence, injection_suspected: delimiter };
         },
       );
+      const route = replyRoute(cls, checks, cls.injection_suspected);
       let result: 'won' | 'lost' | 'counter_offer' | 'ignore';
-      if (cls.confidence >= DIRECT_CONFIDENCE && cls.outcome !== 'counter_offer') {
-        if (cls.outcome === 'won' || cls.outcome === 'lost') result = cls.outcome;
-        else {
-          if (cls.outcome === 'question' || cls.outcome === 'other') {
-            await run(`reply-notice-${n}`, NOTIFY, async () => {
-              await sendNotice(quoteNotice({ run_id: ctx.id, site_origin: env.SITE_ORIGIN, rfq_number: snap.rfq_number, version, company: snap.company, country: snap.country, kind: 'reply', text: cls.outcome === 'question' ? 'Customer replied with a question: answer it from the mailbox' : 'Customer replied (not an outcome): read it in the mailbox' }));
-              return true;
-            });
-          }
-          result = 'ignore';
-        }
-      } else {
-        const asked = await run(`request-reply-${n}`, NOTIFY, async () => {
-          const from = (await db.select<{ from_email: string | null }>('inbound_emails', { columns: 'from_email', filters: [['id', 'eq', inboundId]], limit: 1 }))[0]?.from_email ?? null;
-          const sender_masked = from ? maskEmail(from) : null;
+      if (route === 'apply') result = 'lost';
+      else if (route === 'notice') {
+        await run(`reply-notice-${n}`, NOTIFY, async () => {
+          await sendNotice(quoteNotice({ run_id: ctx.id, site_origin: env.SITE_ORIGIN, rfq_number: snap.rfq_number, version, company: snap.company, country: snap.country, kind: 'reply', text: cls.outcome === 'question' ? 'Customer replied with a question: answer it from the mailbox' : 'Customer replied (not an outcome): read it in the mailbox' }));
+          return true;
+        });
+        result = 'ignore';
+      } else if (route === 'ignore') result = 'ignore';
+      else {
+        const card = (reminder: boolean): CardV1 =>
+          quoteReplyCard({
+            run_id: ctx.id,
+            site_origin: env.SITE_ORIGIN,
+            rfq_number: snap.rfq_number,
+            version,
+            sender_masked: checks.sender_masked,
+            outcome: cls.outcome,
+            confidence: cls.confidence,
+            checks,
+            injection_suspected: cls.injection_suspected,
+            reminder,
+          });
+        await run(`request-reply-${n}`, NOTIFY, async () => {
           await checkpointRun(db, ctx.id, ctx.acc);
-          await request(env, ports, { run_id: ctx.id, card: quoteReplyCard({ run_id: ctx.id, site_origin: env.SITE_ORIGIN, rfq_number: snap.rfq_number, version, sender_masked, outcome: cls.outcome, confidence: cls.confidence }) }, { output: { quote_workflow_id: snap.qwid, inbound_email_id: inboundId } });
-          return { sender_masked };
+          await restoreWaiting();
+          await request(env, ports, { run_id: ctx.id, card: card(false) }, { output: { quote_workflow_id: snap.qwid, inbound_email_id: inboundId } });
+          return true;
         });
         const waited = await waitWithReminder<DecisionEventPayload>(
           step,
-          {
-            run_id: ctx.id,
-            type: 'reply-confirmed',
-            first: REPLY_CONFIRM_FIRST,
-            second: REPLY_CONFIRM_SECOND,
-            card: () => quoteReplyCard({ run_id: ctx.id, site_origin: env.SITE_ORIGIN, rfq_number: snap.rfq_number, version, sender_masked: asked.sender_masked, outcome: cls.outcome, confidence: cls.confidence, reminder: true }),
-            onTimeout: async () => {},
-          },
+          { run_id: ctx.id, type: 'reply-confirmed', first: REPLY_CONFIRM_FIRST, second: REPLY_CONFIRM_SECOND, card: () => card(true), onTimeout: async () => {} },
           { env, ports },
         );
         result = 'timedOut' in waited ? 'ignore' : (REPLY_VERB_OUTCOME[waited.event.verb] ?? 'ignore');
       }
       if (result === 'ignore') {
-        await run(`close-reply-${n}`, DB, async () => {
-          await closeRun(db, ctx.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, inbound_email_id: inboundId, outcome: 'ignore', classified: cls.outcome } }, ctx.acc);
-          return true;
+        const closedReply = await run(`close-reply-${n}`, DB, async () => {
+          await closeRun(db, ctx.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, inbound_email_id: inboundId, outcome: 'ignore', classified: cls.outcome, route } }, ctx.acc);
+          await restoreWaiting();
+          return ports.clock.now().getTime();
         });
-        return null;
+        return { at: closedReply };
       }
-      return finalise(`reply-${n}`, result, result === 'won' ? 'customer_accepted' : result === 'lost' ? 'customer_declined' : 'customer_counter_offer');
+      return { done: await finalise(`reply-${n}`, result, result === 'won' ? 'customer_accepted' : result === 'lost' ? 'customer_declined' : 'customer_counter_offer') };
     };
 
-    // 18-21 follow-ups and replies
+    // 18-21 follow-ups and replies; each wait's time base is the clock reading of the step before it
     const days = opened.follow_up_days as number[];
     let stageStart = Date.parse(recorded.sent_at);
+    let now = closedAt;
     let replies = 0;
     for (let stage = 1; stage <= 3; stage++) {
       const deadline = stageStart + days[stage - 1] * DAY_MS;
       for (;;) {
-        const now = await run(`clock-s${stage}-r${replies}`, PURE, async () => ports.clock.now().getTime());
         let payload: { inbound_email_id?: unknown };
         try {
           const event = await step.waitForEvent<{ inbound_email_id: string }>(`wait-reply-s${stage}-r${replies}`, { type: 'customer-reply', timeout: Math.max(deadline - now, 1000) });
@@ -1162,43 +1325,58 @@ export async function runQuote(p: QuoteParams, instanceId: string, d: QuoteDeps)
         }
         replies++;
         const inboundId = typeof payload.inbound_email_id === 'string' ? payload.inbound_email_id : '';
-        const done = await handleReply(inboundId, replies);
+        const handled = await handleReply(inboundId, replies);
         cur = main;
-        if (done) return done;
+        if ('done' in handled) return handled.done;
+        now = handled.at;
       }
       if (stage < 3) {
         const k = stage as 1 | 2;
-        const { final } = await openPhaseRun(`fu${k}`, `fu${k}`);
-        if (!final) {
+        const phase = await openPhaseRun(`fu${k}`, `fu${k}`);
+        if (!phase.final) {
           await flagGate(`fu${k}`);
+          const accepted = await acceptedElsewhere(`fu${k}-accepted`);
+          if (accepted) return await finalise(`fu${k}`, 'won', 'rfq_approved', accepted);
           const fu = await run(`fu${k}-send`, SEND, async () => sendMail(k));
           const rec = await run(`fu${k}-record`, DB, async () => recordMail(k, fu.provider_id));
+          followUps = k;
           const ctx = cur;
-          await run(`fu${k}-close`, DB, async () => {
+          now = await run(`fu${k}-close`, DB, async () => {
             await closeRun(db, ctx.id, { status: 'succeeded', output: { quote_workflow_id: snap.qwid, follow_up: k } }, ctx.acc);
-            return true;
+            await restoreWaiting();
+            return ports.clock.now().getTime();
           });
           stageStart = Date.parse(rec.sent_at);
-        } else stageStart = deadline;
+        } else {
+          // this follow-up's run was already closed (a replay): its mail was sent
+          followUps = k;
+          stageStart = deadline;
+          now = phase.at;
+        }
         cur = main;
       }
     }
 
-    // 22 expired
+    // 22 expiry, unless the RFQ was accepted outside the quote e-mails in the meantime
     await openPhaseRun('expire', 'expire');
+    await flagGate('expire');
+    const late = await acceptedElsewhere('expire-accepted');
+    if (late) return await finalise('expire', 'won', 'rfq_approved', late);
     return await finalise('expire', 'expired', 'no_reply');
   } catch (error) {
     if (error instanceof Halt) return error.result;
     const code = errorCode(error);
     const failedStep = current;
-    const ctx = cur;
+    // the run the failed step belongs to (a phase run that was being opened is opened here, so it can carry the card)
+    const failedOwner: RunCtx | PhaseRef = owner ?? cur;
     console.error(formatLogLine(LOG_PREFIX, 'quote step failed', { rfq_id: rfqId, version, step: failedStep, error: code }));
-    await step.do('fail-run', DB, async () => {
+    const failed = await step.do('fail-run', DB, async () => {
+      const ctx: RunCtx = 'phase' in failedOwner ? { id: (await openRun(db, phaseRunFields(failedOwner))).run_id, acc: { ...EMPTY_USAGE, by_step: {} } } : failedOwner;
       await failRun(env, ports, ctx.id, { error: code, failed_step: failedStep, restartable: true }, ctx.acc);
       if (qwid) await patchQuoteWorkflow(db, qwid, { status: 'failed', error: code, current_step: failedStep, last_event_at: ports.clock.now().toISOString() }, QUOTE_ACTIVE_STATUSES);
-      return true;
+      return { run_id: ctx.id };
     });
     log('failed');
-    return { outcome: 'failed', run_id: ctx.id, ...(qwid ? { quote_workflow_id: qwid } : {}), failed_step: failedStep };
+    return { outcome: 'failed', run_id: failed.run_id, ...(qwid ? { quote_workflow_id: qwid } : {}), failed_step: failedStep };
   }
 }

@@ -72,6 +72,18 @@ export type InboundEmailPatch = Partial<
 
 export const BODY_EXCERPT_MAX = 4000;
 
+/**
+ * body_excerpt as stored: at most BODY_EXCERPT_MAX characters (inbound_emails_excerpt_check), without NUL characters
+ * and with every unpaired surrogate (e.g. half of an emoji cut at the limit) replaced by U+FFFD, since a Postgres
+ * text value can hold neither.
+ */
+export function bodyExcerpt(text: string): string {
+  return text
+    .replace(/\u0000/g, '')
+    .slice(0, BODY_EXCERPT_MAX)
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '�');
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function getInboundEmail(db: Db, id: string): Promise<InboundEmailRow | null> {
@@ -83,7 +95,7 @@ export async function getInboundEmail(db: Db, id: string): Promise<InboundEmailR
 /** One PATCH by id; `onlyIf` limits it to rows in one of the given statuses (returns false when none matched). */
 export async function updateInboundEmail(db: Db, id: string, patch: InboundEmailPatch, onlyIf?: readonly InboundStatus[]): Promise<boolean> {
   const update: Record<string, unknown> = { ...patch };
-  if (typeof update.body_excerpt === 'string') update.body_excerpt = (update.body_excerpt as string).slice(0, BODY_EXCERPT_MAX);
+  if (typeof update.body_excerpt === 'string') update.body_excerpt = bodyExcerpt(update.body_excerpt as string);
   if (typeof update.error === 'string') update.error = (update.error as string).slice(0, 500);
   const filters: [readonly ['id', 'eq', string], ...Array<readonly ['status', 'in', readonly string[]]>] = [['id', 'eq', id]];
   if (onlyIf?.length) filters.push(['status', 'in', onlyIf]);

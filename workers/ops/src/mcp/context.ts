@@ -47,6 +47,7 @@ export interface McpDeps {
   gsc: () => Promise<GscClient>;
   inprocess: (ctx: McpContext, call: InProcessCall) => Promise<Response>;
   now: () => Date;
+  /** A timer: scan_directory waits on it (at most 20 s) for its in-call scan. */
   sleep: (ms: number) => Promise<void>;
 }
 

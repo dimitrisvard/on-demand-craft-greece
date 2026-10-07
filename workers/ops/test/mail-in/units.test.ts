@@ -171,7 +171,7 @@ describe('quote stripping', () => {
     ['es', 'El lun, 5 oct 2026 a las 16:00, Ana (<a@example.com>) escribió:'],
     ['pt', 'Em seg., 5 de out. de 2026 às 16:00, Rui <r@example.com> escreveu:'],
     ['nl', 'Op ma 5 okt 2026 om 16:00 schreef Jan <j@example.com>:'],
-    ['el', 'Στις Δευ 5 Οκτ 2026 στις 4:00 μ.μ., ο/η Γιώργος <g@example.gr> έγραψε:'],
+    ['el', 'Στις Δευ 5 Οκτ 2026 στις 4:00 μ.μ., ο/η Γιώργος <g@example.com> έγραψε:'],
     ['pl', 'W dniu 5.10.2026 o 16:00, Piotr <p@example.com> napisał:'],
     ['cs', 'Dne 5. 10. 2026 16:00 Jan <j@example.com> napsal(a):'],
     ['hu', '2026. okt. 5., hétfő 16:00 időpontban Péter <p@example.com> ezt írta:'],

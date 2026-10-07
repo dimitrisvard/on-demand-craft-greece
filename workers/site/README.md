@@ -1,11 +1,12 @@
-# microns-site (Cloudflare Worker, Phases 1-2)
+# microns-site (Cloudflare Worker, Phases 1, 2 and 4)
 
 `microns-site` serves every public URL of www.micronshub.eu the way Vercel serves it today: the redirect table,
 the sitemap routes, `/api/*`, the SEO server-side rendering of `/{lang}` and `/{lang}/*`, and the static build in
 `dist/`. Phase 1 runs **only as a preview on `*.workers.dev`** behind Cloudflare Access, with
 `X-Robots-Tag: noindex` on every response. Nothing in production uses it. Phase 2 (PLAN.md §5.2) ports `/api/*`:
 the site answers emails, files and tracking itself and sends every other endpoint to `microns-ops` over the
-service binding `OPS` (section "Phase 2: /api port" below).
+service binding `OPS` (section "Phase 2: /api port" below). Phase 4 (PLAN.md §5.4) adds the endpoint `/api/agent/*`
+for the agent layer (section "Phase 4: /api/agent/*").
 
 The specs live in `docs/migration/`: PLAN.md §5.1 and §5.2, ARCHITECTURE.md §6, §7.1, §8, §14, §17 and §19,
 SEO_PARITY.md and INVENTORY.md. Today's Vercel code is the source of truth for behaviour: `middleware.ts`, `middleware/*`,
@@ -45,6 +46,7 @@ step 4 is not an error and continues to steps 5–6 (ARCHITECTURE.md §6.2).
 | `src/api/forward.ts` | `handleApi` (flag check, then router), `forwardToVercel` |
 | `src/api/resolve.ts`, `src/api/router.ts` | Phase 2 `/api` catalogue, action resolver and router |
 | `src/api/emails.ts`, `src/api/track.ts`, `src/api/ops-client.ts` | Local handlers (lazy `api/emails.js`, `api/marketing.js`) and the `OPS` RPC client |
+| `src/auth/agent-hmac.ts` | Phase 4: relay signature and signed file-link checks for `/api/agent/*`, `AgentSiteEnv` |
 | `src/seo/*` | SEO handler, Supabase lookups (same REST URLs as middleware.ts), two-tier cache, client-route exemptions for strict 404 |
 | `src/static.ts` | Directory index, `hasStaticFile` |
 | `src/preview.ts` | `finalise()` |
@@ -206,6 +208,36 @@ npx wrangler kv key put --binding FLAGS api.forward_to_vercel '{"enabled":true,"
 | Test data | Test users and seeded test RFQs for the preview run (`tests/e2e/api/seed.sql`, `cleanup.sql`, fixtures file outside git); uploads through the preview only for seeded RFQs; before Phase 3, `node scripts/r2-to-legacy-s3.mjs --dry-run`, then `--execute` for any non-test object |
 | Decisions | Confirm or change the defaults D-1…D-17 (PLAN.md §5.2); production values of `API_GATES_MODE` and `API_MACHINE_HOSTS` go into the Phase 3 runbook |
 
+## Phase 4: /api/agent/*
+
+PLAN.md §5.4. The site adds one endpoint, `agent`, for the agent layer in `microns-ops`; the SEO path, the site
+`Env`, `wrangler.jsonc` and every Phase 1 and Phase 2 behaviour are unchanged.
+
+| Item | Rule |
+|---|---|
+| Matching | Any path under `/api/agent/` is endpoint `agent`, matched before the 13-path catalogue (`src/api/resolve.ts`) |
+| Actions | `decision` POST, `status` GET, `flag` POST, `start` POST, `file` GET; another action 404 `{"error":"not_found"}`, a wrong method 405 with `Allow`, a body over 65,536 bytes 413, all answered here |
+| Target | `microns-ops` over `OPS`; `Cache-Control: no-store`; never forwarded to Vercel, whatever `api.forward_to_vercel` says (`src/api/forward.ts`) |
+| Gate rows | AG-1 dashboard decision (staff session, token hash in the body); AG-2 relay decision (signed request from the Telegram relay, raw token); AG-3 signed partner file link; AG-4 flag edit (admin); AG-5 status (staff); AG-6 start (staff; the test card admin only); AG-7 staff file preview. `policy.test.ts` counts 41 action IDs; the 34 Phase 2 expectations are unchanged |
+| Relay secret | `AGENT_APPROVAL_SECRET`, read through `AgentSiteEnv` (`src/auth/agent-hmac.ts`); optional, so a site deploy never fails for agent config: a relay decision without it answers 500 for that request only, a dashboard decision is unaffected. Not in `secrets.required` or the `env-api` name lists |
+| Bundle guard | `scripts/check-bundle.mjs` also refuses `@anthropic-ai/*`, `agents`, `@modelcontextprotocol/*`, `postal-mime` (except through `resend`), `@pdf-lib/fontkit`, `@cloudflare/puppeteer` and any `workers/ops/src/` input |
+| T2 harness | Profile `agents` of `test/integration/harness.mjs` (`T2_PROFILE=agents`, `harness.mjs up --profile agents`, or `startHarness({profile, primary})`): site, ops and mail under one `wrangler dev`, provider stubs in `test/integration/stubs/` (Anthropic, Resend, Telegram, Gmail, Google token, a mini-PostgREST, the unfold service), mail and crons through the Local Explorer; the default profile stays `api`. The suites live in `workers/ops/test/t2/` (`npm --prefix workers/ops run test:integration:agents`) |
+
+| Owner item (Phase 4) | Detail |
+|---|---|
+| Secret | `npx wrangler secret put AGENT_APPROVAL_SECRET` here, the same value as in `microns-ops` and the Supabase function `telegram-leads-bot` (PLAN.md §5.4 OW-7, OW-17) |
+| Order | Deploy `microns-ops`, then `microns-mail`, then the site (OW-8) |
+
+### Status (2026-10-07, local)
+
+| Check | Result |
+|---|---|
+| T1 (`npm --prefix workers/site test`) | 26 files, 1,322 tests green (agent route, gate, relay check and bundle-guard suites included; Phase 1 and Phase 2 suites unchanged) |
+| T2 profile `api` (`test:integration`) | 5 files, 52 tests green, as at the Phase 2 close |
+| T2 profile `agents` | runs from `workers/ops`: 11 files, 46 tests green; the `/api/agent/*` rows are exercised through this site as the primary Worker (`web.t2`, `kernel.t2`) |
+| Dry run and guard | 3,383.82 KiB (gzip 732.56 KiB), 413 inputs, 0 forbidden |
+| Phase 1 checks | `node tests/middleware/smoke.mjs`: 323 route decisions equal; parity tool tests 94/94; SEO path files unchanged since the Phase 2 close |
+
 ## Documented deviations from Vercel
 
 Each one is either on the allow-list or a defensive change that does not change the bytes served. Items marked
@@ -308,7 +340,10 @@ Each one is either on the allow-list or a defensive change that does not change 
    PLAN.md §1, §3, §5.2 (route split, shim, gate classes, tasks, file list, gate wording, rollback, deviations
    DV-1…DV-19, defaults D-1…D-17) and §7b; ARCHITECTURE.md §4–§9, §14, §16–§20 and §23; wrangler.jsonc.draft;
    INVENTORY.md and inventory.csv (57 rows); RISKS.md (R-19, R-23, R-26, R-36…R-39, R-44, R-62, §10, §11);
-   COSTS.md (references only, no cost changes).
+   COSTS.md (references only, no cost changes). Phase 4, done 2026-10-07 under the same delegation: PLAN.md §1
+   item 13 and §5.4 (tasks, file list, build record, deviations DC-1…DC-19, defaults DF-1…DF-84, owner steps);
+   AGENTS.md (corrected in place, marked "as built"); ARCHITECTURE.md; wrangler.jsonc.draft; INVENTORY.md and
+   inventory.csv (19 rows); RISKS.md (16 rows, §10, §11); COSTS.md (cost controls only, no cost changes).
 8. **Prerender is not deterministic.** jsdom captures third-party tag-manager `<script>` tags with `random=`
    timestamps. Two local builds of the same tree differ in 83 prerendered `index.html` files; the shell and
    assets are identical. The prerendered files are served only where the SEO handler returns nothing

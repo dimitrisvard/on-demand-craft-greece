@@ -5,6 +5,9 @@
 //     rotated browser identities, no header or address variation after a refusal.
 //   - Redirects are followed only on the same host (at most 5); a redirect to another host ends the fetch with
 //     error 'redirect_off_host' and the target is not fetched.
+//   - With an `allow` check (the robots gate of the caller), every URL is checked before it is requested, the first
+//     one and each redirect target alike; a refused URL ends the fetch with error 'robots_disallowed' and is not
+//     requested.
 //   - 15 s timeout for the whole fetch; the page body is read up to 5 MiB.
 //   - A 403, a 429, or a page that is a bot challenge or CAPTCHA is reported as `blocked`, so the caller stops
 //     using that host (no browser retry).
@@ -30,7 +33,7 @@ export interface PageResult {
   /** Set when the answer is a refusal or a bot challenge. */
   blocked?: 'status' | 'challenge';
   /** Set when no usable answer arrived. */
-  error?: 'timeout' | 'network' | 'redirect_off_host' | 'too_many_redirects' | 'bad_redirect';
+  error?: 'timeout' | 'network' | 'redirect_off_host' | 'too_many_redirects' | 'bad_redirect' | 'robots_disallowed';
 }
 
 const CHALLENGE_MARKERS = [
@@ -78,6 +81,8 @@ export interface FetchPageOptions {
   timeoutMs?: number;
   maxBytes?: number;
   referer?: string;
+  /** Asked before every request (the first URL and each redirect target); false ends the fetch unrequested. */
+  allow?: (url: string) => Promise<boolean>;
 }
 
 /** GET one page (see the rules above). */
@@ -88,6 +93,9 @@ export async function fetchPage(url: string, o: FetchPageOptions): Promise<PageR
   const host = new URL(url).hostname.toLowerCase();
   try {
     for (let hop = 0; hop <= PAGE_MAX_REDIRECTS; hop++) {
+      if (o.allow && !(await o.allow(target))) {
+        return { status: 0, contentType: '', html: '', finalUrl: target, error: 'robots_disallowed' };
+      }
       let response: Response;
       try {
         const headers: Record<string, string> = {

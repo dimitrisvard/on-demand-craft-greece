@@ -1,6 +1,6 @@
 # workers/shared
 
-Source-only TypeScript shared by the two Workers of the `/api` port: `microns-site` (`workers/site`) and `microns-ops` (`workers/ops`). There is no build step and no workspace: each Worker imports these files by relative path (`../../shared/src/...`) and bundles them with its own wrangler. This package keeps its own `package.json` and lockfile; the root lockfile is unchanged.
+Source-only TypeScript shared by the Workers: `microns-site` (`workers/site`) and `microns-ops` (`workers/ops`) since the `/api` port, and `microns-mail` (`workers/mail`) for the cross-Worker types of Phase 4. There is no build step and no workspace: each Worker imports these files by relative path (`../../shared/src/...`) and bundles them with its own wrangler. This package keeps its own `package.json` and lockfile; the root lockfile is unchanged.
 
 ## Modules
 
@@ -10,7 +10,11 @@ Source-only TypeScript shared by the two Workers of the `/api` port: `microns-si
 | `src/compat/ambient.d.ts` | Minimal type declarations for `content-type`, `node:querystring`, `node:buffer`, `node:crypto`, so importing programs type-check with `types: ["@cloudflare/workers-types"]` only | referenced by `vercel-node.ts` and `etag.ts` |
 | `src/compat/vercel-rewrite.ts` | The `vercel.json` rewrites that target an `/api` function (`/api/track`, `/api/connector-status`) and the query merge Vercel applies to them | site router |
 | `src/compat/etag.ts` | Weak ETag equal to the `etag` package with `{ weak: true }` | `vercel-node.ts` |
-| `src/http/rpc.ts` | Site to ops RPC contract (`OpsCall`, `Principal`, `OpsApiRpc`) | both |
+| `src/http/rpc.ts` | Site to ops RPC contract (`OpsCall`, `Principal`, `OpsApiRpc`); Phase 4 adds the endpoint `agent` and the machine principal `telegram` (the signed Telegram relay) | both |
+| `src/agent-types.ts` (Phase 4) | Cross-Worker types: the 13 canonical flag keys (`FlagKey`) and the `MailIngest` contract (`startIntake`, `ingestReply`, ids only) | ops, mail |
+| `src/agent-api.ts` (Phase 4) | `/api/agent/*` contract: request bodies and results (`v: 1`), error codes, the verb → Telegram code table of approval cards, `callback_data` format, exact-shape type guards; mirrored by the dashboard's `src/types/agent.ts`, kept in step by shared JSON fixtures | site, ops, relay, dashboard |
+| `src/auth/scrape-rules.ts` (Phase 4) | URL rules for scrapes and directory scans, applied by ops before in-process calls of the remote MCP; a shared vector file proves the same answers as the site gate's rows | ops (tests cross-check the site) |
+| `src/limit.ts` (Phase 4) | Promise limiter (default 6 tasks at once, the per-invocation connection limit) | ops scrapers |
 | `src/http/env-check.ts` | Per-request name checks (`missingNames`, `configError`): a missing binding, var or secret answers 500 only on the requests that need it | both |
 | `src/http/json.ts` | `jsonResponse`, `textResponse`, `apiError` for answers the Worker code produces itself | both |
 | `src/http/log.ts` | One-line structured logs (`logLine`) | both |
@@ -70,4 +74,12 @@ Known differences from a Node server running `@vercel/node`:
 | Unit tests (`npm test`) | 18 files, 308 tests green |
 | Consumers | The site and ops suites, T2 and both dry runs pass with these modules (`workers/site/README.md`, "Phase 2 exit gate") |
 
-Design record: docs/migration/PLAN.md §5.2 (DV-2: one shim core here, the Hono adapter in `workers/ops`; DV-15: dependencies per package) and ARCHITECTURE.md §4, §6.4.
+## Status (2026-10-07, local, Phase 4)
+
+| Check | Result |
+|---|---|
+| Typecheck (`npm run typecheck`) | exit 0 (the `rpc.ts` union test extended for `agent` and `telegram` only) |
+| Unit tests (`npm test`) | 21 files, 402 tests green: the Phase 2 suites unchanged, plus the `/api/agent/*` contract (unique codes per card kind, `callback_data` within 34 bytes, every fixture through its guard), the scrape rules and the limiter |
+| Consumers | site, ops and mail suites, both T2 profiles and the three dry runs pass with these modules (docs/migration/PLAN.md §5.4, build record) |
+
+Design record: docs/migration/PLAN.md §5.2 (DV-2: one shim core here, the Hono adapter in `workers/ops`; DV-15: dependencies per package), §5.4 (Phase 4) and ARCHITECTURE.md §4, §6.4.

@@ -151,7 +151,7 @@ The same tools are also served remotely by the `microns-ops` Worker (`workers/op
 | Sign-in | Cloudflare Access (Managed OAuth); only staff accounts of Microns Hub (`user_roles`) are let in, every request is checked again |
 | Switch | Flag `mcp.remote` on the agent dashboard (off by default) |
 | Rate limit | 60 requests per minute per user |
-| Audit | Every tool call is recorded in `agent_runs` (agent `mcp`) with a summary that leaves out arguments and e-mail addresses |
+| Audit | Every tool call except `mcp_status` is recorded in `agent_runs` (agent `mcp`); the stored summary and answer text leave out the call's arguments and e-mail addresses |
 
 ### Connect Claude
 
@@ -175,7 +175,7 @@ The same tools are also served remotely by the `microns-ops` Worker (`workers/op
 |---|---|
 | Write tools | Their descriptions end with "Changes data in Microns Hub; confirm with the user before calling."; the same call with the same arguments within 10 minutes is not repeated (the first result is returned) |
 | `api_base_url` | Not offered: the remote server runs the ops handlers in-process and never calls a caller-supplied address |
-| Long scans | `trigger_country_scan`, `trigger_funding_scan`, `run_saved_search` and `scan_directory` with more than 3 pages are queued and answer with a `run_id` |
+| Long scans | `trigger_country_scan`, `trigger_funding_scan`, `run_saved_search` and `scan_directory` with more than 3 pages are queued and answer with a `run_id`; `scan_directory` with up to 3 pages waits for its scan at most 20 s, and a longer scan finishes in the background (its `run_id` is in the answer) |
 | Directory scans | `scan_directory` and `run_saved_search` run only while flag `agent.growth.scrapers` is on; they follow each directory's robots.txt for the crawler `MicronsHubBot` unless the owner has recorded the directory's permission |
 | `run_saved_search` | `saved_search_id` is the saved search's uuid |
-| E-mail addresses | Shown masked (`o***@example.com`) in lists |
+| E-mail addresses | Shown masked (`o***@example.com`) in lists and in the inbound e-mails of `get_rfq` |

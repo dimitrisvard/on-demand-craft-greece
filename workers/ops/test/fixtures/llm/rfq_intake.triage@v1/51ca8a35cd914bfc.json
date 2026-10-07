@@ -1,0 +1,36 @@
+{
+  "prompt": "rfq_intake.triage@v1",
+  "request_sha256": "51ca8a35cd914bfcd9837c86473a3bdc557c81d62fdbfc4091cd9387f7b85363",
+  "case": "el-dxf",
+  "user": [
+    {
+      "type": "text",
+      "text": "<untrusted_email>\nSubject: Ζήτηση προσφοράς: λαμαρίνα κοπή laser\nFrom: Γιώργος Παπαδόπουλος <g.papadopoulos@example.com>\n\nΚαλημέρα σας,\n\nθα θέλαμε προσφορά για 30 τεμάχια λαμαρίνα (κοπή laser και στράντζα), αλουμίνιο 5754, πάχος 3 mm.\nΕπισυνάπτεται το αρχείο DXF.\n\nΕυχαριστώ,\nΓιώργος Παπαδόπουλος\nΠαράδειγμα Μεταλλικές Κατασκευές ΑΕ\n</untrusted_email>\n<attachments>\n<attachment n=\"1\" name=\"plate.dxf\" kind=\"dxf\" size_bytes=\"121\"/>\n</attachments>"
+    }
+  ],
+  "response": {
+    "id": "msg_fixture",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-4-5-20251001",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"kind\":\"rfq\",\"language\":\"el\",\"injection_suspected\":false,\"confidence\":0.96}"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 640,
+      "output_tokens": 38,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  },
+  "expected": {
+    "kind": "rfq",
+    "language": "el",
+    "injection_suspected": false
+  }
+}

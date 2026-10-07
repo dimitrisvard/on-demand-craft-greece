@@ -7,7 +7,9 @@
 //     "*" group; with neither, everything is allowed.
 //   - Rule choice: the matching rule with the longest pattern wins; on a tie Allow wins. Patterns support "*" (any
 //     run of characters) and a final "$" (end of the path); an empty Disallow matches nothing. /robots.txt itself is
-//     always allowed. The path compared is the URL's path plus its query string.
+//     always allowed. The path compared is the URL's path plus its query string. Matching takes time linear in the
+//     pattern's segments times the path length; a rule with more than 10 "*" counts as a Disallow that matches every
+//     path (fail closed).
 //   - Fetch: GET <origin>/robots.txt with our User-Agent, 5 s timeout, at most 512 KiB read (rules past that are
 //     ignored), at most 5 redirects, each redirect target an http(s) public web host.
 //   - Answers: 2xx -> the rules; 4xx other than 429 -> no robots.txt ("unavailable": everything allowed); 429, 5xx,
@@ -137,12 +139,37 @@ function normalisePattern(pattern: string): string {
   return pattern.replace(/[^A-Za-z0-9\-._~!$&'()*+,;=:@/?%]/g, (c) => encodeURIComponent(c));
 }
 
-/** True when `pattern` (with * and a final $) matches `path` from its start. */
+/** Most "*" a rule may hold; a rule with more is treated as a Disallow that matches every path (fail closed). */
+export const MAX_RULE_WILDCARDS = 10;
+
+/** Number of "*" in a pattern. */
+export function wildcardCount(pattern: string): number {
+  let n = 0;
+  for (let i = 0; i < pattern.length; i++) if (pattern.charCodeAt(i) === 0x2a) n++;
+  return n;
+}
+
+/**
+ * True when `pattern` (with * and a final $) matches `path` from its start. Literal segments are matched left to
+ * right: the first at the start, each later one at its leftmost position after the previous one, and with a final $
+ * the last one at the end of the path. For patterns whose only wildcard is "*" the leftmost choice is never worse
+ * than any other, so this is exact, and the work grows with segments x path length only.
+ */
 export function patternMatches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith('$');
-  const body = normalisePattern(anchored ? pattern.slice(0, -1) : pattern);
-  const source = body.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
-  return new RegExp(`^${source}${anchored ? '$' : ''}`).test(path);
+  const segments = normalisePattern(anchored ? pattern.slice(0, -1) : pattern).split('*');
+  const first = segments[0];
+  if (segments.length === 1) return anchored ? path === first : path.startsWith(first);
+  if (!path.startsWith(first)) return false;
+  let pos = first.length;
+  for (let i = 1; i < segments.length - 1; i++) {
+    const at = path.indexOf(segments[i], pos);
+    if (at < 0) return false;
+    pos = at + segments[i].length;
+  }
+  const last = segments[segments.length - 1];
+  if (anchored) return path.length - last.length >= pos && path.endsWith(last);
+  return path.indexOf(last, pos) >= 0;
 }
 
 /** Groups that apply to the product token: its own (combined), else the '*' groups (combined), else none. */
@@ -161,9 +188,11 @@ export function decide(robots: RobotsFile, productToken: string, path: string): 
   if (path === '/robots.txt') return { allowed: true, rule: null, crawlDelayS };
   let best: RobotsRule | null = null;
   for (const group of groups) {
-    for (const rule of group.rules) {
-      if (rule.pattern === '') continue;
-      if (!patternMatches(rule.pattern, path)) continue;
+    for (const candidate of group.rules) {
+      if (candidate.pattern === '') continue;
+      const tooWide = wildcardCount(candidate.pattern) > MAX_RULE_WILDCARDS;
+      if (!tooWide && !patternMatches(candidate.pattern, path)) continue;
+      const rule = tooWide ? { allow: false, pattern: candidate.pattern } : candidate;
       const length = normalisePattern(rule.pattern).length;
       const bestLength = best ? normalisePattern(best.pattern).length : -1;
       if (length > bestLength || (length === bestLength && rule.allow && !best?.allow)) best = rule;

@@ -127,7 +127,11 @@ export async function mcpHarness(o: HarnessOptions = {}): Promise<McpHarness> {
     ports: () => ports,
     gsc: async () => gscFake,
     now: () => ports.clock.now(),
-    sleep: async () => {},
+    // A real timer that never keeps the test process alive (tools race it against their own work).
+    sleep: (ms) => new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, ms) as { unref?: () => void };
+      timer.unref?.();
+    }),
     scraper: () => ({
       fetch: (async () => new Response('', { status: 404 })) as typeof fetch,
       userAgent: 'MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)',

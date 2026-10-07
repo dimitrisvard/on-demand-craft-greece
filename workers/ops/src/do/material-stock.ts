@@ -20,13 +20,15 @@
 //   - SQLite storage holds(order_item_id, status, holds JSON, updated_at) mirrors the outcome per order item; the
 //     database is always re-checked before a stored outcome is returned.
 //   - Daily alarm: holds past their expiry are released ('expired'); when it released something or a stock item is
-//     held above its remaining stock, it records one agent_runs row (agent post_order, trigger cron) and posts a
-//     notice card through the queue agent-events. The alarm is re-armed while held holds remain.
+//     held above its remaining stock and agent.post_order is on, it records one agent_runs row (agent post_order,
+//     trigger cron) and posts a notice card through the queue agent-events; with the flag off it only releases
+//     expired holds (no run, no card). The alarm is re-armed while held holds remain.
 //   - Log lines carry ids and counts only.
 
 import { DurableObject } from 'cloudflare:workers';
 import { formatLogLine } from '../../../shared/src/http/log';
 import { stockNoticeCard } from '../agents/cards/reorder';
+import { readFlag } from '../agents/flags';
 import { closeRun, EMPTY_USAGE, openRun } from '../agents/runs';
 import { PostgrestDb, type Db } from '../db/postgrest';
 import {
@@ -330,7 +332,9 @@ export class MaterialStock extends DurableObject<OpsEnv> {
       }
       const { items, holds } = await this.checkInputs(db, material_id);
       const check = stockCheckOf(material_id, items, holds);
-      if (orderItems.length > 0 || check.over_held.length > 0) await this.notice(tenant_id, material_id, orderItems.length, check.over_held.length, now);
+      if ((orderItems.length > 0 || check.over_held.length > 0) && (await readFlag(this.env, 'agent.post_order', tenant_id)).enabled) {
+        await this.notice(tenant_id, material_id, orderItems.length, check.over_held.length, now);
+      }
       if (holds.some((h) => h.status === 'held')) await this.ctx.storage.setAlarm(now.getTime() + ALARM_INTERVAL_MS);
     });
   }

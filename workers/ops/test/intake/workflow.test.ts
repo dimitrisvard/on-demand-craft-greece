@@ -170,6 +170,23 @@ describe('parse-and-store and the model input', () => {
     expect(new TextDecoder().decode(stored.bytes)).toBe(stripped);
   });
 
+  it('body_excerpt holds no NUL character and no half of a surrogate pair (an emoji cut at the 4,000-character limit)', async () => {
+    const h = harness();
+    const mail = await seedMail(h, 'de-sheet-metal-step.eml');
+    // 3,999 characters, then an emoji whose two UTF-16 units sit at positions 3,999 and 4,000; a NUL in between
+    const own = `${'a'.repeat(1000)}\u0000${'b'.repeat(2999)}\u{1F527} please quote 20 brackets.`;
+    setRaw(h, mail.sha, () => ['From: Anna Becker <anna.becker@example.com>', 'To: rfq@example.com', 'Subject: Long enquiry', 'Message-ID: <long-2@mail.example.com>', 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', '', Buffer.from(own, 'utf8').toString('base64')].join('\r\n'));
+    h.ports.llm = new ByPromptLlm({ 'rfq_intake.triage@v1': { kind: 'other', language: 'en', injection_suspected: false, confidence: 0.6 } }) as unknown as FakeLlm;
+    await runCase(h, mail);
+    const excerpt = String(inboundOf(h, mail.id).body_excerpt);
+    expect(excerpt).toHaveLength(4000);
+    expect(excerpt).not.toContain('\u0000');
+    expect(excerpt).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
+    expect(excerpt.endsWith('b�')).toBe(true);
+    // what the database receives is valid JSON for a Postgres text value
+    expect(JSON.stringify(excerpt)).not.toMatch(/\\u(0000|d[89a-f][0-9a-f]{2})/i);
+  });
+
   it('a STEP file and a PDF sent with Content-Disposition inline reach the RFQ files, the CAD queue and the model', async () => {
     const h = harness({ quoteFlag: true });
     const mail = await seedMail(h, 'en-step-pdf.eml');

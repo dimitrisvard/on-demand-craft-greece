@@ -5,7 +5,8 @@
 //   order-created   agent.post_order on -> POST_ORDER.create(id 'post-order-<order_id>'); "already exists" counts as
 //                   success; off -> acked (the 10-minute dispatcher sends portal and quote orders again)
 //   resume-parked   a run parked on flag_off, budget or llm_unavailable: event 'agent-resumed' to its Workflow
-//                   instance; an instance that has ended closes the run 'cancelled' (instance_ended)
+//                   instance; an instance that has ended (or that the runtime reports as not found) closes the run
+//                   'cancelled' (instance_ended); any other Workflows error is retried
 //   card            a notice card of a consumer or cron unit: Telegram sendMessage without buttons
 //   decision        a decision on a card of a run without a Workflow instance (decide() sends it): reply_pick cards
 //                   are handled by src/replies/inbound.ts; for any other kind no consumer acts on the decision, so a
@@ -14,7 +15,8 @@
 // Rules
 //   - Messages are handled one at a time; a thrown error retries that message only (queue max_retries 3, then the
 //     DLQ agent-events-dlq). An inbound reply that fails on its last attempt is closed: run 'failed' with the error
-//     code, row 'failed' (the dispatcher no longer sends it).
+//     code, row 'failed' (the dispatcher no longer sends it). A reply_pick decision that fails on its last attempt
+//     is closed the same way (error 'reply_pick_failed'), so no claimed run stays 'running'.
 //   - A message of an unknown shape is acked and logged (retrying cannot fix it).
 //   - Log lines carry the message type, ids and outcome only.
 
@@ -27,7 +29,7 @@ import { closeRun, usageFromRow } from '../agents/runs';
 import { getRun } from '../db/repos/agent-runs';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import { makePorts, type Ports } from '../ports/index';
-import { failInboundReply, handleInboundReply, handleReplyPick, type ReplyDeps } from '../replies/inbound';
+import { failInboundReply, failReplyPick, handleInboundReply, handleReplyPick, type ReplyDeps } from '../replies/inbound';
 import type { CardV1 } from '../agents/cards/index';
 import type { AgentEventV1, DecisionMessageV1 } from './messages';
 
@@ -45,6 +47,12 @@ export interface AgentEventsDeps {
 
 function log(type: string, fields: Record<string, string | number | boolean>): void {
   console.log(formatLogLine(LOG_PREFIX, 'agent-events', { type, ...fields }));
+}
+
+/** True for the Workflows error of a get() whose instance does not exist ('instance.not_found'). */
+export function isInstanceNotFound(e: unknown): boolean {
+  const text = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return text.includes('instance.not_found');
 }
 
 /** The Workflow binding of an instance id (by its prefix). */
@@ -80,7 +88,8 @@ async function resumeParked(env: OpsEnv, ports: Ports, m: Extract<AgentEventV1, 
   let instance: WorkflowInstance;
   try {
     instance = await workflow.get(instanceId);
-  } catch {
+  } catch (error) {
+    if (!isInstanceNotFound(error)) throw error;
     await closeRun(ports.db, run.id, { status: 'cancelled', error: 'instance_ended' }, usageFromRow(run));
     return 'instance_ended';
   }
@@ -131,7 +140,13 @@ async function handle(env: OpsEnv, ports: Ports, deps: AgentEventsDeps, body: Ag
     case 'card':
       return sendCard(ports, body);
     case 'decision':
-      return decision(d, body);
+      try {
+        return await decision(d, body);
+      } catch (error) {
+        if (attempts < MAX_ATTEMPTS || body.card_kind !== 'reply_pick') throw error;
+        await failReplyPick(body, d, 'reply_pick_failed');
+        return 'failed';
+      }
     default:
       return 'unknown';
   }

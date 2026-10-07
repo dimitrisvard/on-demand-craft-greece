@@ -15,10 +15,13 @@
 //   4. Request: body JSON {"v":1,"token","code","tg":{"user_id","chat_id","message_id"}} (that key order);
 //      headers X-Microns-Timestamp (unix seconds) and X-Microns-Signature = hex HMAC-SHA256(AGENT_APPROVAL_SECRET,
 //      timestamp + "." + body); POST to AGENT_DECISION_URL with Content-Type application/json and an 8 s timeout.
-//   5. Answer: exactly one answerCallbackQuery per callback, text at most 200 characters: 200 -> the decision's
-//      label; 409 -> "Already decided"; 422 -> "Not possible for this card"; 401/403 -> "Relay not authorised";
-//      any other answer, a timeout, a network error or missing relay configuration -> "Could not record the
-//      decision. Use the dashboard." as an alert.
+//   5. Answer: exactly one answerCallbackQuery per callback, text at most 200 characters: 200 with a JSON body in
+//      the DecisionResult shape (v 1, ok true, run_id a UUID, verb, a known outcome, label of at most 200
+//      characters, no other keys; the same rules as isDecisionResult of workers/shared/src/agent-api.ts) -> its
+//      label ("Done" when the label is blank); 409 -> "Already decided"; 422 -> "Not possible for this card";
+//      401/403 -> "Relay not authorised"; a 200 with any other body (an HTML page, other JSON), any other answer,
+//      a timeout, a network error or missing relay configuration -> "Could not record the decision. Use the
+//      dashboard." as an alert.
 //   6. The card itself is edited by microns-ops for every channel; the relay never edits it.
 //   7. The webhook is always answered 200 after a callback (a failed decision must not make Telegram redeliver
 //      the update; tokens are single use).
@@ -32,6 +35,11 @@ export const CALLBACK_DATA_RE = /^ap:([A-Z2-7]{26}):([a-z0-9]{1,4})$/;
 export const DECISION_TIMEOUT_MS = 8_000;
 export const ANSWER_MAX_CHARS = 200;
 export const TELEGRAM_API_BASE = 'https://api.telegram.org';
+/** The DecisionResult rules (copy of workers/shared/src/agent-api.ts; tests/edge checks both agree). */
+export const DECISION_OUTCOMES = ['event_sent', 'terminated', 'restarted', 'dismissed'] as const;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const VERB_RE = /^[a-z][a-z0-9_]{0,39}$/;
+export const LABEL_MAX = 200;
 
 export const ANSWERS = {
   notAllowed: 'Not allowed',
@@ -133,10 +141,45 @@ function safeInt(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : null;
 }
 
-/** The answer text for an HTTP status of the decision endpoint (rule 5), with show_alert for failures. */
-export function answerFor(status: number, label?: string): { text: string; alert: boolean; outcome: CallbackOutcome } {
+/** The decision endpoint's 200 body (rule 5); the shape of DecisionResult in workers/shared/src/agent-api.ts. */
+export interface DecisionResult {
+  v: 1;
+  ok: true;
+  run_id: string;
+  verb: string;
+  outcome: (typeof DECISION_OUTCOMES)[number];
+  label: string;
+}
+
+const RESULT_KEYS = ['v', 'ok', 'run_id', 'verb', 'outcome', 'label'];
+
+/** True when x is a DecisionResult: exactly its six keys, each with the value rules of rule 5. */
+export function isDecisionResult(x: unknown): x is DecisionResult {
+  if (typeof x !== 'object' || x === null || Array.isArray(x)) return false;
+  const o = x as Record<string, unknown>;
+  const keys = Object.keys(o);
+  if (keys.length !== RESULT_KEYS.length || !RESULT_KEYS.every((k) => Object.prototype.hasOwnProperty.call(o, k))) return false;
+  return (
+    o.v === 1 &&
+    o.ok === true &&
+    typeof o.run_id === 'string' &&
+    UUID_RE.test(o.run_id) &&
+    typeof o.verb === 'string' &&
+    VERB_RE.test(o.verb) &&
+    (DECISION_OUTCOMES as readonly unknown[]).includes(o.outcome) &&
+    typeof o.label === 'string' &&
+    o.label.length <= LABEL_MAX
+  );
+}
+
+/**
+ * The answer text for an answer of the decision endpoint (rule 5), with show_alert for failures. A 200 counts as
+ * decided only with a DecisionResult body (`result`); a 200 without one is a failure.
+ */
+export function answerFor(status: number, result?: DecisionResult | null): { text: string; alert: boolean; outcome: CallbackOutcome } {
   if (status === 200) {
-    const text = typeof label === 'string' && label.trim() !== '' ? label : ANSWERS.done;
+    if (!result) return { text: ANSWERS.failed, alert: true, outcome: 'failed' };
+    const text = result.label.trim() !== '' ? result.label : ANSWERS.done;
     return { text: text.slice(0, ANSWER_MAX_CHARS), alert: false, outcome: 'decided' };
   }
   if (status === 409) return { text: ANSWERS.alreadyDecided, alert: false, outcome: 'already_decided' };
@@ -167,8 +210,11 @@ async function answerCallback(deps: AgentCallbackDeps, callbackId: string, text:
   }
 }
 
-/** Sends the signed decision; the HTTP status and the label of a 200 answer, or status 0 on timeout or error. */
-async function postDecision(deps: AgentCallbackDeps, url: string, secret: string, body: string): Promise<{ status: number; label?: string }> {
+/**
+ * Sends the signed decision; the HTTP status, and for a 200 the DecisionResult of its body (null when the body is
+ * not one); status 0 on timeout or network error.
+ */
+async function postDecision(deps: AgentCallbackDeps, url: string, secret: string, body: string): Promise<{ status: number; result?: DecisionResult | null }> {
   const timestamp = String(Math.floor(deps.now() / 1000));
   const signature = await signDecision(secret, timestamp, body);
   const controller = new AbortController();
@@ -185,10 +231,10 @@ async function postDecision(deps: AgentCallbackDeps, url: string, secret: string
       return { status: res.status };
     }
     try {
-      const result = (await res.json()) as { label?: unknown } | null;
-      return { status: 200, label: typeof result?.label === 'string' ? result.label : undefined };
+      const parsed: unknown = JSON.parse(await res.text());
+      return { status: 200, result: isDecisionResult(parsed) ? parsed : null };
     } catch {
-      return { status: 200 };
+      return { status: 200, result: null };
     }
   } catch {
     return { status: 0 };
@@ -236,9 +282,10 @@ export async function handleAgentCallback(query: CallbackQuery, deps: AgentCallb
   const result = await postDecision(deps, deps.decisionUrl, deps.approvalSecret, body);
 
   // Rule 5.
-  const answer = answerFor(result.status, result.label);
+  const answer = answerFor(result.status, result.result);
   if (answer.outcome === 'not_authorised' || answer.outcome === 'failed') {
-    log(`${LOG_PREFIX} agent decision refused: ${result.status === 0 ? 'timeout or network error' : `HTTP ${result.status}`}`);
+    const reason = result.status === 0 ? 'timeout or network error' : result.status === 200 ? 'unexpected answer' : `HTTP ${result.status}`;
+    log(`${LOG_PREFIX} agent decision refused: ${reason}`);
   }
   await answerCallback(deps, callbackId, answer.text, answer.alert);
   return answer.outcome;

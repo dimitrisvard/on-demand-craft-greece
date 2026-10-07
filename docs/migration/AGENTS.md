@@ -6,6 +6,8 @@ Related: [README.md](README.md) · [PLAN.md](PLAN.md) · [INVENTORY.md](INVENTOR
 
 This document expands brief §4 (and brief §7 item 6) into buildable designs: for each of the seven agents the purpose, trigger, inputs, outputs, Workflow steps, LLM calls, failure handling, idempotency key, cost per run, human view, feature flag, rollout and success metric. It also fixes the common framework (run records, AI Gateway metadata, flags, approvals, retention, evaluation, prompt versions), the Supabase schema sketch, the CAD backend contract, the stock reservation protocol and reply attribution. Task IDs (P4-n, P5-n) refer to [PLAN.md](PLAN.md); questions are cited as "PLAN.md Q<n>".
 
+Phase 4 build (2026-10-07): agents 1–3 and 7 and the scrapers of agent 4 are built and tested locally; nothing is deployed. Statements below that the build changed are corrected in place and marked "as built"; the list of changes is [PLAN.md](PLAN.md) §5.4 (DC-1…DC-19) and the binding contracts are [specs/PHASE4_SPEC.md](specs/PHASE4_SPEC.md). Agents 4 (other jobs), 5 and 6 are unchanged designs for Phase 5.
+
 ## 1. Scope, load and ground rules
 
 ### 1.1 The seven agents
@@ -18,7 +20,7 @@ This document expands brief §4 (and brief §7 item 6) into buildable designs: f
 | 4 | Growth agents | Cron Triggers + Queue `scrapes`; Browser Rendering `BROWSER` | Cron schedules of wrangler.jsonc.draft (reddit, hn, tenders, xometry); scrapers on demand | `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders`, `agent.growth.scrapers`, `agent.growth.xometry` | 4 (scrapers, P4-10); 5 (P5-3, P5-5) |
 | 5 | Content pipeline | Workflows `content-daily` (`ContentDailyWorkflow`) and `sitemap` (`SitemapWorkflow`), Queue `translations` | Cron 07:00 UTC | `agent.content_daily` | 5 (P5-2) |
 | 6 | Ops digest | Workflow `ops-digest` (`OpsDigestWorkflow`) | Cron Monday 06:30 UTC | `agent.ops_digest` | 5 (P5-7) |
-| 7 | Remote MCP | DO `MicronsMcp` in `microns-ops` on `mcp.micronshub.eu` | MCP client (Claude on desktop or mobile) | `mcp.remote` | 4 (P4-11) |
+| 7 | Remote MCP | Stateless MCP handler (`createMcpHandler`, no Durable Object; as built) in `microns-ops` on `mcp.micronshub.eu` | MCP client (Claude on desktop or mobile) | `mcp.remote` | 4 (P4-11) |
 
 ### 1.2 Design load
 
@@ -55,9 +57,9 @@ Consequence: design for tens of runs per day, cost per run in cents, no throughp
 | Links | `workflow_name`, `workflow_instance_id`, `parent_run_id`, `subject_type` + `subject_id` (e.g. `rfq`, `quote_workflow`, `order`, `article`) |
 | Outcome | `status` (`running`, `waiting_human`, `succeeded`, `failed`, `cancelled`, `skipped`), `error`, `output` (small JSON summary, no raw e-mail text) |
 | Cost | `llm_calls`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `cost_cents` (USD cents: LLM usage from each response × the price table of §2.10, plus the Cloudflare estimate of the step) |
-| Human | `approval_token` (single-use, §2.4), `human_action` (JSON: channel, actor, verb, decided_at), `prompt_version` |
+| Human | `approval_token_sha256` (SHA-256 hex of the single-use token, §2.4; the token itself is never stored), `human_action` (JSON: channel, actor, verb, decided_at), `prompt_version`, `parked_reason` (why a waiting run waits: `flag_off`, `budget`, `llm_unavailable`, or `failed` for a failure card; as built) |
 
-Lifecycle: the first step of every Workflow (or the Cron/Queue handler) inserts the row with `ON CONFLICT (agent, idempotency_key) DO NOTHING`; a conflict means the run already exists and the handler exits or resumes it. The last step sets `status` and `finished_at`. Analytics Engine `microns_events` receives one data point per run and per LLM call for dashboards (P4-13).
+Lifecycle: the first step of every Workflow (or the Cron/Queue handler) opens the row through the RPC `agent_run_begin` (unique per `agent` and `idempotency_key`); an existing row means the run already exists and the handler exits or resumes it. The last step sets `status`, `finished_at`, the usage counters and `cost_cents` (100 × the USD of the calls that returned usage, at the versioned price table `workers/ops/src/agents/prices.ts`; as built). Analytics Engine `microns_events` receives one data point per run and per LLM call for dashboards (P4-13).
 
 ### 2.2 AI Gateway routes and metadata
 
@@ -65,9 +67,9 @@ All LLM calls go through AI Gateway `microns` (P4-3). Routes are roles, not mode
 
 | Route | Provider and model class | Used for |
 |---|---|---|
-| `extract` | Anthropic, current Sonnet-class model (e.g. `claude-sonnet-5-5` at time of writing) | RFQ parsing, quote notes and cover e-mails, traveller summaries, article generation, digest narrative |
-| `classify` | Anthropic, current Haiku-class model (e.g. `claude-haiku-4-5`) | spam and intent triage, CNC vs sheet-metal classification, reply classification, lead relevance |
-| `translate` | Google AI Studio, current Gemini Flash-class model | article translation (the repo's Gemini model IDs are retired, H-19) |
+| `extract` | Anthropic, current Sonnet-class model (`claude-sonnet-5-5` in the Phase 4 build, with server-side refusal fallback) | RFQ parsing, quote notes and cover e-mails, traveller summaries, article generation, digest narrative |
+| `classify` | Anthropic, current Haiku-class model (`claude-haiku-4-5` in the Phase 4 build) | spam and intent triage, CNC vs sheet-metal classification, reply classification, lead relevance |
+| `translate` | Google AI Studio, current Gemini Flash-class model | article translation (the repo's Gemini model IDs are retired, H-19); created in Phase 5 with its first caller (PLAN.md §5.4 DC-18) |
 | `embed` | Workers AI `@cf/baai/bge-m3` (1,024 dimensions, index `quotes-v1`, cosine) | RAG over past quotes, tender relevance |
 
 Every call carries header `cf-aig-metadata` with at most five flat entries (AI Gateway allows up to five, values string, number or boolean; CF docs, verified 2026-09-30):
@@ -76,19 +78,19 @@ Every call carries header `cf-aig-metadata` with at most five flat entries (AI G
 {"agent": "quote", "run_id": "<agent_runs.id>", "tenant_id": "<tenants.id>", "step": "price-notes", "prompt": "quote.price-notes@v3"}
 ```
 
-The first three keys are the ones every document uses (P4-3, [ARCHITECTURE.md](ARCHITECTURE.md)); `step` and `prompt` use the two remaining entries. Gateway logs are filtered by these keys to reconcile `agent_runs.cost_cents` with provider billing. Budget and rate limits on the gateway follow PLAN.md Q20 (proposal: €50/month hard cap, alerts at 50 % and 80 %).
+The first three keys are the ones every document uses (P4-3, [ARCHITECTURE.md](ARCHITECTURE.md)); `step` and `prompt` use the two remaining entries. Gateway logs are filtered by these keys to reconcile `agent_runs.cost_cents` with provider billing. The gateway budget follows PLAN.md Q20 (default built: €50/month spend limit, alerts at 50 % and 80 %). As built there is no gateway rate limit: the per-agent daily cap (`value.max_runs_per_day`, default 200) stops runaway loops (PLAN.md §5.4 DC-19).
 
-Call rules: structured output (JSON schema) for every `extract` and `classify` call; stable system prompt and schema first so the provider's prompt cache applies; `max_tokens` set per step; the untrusted text (e-mail body, attachment text, web page) is passed as data inside a delimited block and never concatenated into instructions.
+Call rules: structured output (JSON schema) for every `extract` and `classify` call; stable system prompt and schema first so the provider's prompt cache applies; `max_tokens` set per step; the untrusted text (e-mail body, attachment text, web page) is passed as data inside a delimited block and never concatenated into instructions. As built: `@anthropic-ai/sdk` against the gateway's provider-native Anthropic endpoint, provider keys stored in the gateway (BYOK), gateway authentication with `AI_GATEWAY_TOKEN`, payload logging off for every call with customer data.
 
 ### 2.3 Feature flags
 
 | Aspect | Design |
 |---|---|
-| Store | Table `feature_flags` (PK `key`, `tenant_id`), columns `enabled`, `value` (JSON), `description`, `updated_by`, `updated_at` (§7). Written only by `microns-ops` endpoints (service role); staff edit them on the dashboard ApprovalsPage "Agent switches" section. |
-| Mirror | KV `FLAGS`. Key = flag key for the default tenant (e.g. `agent.quote`), `t:<tenant_id>:<key>` for any other tenant (unused in Phase 4). Value = JSON `{"enabled":…,"mode":…,"value":{…},"updated_at":…}`. |
-| Sync | Cron `* * * * *` in `microns-ops` (P4-2) writes only rows whose `updated_at` is newer than KV key `_synced_at`; seeded from the KV values set by hand in Phases 1–3 so `seo.strict_404` and `api.forward_to_vercel` keep their state. |
-| Read | One KV read per run or request. Missing key, unreadable value or KV error → default: every `agent.*` and `mcp.remote` flag is off (fail closed); `seo.strict_404` and `api.forward_to_vercel` fall back to their Phase 1–2 defaults. |
-| Switch-off time | Sync ≤ 1 min plus KV propagation ≈ 1 min (CF docs, re-check at execution): new runs stop within 2 min (Phase 4 exit gate item 3). Running Workflow instances check the flag again before every side-effecting step and park in `waiting_human` if it went off. |
+| Store | Table `feature_flags` (PK `key`, `tenant_id`), columns `enabled`, `value` (JSON), `description`, `updated_by`, `updated_at`, and the revision columns `rev`, `kv_synced_rev` (§7). Written only by `microns-ops` (service role); admins edit them on the dashboard ApprovalsPage "Agent switches" section; rows are never deleted. |
+| Mirror | KV `FLAGS`. Key = flag key for the default tenant (e.g. `agent.quote`), `t:<tenant_id>:<key>` for any other tenant (unused in Phase 4). Value = JSON `{"enabled":…,"value":{…},"updated_at":…,"rev":…}` plus `"mode"` when `value.mode` is set. |
+| Sync | Cron `* * * * *` in `microns-ops` (P4-2) writes only rows whose revision is newer than their last mirrored revision (as built; no `_synced_at` key); the first tick imports the KV values set by hand in Phases 1–3 so `seo.strict_404` and `api.forward_to_vercel` keep their state; a dashboard edit is written through to KV at once; a KV value changed by hand is reported by the hourly drift check. |
+| Read | One KV read per run or request (`microns-ops` reads with `cacheTtl` 30 s, the KV minimum). Missing key, unreadable value or KV error → default: every `agent.*` and `mcp.remote` flag is off (fail closed); `seo.strict_404` and `api.forward_to_vercel` fall back to their Phase 1–2 defaults. |
+| Switch-off time | Sync ≤ 1 min plus KV propagation ≈ 1 min (CF docs, re-check at execution): new runs stop within 2 min (Phase 4 exit gate item 3). Running Workflow instances check the flag again before every side-effecting step and park in `waiting_human` if it went off; the `*/10` dispatcher resumes them when the flag is on again (event `agent-resumed`). |
 | Canonical keys | `seo.strict_404`, `api.forward_to_vercel`, `agent.rfq_intake`, `agent.quote`, `agent.post_order`, `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders`, `agent.growth.scrapers`, `agent.growth.xometry`, `agent.content_daily`, `agent.ops_digest`, `mcp.remote` |
 
 Rollout modes (`value.mode`) used by the agent flags:
@@ -105,14 +107,14 @@ Other per-agent settings live in `value` (for example `min_confidence`, `max_run
 
 | # | Hop | Mechanism | Guard |
 |---|---|---|---|
-| 1 | Workflow step `request-*` | Generates a single-use `approval_token` (random 128 bit, base32) on the run's `agent_runs` row, sets `status = waiting_human`, posts the card with Telegram `sendMessage` and an `inline_keyboard`; `callback_data` = `ap:<token>:<verb>` (≤ 64 bytes, Telegram Bot API limit; re-check at execution) | Card holds business fields only, no e-mail body, no customer e-mail address in full |
-| 2 | Owner taps a button | Telegram sends a `callback_query` to the existing bot webhook, the Supabase edge function `telegram-leads-bot` (it handles text commands only today, supabase/functions/telegram-leads-bot/index.ts:210-215); P4-12 adds callback handling on top of the live source pulled in P0-5 (H-26) | Webhook secret-token header set with `setWebhook`; callback accepted only from the private chat `TELEGRAM_CHAT_ID` |
-| 3 | Bot → `microns-ops` | `POST https://www.micronshub.eu/api/agent/decision`, routed by `microns-site` over `OPS`; body `{token, verb, channel, actor, ts}`; header `X-Microns-Signature` = HMAC-SHA256 over `ts + "." + body` | Shared secret (name proposed: `AGENT_APPROVAL_SECRET`, §9); ±300 s clock window; rate limit `API_RATE_LIMIT` |
-| 4 | `microns-ops` claims the token | `UPDATE agent_runs SET approval_token = NULL, human_action = … WHERE approval_token = $1 AND status = 'waiting_human' RETURNING workflow_name, workflow_instance_id, output` | A double tap or a stale card finds no row and gets "already decided" |
-| 5 | `microns-ops` → Workflow | `instance.sendEvent({ type, payload })` for approve/confirm verbs; for reject verbs the business row is set to `rejected` and `instance.terminate()` is called | Event type from the table below |
-| 6 | Feedback | `answerCallbackQuery`, then `editMessageReplyMarkup`: the card shows "Approved by … at …" without buttons | — |
+| 1 | Workflow step `request-*` | Generates a single-use token (random 128 bit, base32) and stores only its SHA-256 on the run's `agent_runs` row, sets `status = waiting_human`, posts the card with Telegram `sendMessage` and an `inline_keyboard`; `callback_data` = `ap:<token>:<code>`, a 1–4 character code per verb (at most 34 bytes; Telegram allows 1–64) | Card holds business fields only, no e-mail body, no customer e-mail address in full |
+| 2 | Owner taps a button | Telegram sends a `callback_query` to the existing bot webhook, the Supabase edge function `telegram-leads-bot` (it handles text commands only today, supabase/functions/telegram-leads-bot/index.ts:210-215); P4-12 adds callback handling on top of the live source pulled in P0-5 (H-26); as built in `supabase/functions/telegram-leads-bot/agent-callback.ts` | Webhook secret-token header set with `setWebhook`; callback accepted only from the private chat `TELEGRAM_CHAT_ID` |
+| 3 | Bot → `microns-ops` | `POST https://www.micronshub.eu/api/agent/decision`, routed by `microns-site` over `OPS`; body `{v, token, code, tg}` (as built); headers `X-Microns-Timestamp` and `X-Microns-Signature` = HMAC-SHA256 over `ts + "." + body` | Shared secret `AGENT_APPROVAL_SECRET` (site, ops and the Supabase function); ±300 s clock window; rate limit `API_RATE_LIMIT` |
+| 4 | `microns-ops` claims the token | One `decide()` for every channel (as built): hashes the token, maps the code to a verb, refuses a verb outside the card's allowed verbs, then claims the run with the RPC `agent_run_claim_approval(<token SHA-256>, <human_action>)`, which returns the run once and clears the hash | A double tap or a stale card finds no row and gets "already decided" |
+| 5 | `microns-ops` → Workflow | `instance.sendEvent({ type, payload })` for approve/confirm verbs; for reject verbs the business row is set to `rejected` and `instance.terminate()` is called; on a failure card, Retry restarts the instance from the failed step and Dismiss closes the run | Event type from the table below |
+| 6 | Feedback | The relay answers the callback (`answerCallbackQuery`); `microns-ops` edits the card for every channel: it shows "Approved by … at …" without buttons | — |
 
-Dashboard path: ApprovalsPage and RfqInboxPage call the same `POST /api/agent/decision` with the staff user's Supabase JWT; `microns-site` verifies the JWT (Phase 2 module `workers/site/src/auth/supabase-jwt.ts`) and requires a `user_roles` role in `admin`, `sales_rep`, `production_manager`, `accountant` (the list `is_staff()` uses, supabase/migrations/20260806_phase2_rls_per_user.sql:37); steps 4–6 are identical. Optional: an Access application on `/dashboard*` (P6-4).
+Dashboard path: ApprovalsPage and RfqInboxPage call the same `POST /api/agent/decision` with the staff user's Supabase JWT and the body `{v, run_id, token_sha256, verb, edits?, note?}` (as built: the database holds only hashes, so the dashboard sends the hash and the relay the raw token); `microns-site` verifies the JWT (Phase 2 module `workers/site/src/auth/supabase-jwt.ts`) and requires a `user_roles` role in `admin`, `sales_rep`, `production_manager`, `accountant` (the list `is_staff()` uses, supabase/migrations/20260806_phase2_rls_per_user.sql:37); steps 4–6 are identical. Optional: an Access application on `/dashboard*` (P6-4).
 
 Workflow events (type pattern `^[a-zA-Z0-9_][a-zA-Z0-9-_]*$`, letters, digits, `-` and `_`, up to 100 characters; events sent before the step is reached are buffered; a timed-out `waitForEvent` throws and fails the instance unless caught; CF docs, verified 2026-09-30):
 
@@ -125,6 +127,7 @@ Workflow events (type pattern `^[a-zA-Z0-9_][a-zA-Z0-9-_]*$`, letters, digits, `
 | `reply-confirmed` | approval endpoint | `quote` step `confirm-reply` | 7 d, reminder, 7 d |
 | `handoff-approved` | approval endpoint | `post-order` step `wait-handoff` | 7 d, reminder, 7 d |
 | `reorder-approved` | approval endpoint | `post-order` step `wait-reorder` | 7 d, reminder, 7 d |
+| `agent-resumed` (as built) | `*/10` dispatcher, for a run parked by `flag_off` or `llm_unavailable` | any parked step | 7 d, then `cancelled` |
 | `translations-done` | `translations` consumer (last language) | `content-daily` step `wait-translations` | 6 h |
 
 Human waits use a 7-day timeout (the default is 24 h, maximum 365 d; CF docs, verified 2026-09-30) inside `try/catch`: on timeout a `remind-*` step invalidates the old token, posts a reminder card with a new token, and waits 7 more days; after the second timeout the item is set to `needs_review` or `expired` and stays on the dashboard. Workflow instance IDs are deterministic, so a repeated start is a no-op: `rfq-intake-<first 32 hex of message_id_sha256>`, `quote-<rfq_id>-v<quote_version>`, `post-order-<order_id>`, `content-daily-<yyyy-mm-dd>`, `sitemap-<yyyy-mm-dd>`, `ops-digest-<yyyy>-W<ww>` (instance ID length limit: CF docs, re-check at execution).
@@ -133,11 +136,11 @@ Human waits use a 7-day timeout (the default is 24 h, maximum 365 d; CF docs, ve
 
 | Layer | Policy (proposal; tuned when each consumer ships) |
 |---|---|
-| Workflow step | Each `step.do` sets `retries` (limit, delay, backoff) and `timeout` explicitly (CF docs, re-check at execution): LLM steps 3 retries, 30 s exponential, timeout 2 min; Supabase and R2 steps 5 retries, 10 s exponential; send steps (Resend, Telegram) 3 retries with a provider idempotency key. Non-retryable errors (schema validation failure after one re-ask, 4xx from a provider) throw `NonRetryableError`. |
-| Workflow instance | A failed instance sets `agent_runs.status = failed` in a `finally`-style last step where possible and posts an "agent failed" card with a **Retry** button (ops calls `instance.restart()`, which re-runs from the start; completed side effects are skipped by idempotency keys). |
+| Workflow step | Each `step.do` sets `retries` (limit, delay, backoff) and `timeout` explicitly (CF docs, re-check at execution): LLM steps 3 retries, 30 s exponential, timeout 3 min for `extract` (document input) and 1 min for `classify` (as built); Supabase and R2 steps 5 retries, 10 s exponential; send steps (Resend, Telegram) 3 retries with a provider idempotency key. Non-retryable errors (schema validation failure after one re-ask, 4xx from a provider) throw `NonRetryableError`. |
+| Workflow instance | As built: a failed run waits on a `failure` card (`waiting_human`, `parked_reason = 'failed'`): **Retry** restarts the instance from the failed step (earlier step results are reused, completed side effects are skipped by idempotency keys), **Dismiss** closes the run `failed`; an unanswered failure card is closed `failed` after 14 days. |
 | Queues | `max_retries` per consumer and DLQ `<name>-dlq` (wrangler.jsonc.draft: `cad-jobs` 2 retries, `translations` 5, `scrapes` 3, `agent-events` 3, `outbound-mail` 3). DLQs have no consumer; the ops digest lists their backlog and a manual task re-drives them. |
-| Provider outage | AI Gateway returns the provider error; the step retries; after the last retry the run parks in `waiting_human` with the card "LLM unavailable, continue manually". The business path (RFQ row, dashboard) never depends on the LLM being up. |
-| Budget exhausted | Gateway limit (PLAN.md Q20) → same as outage; `max_runs_per_day` in the flag `value` stops runaway loops. |
+| Provider outage | AI Gateway returns the provider error; the step retries; after the last retry the run parks in `waiting_human` (`parked_reason = 'llm_unavailable'`, resumed by the dispatcher after 30 min). The business path (RFQ row, dashboard) never depends on the LLM being up. |
+| Budget exhausted | Gateway spend limit (PLAN.md Q20) answers 429 → the run parks (`parked_reason = 'budget'`); `max_runs_per_day` in the flag `value` (default 200) closes further runs of that agent as `skipped` (`daily_cap`) before any LLM call, and one Telegram notice per agent and day reports it. |
 
 ### 2.6 Personal data and retention
 
@@ -146,11 +149,11 @@ Human waits use a 7-day timeout (the default is 24 h, maximum 365 d; CF docs, ve
 | Raw MIME of inbound mail | `microns-private` `email/<message_id_sha256>/raw.eml` | 90 days | R2 object lifecycle rule on prefix `email/` (CF docs, re-check at execution) |
 | Attachments not linked to an RFQ | `email/<message_id_sha256>/att/<n>-<name>` | 90 days | same rule |
 | Attachments linked to an RFQ | copied to `rfq/<rfq_id>/<file_id>-<name>` | as long as the RFQ and customer record (business record) | copy in `rfq-intake` step `copy-files` |
-| `inbound_emails` rows | Supabase | 24 months; after 90 days `parsed` keeps structured fields only and the body excerpt is cleared | monthly purge in the `ops-digest` run (Phase 5; run by hand before) |
+| `inbound_emails` rows | Supabase | 24 months; after 90 days `parsed` keeps structured fields only and the body excerpt is cleared | `agent_retention_purge()` (as built): monthly in the `ops-digest` run (Phase 5); by hand before |
 | `agent_runs` | Supabase | 13 months; `output` cleared after 90 days | same purge |
 | CAD inputs and outputs | `cad/<job_id>/{input,output}/…` | with the RFQ | — |
 | Quote PDFs, travellers | `quotes/<rfq_id>/v<version>/quote.pdf`, `orders/<order_id>/traveler.pdf` | business record | — |
-| AI Gateway logs | Cloudflare | shortest retention the gateway offers that still covers the monthly cost reconciliation; request and response bodies not logged for `extract` calls on e-mail content if the gateway allows per-request opt-out (P4-3) | gateway settings |
+| AI Gateway logs | Cloudflare | shortest retention the gateway offers that still covers the monthly cost reconciliation; as built every call with customer data sends `cf-aig-collect-log-payload: false`, so only metadata is logged (P4-3) | gateway settings |
 | Telegram cards | Telegram | minimised content (company, RFQ number, totals, masked e-mail) | card templates |
 
 EU residency: Supabase runs in eu-central-1 (live 2026-09-30). R2 location hints (`weur`, `eeur`, …) are best effort, not guarantees; a jurisdiction (`eu`) is a guarantee, can only be chosen when a bucket is created and cannot be changed afterwards; every Worker binding of such a bucket needs `"jurisdiction": "eu"`, and the S3 endpoint becomes `https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com` (CF docs, verified 2026-09-30). Recommendation: create `microns-private` with jurisdiction `eu` at P2-9 (it holds e-mails, CAD files and quotes); `microns-public` holds public content and needs only a `weur` location hint. LLM providers process the texts sent to them under their API data terms; the owner confirms the provider choice with PLAN.md Q20.
@@ -167,16 +170,16 @@ EU residency: Supabase runs in eu-central-1 (live 2026-09-30). R2 location hints
 
 | Item | Design |
 |---|---|
-| Golden set | 30 cases to start: the 2 live RFQs (live 2026-09-30); past RFQ e-mails and Techpilot notifications from the current mailbox (PLAN.md Q3), with the owner's final RFQ entry as ground truth; past offers such as RFQ-08052026-1 (scripts/generate_offer_pdf.py:1-3) for pricing; synthetic variants to reach ≥ 2 cases per language for the 14 languages, both processes, spam, auto-replies and multi-mail threads. Stored outside the public repo because it contains customer data; the private location (for example a dedicated prefix in `microns-private`, not yet in the ARCHITECTURE.md prefix list) is fixed at P4-5. |
+| Golden set | 30 cases to start: the 2 live RFQs (live 2026-09-30); past RFQ e-mails and Techpilot notifications from the current mailbox (PLAN.md Q3), with the owner's final RFQ entry as ground truth; past offers such as RFQ-08052026-1 (scripts/generate_offer_pdf.py:1-3) for pricing; synthetic variants to reach ≥ 2 cases per language for the 14 languages, both processes, spam, auto-replies and multi-mail threads. Stored outside the public repo because it contains customer data; as built in R2 `microns-private` under `eval/golden/<yyyy-mm-dd>/`. |
 | Metrics | Intake: field-level accuracy for quantity, material, thickness, deadline, contact; process classification accuracy; calibration (share of errors above the 0.7 threshold). Quote: absolute percentage error of the draft total vs the owner's final price; share of drafts approved without edits. Replies: classification accuracy. |
-| Gate | A prompt or model change ships only if no metric falls more than 2 points below the current version; results stored as `agent_runs` rows with `agent = eval` and gateway metadata `step = eval`. |
+| Gate | A prompt or model change ships only if no metric falls more than 2 points below the current version; results stored as `agent_runs` rows with `agent = eval` and gateway metadata `step = eval`. As built: `npm --prefix workers/ops run eval:synthetic` replays the synthetic fixtures offline; `eval:live` runs the golden set through the gateway (owner only; workers/ops/eval/README.md). |
 | Cost | ≈ 30 × $0.05 ≈ $1.50 per full evaluation run at the §2.10 prices (list price, re-check at execution). |
 
 ### 2.9 Prompt versioning
 
 | Aspect | Design |
 |---|---|
-| Files | `workers/ops/src/agents/prompts/<agent>/<step>.v<N>.md` plus the JSON schema next to it (P4 file list: `workers/ops/src/agents/*`). A prompt file is never edited after release; a change is a new `v<N+1>`. |
+| Files | `workers/ops/src/agents/prompts/<agent>/<step>.v<N>.md` plus `<step>.v<N>.schema.json` next to it. A prompt file is never edited after release; a change is a new `v<N+1>`; as built, a per-agent `LOCK.json` of SHA-256 hashes freezes released files (a test fails on any change). |
 | Identifier | `<agent>.<step>@v<N>`, written to `agent_runs.prompt_version` and to gateway metadata `prompt`. |
 | Selection | The flag `value.prompts` may pin a version per step (rollback without deploy); default = highest version in the bundle. |
 | Model | Route names stay stable; a model change at the gateway is treated like a prompt change and must pass the §2.8 gate. |
@@ -217,6 +220,8 @@ EU residency: Supabase runs in eu-central-1 (live 2026-09-30). R2 location hints
 | M4 | `insert-row` | `inbound_emails` insert `ON CONFLICT (tenant_id, message_id_sha256) DO NOTHING`; conflict → stop (duplicate delivery). |
 | M5 | `start` | `OPS` service binding: create instance `rfq-intake-<sha32>` (already exists → treat as success). |
 
+As built: steps M0–M7 of [workers/mail/README.md](../../workers/mail/README.md): the hand-over is `OPS.startIntake` or `OPS.ingestReply` (named entrypoint `MailIngest`), every accepted mail is also forwarded to `MAIL_COPY_TO` during shadow mode, and a failed store or row write forwards to `MAIL_FALLBACK_TO` or rejects temporarily so the sender retries.
+
 Workflow `rfq-intake` (`RfqIntakeWorkflow`):
 
 | # | Step | What | LLM route |
@@ -231,7 +236,7 @@ Workflow `rfq-intake` (`RfqIntakeWorkflow`):
 | 8 | `request-confirmation` | Card when overall confidence < 0.7 (`value.min_confidence`), DMARC failed, customer unknown and company missing, or `mode` is `shadow`/`assist`. Auto-eligible otherwise in `auto` mode. | — |
 | 9 | `wait-confirmation` | `waitForEvent('intake-confirmed')` 7 d, reminder, 7 d; payload may correct the process or reject. Timeout → `needs_review`; the dashboard can still create the RFQ later through the same idempotent function. | — |
 | 10 | `create-rfq` | `create_email_rfq(inbound_email_id, payload, source)` → RFQ number `RFQ-DDMMYYYY-n`, customer link, `rfqs.source`, `rfqs.inbound_email_id` (one transaction). The RPC requires a company name (supabase/migrations/20260806_link_rfqs_to_customers.sql:63-65); when none is found the sender's domain is used and flagged. | — |
-| 11 | `copy-files` | R2 copy to `rfq/<rfq_id>/<file_id>-<name>`; insert `rfq_files` (`file_path` = `r2_key`, `part_id` from the part mapping) `ON CONFLICT (rfq_id, sha256) DO NOTHING`. | — |
+| 11 | `copy-files` | R2 copy to `rfq/<rfq_id>/<file_id>-<name>`; insert `rfq_files` (as built: `file_path` = `<rfq_id>/<file_id>-<name>` and `r2_key` = `rfq/` + `file_path`, because the files API adds `rfq/`; `part_id` from the part mapping) `ON CONFLICT (rfq_id, sha256) DO NOTHING`. | — |
 | 12 | `enqueue-cad` | One `cad_jobs` row + `cad-jobs` message (`job_type` `analyse`) per STEP, STL or DXF file (§5). | — |
 | 13 | `notify-and-hand-over` | Final card; `agent_runs` closed; if `agent.quote` is on, create instance `quote-<rfq_id>-v1`. Optional customer acknowledgement mail only when `value.ack` is true (off by default). | — |
 
@@ -262,7 +267,7 @@ Human view:
 
 | Surface | Content |
 |---|---|
-| Telegram card | Title "RFQ e-mail · <company> · <country> · <language>"; sender name and masked address; parts count and file types; total quantity; process + confidence; deadline; customer "existing" or "new"; flags (DMARC fail, injection suspected). Buttons: **Confirm sheet metal**, **Confirm CNC**, **Not an RFQ**, **Open**. |
+| Telegram card | Title "RFQ e-mail · <company> · <country> · <language>"; sender name and masked address; parts count and file types; total quantity; process + confidence; deadline; customer "existing" or "new"; flags (DMARC fail, injection suspected). Buttons: **Confirm sheet metal**, **Confirm CNC**, **Confirm mixed**, **Not an RFQ**, **Open**. |
 | Dashboard | New page `/dashboard/rfq-inbox` (`RfqInboxPage`, P4-12): every `inbound_emails` row with status, parsed fields highlighted with confidence, original text on demand, attachments, actions confirm/correct/reject. Created RFQs open in the existing `/rfq/:id` (src/App.tsx:271). |
 
 Rollout and success metric:
@@ -279,9 +284,9 @@ Rollout and success metric:
 |---|---|
 | Purpose | From a draft RFQ to a sent quote: geometry, unfold, bend table, drawing, a rule-based price with RAG context, owner approval, PDF, send, follow-ups and outcome detection. |
 | Trigger | Step 13 of `rfq-intake`; "Start quote" on `/rfq/:id` or ApprovalsPage (web-form RFQs too); a revision creates `quote_version + 1` and cancels the previous instance. |
-| Inputs | `rfqs` (incl. `parts_details`, `due_date`), `rfq_files`, `customers`; CAD results (`cad_jobs.result`, outputs in R2); `pricing_rules`; material prices (`catalog_materials.price_per_kg`, src/sql/20260407_add_price_per_kg.sql:6-8; density and kerf factor in `materials`, supabase/migrations/20260401_create_inventory_system.sql:48,63); similar past quotes from Vectorize `quotes-v1`. |
-| Outputs | `quote_workflows` row (state machine); `cad_jobs` for `drawing_pdf`/`flat_dxf`; R2 `quotes/<rfq_id>/v<version>/quote.pdf`; Resend e-mail with `Reply-To: replies@rfq.micronshub.eu`; stored outbound `Message-ID`s; `rfqs.status` `sent` (existing values `draft`, `sent`, `received`, `approved`, src/pages/RfqManagement.tsx:601-768); Vectorize upsert (id = `quote_workflows.id`); Telegram cards; `agent_runs`. |
-| Idempotency key | `rfq_id + quote_version` (unique in `quote_workflows`; instance `quote-<rfq_id>-v<n>`); Resend `Idempotency-Key` `quote-<quote_workflow_id>-send` and `…-fu<n>` for follow-ups (Resend feature, re-check at execution). |
+| Inputs | `rfqs` (incl. `parts_details`, `due_date`), `rfq_files`, `customers`; CAD results (`cad_jobs.result`, outputs in R2); `pricing_rules`; material prices (`catalog_materials.price_per_kg`, src/sql/20260407_add_price_per_kg.sql:6-8); as built, the kerf factor is a `pricing_rules` row, because the live `materials` table has no kerf column (live 2026-10-03; PLAN.md §5.4 DC-5); similar past quotes from Vectorize `quotes-v1`. |
+| Outputs | `quote_workflows` row (state machine); `cad_jobs` for `drawing_pdf`/`flat_dxf`; R2 `quotes/<rfq_id>/v<version>/quote.pdf`; Resend e-mail with `Reply-To: replies@rfq.micronshub.eu`; stored outbound `Message-ID`s; `rfqs.status` `sent` (existing values `draft`, `sent`, `received`, `approved`, src/pages/RfqManagement.tsx:601-768); Vectorize upsert (as built: one vector per quote line, id `<quote_workflow_id>:<line_no>`, namespace = tenant); Telegram cards; `agent_runs`. |
+| Idempotency key | `rfq_id + quote_version` (unique in `quote_workflows`; instance `quote-<rfq_id>-v<n>`); Resend `Idempotency-Key` `quote/<quote_workflow_id>/send` and `quote/<quote_workflow_id>/fu<k>` for follow-ups (as built; Resend keeps a key 24 h). |
 | Flag | `agent.quote` (also gates the reply detection of §4 for quote threads). |
 
 Steps (Workflow `quote`, `QuoteWorkflow`):
@@ -290,18 +295,18 @@ Steps (Workflow `quote`, `QuoteWorkflow`):
 |---|---|---|---|
 | 1 | `load` | RFQ, files, customer; insert `quote_workflows` (`status` `started`). | — |
 | 2 | `await-cad` | `waitForEvent('cad-done')` 2 h (sent when all `analyse` jobs of the RFQ are final); timeout → continue with "geometry missing" lines priced manually. | — |
-| 3 | `cad-outputs` | For sheet-metal parts: `drawing_pdf` (A3 drawing with bend table and title block) and `flat_dxf` jobs through the same queue (§5); wait `cad-done` again. | — |
+| 3 | `cad-outputs` | For sheet-metal parts: `drawing_pdf` jobs (A3 drawing with bend table and title block) through the same queue (§5). As built they are not awaited: the flat DXF comes from `analyse` (PLAN.md §5.4 DC-3). | — |
 | 4 | `similar-quotes` | Embed a normalised description (process, material, thickness, bounding box, quantity) and query `quotes-v1` top 5 with metadata filter on process; load their pricing and outcome. | `embed` |
 | 5 | `price` | Deterministic calculator: material mass × `price_per_kg` × kerf factor, cutting/bending/machining time from CAD results × rates, setup, finishing, margin, minimum order value, all from `pricing_rules` (version recorded). | — |
 | 6 | `price-notes` | Model reviews the calculated lines with the RFQ notes and the similar quotes: assumptions, risks (e.g. tight tolerance), suggested adjustments with reasons. Suggestions are shown, never applied. | `extract` |
 | 7 | `cover-email` | Cover e-mail text in the customer's language (from `rfq-intake` or the form language). | `extract` |
-| 8 | `draft-pdf` | Quote PDF with `pdf-lib` in `microns-ops` (the library `generate-manufacturing-pdf` already uses, supabase/functions/generate-manufacturing-pdf/pdf-builder.ts), layout ported from scripts/generate_offer_pdf.py (brand colours, line table); drawing PDFs attached. | — |
+| 8 | `draft-pdf` | Quote PDF with `pdf-lib` in `microns-ops` (the library `generate-manufacturing-pdf` already uses, supabase/functions/generate-manufacturing-pdf/pdf-builder.ts) and embedded Liberation Sans (Greek text), layout ported from the dashboard offer template; drawing PDFs not attached by default (as built, `value.attach_drawings`; DC-4). | — |
 | 9 | `request-approval` | Card + ApprovalsPage entry; `status` `awaiting_approval`. | — |
 | 10 | `wait-approval` | `waitForEvent('quote-approved')` 7 d, reminder, 7 d; edited lines in the payload → re-run `draft-pdf`. Reject = terminate (§2.4). Second timeout → `expired`. | — |
 | 11 | `send` | Resend from the existing sender identity, `Reply-To: replies@rfq.micronshub.eu`, `Message-ID` `<q.<quote_workflow_id>.<n>@rfq.micronshub.eu>` (if Resend does not keep a custom `Message-ID`, store the one it reports; re-check at execution); PDF attached; `outbound_message_ids`, `sent_at`, `rfqs.status = 'sent'`; Vectorize upsert with `outcome: open`. | — |
 | 12 | `follow-up-1` … `follow-up-3` | `waitForEvent('customer-reply')` 3 d → follow-up 1; 4 d → follow-up 2; 7 d → `expired`. Follow-ups carry `In-Reply-To`/`References` of the first send; cadence in `value.follow_up_days`; follow-up sends are auto-eligible because the text is a fixed template. | — |
 | 13 | `classify-reply` | On `customer-reply`: won, lost, counter-offer, question, auto-reply, with confidence. | `classify` |
-| 14 | `confirm-reply` | Confidence ≥ 0.8 and not counter-offer → status set, card informational; otherwise card with buttons and `waitForEvent('reply-confirmed')`. "Won" can create the `orders` row (status `new`, `rfq_id`) through `microns-ops`, which starts agent 3. | — |
+| 14 | `confirm-reply` | Confidence ≥ 0.8 and not counter-offer → status set, card informational; otherwise card with buttons and `waitForEvent('reply-confirmed')`. "Won" creates the order through the RPC `create_order_from_quote` (as built: the rows the portal's Accept Quote writes, once per RFQ), which starts agent 3. | — |
 | 15 | `close` | `quote_workflows.status` final; Vectorize metadata `outcome`; `agent_runs` closed. | — |
 
 LLM calls:
@@ -345,7 +350,7 @@ Rollout and success metric: `assist` for the whole of Phase 4 (every send approv
 | Trigger | (a) "Won" in agent 2 creates the order and starts the instance; (b) portal "Accept Quote" inserts `orders` client-side (supabase/migrations/20260806_phase2_rls_per_user.sql:18-19), detected by the existing `*/10` dispatcher tick of `microns-ops` (orders without a `post-order` run; no new cron); (c) "Start handoff" on `/orders/:id` (src/App.tsx:274). |
 | Inputs | `orders`, `order_items`, `rfqs`, `quote_workflows.pricing` (per-line material and area), `production_partners`, CAD outputs, `materials`, `stock_items`, `low_stock_alerts`, `inventory_settings`. |
 | Outputs | R2 `orders/<order_id>/traveler.pdf`; `orders.partner_id` when a partner is chosen; partner e-mail (Resend) with signed links; `stock_reservations` rows and `stock_transactions` rows of the existing types `reserve`/`unreserve` (supabase/migrations/20260401_create_inventory_system.sql:24-26); reorder draft; cards; `agent_runs`. |
-| Idempotency key | `order_id` (instance `post-order-<order_id>`); reservations idempotent on `order_item_id` (§6); partner mail `Idempotency-Key` `order-<order_id>-handoff`. |
+| Idempotency key | `order_id` (instance `post-order-<order_id>`); reservations idempotent on `order_item_id` (§6); partner mail `Idempotency-Key` `order/<order_id>/handoff` (as built). |
 | Flag | `agent.post_order`. |
 
 Steps (Workflow `post-order`, `PostOrderWorkflow`):
@@ -358,7 +363,7 @@ Steps (Workflow `post-order`, `PostOrderWorkflow`):
 | 4 | `reserve-stock` | For items made from stocked material: `MaterialStock(<tenant>:<material_id>).reserve(order_item_id, need)` (§6); shortfall recorded. | — |
 | 5 | `request-handoff` | Card with partner, traveller link and stock status; `waitForEvent('handoff-approved')` 7 d, reminder, 7 d. | — |
 | 6 | `handoff` | Set `orders.partner_id` (the partner portal shows it through the existing partner visibility rules, supabase/migrations/20260806_phase2_rls_per_user.sql:90-107); Resend mail with signed links (7 d) to the traveller and drawings. | — |
-| 7 | `reorder-draft` | If a shortfall exists or an unresolved `low_stock_alerts` row exists for the material: draft using `materials.supplier`, `supplier_sku`, `reorder_quantity`, `lead_time_days` (supabase/migrations/20260401_create_inventory_system.sql:53-59). | `extract` |
+| 7 | `reorder-draft` | If a shortfall exists or an unresolved `low_stock_alerts` row exists for the material: draft with the supplier and SKU from `catalog_materials`; quantity and lead time are entered by hand. As built: the live `materials` table has no supplier, SKU, reorder-quantity or lead-time columns, although supabase/migrations/20260401_create_inventory_system.sql:53-59 declares them (live 2026-10-03; DC-5, DC-8). | `extract` |
 | 8 | `wait-reorder` | `waitForEvent('reorder-approved')` 7 d, reminder, 7 d; approval marks the draft approved and hands the text to the owner for sending (no supplier e-mail column exists, §9). | — |
 | 9 | `close` | `agent_runs` closed; commit and release of reservations happen later through the inventory actions (§6). | — |
 
@@ -400,7 +405,7 @@ Five jobs, one pattern: a Cron Trigger (or an on-demand call) enqueues one `scra
 | Reddit | tier1 `*/15`, tier2 `*/30`, tier3 hourly (live `cron.job` 2026-09-30) | `monitored_subreddits` due by `scan_interval_minutes`, `lead_keywords`; pullpush API (supabase/functions/reddit-collector/index.ts:141-146, :260-271) | `leads` upserts, Telegram lead messages | `leads.source_url` unique (supabase/migrations/20260321_create_lead_monitor.sql:10); run key `growth.reddit:<cron>:<scheduledTime>` | `agent.growth.reddit` | 5 (P5-3) |
 | HN | `*/30` | `lead_keywords`; Algolia HN API | `leads` upserts, Telegram | same | `agent.growth.hn` | 5 (P5-3) |
 | Tenders | 06:00 | `tender_connectors` due (26 seeded, supabase/migrations/20260322_create_tender_monitor.sql:138); `lib/connectors/*` and `scoreTender` (api/tender-scan.js:14-21, :140) | `tenders` upserts with score, Telegram | `tenders` unique (`country_code`, `tender_reference`) (supabase/migrations/20260325_fix_table_schemas.sql:200) | `agent.growth.tenders` | 5 (P5-3) |
-| Scrapers (Europages, wlw) | on demand from `/dashboard/company-scanner`, MCP `scan_directory`/`run_saved_search` | search URL; Browser Rendering for pages that need a browser, plain fetch otherwise (api/scan-directory.js:1-7) | `company_leads` upserts, `scan_logs` | `company_leads` unique (`source`, `source_url`) (supabase/migrations/20260325_fix_table_schemas.sql:127) | `agent.growth.scrapers` | 4 (P4-10) |
+| Scrapers (Europages, wlw) | on demand from `/dashboard/company-scanner`, MCP `scan_directory`/`run_saved_search` | search URL; as built: plain fetch after a robots.txt check that fails closed, Browser Rendering only for client-rendered pages of hosts the owner has recorded permission for (`SCRAPER_PERMITTED_HOSTS`; DC-12); with the flag off the Phase 2 handlers answer unchanged | `company_leads` upserts, `scan_logs` | `company_leads` unique (`source`, `source_url`) (supabase/migrations/20260325_fix_table_schemas.sql:127) | `agent.growth.scrapers` | 4 (P4-10) |
 | Xometry | `0 6,8,10,12,14,16,18 * * *` (.github/workflows/xometry-scan.yml:21) | Xometry partner GraphQL (TypeScript port or Container, PLAN.md Q8) | `xometry_offers` upserts; alert on HTTP 401 | `xometry_offers.code` unique (xometry-bot/schema.sql:8) | `agent.growth.xometry` | 5 (P5-5) |
 
 Consumer steps (Queue `scrapes`, one message per subreddit, search term set, connector, search page or scan):
@@ -509,24 +514,24 @@ Rollout and success metric: on from Phase 5 (P5-7). Success: delivered every Mon
 | Trigger | MCP client over Streamable HTTP to `mcp.micronshub.eu` (Custom Domain → `microns-ops`). |
 | Inputs | Tool arguments; Supabase (service role, scoped per tool); GSC through the existing client logic; the ops routes that replace the Vercel API calls of the local server (mcp-server/src/index.ts:541, :683, :815, :1290, :1552). |
 | Outputs | Tool results; for write tools, the same effects as the dashboard (e.g. a `quote-approved` decision through `/api/agent/decision` logic); one `agent_runs` row per tool call (`agent` `mcp`). |
-| Idempotency key | Read tools: none needed. Write tools: `mcp:<session id>:<request id>` as `agent_runs.idempotency_key`. |
+| Idempotency key | Read tools: `mcp:r:<uuid>` (audit only). Write tools (as built): `mcp:w:<tool>:<digest of user, tool and arguments>:<10-minute bucket>` as `agent_runs.idempotency_key` (DC-10). |
 | Flag | `mcp.remote` (`value.writes` false in the first stage). |
 
 Design points:
 
 | Point | Design |
 |---|---|
-| Class | `MicronsMcp` (Agents SDK `McpAgent`, as planned). CF docs (verified 2026-09-30, see wrangler.jsonc.draft) mark `McpAgent` as feature-frozen in favour of the stateless `createMcpHandler`; P4-11 decides before the first deploy. |
-| Authentication | Cloudflare Access in front of the hostname plus an OAuth flow for MCP clients (secrets `MCP_OAUTH_*`); only the owner's identity is allowed. Tool handlers additionally require a `user_roles` staff role for the mapped Supabase user (never a tenant role, H-5). |
-| Tools, stage 1 (read) | The 39 tools of the local server (mcp-server/src/index.ts, 39 `server.tool` registrations: leads 10, companies 6, tenders 8, funded startups 5, GSC 10) plus `list_rfqs`, `get_rfq`, `get_quote_workflow`, `list_orders`, `get_order`, `get_stock_summary` (existing RPC `get_stock_summary`, supabase/migrations/20260401_create_inventory_system.sql:572), `list_agent_runs`, `search_similar_quotes` (`embed` + `quotes-v1`). |
-| Tools, stage 2 (write) | `decide_approval` (same claim-and-event logic as §2.4), `update_lead_status`, `update_tender_status`, `trigger_country_scan`, `run_saved_search`; each asks for confirmation in the tool description and is recorded in `agent_runs`. |
+| Class | As built: no class and no Durable Object. The Agents SDK's stateless `createMcpHandler` serves an MCP server factory from the default `fetch` of `microns-ops` when the host is `mcp.micronshub.eu` (route `/mcp`); `McpAgent` is deprecated and feature-frozen (CF docs, fetched 2026-10-03; DC-1). |
+| Authentication | As built: a Cloudflare Access "MCP server" application with Managed OAuth (Access is the OAuth server for MCP clients; no `MCP_OAUTH_*` secrets); only the owner's identity is allowed. The Worker checks the Access assertion and maps its e-mail to a `user_roles` staff role through the RPC `agent_staff_for_email` (never a tenant role, H-5); calls are rate-limited per user (`MCP_RATE_LIMIT`, 60 per minute). |
+| Tools, stage 1 (read) | The 39 tools of the local server (mcp-server/src/index.ts, 39 `server.tool` registrations: leads 10, companies 6, tenders 8, funded startups 5, GSC 10) plus `list_rfqs`, `get_rfq`, `get_quote_workflow`, `list_orders`, `get_order`, `get_stock_summary` (existing RPC `get_stock_summary`, supabase/migrations/20260401_create_inventory_system.sql:572), `list_agent_runs`, `search_similar_quotes` (`embed` + `quotes-v1`); as built also `list_inbound_emails`, `list_pending_approvals`, and `mcp_status`, the only tool while the flag is off (DC-10). Ported tools pass a parity test against the local server; the `api_base_url` arguments are dropped. |
+| Tools, stage 2 (write) | `decide_approval` (same `decide()` as §2.4), `update_lead_status`, `update_tender_status`, `trigger_country_scan`, `run_saved_search`; further write tools (for example `start_quote`) only when named in `value.write_tools`; each asks for confirmation in the tool description and is recorded in `agent_runs`. |
 | Local server | The stdio server stays for Claude Desktop (PLAN.md §5.4); only its `SITE_URL` changes in Phase 2. |
 
 LLM calls: none server-side (the client's model does the reasoning); `search_similar_quotes` uses `embed` (≈ $0).
 
-Failure modes: Access or OAuth failure → 401, nothing logged beyond Access logs; Supabase error → tool error result; flag off → every tool returns "remote MCP disabled"; a write tool with an already-used idempotency key returns the first result.
+Failure modes: Access or OAuth failure → 401, nothing logged beyond Access logs; Supabase error → tool error result; flag off → only `mcp_status` is listed (as built); a write tool with an already-used idempotency key returns the first result.
 
-Cost per run: Worker request + DO + Supabase call per tool call, inside included usage; **≈ $0 per call**.
+Cost per run: Worker request + Supabase call per tool call, inside included usage; **≈ $0 per call**.
 
 Human view: Claude's tool calls on the owner's device; `agent_runs` rows with `agent = mcp` on ApprovalsPage "Activity"; Access logs.
 
@@ -563,15 +568,15 @@ Gmail poller (Cron `*/10 * * * *` in `microns-ops`, Phase 4, P4-8; `check-replie
 | 2 | `list` | Incremental Gmail sync from the last `historyId` (stored in the last successful poller run's `agent_runs.output`); first run falls back to the `check-replies` query `in:inbox after:<now − 7 d>` with `maxResults` 100 (supabase/functions/check-replies/index.ts:79-83). |
 | 3 | `headers` | Metadata only: `Message-ID`, `In-Reply-To`, `References`, `From`, `Subject` (today `From` and `In-Reply-To`, check-replies/index.ts:98-108). |
 | 4 | `route` | Quote thread match (rules 1–3) → fetch the raw message, store it like §3.1 (`inbound_emails.source` `gmail_poller`), `customer-reply` event. Campaign reply → existing semantics: `marketing_subscribers.replied_at` and `marketing_events` `replied`. Otherwise ignore (the Workspace inbox stays the owner's inbox; nothing is moved or labelled). |
-| 5 | `record` | `agent_runs` per tick with counts and the new `historyId`. |
+| 5 | `record` | `agent_runs` per tick (as built: agent `quote.reply_poller`, DC-6) with counts and the new `historyId`; refreshed tokens stay in memory and are never written back. |
 
 Idempotency: `inbound_emails` unique `message_id_sha256`; Gmail message IDs per account are recorded in `agent_runs.output`. Flag: `agent.quote` for the quote-thread path; the campaign-reply path runs only when `agent.quote` `value.campaign_replies` is true (no canonical flag exists for it, §9). Cost: Gmail API calls only; no LLM unless a reply reaches `classify-reply` in agent 2.
 
 ## 5. CAD backend contract (Container and Mac mini)
 
-`CadRouter` (DO in `microns-ops`) is the only caller of a CAD backend. For agent jobs the backend receives the file bytes and returns its outputs; it writes nothing to R2 or Supabase and needs no storage credentials, because `sheet-metal-service` already streams its outputs (sheet-metal-service/main.py:243-258: "Output is streamed directly — nothing is stored").
+As built (DC-3): the `cad-jobs` consumer is the only caller of a CAD backend; `CadRouter` (DO in `microns-ops`) grants it a lease per backend (concurrency: unfold service 1, inline 1, Container 3 from Phase 5) and tracks backend health, so no CPU-heavy work runs in the single-threaded DO. For agent jobs the backend receives the file bytes and returns its outputs; it writes nothing to R2 or Supabase and needs no storage credentials, because `sheet-metal-service` already streams its outputs (sheet-metal-service/main.py:243-258: "Output is streamed directly — nothing is stored").
 
-`cad-jobs` message (JSON, schema version 1):
+`cad-jobs` message (JSON, schema version 1; as built, `CadJobMessageV1` in `workers/ops/src/queues/messages.ts`; the `cad-done` event goes to the quote through `RfqThread`, so the message carries no reply address):
 
 ```json
 {
@@ -583,18 +588,17 @@ Idempotency: `inbound_emails` unique `message_id_sha256`; Gmail message IDs per 
   "rfq_id": "<rfqs.id>",
   "rfq_file_id": "<rfq_files.id>",
   "quote_workflow_id": null,
-  "input": { "r2_key": "rfq/<rfq_id>/<file_id>-<name>", "sha256": "<hex>", "content_type": "model/step", "size_bytes": 482113 },
-  "params": { "material": "steel", "thickness_override": 0, "k_factor_override": 0, "drawing_size": "A3" },
+  "input": { "store": "r2", "r2_key": "rfq/<rfq_id>/<file_id>-<name>", "sha256": "<hex>", "content_type": "model/step", "size_bytes": 482113, "file_name": "<name>" },
+  "params": { "material": "steel", "thickness_override": 0, "k_factor_override": 0, "drawing_size": "A3", "process": "sheet_metal" },
   "backend": "auto",
   "deadline_s": 300,
-  "reply": { "workflow": "quote", "instance_id": "quote-<rfq_id>-v1", "event_type": "cad-done" },
   "run_id": "<agent_runs.id>"
 }
 ```
 
 | `job_type` | Backend endpoint (existing) | Outputs in R2 `cad/<job_id>/output/` |
 |---|---|---|
-| `analyse` | `POST /api/v1/unfold/info` ("JSON metadata only — for the quoting engine", sheet-metal-service/main.py:377-391) | `result.json` (thickness, flat size, bends, bounding box, warnings) |
+| `analyse` | As built: STEP sheet metal → `POST /api/v1/unfold` with `output_format=dxf` (metrics from the `X-Part-*` headers and the DXF); DXF, STL and CNC STEP → inline TypeScript backend ported from the edge-function parsers, inputs up to STEP 5 MB, DXF 3 MB, STL 0.75 MB (larger: manual-price line, warning `inline_too_large`) | `result.json` (thickness, flat size, bends, bounding box, warnings), `flat.dxf` |
 | `drawing_pdf` | `POST /api/v1/unfold` with `output_format=pdf`, `drawing_size` (main.py:243-253) | `drawing.pdf` + response headers `X-Part-*` in `result.json` (main.py:270-275) |
 | `flat_dxf` | `POST /api/v1/unfold` with `output_format=dxf` | `flat.dxf` |
 | `flat_svg` | `POST /api/v1/unfold` with `output_format=svg` | `flat.svg` |
@@ -605,7 +609,7 @@ R2 contract:
 | Prefix | Writer | Content |
 |---|---|---|
 | `cad/<job_id>/input/<name>` | not written: `CadRouter` streams the object from `rfq/…` as a multipart upload (the service accepts `file` or `file_url`, main.py:245-247) | — |
-| `cad/<job_id>/output/{result.json, <artefact>, log.txt}` | `CadRouter` | parsed metadata with backend, duration and versions; PDF, DXF or SVG as returned; backend error text (truncated) |
+| `cad/<job_id>/output/{result.json, <artefact>, log.txt}` | `cad-jobs` consumer (as built) | parsed metadata with backend, duration and versions; PDF, DXF or SVG as returned; backend error text (truncated) |
 
 `cad_jobs` lifecycle:
 
@@ -626,7 +630,8 @@ Backend selection and limits:
 
 | Backend | When | Transport | Timeout | Concurrency |
 |---|---|---|---|---|
-| Existing unfold service (`vps`) | Phase 4 (P4-6), until the Container ships | HTTPS to the current service URL (the one `UNFOLD_SERVICE_URL` points at), shared-secret header that sheet-metal-service/main.py:51-57 checks when its API key is configured | 300 s wall clock enforced by `CadRouter` | 1 (single uvicorn worker) |
+| Inline TypeScript backend (`inline`, as built) | DXF, STL and CNC STEP within the input caps above | In the consumer's isolate, one job per isolate | 300 s | 1 |
+| Existing unfold service (`vps`) | Phase 4 (P4-6) for STEP sheet metal, until the Container ships | HTTPS to the current service URL (the one `UNFOLD_SERVICE_URL` points at), shared-secret header that sheet-metal-service/main.py:51-57 checks when its API key is configured | 300 s wall clock enforced by `CadRouter` | 1 (single uvicorn worker) |
 | `container` (`CadContainer`, `microns-cad`) | Phase 5 (P5-6) default | Container binding from `CadRouter`; `CAD_SHARED_SECRET` header; service-side wall clock enforced in P5-6 (`PROCESSING_TIMEOUT` = 120 s is declared, sheet-metal-service/config.py:37) | 300 s | 3 (`max_instances` 3 = `cad-jobs` `max_concurrency` 3, wrangler.jsonc.draft) |
 | `mac_mini` | `fusion_*` job types only (PLAN.md Q22) | Cloudflare Tunnel (`cloudflared` on the Mac mini) to a hostname behind an Access application with a service-token policy; hostname fixed when Q22 is answered (not yet in the hostname list of ARCHITECTURE.md) | async: `202` + signed callback to `microns-ops`, 60 min | 1 |
 
@@ -644,17 +649,33 @@ Today nothing reserves stock: `select_stock_for_session()` is a plain `SELECT` a
 
 | Call | Idempotency | Effect |
 |---|---|---|
-| `reserve(order_item_id, need)` → holds | If active holds exist for `order_item_id`, return them unchanged | Choose stock like `select_stock_for_session` (remnants smallest first, then full sheets FIFO); insert `stock_reservations` rows (`held`, `expires_at` = now + 14 d) and one `stock_transactions` row type `reserve` per stock item (with `order_id`); return holds and shortfall |
+| `reserve(order_item_id, need)` → holds | If active holds exist for `order_item_id`, return them unchanged | Choose stock like `select_stock_for_session` (remnants smallest first, then full sheets FIFO); as built, the RPC `stock_hold` inserts `stock_reservations` rows (`held`, `expires_at` = now + 14 d) and one `stock_transactions` row type `reserve` per stock item with `reference_type = 'order_item'` and `reference_id` = the order item (the live table has no `order_id` column; DC-5); return holds and shortfall |
 | `commit(order_item_id, nesting_session_id)` | Already `committed` for that session → no-op | Holds → `committed`, `expires_at` cleared; called when the job is added to a nesting session (`inv-session-add-jobs`, lib/inventory/index.js:500) |
 | `release(order_item_id, reason)` | No active holds → no-op | Holds → `released` with reason (`cancelled`, `consumed`, `expired`, `manual`); one `unreserve` transaction per stock item; `consumed` is used after `inv-session-complete` (lib/inventory/index.js:506) records the real consumption |
 | `expireHolds()` (DO alarm, daily) | — | `held` past `expires_at` → `release(…, 'expired')` + card |
 | `check()` | — | Returns holds vs remaining per stock item; "held > remaining" (a manual adjustment or a session completed outside the DO) raises a card |
 
-Write order inside one call (the DO processes calls one at a time): (1) idempotency check in DO storage; (2) re-read stock and active holds from Supabase; (3) insert rows with `ON CONFLICT` on the partial unique indexes of §7 (a retried call after a crash inserts nothing twice); (4) record the result in DO storage; (5) return. Phase 4 routes `inv-session-select-stock`, `inv-session-add-jobs`, `inv-session-complete` and `inv-stock-adjust` (lib/inventory/index.js:488-508) through the DO once they run in `microns-site`/`microns-ops`, so all stock mutations of a material serialise. Extending `complete_nesting_session()` with reservation IDs and an over-consumption check is a separate, additive change proposed for P4-9.
+Write order inside one call (the DO processes calls one at a time): (1) idempotency check in DO storage; (2) re-read stock and active holds from Supabase; (3) insert rows with `ON CONFLICT` on the partial unique indexes of §7 (a retried call after a crash inserts nothing twice); (4) record the result in DO storage; (5) return. As built, the Phase 2 inventory actions (`inv-session-select-stock`, `inv-session-add-jobs`, `inv-session-complete`, `inv-stock-adjust`, lib/inventory/index.js:488-508) do not go through the DO: the inventory tables are empty (live 2026-10-03), so this is revisited when inventory is used (DF-38). Extending `complete_nesting_session()` with reservation IDs and an over-consumption check is a separate, additive change proposed for P4-9.
 
 ## 7. Supabase schema sketch (Phase 4, P4-1)
 
-File: `supabase/migrations/2026MMDD_agent_layer.sql` (applied by Dimitris; additive; regenerate `src/integrations/supabase/types.ts` as UTF-8). Existing tables that are reused and not duplicated: `rfqs`, `rfq_files`, `rfq_parts` (unused), `customers`, `orders`, `order_items`, `production_partners`, `materials`, `stock_items`, `stock_transactions`, `low_stock_alerts`, `inventory_settings`, `nesting_sessions`, `nesting_session_jobs`, `catalog_materials`, `app_settings`, `marketing_sender_accounts`, `marketing_events`. Helpers reused: `public.update_updated_at_column()` (supabase/migrations/20241202_create_articles_table.sql:39), `public.is_staff()` (supabase/migrations/20260806_phase2_rls_per_user.sql:30-39), default tenant `00000000-0000-0000-0000-000000000001` of `tenants` (supabase/migrations/20260407_create_multi_tenant_system.sql:20, :205). Sketch only: column types and checks are final at P4-1.
+As built: `supabase/migrations/20261005_agent_layer.sql` (one transaction with preconditions; removal script `supabase/rollback/20261005_agent_layer_down.sql`; tests in `supabase/tests/agent_layer`), applied by Dimitris (PLAN.md §5.4 OW-6); `src/integrations/supabase/types.ts` is regenerated as UTF-8 afterwards. The sketch below is the planning version, kept for reference; the migration differs from it as follows (DC-7):
+
+| Topic | Sketch | Migration |
+|---|---|---|
+| Staff read | `is_staff()` | `has_staff_role()`: the four `user_roles` staff roles only; `REVOKE ALL` from `PUBLIC`, `anon`, `authenticated`, then `SELECT` for `authenticated` under RLS |
+| Approval token | `approval_token` (raw, unique) | `approval_token_sha256` (hex), only while `waiting_human`; `parked_reason` |
+| Flags | no revision | `rev`, `kv_synced_rev`, `kv_synced_at`, `kv_seed_pending`; `value` an object ≤ 8 KiB; DELETE and TRUNCATE blocked |
+| `pricing_rules` | unique per (tenant, process, rule key, version) | unique per (tenant, process, rule key, version, material match, quantity band), NULLs not distinct |
+| `quote_workflows` | — | + `drafts` (approved texts) and `pdf_sha256`; instance id, PDF key and `approved_by` format checked |
+| `inbound_emails` | no body column | + `body_excerpt` (≤ 4,000 characters, cleared after 90 days) |
+| `cad_jobs` | unique index; backend `vps`, `container`, `mac_mini` | unique constraint (rfq, key) with NULLs not distinct; backend also `inline` |
+| `rfq_files (rfq_id, sha256)` | partial unique index | full unique constraint (usable by PostgREST `on_conflict`) |
+| Agent columns on `rfqs` / `rfq_files` | plain columns | guard trigger `agent_columns_guard`: only the service role and definer functions set them; staff may create `manual` rows |
+| RPCs | `create_email_rfq` (definer) | `create_email_rfq` (invoker, service role only), `agent_run_begin`, `agent_run_claim_approval`, `stock_hold`, `stock_commit`, `stock_release`, `agent_retention_purge`, `create_order_from_quote`, `agent_staff_for_email`, five `feature_flags_*` functions |
+| Seed | — | the 13 canonical flags, all off |
+
+Planning sketch (kept for reference). Existing tables that are reused and not duplicated: `rfqs`, `rfq_files`, `rfq_parts` (unused), `customers`, `orders`, `order_items`, `production_partners`, `materials`, `stock_items`, `stock_transactions`, `low_stock_alerts`, `inventory_settings`, `nesting_sessions`, `nesting_session_jobs`, `catalog_materials`, `app_settings`, `marketing_sender_accounts`, `marketing_events`. Helpers reused: `public.update_updated_at_column()` (supabase/migrations/20241202_create_articles_table.sql:39), `public.is_staff()` (supabase/migrations/20260806_phase2_rls_per_user.sql:30-39), default tenant `00000000-0000-0000-0000-000000000001` of `tenants` (supabase/migrations/20260407_create_multi_tenant_system.sql:20, :205). Sketch only: column types and checks are final at P4-1.
 
 ```sql
 -- 1. agent_runs ---------------------------------------------------------------
@@ -856,9 +877,9 @@ Notes on the sketch:
 
 | Point | Note |
 |---|---|
-| `is_staff()` | It also returns true for tenant super admins (supabase/migrations/20260806_phase2_rls_per_user.sql:38), so it depends on tenant-role data. Staff read of these tables is acceptable for Phase 4 because agent actions never rely on it: approvals, flags and MCP check `user_roles` in `microns-site`/`microns-ops` (H-5 prerequisite, §1.3). |
-| `rfqs.source` default | Existing rows become `web`; dashboard-created RFQs pass `manual` from Phase 4 (small change in the RFQ creation code, P4-12). |
-| `rfq_files.file_path` | Stays NOT NULL (src/integrations/supabase/types.ts:715-725); agent rows set it to the `r2_key`. |
+| `is_staff()` | It also returns true for tenant super admins (supabase/migrations/20260806_phase2_rls_per_user.sql:38), so it depends on tenant-role data. As built the agent tables use `has_staff_role()` instead (the four `user_roles` staff roles only); approvals, flags and MCP also check `user_roles` in `microns-site`/`microns-ops` (H-5 prerequisite, §1.3). |
+| `rfqs.source` default | Existing rows become `web`. Staff may create `manual` rows (the guard allows it); the dashboard RFQ form is unchanged in Phase 4. |
+| `rfq_files.file_path` | Stays NOT NULL (src/integrations/supabase/types.ts:715-725); as built, agent rows set `file_path` = `<rfq_id>/<file_id>-<name>` and `r2_key` = `rfq/` + `file_path` (the files API adds `rfq/`). |
 | Order of creation | `agent_runs`, `feature_flags`, `pricing_rules`, `quote_workflows`, `inbound_emails`, `cad_jobs`, `stock_reservations`, then the `ALTER TABLE` statements and the function (foreign keys point backwards only). |
 | Realtime | None of the new tables joins the `supabase_realtime` publication; the dashboard polls. |
 | Phase 7 | These tables move to D1 `microns-db` with the rest of the schema if Phase 7 proceeds (PLAN.md P7-1). |
@@ -884,15 +905,15 @@ At today's volume (2 RFQs and 2 orders in the database, live 2026-09-30) the tot
 
 | # | Point | Where it is decided |
 |---|---|---|
-| 1 | Secret name for the signed Telegram → `microns-ops` call: proposed `AGENT_APPROVAL_SECRET` (not yet in the canonical secret lists of ARCHITECTURE.md and wrangler.jsonc.draft). Alternative: an Access service token only. | P4-12 |
-| 2 | No canonical flag covers the Gmail poller's campaign-reply path; this design uses `agent.quote` `value.campaign_replies`. | P4-8 |
+| 1 | Secret name for the signed Telegram → `microns-ops` call: proposed `AGENT_APPROVAL_SECRET` (not yet in the canonical secret lists of ARCHITECTURE.md and wrangler.jsonc.draft). Alternative: an Access service token only. | Built (P4-12): `AGENT_APPROVAL_SECRET`, one value in `microns-site`, `microns-ops` and the Supabase function |
+| 2 | No canonical flag covers the Gmail poller's campaign-reply path; this design uses `agent.quote` `value.campaign_replies`. | Built as proposed (P4-8; seeded `false`) |
 | 3 | DLQ backlog in the digest needs a read-only Cloudflare API token (Queues/analytics read); its secret name is not yet fixed. | P5-7 |
-| 4 | Supplier e-mail addresses: `materials.supplier` is a name only (supabase/migrations/20260401_create_inventory_system.sql:53); reorder stays a draft the owner sends, unless a column is added (not in the P4-1 column list). | P4-9 |
-| 5 | Two material models (`materials` for stock, `catalog_materials` with `price_per_kg` for pricing): a mapping is needed for pricing and reservation. | P4-7, P4-9 |
+| 4 | Supplier e-mail addresses: `materials.supplier` is a name only (supabase/migrations/20260401_create_inventory_system.sql:53); reorder stays a draft the owner sends, unless a column is added (not in the P4-1 column list). | Built (P4-9): a draft the owner sends; the live `materials` table has no supplier column at all, so the supplier comes from `catalog_materials` |
+| 5 | Two material models (`materials` for stock, `catalog_materials` with `price_per_kg` for pricing): a mapping is needed for pricing and reservation. | Built (P4-7, P4-9): pricing reads `catalog_materials`; a quote line maps to `materials` in code (normalised grade, thickness ± 0.05 mm, exactly one active row, else "not stocked") |
 | 6 | Order item → quote line mapping by `product_name` must be checked against the portal's Accept Quote flow. | P4-9 |
 | 7 | Google Ads offline conversions: no click ID is captured today; needs Ads API access and a capture method. | PLAN.md Q21 |
 | 8 | Mac mini hostname, Tunnel and job types. | PLAN.md Q22 |
 | 9 | Techpilot channel and the current RFQ mailbox. | PLAN.md Q3 |
 | 10 | LLM budget cap and provider preferences. | PLAN.md Q20 |
-| 11 | `McpAgent` vs `createMcpHandler`. | P4-11 |
-| 12 | Whether Resend keeps a custom `Message-ID` header, and its idempotency-key behaviour. | P4-7 |
+| 11 | `McpAgent` vs `createMcpHandler`. | Decided (P4-11): `createMcpHandler`, no Durable Object |
+| 12 | Whether Resend keeps a custom `Message-ID` header, and its idempotency-key behaviour. | Built (P4-7): both ids stored and matched; checked on the preview (OW-10) |

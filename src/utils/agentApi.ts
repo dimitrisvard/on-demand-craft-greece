@@ -11,7 +11,8 @@
 //     sent. Decisions use run_id + token_sha256 as read under staff RLS (never a raw token).
 //   - Answers are accepted only in the contract's shapes; errors carry the endpoint's {"error": code}.
 //   - Stored files are read through GET /api/agent/file?k=<key> with the key's slashes kept literally (the
-//     endpoint refuses encoded slashes); keys outside the staff preview patterns are refused here too.
+//     endpoint refuses encoded slashes); keys outside the staff preview patterns, or containing '..' or a
+//     backslash, are refused here too (the same rule as the site gate and microns-ops).
 import { useQuery } from '@tanstack/react-query';
 import { downloadWithAuth, fetchWithAuth, openInNewWindow } from '@/utils/apiAuth';
 import {
@@ -88,9 +89,14 @@ function isJson(res: Response): boolean {
   return (res.headers.get('content-type') || '').toLowerCase().includes('application/json');
 }
 
-/** GET /api/agent/file?k=<key>, slashes kept; throws for keys outside STAFF_FILE_KEY_RE. */
+/** True for a key the staff preview may read: no '..' or backslash, and one of the STAFF_FILE_KEY_RE patterns. */
+export function isStaffFileKey(key: string): boolean {
+  return !key.includes('..') && !key.includes('\\') && STAFF_FILE_KEY_RE.test(key);
+}
+
+/** GET /api/agent/file?k=<key>, slashes kept; throws for keys isStaffFileKey refuses. */
 export function agentFileUrl(key: string): string {
-  if (!STAFF_FILE_KEY_RE.test(key)) throw new AgentApiRequestError('invalid_body', 0);
+  if (!isStaffFileKey(key)) throw new AgentApiRequestError('invalid_body', 0);
   return `${AGENT_API_BASE}/file?k=${encodeURIComponent(key).replace(/%2F/g, '/')}`;
 }
 

@@ -10,6 +10,8 @@ Evidence tags: `path:line` = this repository at commit `9afcba8`; "live 2026-09-
 
 Security findings appear at summary level only. Details: private security note (delivered to the owner out of band, not in this public repo).
 
+Phase 4 build (2026-10-07): §3, §5, §6.4, §7, §8–§14, §16–§20 and §23 are brought in line with the agent layer as built ([PLAN.md](PLAN.md) §5.4, deviations DC-1…DC-19); nothing is deployed. Cloudflare now titles Email Routing "Email Service" and Browser Rendering "Browser Run"; these documents keep the old names (DC-15).
+
 ## 1. Decisions in one table
 
 | # | Decision | Reason | Evidence |
@@ -23,7 +25,7 @@ Security findings appear at summary level only. Details: private security note (
 | 7 | Workers Route (not Custom Domain) for `www` and `*.micronshub.eu` | Rollback is one record flip; Custom Domains do not support wildcards or existing CNAMEs | CF docs (verified 2026-09-27) |
 | 8 | Supabase stays the system of record for Phases 0–6 | Brief §2 item 3; optional Phase 7 sketch in §22 | Owner decision 2026-09-30 |
 | 9 | Agents are flag-gated Workflows and Durable Objects with Telegram and dashboard approval | Brief §4; every run is an `agent_runs` row | [AGENTS.md](AGENTS.md) |
-| 10 | Every LLM call goes through AI Gateway `microns` with role-based routes | Cost per agent, rate limits, logs, BYOK | §13 |
+| 10 | Every LLM call goes through AI Gateway `microns` with role-based routes | Cost per agent, spend limit, logs, BYOK | §13 |
 
 ## 2. Current state (live 2026-09-30)
 
@@ -104,7 +106,7 @@ flowchart TB
     R2X["R2 microns-private"]
     Q["Queues: cad-jobs, translations, outbound-mail, scrapes, agent-events (+ DLQs)"]
     WF["Workflows: rfq-intake, quote, post-order, content-daily, sitemap, ops-digest"]
-    DO["Durable Objects: MaterialStock, RfqThread, SenderLimiter, CadRouter, MicronsMcp"]
+    DO["Durable Objects: MaterialStock, RfqThread, SenderLimiter, CadRouter"]
     VEC["Vectorize quotes-v1"]
     AIG["AI Gateway microns (+ Workers AI)"]
   end
@@ -174,7 +176,7 @@ Rules that follow from the split:
 | `micronshub.eu` (apex) | Vercel domain redirect to www (`redirectStatusCode: null` → status from baseline) | Single Redirect Rule → `https://www.micronshub.eu${path}${query}` with the status seen in the baseline |
 | `*.micronshub.eu` | wildcard CNAME to Vercel (tenant subdomains) | proxied wildcard record + Workers Route `*.micronshub.eu/*` → `microns-site` (more specific routes win) |
 | `files.micronshub.eu` | — | R2 custom domain for `microns-public` |
-| `mcp.micronshub.eu` | — | Custom Domain → `microns-ops` (remote MCP), Access + OAuth |
+| `mcp.micronshub.eu` | — | Custom Domain → `microns-ops` (remote MCP at `/mcp`, stateless handler in the default `fetch`); Access "MCP server" application with Managed OAuth (Phase 4) |
 | `api.micronshub.eu` | caught by wildcard CNAME | Machine-caller host for `tender-collector` and the local MCP server, served by `microns-site` behind Access application `microns-machine-api`; added to `API_MACHINE_HOSTS` by the Phase 3 runbook before the `www` flip ([PLAN.md](PLAN.md) §5.2 D-3) |
 | `rfq.micronshub.eu` | caught by wildcard CNAME | Email Routing subdomain (MX/TXT added by CF); addresses `rfq@`, `replies@` → `microns-mail` |
 | preview | — | `microns-site.<account>.workers.dev` + `wrangler versions upload --preview-alias staging`; Access (service token for CI tools); `X-Robots-Tag: noindex` on every non-production host |
@@ -320,11 +322,11 @@ Execution classes: **Local** = handled in `microns-site`; **OPS** = sent over th
 | 7 | `/api/tender-scan` | POST scan (api/tender-scan.js:78); called by `tender-collector` (supabase/functions/tender-collector/index.ts:68) | `microns-ops`: a machine caller's POST is validated as the handler validates it, enqueued on `scrapes` and answered 200 at once with every key of today's body at zero plus `queued` and `run_id`; staff and dashboard callers run synchronously (DV-3) | Queue (machine) / OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SCRAPES` |
 | 8 | `/api/funded-startups` | GET list, `stats`, `feeds`, `export`; POST scan; PATCH (api/funded-startups.js:36-46) | `microns-ops`; POST scan synchronous in Phase 2 (the queue kind `funded-scan` is built, no producer yet; DV-3) | OPS | `SUPABASE_SERVICE_ROLE_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | 9 | `/api/scrape-website` | POST (api/scrape-website.js:15) | `microns-ops`, ≤ 6 concurrent outbound connections | OPS | — |
-| 10 | `/api/scrape-company-profile` | POST (api/scrape-company-profile.js:321) | `microns-ops`, ≤ 6 concurrent outbound connections | OPS | — |
-| 11 | `/api/scan-directory` | POST (api/scan-directory.js:349) | `microns-ops`; Europages/wlw via Browser Rendering later (P4-10) | OPS | `BROWSER` (Phase 4) |
+| 10 | `/api/scrape-company-profile` | POST (api/scrape-company-profile.js:321) | `microns-ops`, ≤ 6 concurrent outbound connections; from Phase 4 the scrapers-module branch of row 11 | OPS | `BROWSER` (Phase 4) |
+| 11 | `/api/scan-directory` | POST (api/scan-directory.js:349) | `microns-ops`; from Phase 4 a branch at the top runs the scrapers module when `agent.growth.scrapers` is on and the host is permitted (robots.txt gate that fails closed, owner-recorded permissions in `SCRAPER_PERMITTED_HOSTS`, Browser Rendering only for client-rendered pages of permitted hosts); otherwise the Phase 2 path answers byte-identically | OPS | `BROWSER` (Phase 4) |
 | 12 | `/api/sitemap` (+ `/sitemap*.xml`) | `main-index`, default, `index`, `lang` (api/sitemap.js:402-409) | `microns-site` (router step 2) | Local | `SUPABASE_ANON_KEY`; from Phase 5 `PRIVATE_FILES` (`sitemaps/…`) |
 | — | Any `/api/*` with flag `api.forward_to_vercel` on (all paths, a path list, or preview / production hosts only), and any `/api/*` path outside the catalogue | Proxied unchanged, ungated, to `API_FORWARD_ORIGIN` (the Vercel deployment host); `/api/sitemap` stays local (router step 2) | Vercel | Rollback | KV `FLAGS`, var `API_FORWARD_TO_VERCEL` (fallback) |
-| — | `/api/agent/decision` (new in Phase 4) | POST approve / confirm / reject from `ApprovalsPage`, `RfqInboxPage` and the Telegram relay ([AGENTS.md](AGENTS.md) §2.4) | `microns-ops` | Workflow (`sendEvent` / `terminate`) | `SUPABASE_SERVICE_ROLE_KEY` |
+| — | `/api/agent/*` (Phase 4): `decision` POST, `status` GET, `flag` POST, `start` POST, `file` GET | Decisions from `ApprovalsPage`, `RfqInboxPage` (staff JWT, token hash) and the Telegram relay (signed request, raw token) ([AGENTS.md](AGENTS.md) §2.4); dashboard status probe, flag edits (admins), quote and intake starts, file previews and signed partner links | `microns-ops` over `OPS`; gates AG-1…AG-7 at the site; never forwarded to Vercel | Workflow (`sendEvent`, `terminate`, `restart`) | site: `AGENT_APPROVAL_SECRET` (optional, checked per request); ops: `SUPABASE_SERVICE_ROLE_KEY`, `AGENT_APPROVAL_SECRET`, Workflow bindings |
 
 `/api` router rules (as built in Phase 2: `workers/site/src/api/{forward,resolve,router,ops-client}.ts`; detail in workers/site/README.md):
 
@@ -339,6 +341,7 @@ Execution classes: **Local** = handled in `microns-site`; **OPS** = sent over th
 | Errors after the gate | `OPS` RPC rejection → 500 `text/plain`, for `nest` 504 `{"success":false,"error":"Nesting exceeded the time limit","code":"TIMEOUT"}`; forward failure → 502 `{"error":"upstream"}` | — |
 | CORS | Phase 1 `finalise()` sets the vercel.json headers on every `/api/*` answer, including those from `microns-ops`; the allow-list mode (`workers/shared/src/http/cors.ts`) is built and tested, and wired after the Phase 3 observation window (D-9) | `OPTIONS` parity is a Phase 2 gate item |
 | Logs | `[microns-site] api endpoint=… action=… actionId=… target=… status=… ms=… principal=<class> requestId=…`; the same `requestId` in `microns-ops`; never a token, cookie, body or e-mail address | One request traceable across both Workers |
+| `/api/agent/*` (Phase 4) | Matched as a prefix before the catalogue; unknown action 404 `{"error":"not_found"}`, wrong method 405 with `Allow`, body over 65,536 bytes 413, all answered at the site; never forwarded, whatever `api.forward_to_vercel` says; `Cache-Control: no-store` | The dashboard enables its buttons only after `GET /api/agent/status` answers `{v: 1, ok: true}`, so the pages work on Vercel before the Worker API exists |
 
 Callers outside `/api/*` that reach Cloudflare compute: `extract-flat-pattern` and `generate-manufacturing-pdf` call `UNFOLD_SERVICE_URL` (supabase/functions/generate-manufacturing-pdf/index.ts:55), repointed in Phase 5 to `microns-ops`, which runs the job through `CadRouter` → `CadContainer` (Container class, `/flat-pattern` byte-identical, sheet-metal-service/main.py:445). `lib/inventory/cron-batch.js:7` documents `inv-cron-batch` as a cron target, but nothing schedules it today (live `cron.job`, 2026-09-30); it stays an on-demand OPS action unless the owner wants a Cron Trigger.
 
@@ -363,22 +366,25 @@ Why `PRIVATE_FILES` and R2 S3 API keys both: presigned URLs need S3 API credenti
 
 | Kind | Name | Target / value |
 |---|---|---|
-| Entrypoint | `OpsApi` (named `WorkerEntrypoint`) | RPC `handle(request, call)` from `microns-site`: checks `call.v`, takes the caller only from `call`, runs the Hono app; the default `fetch` answers 404 (Phase 2) |
-| R2 | `PRIVATE_FILES`, `PUBLIC_FILES` | `microns-private` (`"jurisdiction": "eu"`, as every binding of it), `microns-public` (Phase 4–5) |
-| KV | `FLAGS`, `SEO_CACHE` | Phase 4–5; `SEO_CACHE` keys purged on content publish. The Phase 2 ops Worker reads no flag |
-| Queues (producer + consumer) | `cad-jobs`, `translations`, `outbound-mail`, `scrapes`, `agent-events` | each with DLQ `<name>-dlq` (§9) |
+| Entrypoints | `OpsApi`, `MailIngest` (named `WorkerEntrypoint`s) | `OpsApi`: RPC `handle(request, call)` from `microns-site`: checks `call.v`, takes the caller only from `call`, runs the Hono app. `MailIngest` (Phase 4): RPC `startIntake`, `ingestReply` from `microns-mail`, ids only. The default `fetch` serves the remote MCP for host `mcp.micronshub.eu` and answers 404 for every other host (Phase 2 behaviour) |
+| R2 | `PRIVATE_FILES`, `PUBLIC_FILES` | `microns-private` (`"jurisdiction": "eu"`, as every binding of it; Phase 4), `microns-public` (Phase 5) |
+| KV | `FLAGS`, `SEO_CACHE` | `FLAGS` from Phase 4 (agent flags read with `cacheTtl` 30 s; mirrored from `feature_flags`); `SEO_CACHE` from Phase 5, keys purged on content publish |
+| Queues (producer + consumer) | `scrapes` (Phase 2), `cad-jobs` and `agent-events` (Phase 4), `translations` and `outbound-mail` (Phase 5) | each with DLQ `<name>-dlq` (§9) |
 | Workflows | `rfq-intake` (`RfqIntakeWorkflow`), `quote` (`QuoteWorkflow`), `post-order` (`PostOrderWorkflow`), `content-daily` (`ContentDailyWorkflow`), `sitemap` (`SitemapWorkflow`), `ops-digest` (`OpsDigestWorkflow`) | §10 |
-| Durable Objects | `MaterialStock`, `RfqThread`, `SenderLimiter`, `CadRouter`, `MicronsMcp`, `CadContainer` | §11 |
+| Durable Objects | `RfqThread`, `MaterialStock`, `CadRouter` (migration tag `v1`, Phase 4); `SenderLimiter`, `CadContainer` (tag `v2`, Phase 5) | §11 |
 | Vectorize | `QUOTES_INDEX` | index `quotes-v1` (bge-m3, 1024 dims, cosine) |
 | Workers AI | `AI` | AI Gateway id `microns` |
 | Browser Rendering | `BROWSER` | Scrapers (Phase 4) |
 | Hyperdrive (optional) | `SUPABASE_DB` | Only for bulk upserts such as `xometry_offers` |
 | Analytics Engine | `EVENTS` | dataset `microns_events` |
-| Custom Domain | `mcp.micronshub.eu` | Remote MCP (`MicronsMcp`) |
-| Vars | `SUPABASE_URL`, `SITE_ORIGIN` (= `https://www.micronshub.eu`), `AI_GATEWAY_ID` (= `microns`) | Needed by the ported code and the gateway client (added in [wrangler.jsonc.draft](wrangler.jsonc.draft)) |
-| Secrets (names only) | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY` (or AI Gateway BYOK), `GEMINI_API_KEY` (or BYOK), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GSC_SERVICE_ACCOUNT_JSON`, `APOLLO_API_KEY`, `XOMETRY_TOKEN`, `CAD_SHARED_SECRET`, `INDEXNOW_KEY`, `MCP_OAUTH_*` | `GSC_SERVICE_ACCOUNT_JSON` is a reserved name: today the GSC client reads its Google credentials from the database (api/_lib/gsc-client.js:4), so the secret is only needed if they move to a Worker secret |
+| Custom Domain | `mcp.micronshub.eu` | Remote MCP (stateless `createMcpHandler`, no Durable Object; DC-1) |
+| Rate limiting | `MCP_RATE_LIMIT` (60/60 s, namespace `2004`) | Remote MCP calls per user (Phase 4) |
+| Module rules | `.md` as text; `.ttf`, `.png` as data | Prompt files, PDF fonts and logo bundled with the Worker (Phase 4) |
+| Vars | `SUPABASE_URL`, `SITE_ORIGIN` (= `https://www.micronshub.eu`); Phase 4: `AI_GATEWAY_ID` (= `microns`), `AGENT_TENANT_ID`, `QUOTE_FROM`, `QUOTE_REPLY_TO`, `MESSAGE_ID_DOMAIN`, `CAD_BACKEND_DEFAULT` (= `vps`), `MCP_HOSTNAME`, `MCP_ROUTE`, `ACCESS_TEAM_DOMAIN`, `MCP_ACCESS_AUD`, `SCRAPER_USER_AGENT`, `SCRAPER_PERMITTED_HOSTS` (= `{}`) | Needed by the ported code, the gateway client and the agents; the local-test overrides (`AGENT_STUBS`, `*_API_BASE` and similar) never appear in the production config (bundle check) |
+| Secrets (names only) | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APOLLO_API_KEY` (Phase 2, `secrets.required`); Phase 4, optional and checked where used: `AI_GATEWAY_TOKEN`, `CAD_UNFOLD_URL`, `CAD_SHARED_SECRET`, `AGENT_APPROVAL_SECRET`, `CAD_ACCESS_CLIENT_ID` / `CAD_ACCESS_CLIENT_SECRET` (only with the network path chosen at OW-11); Phase 5: `GEMINI_API_KEY` (or BYOK), `XOMETRY_TOKEN`, `INDEXNOW_KEY`; `GSC_SERVICE_ACCOUNT_JSON` reserved; `ANTHROPIC_API_KEY` not set (BYOK); no `MCP_OAUTH_*` (DC-1) | `GSC_SERVICE_ACCOUNT_JSON` is a reserved name: today the GSC client reads its Google credentials from the database (api/_lib/gsc-client.js:4), so the secret is only needed if they move to a Worker secret |
 | Flags and limits | `nodejs_compat`, same compatibility date as the site; `limits.cpu_ms` 300,000 (DV-4; applies to RPC calls and queue consumers alike); `alias` `qrcode` → `qrcode/lib/server.js` | H-18, H-20 |
 | Phase 2 subset | Entrypoint, `SCRAPES` producer and consumer, the two vars, the ten Phase 2 secrets, `limits`, `alias`; `workers_dev` and `preview_urls` off, no routes. Deployed with `wrangler deploy` before the site (a service binding reaches the current deployment only), from `.github/workflows/cf-ops.yml` (manual dispatch) | workers/ops/wrangler.jsonc |
+| Phase 4 additions | `FLAGS`, `PRIVATE_FILES`, `CAD_JOBS` and `AGENT_EVENTS` (producers and consumers), Workflows `RFQ_INTAKE`, `QUOTE`, `POST_ORDER`, DOs `RFQ_THREAD`, `MATERIAL_STOCK`, `CAD_ROUTER` (tag `v1`), `QUOTES_INDEX`, `AI`, `BROWSER`, `EVENTS`, `MCP_RATE_LIMIT`, the `mcp.micronshub.eu` Custom Domain, the module rules, the two crons and the Phase 4 vars; `secrets.required` unchanged. The first deploy with this file needs the queues, the Vectorize index, the KV id and the zone (PLAN.md §5.4 OW-3…OW-5) | workers/ops/wrangler.jsonc |
 
 Binding variable names for Queues, Workflows and Durable Objects (for example `CAD_JOBS`, `RFQ_INTAKE`, `RFQ_THREAD`) are set in [wrangler.jsonc.draft](wrangler.jsonc.draft). Cron Triggers on `microns-ops` (UTC; Phase 5 unless stated):
 
@@ -389,8 +395,8 @@ Binding variable names for Queues, Workflows and Durable Objects (for example `C
 | `0 6 * * *` | Tender collector → Queue `scrapes` | `tender-scan-daily` |
 | `0 6,8,10,12,14,16,18 * * *` | Xometry scan (7×/day, PLAN.md Q8) | .github/workflows/xometry-scan.yml:21 |
 | `30 6 * * 1` | `ops-digest` Workflow | — (new) |
-| `* * * * *` | `feature_flags` → KV `FLAGS` sync (Phase 4) | — (new) |
-| `*/10 * * * *` | Gmail reply poller for the 2 Workspace sender accounts (Phase 4) | `check-replies` (in the repo, not deployed) |
+| `* * * * *` | `feature_flags` → KV `FLAGS` sync by revision; drift report at minute 0 (Phase 4) | — (new) |
+| `*/10 * * * *` | Dispatcher (Phase 4): Gmail reply poller for the 2 Workspace sender accounts, inbound rows left `received`, portal orders without a post-order run, parked runs whose cause has cleared, failure cards older than 14 days, stuck CAD jobs | `check-replies` (in the repo, not deployed) |
 
 One `scheduled()` handler dispatches on `controller.cron`; per-Worker and per-account Cron Trigger limits are CF docs, re-check at execution (if a per-Worker cap applies, the jobs are collapsed onto fewer expressions and dispatched by time).
 
@@ -400,9 +406,10 @@ One `scheduled()` handler dispatches on `controller.cron`; per-Worker and per-ac
 |---|---|---|
 | Email handler | `email(message, env, ctx)` | Email Routing rules for `rfq@rfq.micronshub.eu` and `replies@rfq.micronshub.eu` |
 | R2 | `PRIVATE_FILES` | `microns-private` |
-| Service binding | `OPS` | `microns-ops` (starts `rfq-intake`, routes replies) |
-| Vars | `ALLOWED_RCPT`; `SUPABASE_URL` | `rfq@rfq.micronshub.eu,replies@rfq.micronshub.eu`; project URL for the `inbound_emails` insert (added in [wrangler.jsonc.draft](wrangler.jsonc.draft)) |
-| Secret | `SUPABASE_SERVICE_ROLE_KEY` | `inbound_emails` insert |
+| Service binding | `OPS` | `microns-ops`, named entrypoint `MailIngest` (`startIntake` starts `rfq-intake`, `ingestReply` queues the reply; as built, DC-2) |
+| Vars | `ALLOWED_RCPT`; `SUPABASE_URL`; `AGENT_TENANT_ID` | `rfq@rfq.micronshub.eu,replies@rfq.micronshub.eu`; project URL for the `inbound_emails` insert; default tenant |
+| Secrets | `SUPABASE_SERVICE_ROLE_KEY` (required); `MAIL_COPY_TO`, `MAIL_FALLBACK_TO` (optional) | `inbound_emails` insert; verified destination addresses for the shadow copy and the fallback forward, kept as secrets so no address sits in the repository |
+| Deploy | `.github/workflows/cf-mail.yml` (manual dispatch) | After `microns-ops`, which must export `MailIngest`; `workers_dev` and `preview_urls` off, no routes |
 
 ### 7.4 `microns-cad` (Container app)
 
@@ -410,7 +417,7 @@ One `scheduled()` handler dispatches on `controller.cron`; per-Worker and per-ac
 |---|---|---|
 | Image | Built from `sheet-metal-service/Dockerfile` (`python:3.11-slim`, uvicorn on port 8000) | sheet-metal-service/Dockerfile:7, :34, :40 |
 | Class | `CadContainer` (container-enabled DO class, bound from `microns-ops`) | [PLAN.md](PLAN.md) P5-6 |
-| Front | `CadRouter` DO in `microns-ops`; shared secret `CAD_SHARED_SECRET`; enforced wall-clock (`PROCESSING_TIMEOUT` = 120 s is declared but not enforced today) | sheet-metal-service/config.py:37 |
+| Front | `CadRouter` DO in `microns-ops` grants leases (3 Container slots); the `cad-jobs` consumer calls the Container with the shared secret `CAD_SHARED_SECRET` and a 300 s wall clock (`PROCESSING_TIMEOUT` = 120 s is declared but not enforced today) | sheet-metal-service/config.py:37 |
 | Size and scale | `standard-1` (½ vCPU, 4 GiB; `standard-2` if memory requires); `max_instances` 3 in the draft (= `cad-jobs` concurrency); `sleepAfter` ≈ 10 min; keep-warm ping in business hours; cold start 10–30 s | CF docs (verified 2026-09-27); plan §6 item 3 |
 | Interface | Job in (`cad-jobs`) → artefacts to R2 `cad/<job_id>/output/…` → `cad_jobs` row; the Mac mini Fusion 360 worker can serve the same interface later over Tunnel (PLAN.md Q22) | brief §2 item 5 |
 | Endpoints kept | `/flat-pattern` byte-identical; `/api/v1/unfold`, `/api/v1/unfold/preview`, `/api/v1/unfold/info`, `/health` | sheet-metal-service/main.py:243, :337, :377, :445, :712 |
@@ -424,13 +431,14 @@ Refinement against plan.md (which proposed one bucket `microns-files`): two buck
 | `microns-public` | `articles/<yyyy>/<mm>/<slug>.<ext>` | New article images | `/api/s3` `articles` scope (presigned PUT) | Public via `files.micronshub.eu` | 3 (P3-6) |
 | `microns-public` | `tenants/<slug>/…` | Tenant logos and assets | `microns-ops` / dashboard | Public | 4–5 |
 | `microns-private` | `rfq/<rfqNumber>/<partFolder>/<safeName>` (`rfq/` + the key api/s3.js returns today) | RFQ files uploaded through `/api/s3`; the browser keeps today's key and `publicUrl`/`url` keep the legacy string format (DV-5, D-2) | `/api/s3` `rfq` scope (presigned PUT, 300 s, `Content-Type` signed) | Presigned GET; `CadRouter` | 2 |
-| `microns-private` | `rfq/<rfq_id>/<file_id>-<name>` | E-mail attachments linked to an RFQ | `rfq-intake` step `copy-files` | Presigned GET or Worker-streamed; `CadRouter` | 4 |
+| `microns-private` | `rfq/<rfq_id>/<file_id>-<name>` | E-mail attachments linked to an RFQ (`rfq_files.file_path` = the key without `rfq/`, because the files API adds it) | `rfq-intake` step `copy-files` | Presigned GET through the files API; `cad-jobs` consumer | 4 |
 | `microns-private` | `upload-counters/<folder>/…` | Per-folder count of upload URLs issued by the files API (advanced with a conditional write) | `/api/s3` `presign-upload` | Files API only | 2 |
 | `microns-private` | `email/<message_id_sha256>/raw.eml` | Raw inbound MIME | `microns-mail` | `rfq-intake` Workflow | 4 |
 | `microns-private` | `email/<message_id_sha256>/att/<n>-<name>` | Inbound attachments (STEP, STL, DXF, PDF) | `rfq-intake` step `store-attachments` | Workflows, dashboard | 4 |
-| `microns-private` | `cad/<job_id>/input/…`, `cad/<job_id>/output/…` | Input prefix reserved (`CadRouter` streams inputs from `rfq/…`); outputs: `result.json`, PDF, DXF, SVG, log | `CadRouter` | `quote` Workflow, dashboard | 4–5 |
-| `microns-private` | `quotes/<rfq_id>/v<version>/quote.pdf` | Issued quote PDFs | `quote` Workflow | Resend attachment, dashboard | 4 |
-| `microns-private` | `orders/<order_id>/traveler.pdf` | Job travellers | `post-order` Workflow | Partner portal (presigned) | 4 |
+| `microns-private` | `cad/<job_id>/input/…`, `cad/<job_id>/output/…` | Input prefix reserved (inputs are read from `rfq/…`); outputs `result.json`, `flat.dxf`, `drawing.pdf`, `flat.svg`, `log.txt` | `cad-jobs` consumer | `quote` Workflow, dashboard, signed partner links | 4–5 |
+| `microns-private` | `quotes/<rfq_id>/v<version>/quote.pdf` | Issued quote PDFs | `quote` Workflow | Resend attachment, dashboard preview (`/api/agent/file`) | 4 |
+| `microns-private` | `orders/<order_id>/traveler.pdf` | Job travellers | `post-order` Workflow | Partner through a signed `/api/agent/file` link (at most 7 days); dashboard preview | 4 |
+| `microns-private` | `eval/golden/<yyyy-mm-dd>/…` | Private golden set for the live prompt evaluation (owner export, never in git) | Dimitris | `eval:live` | 4 |
 | `microns-private` | `sitemaps/…` | Generated sitemap files (Phase 5 only) | `sitemap` Workflow | `microns-site` at the identical sitemap URLs | 5 |
 
 | Topic | Rule | Evidence |
@@ -441,7 +449,7 @@ Refinement against plan.md (which proposed one bucket `microns-files`): two buck
 | Rollback copy | `scripts/r2-to-legacy-s3.mjs` (owner-run, dry run by default, `--since`, `--execute`) copies `rfq/<key>` from R2 to the legacy `rfq` bucket under `<key>` with the owner's own credentials | PLAN.md §5.2 rollback |
 | Split brain today | RFQ uploads go to S3 but downloads read the public Supabase bucket `rfq-files`; the files API serves both during the overlap | src/components/rfq/RfqFileDownload.tsx:47, :100; sheet-metal-service/config.py:10 |
 | Supabase Storage | `quote-files` (0 objects), `rfq-files` (3), `sitemaps` (17, 6.76 MB), `tenant-laserkritis` (0), all public; unchanged until Phase 5/6 | live 2026-09-30 |
-| Retention and residency | Proposal: lifecycle rule deletes `email/` objects after 90 days (RFQ-linked files are copied to `rfq/…`); `microns-private` is created with jurisdiction `eu` at P2-9 (only possible at creation; every binding and the S3 endpoint carry it; D-1) | [AGENTS.md](AGENTS.md) §2.6 |
+| Retention and residency | Lifecycle rule deletes `email/` objects after 90 days (RFQ-linked files are copied to `rfq/…`; owner step OW-12); `microns-private` is created with jurisdiction `eu` at P2-9 (only possible at creation; every binding and the S3 endpoint carry it; D-1) | [AGENTS.md](AGENTS.md) §2.6 |
 | Message size | Queue messages carry R2 keys, never file bodies | §9 |
 
 ## 9. Queues
@@ -450,39 +458,40 @@ All queues are produced and consumed by `microns-ops`; binding variable names an
 
 | Queue | Producers | Consumer | Message shape (sketch) | Batch size | Max retries | Concurrency | DLQ | Phase |
 |---|---|---|---|---|---|---|---|---|
-| `cad-jobs` | `rfq-intake`, `quote` Workflows; dashboard re-run | `CadRouter` → backend (existing unfold service until Phase 5, then `CadContainer`) | `{v, job_id, idempotency_key, job_type: "analyse" \| "drawing_pdf" \| "flat_dxf" \| "flat_svg", tenant_id, rfq_id, rfq_file_id, input: {r2_key, sha256}, params, backend: "auto", deadline_s, reply: {workflow, instance_id, event_type}, run_id}` | 1 | 2 | 3 (= `max_instances`) | `cad-jobs-dlq` | 4 |
+| `cad-jobs` | `rfq-intake`, `quote` Workflows; dashboard re-run | The consumer runs the job under a `CadRouter` lease (as built, DC-3): the existing unfold service for STEP sheet metal and an inline backend for DXF, STL and CNC STEP until Phase 5, then `CadContainer`; `RfqThread` sends `cad-done` when all jobs of an RFQ are final | `{v, job_id, idempotency_key, job_type: "analyse" \| "drawing_pdf" \| "flat_dxf" \| "flat_svg", tenant_id, rfq_id, rfq_file_id, quote_workflow_id, input: {store, r2_key, sha256, content_type, size_bytes, file_name}, params, backend, deadline_s, run_id}` | 1 | 2 | 3 (= `max_instances`) | `cad-jobs-dlq` | 4 |
 | `translations` | `content-daily` Workflow (13 languages per article, plus backfill) | Translation via AI Gateway route `translate` | `{article_id, translation_id, target_lang, idempotency_key: "<translation_id>:<language>", run_id}` | 1 | 5 (retry delay 120 s) | 3 | `translations-dlq` | 5 |
 | `outbound-mail` | `send-campaign` port (one message per campaign recipient) | `SenderLimiter.acquire` → Resend or Gmail API | `{campaign_id, recipient_id, sender_account_id, provider: "resend" \| "gmail", template_id, idempotency_key, run_id}` | 10 | 3 | 2 | `outbound-mail-dlq` | 5 |
-| `scrapes` | Phase 2: `/api/tender-scan` POST from a machine caller only (answered 200 with `queued` and `run_id`; DV-3). Later: `/api/funded-startups` POST, `/api/gsc` bulk actions (Phase 5), collector Cron Triggers, directory scans | Scan and collector handlers, run unchanged through the shim (synthetic `POST /api/<function>`, deadline 840 s); status < 500 → ack, 5xx, timeout or throw → retry after 300 s | `{v: 1, kind: "tender-scan" \| "funded-scan" (built in Phase 2) \| "gsc-bulk-inspect" \| "gsc-submit-indexing" \| "reddit" \| "hn" \| "tenders" \| "directory", params, run_id, enqueued_at, requested_by}` (in Phase 2 `run_id` is a UUID, not yet an `agent_runs` row) | 1 | 3 (retry delay 300 s) | 2 | `scrapes-dlq` | 2 (machine tender scans); 4–5 (collectors, funded scan, GSC) |
-| `agent-events` | `microns-ops` for `microns-mail` replies (`replies@`, via `OPS`), Workflows, Durable Objects | Reply attribution, Telegram cards, `EVENTS` data points | `{type: "inbound-reply" \| …, inbound_email_id?, rfq_id?, order_id?, payload, run_id}` | 25 (timeout 10 s) | 3 | default | `agent-events-dlq` | 4 |
+| `scrapes` | Phase 2: `/api/tender-scan` POST from a machine caller only (answered 200 with `queued` and `run_id`; DV-3). Phase 4: directory scans from the scraper routes and MCP tools in their own envelope `{v: 1, kind: "directory-scan", params, run_id, enqueued_at, requested_by}` (`DirectoryScanMessage`; the Phase 2 message and consumer stay unchanged). Later: `/api/funded-startups` POST, `/api/gsc` bulk actions (Phase 5), collector Cron Triggers | Scan and collector handlers, run unchanged through the shim (synthetic `POST /api/<function>`, deadline 840 s); status < 500 → ack, 5xx, timeout or throw → retry after 300 s | `{v: 1, kind: "tender-scan" \| "funded-scan" (built in Phase 2) \| "gsc-bulk-inspect" \| "gsc-submit-indexing" \| "reddit" \| "hn" \| "tenders" \| "directory", params, run_id, enqueued_at, requested_by}` (in Phase 2 `run_id` is a UUID, not yet an `agent_runs` row) | 1 | 3 (retry delay 300 s) | 2 | `scrapes-dlq` | 2 (machine tender scans); 4–5 (collectors, funded scan, GSC) |
+| `agent-events` | `MailIngest` for `replies@` mail, the `*/10` dispatcher (orphan rows, portal orders, parked runs), Workflows | Reply attribution, post-order starts, parked-run resumes, Telegram cards; per-message ack or retry | `{v: 1, type: "inbound-reply" \| "order-created" \| "resume-parked" \| "card", …ids, tenant_id}` (as built) | 25 (timeout 10 s) | 3 | default | `agent-events-dlq` | 4 |
 
 DLQ handling: DLQs have no consumer; the weekly ops digest lists their backlog and re-drive is a manual task ([AGENTS.md](AGENTS.md) §2.5).
 
 ## 10. Workflows
 
-Event `type` names use only letters, digits, `-` and `_` (CF docs, verified 2026-09-27); `waitForEvent` defaults to 24 h and allows up to 365 d; events sent before the step is reached are buffered. Human waits are 7 d, then a reminder with a new approval token, then 7 d more; afterwards the item is `needs_review` or `expired`. Instance ids are deterministic, so a repeated start is a no-op (length limit: CF docs, re-check at execution). Full step lists: [AGENTS.md](AGENTS.md) §3.
+Event `type` names use only letters, digits, `-` and `_` (CF docs, verified 2026-09-27); `waitForEvent` defaults to 24 h and allows up to 365 d; events sent before the step is reached are buffered. Human waits are 7 d, then a reminder with a new approval token, then 7 d more; afterwards the item is `needs_review` or `expired`. A failed run waits on a `failure` card: Retry restarts the instance from the failed step (`instance.restart({from})`, earlier step results reused), Dismiss closes it; unanswered failure cards close after 14 days (Phase 4, as built). Instance ids are deterministic, so a repeated start is a no-op (at most 100 characters, CF docs fetched 2026-10-03). Full step lists: [AGENTS.md](AGENTS.md) §3.
 
 | Workflow (class) | Trigger | Instance id (idempotency) | Main steps | Events waited for | Flag | Phase |
 |---|---|---|---|---|---|---|
 | `rfq-intake` (`RfqIntakeWorkflow`) | `microns-mail` via `OPS`; dashboard re-run | `rfq-intake-<first 32 hex of message_id_sha256>` (SHA-256 of the RFC `Message-ID`, or of the raw MIME if missing) | load e-mail → store attachments → triage (`classify`) → thread check (`RfqThread`) → extract (`extract`) → classify CNC vs sheet metal (`classify`) → confirmation if confidence < 0.7 → create RFQ (`rfqs` with `parts_details`, `source`, `inbound_email_id`) → copy files to `rfq/…` + `rfq_files` → enqueue `cad-jobs` → start `quote` | `intake-confirmed` | `agent.rfq_intake` | 4 |
-| `quote` (`QuoteWorkflow`) | End of `rfq-intake`; "Start quote" on the dashboard (web RFQs too) | `quote-<rfq_id>-v<quote_version>` | load → await CAD → drawing and flat jobs → similar quotes (`embed` + `quotes-v1`) → deterministic price from `pricing_rules` and material prices → price notes and cover e-mail (`extract`) → draft PDF → approval → send via Resend (`Reply-To: replies@rfq.micronshub.eu`) → follow-ups → classify reply (`classify`) → close | `cad-done` (2 h), `quote-approved`, `customer-reply` (3 d, 4 d, 7 d follow-up cadence), `reply-confirmed` | `agent.quote` | 4 |
+| `quote` (`QuoteWorkflow`) | End of `rfq-intake`; "Start quote" on the dashboard (web RFQs too) | `quote-<rfq_id>-v<quote_version>` | load → await CAD → drawing jobs (not awaited) → similar quotes (`embed` + `quotes-v1`) → deterministic price from `pricing_rules` and material prices → price notes and cover e-mail (`extract`) → draft PDF → approval → send via Resend (`Reply-To: replies@rfq.micronshub.eu`) → follow-ups → classify reply (`classify`) → "won" creates the order (`create_order_from_quote`) → close | `cad-done` (2 h), `quote-approved`, `customer-reply` (3 d, 4 d, 7 d follow-up cadence), `reply-confirmed`, `agent-resumed` | `agent.quote` | 4 |
 | `post-order` (`PostOrderWorkflow`) | Order won in `quote`, portal acceptance, or "Start handoff" | `post-order-<order_id>` | load → traveller notes (`extract`) → traveller PDF to `orders/…` → `MaterialStock.reserve` → handoff approval → partner hand-off → reorder draft (`extract`) → reorder approval → close | `handoff-approved`, `reorder-approved` | `agent.post_order` | 4 |
 | `content-daily` (`ContentDailyWorkflow`) | Cron `0 7 * * *`; manual "Run now" | `content-daily-<yyyy-mm-dd>` | pick title (logic of `enqueue_next_article()`) → generate English article (`extract`) → fan out 13 `translations` messages → wait → fix links → start `sitemap` → IndexNow → purge `SEO_CACHE` keys → close | `translations-done` (6 h; timeout continues with the languages present) | `agent.content_daily` | 5 |
 | `sitemap` (`SitemapWorkflow`) | `content-daily` step; manual | `sitemap-<yyyy-mm-dd>` | build URL set from the database (port of `generate-sitemap`, with its regression guard) → write `sitemaps/…` to `microns-private` → upsert `gsc_monitored_urls` | — | (covered by `agent.content_daily`) | 5 |
 | `ops-digest` (`OpsDigestWorkflow`) | Cron `30 6 * * 1`; manual "Send now" | `ops-digest-<yyyy>-W<ww>` | collect week figures → stuck items and DLQ backlog → narrative (`extract`) → send via Resend + Telegram line → optional Google Ads conversions (PLAN.md Q21) → monthly retention purge | — | `agent.ops_digest` | 5 |
 
-Every Workflow writes its outcome to `agent_runs` (pg_cron outcomes are unobserved today because of the 5 s `pg_net` timeout, H-29). Step retries are set per step (LLM steps: 3 retries, exponential back-off); gateway-level retries stay off so that retries do not multiply.
+Every Workflow writes its outcome to `agent_runs` (pg_cron outcomes are unobserved today because of the 5 s `pg_net` timeout, H-29). Step retries are set per step (LLM steps: 3 retries, exponential back-off; timeout 3 min for `extract`, 1 min for `classify`); gateway-level and SDK retries stay off so that retries do not multiply. A run parked because its flag went off or the LLM was unavailable resumes through the event `agent-resumed` (Phase 4).
 
 ## 11. Durable Object classes
 
 | Class | Key (`idFromName`) | State | Methods | Why a Durable Object |
 |---|---|---|---|---|
-| `MaterialStock` | `<tenant_id>:<material_id>` (one per material / stock key) | Idempotency map and cache of holds; rebuilt from `stock_reservations` | `reserve(order_item_id, need)` (idempotent on `order_item_id`), `commit()`, `release()`, `check()`; daily alarm `expireHolds()`; writes `stock_reservations` and `stock_transactions` (`reserve`/`unreserve`) | Single writer per material prevents double booking; nothing reserves stock today. Supabase stays the record, the DO is the serialisation point ([AGENTS.md](AGENTS.md) §6) |
+| `MaterialStock` | `<tenant_id>:<material_id>` (one per material / stock key) | Idempotency map and cache of holds; rebuilt from `stock_reservations` | `reserve(order_item_id, need)` (idempotent on `order_item_id`), `commit()`, `release()`, `check()`; daily alarm `expireHolds()`; writes through the RPCs `stock_hold`, `stock_commit`, `stock_release` (`stock_reservations` plus `stock_transactions` of type `reserve`/`unreserve`) | Single writer per material prevents double booking; nothing reserves stock today. Supabase stays the record, the DO is the serialisation point ([AGENTS.md](AGENTS.md) §6) |
 | `RfqThread` | `<rfq_id>` | Message-IDs of inbound and outbound mail, CAD job states, Workflow instance ids | Append mail and files; resolve replies; send `cad-done` when all CAD jobs of the RFQ are final | Serialises concurrent mails and job results on one RFQ; routes events to the right Workflow instance |
 | `SenderLimiter` | `<sender_account_id>` | Token bucket, daily count, warm-up ramp, pause flag | `acquire(n)` → granted or retry-after; `report(result)`; `pause()`, `resume()` | One rate per sender across concurrent queue consumers (2 Workspace sender accounts, live 2026-09-30) |
-| `CadRouter` | `global` | In-flight jobs, backend health, keep-warm schedule | `submit(job)`: reads the input from R2 and streams it to the backend, writes outputs to `cad/<job_id>/output/`, updates `cad_jobs`; alarms for wall-clock time-outs and keep-warm | Jobs are synchronous and single-worker, so concurrency = instances; one coordinator enforces the shared secret and hard time-outs ([AGENTS.md](AGENTS.md) §5) |
-| `MicronsMcp` | Per MCP session (Agents SDK `McpAgent`) | Session, authorised identity and scopes | MCP tools: the 39 tools of the local server plus RFQ, quote, order, inventory and agent-run tools | The Agents SDK runs each MCP session in a Durable Object; P4-11 confirms `McpAgent` vs the stateless handler before the first deploy ([AGENTS.md](AGENTS.md) §3.7) |
+| `CadRouter` | `global` | Leases per backend and backend health (keep-warm schedule from Phase 5) | As built (DC-3): `acquire(job)` → lease or retry-after, `release(lease, outcome)`, `report(backend, ok)`, `snapshot()`; alarm for expired leases. The `cad-jobs` consumer reads the input from R2, calls the backend, writes `cad/<job_id>/output/` and updates `cad_jobs` | Backends are single-worker (unfold service 1, inline 1 per isolate, Container 3), so one coordinator grants capacity while CPU stays out of the single-threaded DO ([AGENTS.md](AGENTS.md) §5) |
 | `CadContainer` | Instance slot (up to `max_instances` 3) | Container lifecycle (runtime-managed) | `fetch` proxied to port 8000 | Containers are addressed and lifecycle-managed through a container-enabled DO class |
+
+No Durable Object serves the remote MCP: the planned `MicronsMcp` (`McpAgent`) was replaced in the Phase 4 build by the Agents SDK's stateless `createMcpHandler` in the default `fetch` of `microns-ops` (DC-1).
 
 ## 12. RFQ intake and quote flow
 
@@ -499,7 +508,7 @@ sequenceDiagram
   participant TH as RfqThread DO
   participant AG as AI Gateway microns
   participant TG as Telegram bot
-  participant Q as cad-jobs Queue
+  participant Q as cad-jobs Queue and consumer
   participant CR as CadRouter DO
   participant CC as CadContainer
   participant WQ as quote Workflow
@@ -509,7 +518,7 @@ sequenceDiagram
   ER->>ML: email(message)
   ML->>R2: put email/{sha256}/raw.eml
   ML->>SB: insert inbound_emails (unique message_id_sha256)
-  ML->>OP: start rfq-intake-{sha32}
+  ML->>OP: MailIngest.startIntake (OPS RPC, ids only)
   OP->>WI: create instance
   WI->>R2: put email/{sha256}/att/{n}-{name}
   WI->>AG: classify route (triage, language)
@@ -524,13 +533,15 @@ sequenceDiagram
   WI->>R2: copy files to rfq/{rfq_id}/{file_id}-{name}
   WI->>Q: one analyse job per CAD file
   WI->>OP: start quote-{rfq_id}-v1
-  Q->>CR: consumer calls submit(job)
-  CR->>R2: read input rfq/{rfq_id}/...
-  CR->>CC: POST /api/v1/unfold/info (shared secret, wall-clock)
-  CC-->>CR: geometry JSON
-  CR->>R2: put cad/{job_id}/output/result.json
-  CR->>SB: update cad_jobs
-  CR->>TH: job final
+  Q->>CR: acquire a lease for the backend
+  CR-->>Q: lease granted
+  Q->>R2: read input rfq/{rfq_id}/...
+  Q->>CC: POST /api/v1/unfold, DXF output (shared secret, 300 s)
+  CC-->>Q: flat DXF and part metrics
+  Q->>R2: put cad/{job_id}/output/result.json and flat.dxf
+  Q->>SB: update cad_jobs
+  Q->>CR: release the lease
+  Q->>TH: job final
   TH-->>WQ: event cad-done (all jobs final)
   WQ->>VZ: similar past quotes
   WQ->>AG: extract route (price notes, cover e-mail)
@@ -541,23 +552,23 @@ sequenceDiagram
   WQ->>RS: send quote, Reply-To replies@rfq.micronshub.eu
   E->>ER: reply to replies@rfq.micronshub.eu
   ER->>ML: email(reply)
-  ML->>OP: agent-events message inbound-reply
+  ML->>OP: MailIngest.ingestReply, then agent-events message inbound-reply
   OP->>TH: match In-Reply-To and References, append
   OP-->>WQ: event customer-reply
   WQ->>AG: classify route (won, lost, counter)
   WQ->>SB: update quote_workflows.status
 ```
 
-Notes: approvals from Telegram and from the dashboard (`ApprovalsPage`, `RfqInboxPage`) reach `microns-ops` through `POST /api/agent/decision`; Telegram callbacks arrive at the existing `telegram-leads-bot` edge function, which relays them as a signed request ([AGENTS.md](AGENTS.md) §2.4, PLAN.md P4-12). Replies to Gmail-sent campaigns stay in the Workspace inboxes and are read by the `*/10` Gmail poller. Customer rows can also appear through the DB trigger `on_auth_user_created_customer` (supabase/migrations/20260806_phase2_rls_per_user.sql:415), so dedupe matches on e-mail.
+Notes: approvals from Telegram and from the dashboard (`ApprovalsPage`, `RfqInboxPage`) reach `microns-ops` through `POST /api/agent/decision` and end in one `decide()`; Telegram callbacks arrive at the existing `telegram-leads-bot` edge function, which relays them as a signed request ([AGENTS.md](AGENTS.md) §2.4, PLAN.md P4-12). Replies to Gmail-sent campaigns stay in the Workspace inboxes and are read by the `*/10` Gmail poller. Customer rows can also appear through the DB trigger `on_auth_user_created_customer` (supabase/migrations/20260806_phase2_rls_per_user.sql:415), so dedupe matches on e-mail. In Phase 4 the CAD step uses the existing unfold service for STEP sheet metal and an inline backend for DXF, STL and CNC STEP; `CadContainer` serves the same request from Phase 5.
 
 ## 13. AI Gateway
 
-Gateway id `microns`. Routes are role-based placeholders; the concrete model is chosen at Phase 4/5 start (the repo's Gemini model IDs are retired, H-19).
+Gateway id `microns`. Routes are roles; the concrete model is chosen at each phase start (the repo's Gemini model IDs are retired, H-19). Phase 4 builds `extract`, `classify` and `embed`; `translate` follows in Phase 5 with its first caller (DC-18).
 
 | Route | Provider | Model class (example at time of writing) | Used by | Response caching |
 |---|---|---|---|---|
-| `extract` | Anthropic | Current Sonnet-class (e.g. `claude-sonnet-5-5`) | RFQ parsing, quote drafting (and article generation in `content-daily`) | Off |
-| `classify` | Anthropic | Current Haiku-class (e.g. `claude-haiku-4-5`) | CNC vs sheet metal, spam triage, reply classification | Off |
+| `extract` | Anthropic | `claude-sonnet-5-5` (Phase 4 build), with server-side refusal fallback | RFQ parsing, quote drafting (and article generation in `content-daily`) | Off |
+| `classify` | Anthropic | `claude-haiku-4-5` (Phase 4 build) | CNC vs sheet metal, spam triage, reply classification | Off |
 | `translate` | Google AI Studio | Current Gemini Flash-class | Article translation (`translations` Queue) | Off |
 | `embed` | Workers AI | `@cf/baai/bge-m3` (1024 dims, matches `quotes-v1`) | Vectorize RAG over past quotes | Optional (deterministic input → output) |
 
@@ -566,11 +577,11 @@ Every call carries `cf-aig-metadata: {"agent":…,"run_id":…,"tenant_id":…}`
 | Setting | Value | Why |
 |---|---|---|
 | Caching | Off for `extract`, `classify`, `translate` | Generation must not return a stale answer for a new RFQ or article; prompts contain customer data |
-| Rate limiting | Gateway rate limit sized from PLAN.md Q20 (proposal: €50/month hard cap with alerts at 50 % and 80 %) | Protects the budget if a loop or a flood of e-mails starts runs; spend-cap mechanism is CF docs, re-check at execution |
-| Logging | On, with `cf-aig-metadata`; retention set to the shortest period that still feeds the weekly digest | Cost per agent and per RFQ (Phase 4 gate); prompts include personal data (GDPR) |
-| Keys and gateway authentication | BYOK: provider keys stored in AI Gateway where supported, otherwise Worker secrets `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`; gateway authentication on if available, its token added to the P0-2 checklist (CF docs, re-check at execution) | One place to rotate (P6-1); only `microns-ops` can use the gateway |
-| Retries and fallbacks | Retries in Workflow steps, not in the gateway; no provider fallback at start | Avoid multiplied retries; add fallbacks per route once costs are measured |
-| Implementation | Gateway dynamic routes named as above if available at Phase 4 start, else a role → provider/model map in `workers/ops/src/agents/` calling the gateway's provider endpoints | CF docs, re-check at execution |
+| Spend limit | €50/month with alerts at 50 % and 80 % (PLAN.md Q20, default DF-2); no gateway rate limit (DC-19) | A 429 from the spend limit parks the run as `budget`; the per-agent daily cap (`value.max_runs_per_day`, default 200) stops loops and floods before any LLM call |
+| Logging | On, with `cf-aig-metadata` (5 keys, ids only); payload logging off for every call with customer data (`cf-aig-collect-log-payload: false`); retention set to the shortest period that still feeds the weekly digest | Cost per agent and per RFQ (Phase 4 gate); prompts include personal data (GDPR) |
+| Keys and gateway authentication | BYOK: the Anthropic key stored in the gateway (`ANTHROPIC_API_KEY` not set); gateway authentication on before a key is stored; the Run token `AI_GATEWAY_TOKEN` is an ops secret on the P0-2 checklist | One place to rotate (P6-1); only `microns-ops` can use the gateway |
+| Retries and fallbacks | Retries in Workflow steps, not in the gateway or the SDK (`maxRetries` 0); `extract` uses Anthropic's server-side refusal fallback, accepted on the gateway path at OW-10 or dropped (a refusal then becomes a human card) | Avoid multiplied retries |
+| Implementation | As built: `@anthropic-ai/sdk` 0.131.0 against the provider-native endpoint `env.AI.gateway('microns').getUrl('anthropic')`, structured outputs (`messages.parse` with a JSON Schema), one prompt-cache breakpoint on Sonnet prompts; `embed` through `env.AI.run` with the gateway option. Dynamic routes are not used: they take the OpenAI request shape only | CF docs (fetched 2026-10-03) |
 
 ## 14. Access policies
 
@@ -579,7 +590,8 @@ Every call carries `cf-aig-metadata: {"agent":…,"run_id":…,"tenant_id":…}`
 | `microns-site` preview | `microns-site.<account>.workers.dev` and its version preview URLs, including the `staging` alias (host format CF docs, re-check at execution) | Allow: owner identity; Service Auth: service token for CI tools (`CF-Access-Client-Id` / `CF-Access-Client-Secret`) | `scripts/seo-parity.mjs`, `scripts/verify-ssr.sh`, Playwright, Lighthouse, the owner | 1 |
 | `microns-site` preview, machine callers | Same application as above | Service Auth: `microns-machine-collector`, `microns-machine-mcp` (one token per consumer, each revocable alone) | `tender-collector`, the local MCP server (tests against the preview) | 2 |
 | `microns-machine-api` | `api.micronshub.eu` (not a path on `www`: `/api/tender-scan` also has a browser caller, TenderMonitorPage.tsx:240; DV-7) | Service Auth: `microns-machine-collector`, `microns-machine-mcp`; Allow: owner | `tender-collector` (supabase/functions/tender-collector/index.ts:68), the local MCP server | 3 (runbook, before the `www` flip; D-3) |
-| Remote MCP | `mcp.micronshub.eu` | Access + OAuth for MCP clients; Allow: owner identity | Claude on desktop and mobile | 4 (flag `mcp.remote`) |
+| Remote MCP (`microns-mcp`) | `mcp.micronshub.eu` | Access "MCP server" application with Managed OAuth (Access is the OAuth server for MCP clients); Allow: owner identity. The Worker also checks the assertion (audience `MCP_ACCESS_AUD`) and maps the e-mail to a `user_roles` staff role | Claude on desktop and mobile | 4 (flag `mcp.remote`) |
+| CAD backend (optional) | Hostname of the unfold service, only with the network path chosen at OW-11 | Service Auth: `microns-machine-cad` | `cad-jobs` consumer (`CAD_ACCESS_CLIENT_ID`, `CAD_ACCESS_CLIENT_SECRET`) | 4 |
 | Dashboard (optional) | `www.micronshub.eu/dashboard*` | Allow: staff identities | Staff | 6 |
 | `workers.dev` | `microns-ops`, `microns-mail`: `workers_dev` off; `microns-site` production URL off after Phase 3 or kept behind the preview application | — | — | 1–3 |
 
@@ -616,7 +628,8 @@ H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate 
 | `microns-site` sitemap routes | `SUPABASE_ANON_KEY` | Storage public object, REST fallback | `sitemaps` bucket, then R2 `sitemaps/…` from Phase 5 | api/sitemap.js:25, :236 |
 | `microns-site` local API | `SUPABASE_SERVICE_ROLE_KEY` (server-side only) | REST | Marketing tracking tables (`track`); lookups the gates need | Service role never reaches the browser |
 | `microns-site` gates | User JWT | `GET /auth/v1/user` after a local shape and expiry pre-check; roles read as an array from `user_roles` with the caller's own JWT | `user_roles` | Result cached per isolate for at most 60 s and never past the token's expiry; no JWT secret in any Worker; a JWKS path is built but dormant (the project's JWKS is empty, live 2026-10-02); Supabase Auth unreachable → 503 (fail closed) |
-| `microns-ops` | `SUPABASE_SERVICE_ROLE_KEY` | supabase-js over REST | Ops, agent and inventory tables | Server-side only |
+| `microns-ops` | `SUPABASE_SERVICE_ROLE_KEY` | supabase-js (ported handlers) and a small PostgREST client (agent code) over REST | Ops, agent and inventory tables; agent RPCs | Server-side only; idempotent single-statement writes use `on_conflict` |
+| `microns-ops` remote MCP (Phase 4) | `SUPABASE_SERVICE_ROLE_KEY`, after the Access check and the staff mapping (`agent_staff_for_email`) | REST | Tables of the ported tools, agent tables | Every tool call audited in `agent_runs`; e-mail addresses masked in list results |
 | `microns-ops` bulk upserts (optional) | Hyperdrive `SUPABASE_DB` (connection string stored in the Hyperdrive config, never in a file) | Postgres wire | `xometry_offers` upserts (the Python scanner uses psycopg today) | Session-mode pooling; CF docs, re-check at execution |
 | `microns-mail` | `SUPABASE_SERVICE_ROLE_KEY` | REST | `inbound_emails` | Insert only |
 
@@ -637,15 +650,15 @@ H-6: Most `/api/*` routes and the `leads-api` edge function do not authenticate 
 | Cache API | Sitemap responses | 1 h, matching `s-maxage=3600` today | Expiry; per data centre | api/sitemap.js:392-396; H-12 |
 | HTML | Not cached at the edge | `Cache-Control: public, max-age=0, must-revalidate` | — (no Cache Rule; HTML, JSON and XML are not cached by default) | middleware.ts:674; CF docs (verified 2026-09-27) |
 | Static assets | Served by Workers Static Assets; hashed `/assets/*` | Platform defaults; `_headers` only if the baseline needs immutable caching or the `Content-Type` values of vercel.json:173-184 | New version on deploy | H-28 |
-| KV `FLAGS` | Flag values | Read with a short `cacheTtl` (60 s since Phase 1); synced every minute from `feature_flags`. The SEO handler waits at most 500 ms for `seo.strict_404`, then uses var `SEO_STRICT_404`; `api.forward_to_vercel` (Phase 2) falls back to var `API_FORWARD_TO_VERCEL` when the key is missing, malformed or KV fails | Sync job | PLAN.md P4-2; workers/site/src/flags.ts |
+| KV `FLAGS` | Flag values | Read with a short `cacheTtl` (60 s in `microns-site` since Phase 1; 30 s for agent flags in `microns-ops`, Phase 4); synced every minute from `feature_flags` by revision, with write-through on dashboard edits. The SEO handler waits at most 500 ms for `seo.strict_404`, then uses var `SEO_STRICT_404`; `api.forward_to_vercel` (Phase 2) falls back to var `API_FORWARD_TO_VERCEL` when the key is missing, malformed or KV fails | Sync job | PLAN.md P4-2; workers/site/src/flags.ts |
 
 ## 18. Observability
 
 | Signal | Where | Content | Consumer |
 |---|---|---|---|
 | Workers Logs | All three Workers | Structured JSON per request: route step, `X-Seo-Source`, cache layer hit, Supabase latency, status; errors for shell failures (H-4). From Phase 2 one `api` line per `/api` request in `microns-site` and in `microns-ops` with a shared `requestId`, gate decisions in report mode, `scrapes` outcomes and `nest` CPU; never tokens, cookies, bodies or e-mail addresses | Phase 1–3 gates (zero 5xx), debugging |
-| Analytics Engine `microns_events` (`EVENTS`) | `microns-ops` | One data point per agent step: agent, `run_id`, tokens, cost, outcome, latency | Ops digest, dashboards |
-| `agent_runs` table | Supabase | One row per run: agent, trigger, `idempotency_key` UNIQUE, status, `cost_cents`, tokens, times, error, human action | Dashboard, ops digest, Phase 5 output parity (H-29) |
+| Analytics Engine `microns_events` (`EVENTS`) | `microns-ops` | Data points `llm_call`, `embed_call`, `step`, `run_end`, `cad_job`, `mail_in`, `send` (index `run_id`; agent, model, outcome, tokens, cost, latency) | Ops digest, dashboards |
+| `agent_runs` table | Supabase | One row per run: agent, trigger, `idempotency_key` (unique per agent), status, `parked_reason`, `cost_cents`, tokens, times, error, human action | Dashboard, ops digest, Phase 5 output parity (H-29) |
 | AI Gateway logs | Gateway `microns` | Per call with `cf-aig-metadata` | Cost per agent and per RFQ (Phase 4 gate) |
 | Queue DLQs | `<name>-dlq` | Failed messages | Telegram alert + `agent_runs` |
 | Parity reports | `scripts/seo-parity.mjs` output | JSON + Markdown diff | Phase gates, deploy gating |
@@ -664,7 +677,8 @@ Web Analytics automatic setup stays off (it injects a script into HTML at the ed
 | Stage | Pipeline | Gate |
 |---|---|---|
 | Phase 1–2 | `.github/workflows/cf-preview.yml`: manual dispatch only; pinned Node and package manager (P0-7); `vite build`; `wrangler versions upload --preview-alias staging`; secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (names only). Phase 2 adds: `workers/shared` install, secret `VITE_TURNSTILE_SITE_KEY` passed to `vite build` (the run stops early when it is empty), a prerender guard that fails when `dist/**/*.html` contains Turnstile markup, and the bundle guard after the dry run | Parity diff, `verify-ssr.sh`, Playwright, Lighthouse, size report (PLAN.md §5.1); Phase 2: T1/T2 suites, bundle guard, `tests/e2e/api.spec.ts` (PLAN.md §5.2) |
-| Phase 2 (`microns-ops`) | `.github/workflows/cf-ops.yml`: manual dispatch only; install, typecheck, tests, dry run with metafile; `wrangler deploy` only when the input `deploy` is true (deployed, not version-uploaded, and before the site, because a service binding reaches the current deployment only) | T1 suite, `qrcode` server-build check, size report |
+| Phase 2 (`microns-ops`) | `.github/workflows/cf-ops.yml`: manual dispatch only; install, typecheck, tests, dry run with metafile; `wrangler deploy` only when the input `deploy` is true (deployed, not version-uploaded, and before the site, because a service binding reaches the current deployment only) | T1 suite, `qrcode` server-build check, size report; Phase 4 adds one copy each of `pdf-lib`, supabase-js and `zod`, and no local-test var in the production config |
+| Phase 4 (`microns-mail`) | `.github/workflows/cf-mail.yml`: manual dispatch only; install, typecheck, tests, dry run with the mail bundle check; `wrangler deploy` only when `deploy` is true, after `microns-ops` | T1 suite; no npm package in the mail bundle |
 | From Phase 3 | Deploy job (added later, manual trigger): upload a version → parity diff preview vs production → promote the same version ID only if 0 unexplained differences; gradual percentage deploys where useful (CF docs, re-check at execution) | Parity = 0 for `microns-site`; unit and e2e tests for `microns-ops`, `microns-mail`, `microns-cad` |
 | Branch safety | No Worker code is pushed before P0-1 gates `auto-merge-claude.yml` (.github/workflows/auto-merge-claude.yml:3-6, :26-30); Vercel keeps deploying `main` until Phase 6 | H-2 |
 
@@ -673,13 +687,14 @@ Web Analytics automatic setup stays off (it injects a script into HTML at the ed
 | Limit | Value | Design consequence | Source |
 |---|---|---|---|
 | CPU per request | 30 s default, 5 min max (`limits.cpu_ms`); applies to queue consumers too; not enforced locally | `nest` on `microns-ops` with `cpu_ms` 300,000; CAD in the Container; CPU measured on the preview only | CF docs (verified 2026-09-27; re-read 2026-10-02); H-18 |
-| Worker size | 64 MiB uncompressed on Free and Paid; no compressed size limit | Size is not the binding limit; startup is. Phase 2 dry runs: `microns-site` 3,366.23 KiB (gzip 728.01 KiB), `microns-ops` 3,743.75 KiB (gzip 725.78 KiB); a bundle guard keeps ops-only code out of the site | CF docs (fetched 2026-10-02) |
+| Worker size | 64 MiB uncompressed on Free and Paid; no compressed size limit | Size is not the binding limit; startup is. Phase 2 dry runs: `microns-site` 3,366.23 KiB (gzip 728.01 KiB), `microns-ops` 3,743.75 KiB (gzip 725.78 KiB). Phase 4 dry runs (2026-10-07): `microns-site` 3,383.82 KiB (gzip 732.56 KiB), `microns-ops` 9,657.36 KiB upload (gzip 2,307.86 KiB), `microns-mail` 17.15 KiB; bundle guards keep ops-only and agent code out of the site and npm packages out of the mail Worker | CF docs (fetched 2026-10-02) |
 | Startup time | 1 s | SEO Worker kept small; size report gate; API handlers imported lazily per route | CF docs (verified 2026-09-27); H-27 |
 | Service bindings (RPC) | Each call counts as a subrequest; at most 32 Worker invocations per request; serialised RPC payload 32 MiB (streams for more); the target must be deployed; Access context is not propagated | `microns-ops` deployed before the site; the caller travels in the RPC call | CF docs (fetched 2026-10-02) |
 | Subrequests; simultaneous outgoing connections | 10,000 per request; 6 at a time | Fan-out goes through Queues and Workflows; scrapers cap concurrency at 6 | CF docs (verified 2026-09-27) |
-| Memory | 128 MB per isolate | 6.2 MB sitemap streamed, not built in memory twice | CF docs (verified 2026-09-27); H-12 |
+| Memory | 128 MB per isolate, shared by concurrent invocations | 6.2 MB sitemap streamed, not built in memory twice; inbound ZIP entries streamed one at a time; inline CAD inputs capped at STEP 5 MB, DXF 3 MB, STL 0.75 MB with one inline job per isolate (half of the largest input that parsed under a 96 MB heap, measured 2026-10-04) | CF docs (verified 2026-09-27); H-12 |
 | Cron / Queue consumer wall time | 15 min | Long jobs become Workflows (steps have no wall-time limit) | CF docs (verified 2026-09-27) |
 | `waitForEvent` | Default 24 h, max 365 d; event types: letters, digits, `-`, `_` | 7-day approval waits with a reminder step | CF docs (verified 2026-09-27) |
+| Workflow restart | `instance.restart({from: {name}})` re-runs the named step and every later one, reusing earlier results; it throws when the step is not in the history | Retry on failure cards (Phase 4); exercised under local workerd, re-checked on the preview | CF docs (fetched 2026-10-03) |
 | Containers | `lite` 1/16 vCPU 256 MiB … `standard-4` 4 vCPU 12 GiB; included 25 GiB-h, 375 vCPU-min, 200 GB-h per month | `standard-1`/`standard-2`, `sleepAfter` ≈ 10 min | CF docs (verified 2026-09-27); list price, re-check at execution |
 | `_redirects` | 2,000 static + 100 dynamic rules; not applied to Worker responses | In-Worker table instead | CF docs (verified 2026-09-27) |
 | Custom Domains | No wildcards; not on a hostname with an existing CNAME | Routes for `www` and `*` | CF docs (verified 2026-09-27) |
@@ -784,7 +799,8 @@ flowchart LR
 | Apex redirect status, HTTP → HTTPS status, HSTS values | §5, runbook S11/S13 (baseline P0-3; H-11, H-24) | Both |
 | Directory indexes for `/laserkritis/` and `/zohoverify/` (router step 5); `/sitemap-complete.xml` as a rewrite (vercel.json:135-136) vs the 301 described in the api/sitemap.js:5-6 comment (router step 2) | §6.2 | Claude (from the baseline) |
 | KV minimum TTL, Queue limits, Workflow instance id limits, Cron Trigger limits, preview-alias host format, Static Assets file limits | §7, §9, §10, §14, §17, §20 | Claude |
-| AI Gateway spend caps, authentication and dynamic routes; Supabase JWT verification method (`/auth/v1/user` built in Phase 2; JWKS path dormant until the project publishes keys) | §13, §16 | Claude |
+| AI Gateway spend limit and authentication, BYOK and the server-side refusal fallback on the provider-native path (OW-10); Supabase JWT verification method (`/auth/v1/user` built in Phase 2; JWKS path dormant until the project publishes keys) | §13, §16 | Both |
+| Resend keeps or replaces our `Message-ID` (both ids are stored); Access Managed OAuth with the Claude connectors (protected-resource URL, OW-16); restart of an ended Workflow instance and inline CAD memory on the real runtime | §10, §14, §20 (PLAN.md §5.4) | Both |
 | CPU limit of an RPC callee, the error on CPU exhaustion, version overrides on RPC calls; `nest` CPU per fixture on the preview | §6.4, §20 (PLAN.md §5.2 D-6, D-15) | Both |
 | Vercel's request-body cut-off, its bytes for invalid JSON and default `Cache-Control` on `/api/*`, `maxDuration`; whether a handler-set CORS header or the platform header wins | §6.4 (PLAN.md §5.2 D-12, D-15; P0-3) | Both |
 | Supabase plan tier and REST throughput | §16 (PLAN.md Q2) | Dimitris |

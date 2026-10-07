@@ -14,7 +14,7 @@ import { LOG_PREFIX } from '../env';
 import type { BrowserPort } from '../ports/index';
 import { scraperBrowser } from './browser';
 import { scraperFetch, type ScraperEnv } from './fetch-page';
-import { parsePermittedHosts, robotsCache, type RobotsCache } from './robots';
+import { parsePermittedHosts, robotsAllows, robotsCache, type RobotsCache, type RobotsDecision } from './robots';
 
 export const DEFAULT_SCRAPER_USER_AGENT = 'MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)';
 export const HOST_PAUSE_MS = 24 * 3_600_000;
@@ -95,6 +95,28 @@ export async function pauseRemaining(deps: Pick<ScraperDeps, 'pauses' | 'db' | '
     // A failed read does not pause the host; the robots gate and the fetch answer still apply.
     return 0;
   }
+}
+
+/** The robots gate with the module's identity, permissions, clock and cache. */
+export function robotsDecision(deps: Pick<ScraperDeps, 'fetch' | 'userAgent' | 'permitted' | 'now' | 'robotsCache'>, url: string): Promise<RobotsDecision> {
+  return robotsAllows(url, { fetchImpl: deps.fetch, userAgent: deps.userAgent, permitted: deps.permitted, now: deps.now, cache: deps.robotsCache });
+}
+
+/**
+ * The robots check of redirect targets for fetchPage: the first URL already passed the gate; every other target is
+ * asked again, and the refusal is kept for the answer.
+ */
+export function redirectGate(deps: ScraperDeps, first: string): { allow(target: string): Promise<boolean>; refused: RobotsDecision | null } {
+  const gate = {
+    refused: null as RobotsDecision | null,
+    async allow(target: string): Promise<boolean> {
+      if (target === first) return true;
+      const hop = await robotsDecision(deps, target);
+      if (!hop.allowed) gate.refused = hop;
+      return hop.allowed;
+    },
+  };
+  return gate;
 }
 
 function defaultLog(event: string, fields: Record<string, string | number | boolean | undefined>): void {

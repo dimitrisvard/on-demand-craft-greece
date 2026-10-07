@@ -1,14 +1,16 @@
 # microns-ops
 
-Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2; ARCHITECTURE.md §6.4, §7.2, §9). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`). Every `/api/notifications` action runs here, because `api/notifications.js` imports nesting and inventory at module scope (PLAN.md §5.2 DV-1).
+Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2; ARCHITECTURE.md §6.4, §7.2, §9). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`). Every `/api/notifications` action runs here, because `api/notifications.js` imports nesting and inventory at module scope (PLAN.md §5.2 DV-1). Phase 4 (PLAN.md §5.4) adds the agent layer: section "Phase 4: agent layer" below.
 
 ## How requests reach it
 
 | Entry | Who calls it | Rule |
 |---|---|---|
 | `OpsApi.handle(request, call)` (named entrypoint, RPC) | `microns-site` through the service binding `OPS` | The site resolves the endpoint and action, runs the gate and sends the verified principal and the function URL in `call` (`OpsCall`, `workers/shared/src/http/rpc.ts`). Ops reads the principal from `call` only, never from a header |
-| default `fetch` | nobody (`workers_dev` and `preview_urls` are off, no routes) | 404 |
-| default `queue` | queue `scrapes` | One scan per message (below) |
+| `MailIngest.startIntake`, `MailIngest.ingestReply` (named entrypoint, RPC; Phase 4) | `microns-mail` through its service binding `OPS` | Ids only (`v`, inbound e-mail id, message hash, tenant); the row is read from the database here |
+| default `fetch` | MCP clients on the Custom Domain `mcp.micronshub.eu` (Phase 4); nobody else (`workers_dev` and `preview_urls` are off) | Host `MCP_HOSTNAME` → remote MCP (`src/mcp/`); every other host 404 with no body |
+| default `queue` | queues `scrapes`, `cad-jobs`, `agent-events` | By `batch.queue`; on `scrapes` a `directory-scan` envelope goes to the scrapers module, every other message to the Phase 2 consumer (below) |
+| default `scheduled` (Phase 4) | crons `* * * * *` and `*/10 * * * *` | Flag mirror tick; dispatcher (Gmail poller, orphan inbound rows, portal orders, parked runs, old failure cards, stuck CAD jobs) |
 
 | Check in `OpsApi.handle` / the app | Answer |
 |---|---|
@@ -60,6 +62,8 @@ Every route is `app.all(<function path>)`, so `OPTIONS` and every method reach t
 | `SUPABASE_URL`, `SITE_ORIGIN` | var | in `wrangler.jsonc` |
 | `SCRAPES` | queue producer | queue `scrapes` (consumer: batch 1, concurrency 2, 3 retries, 300 s delay, DLQ `scrapes-dlq`) |
 | `limits.cpu_ms` | limit | 300,000 (requests and consumer; `nest` on large orders needs more than the default) |
+| Phase 4 bindings and vars | see `wrangler.jsonc` and "Phase 4: agent layer" below | KV `FLAGS`, R2 `PRIVATE_FILES`, queues `cad-jobs` and `agent-events`, three Workflows, three Durable Objects (tag `v1`), Vectorize `QUOTES_INDEX`, `AI`, `BROWSER`, `EVENTS`, `MCP_RATE_LIMIT`, the `mcp.micronshub.eu` Custom Domain, twelve vars; every one optional in `OpsEnv` and checked where used |
+| `AI_GATEWAY_TOKEN`, `CAD_UNFOLD_URL`, `CAD_SHARED_SECRET`, `AGENT_APPROVAL_SECRET`, `CAD_ACCESS_CLIENT_ID`, `CAD_ACCESS_CLIENT_SECRET` | secret (Phase 4, optional, not in `secrets.required`) | `npx wrangler secret put <NAME>`; a missing one fails only the step that needs it (`config_missing`) |
 | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APOLLO_API_KEY` | secret (`secrets.required`) | `npx wrangler secret put <NAME>` in this folder; locally `.dev.vars` (template `.dev.vars.example`, dummy values) |
 
 The repository is public: secret values never go into a file of this folder.
@@ -149,4 +153,20 @@ AI Gateway `microns` with authentication on before a provider key is stored. The
 (`supabase/migrations/*_agent_layer.sql`, dry run with `ROLLBACK` first), the optional secrets
 (`AI_GATEWAY_TOKEN`, `CAD_UNFOLD_URL`, `CAD_SHARED_SECRET`, `AGENT_APPROVAL_SECRET`), the deploy (ops, then mail,
 then the site) and the flags stage by stage. The full list with commands is the owner checklist of the Phase 4
-build specification.
+build specification (summary: docs/migration/PLAN.md §5.4, "Owner steps").
+
+### Status (2026-10-07, local)
+
+Nothing is deployed. Phase 4 exit gate as a whole: docs/migration/PLAN.md §5.4, build record.
+
+| Check | Result |
+|---|---|
+| Typecheck (`npm run typecheck`) | exit 0 |
+| T1 (`npm test`) | 73 files, 1,159 tests green; 2 opt-in files (19 tests) skipped unless `PDF_SAMPLES=1` or `MCP_PARITY=1`; kernel suite 187/187 |
+| T2, profile `api` (`npm run test:integration`) | 4 green, as at the Phase 2 close |
+| T2, profile `agents` (`npm run test:integration:agents`) | 11 files, 46 tests green on two runs in a row (≈ 114 s each): kernel, flags, mail, intake, CAD, quote, replies, post-order, web, MCP, scrapers |
+| Offline evaluation (`npm run eval:synthetic`) | 37 recorded cases, ok 97.3 %, field accuracy 97.6 %; the intake, quote and post-order prompts 100 %; the misses are the two sample cases built to show a misread field and a truncated answer (`eval/samples/`) |
+| MCP parity (`npm run mcp:parity`, after `npm --prefix ../../mcp-server ci && npm --prefix ../../mcp-server run build`) | 3/3 |
+| Dry run (`npm run build:dry`) | `index.js` 8,789.41 KiB (gzip 1,857.46 KiB), upload 9,657.36 KiB (gzip 2,307.86 KiB); one copy each of `pdf-lib`, `@supabase/supabase-js`, `zod`; Phase 2 and Phase 4 bundle rules pass |
+
+Dependency rule: `npm audit` output for the pinned packages is reviewed before each deploy; the pins of `agents`, its MCP peers and `@cloudflare/puppeteer` move only by owner decision and with the parity and T2 suites green (PLAN.md §5.4 DF-49). The bundle holds two copies of `postal-mime` 2.7.4 (one through `resend` for the Phase 2 handlers, one for the agent mail parser); the bundle check allows it.

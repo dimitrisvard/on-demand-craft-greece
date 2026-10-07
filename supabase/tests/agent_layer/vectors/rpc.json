@@ -54,9 +54,11 @@
         "mailbox": "rfq", "from_email": "x@example.test", "received_at": "$now-1h" } ] }
   ],
   "cases": [
-    { "name": "agent_run_begin twice returns the same run; a bad trigger is refused", "tables": ["agent_runs"], "steps": [
+    { "name": "agent_run_begin twice returns the same run, and a finished run with its final status; a bad trigger is refused", "tables": ["agent_runs"], "steps": [
       { "rpc": "agent_run_begin", "args": { "p_agent": "quote", "p_trigger": "workflow", "p_idempotency_key": "rfq-x:v1",
         "p_fields": { "workflow_name": "quote", "workflow_instance_id": "quote-x-v1", "subject_type": "rfq", "subject_id": "a0000000-0000-4000-8000-000000000001", "prompt_version": "quote.price_notes@v1" } } },
+      { "rpc": "agent_run_begin", "args": { "p_agent": "quote", "p_trigger": "workflow", "p_idempotency_key": "rfq-x:v1" } },
+      { "update": { "table": "agent_runs", "compare": true, "where": { "idempotency_key": "rfq-x:v1" }, "set": { "status": "succeeded", "finished_at": "$now+0m" } } },
       { "rpc": "agent_run_begin", "args": { "p_agent": "quote", "p_trigger": "workflow", "p_idempotency_key": "rfq-x:v1" } },
       { "rpc": "agent_run_begin", "args": { "p_agent": "flags", "p_trigger": "cron", "p_idempotency_key": "flags-sync:2026-10-05T07:00Z", "p_fields": {}, "p_tenant_id": "$T2" } },
       { "rpc": "agent_run_begin", "args": { "p_agent": "quote", "p_trigger": "sms", "p_idempotency_key": "k-bad" } },

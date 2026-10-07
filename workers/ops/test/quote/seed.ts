@@ -198,13 +198,14 @@ export const COVER_ANSWER = {
 };
 
 /** A customer reply stored as microns-mail would (raw MIME in R2 + inbound_emails row). */
-export function replyMime(o: { subject: string; text: string; messageId?: string; inReplyTo?: string }): string {
+export function replyMime(o: { subject: string; text: string; messageId?: string; inReplyTo?: string | null }): string {
+  const inReplyTo = o.inReplyTo === undefined ? `<q.${QWID}.0@rfq.micronshub.eu>` : o.inReplyTo;
   return [
     'From: Erika Beispiel <erika.beispiel@example.de>',
     'To: replies@rfq.micronshub.eu',
     `Subject: ${o.subject}`,
     `Message-ID: ${o.messageId ?? '<reply-1@example.de>'}`,
-    `In-Reply-To: ${o.inReplyTo ?? `<q.${QWID}.0@rfq.micronshub.eu>`}`,
+    ...(inReplyTo ? [`In-Reply-To: ${inReplyTo}`] : []),
     'Date: Wed, 07 Oct 2026 10:00:00 +0200',
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',

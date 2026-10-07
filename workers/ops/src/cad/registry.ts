@@ -4,6 +4,10 @@
 // Rules
 //   - 'vps' is registered only when CAD_UNFOLD_URL and CAD_SHARED_SECRET are configured (checked per use, so a
 //     missing CAD secret fails CAD jobs only, never the Worker); missingCadConfig() names what is missing.
+//   - The shared secret travels over HTTPS only: 'vps' is registered only for an https: CAD_UNFOLD_URL. Generated
+//     test configs (AGENT_STUBS set, never in production, ports/index.ts) may point it at the local http: stub.
+//     invalidCadConfig() names a configured value that may not be used, and CAD jobs that need it fail
+//     'config_invalid'.
 //   - candidates(job, kind): an explicit backend in the message is honoured when it is registered and supports the
 //     job; 'auto' = CAD_BACKEND_DEFAULT (default 'vps'), then 'inline', each kept only when registered and
 //     supporting (job_type, kind, process). Health and free slots are CadRouter's decision.
@@ -26,6 +30,23 @@ export function missingCadConfig(env: Pick<OpsEnv, 'CAD_UNFOLD_URL' | 'CAD_SHARE
   if (!env.CAD_UNFOLD_URL) missing.push('CAD_UNFOLD_URL');
   if (!env.CAD_SHARED_SECRET) missing.push('CAD_SHARED_SECRET');
   return missing;
+}
+
+/** True when the shared secret may be sent to this base URL: https:, or http: in a generated test config. */
+export function unfoldUrlAllowed(url: string, env: Pick<OpsEnv, 'AGENT_STUBS'>): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'https:') return true;
+  return parsed.protocol === 'http:' && Boolean(env.AGENT_STUBS?.trim());
+}
+
+/** Names of configured CAD values that may not be used (empty when every configured value is usable). */
+export function invalidCadConfig(env: Pick<OpsEnv, 'CAD_UNFOLD_URL' | 'AGENT_STUBS'>): string[] {
+  return env.CAD_UNFOLD_URL && !unfoldUrlAllowed(env.CAD_UNFOLD_URL, env) ? ['CAD_UNFOLD_URL'] : [];
 }
 
 export class MapCadRegistry implements CadBackendRegistry {
@@ -54,7 +75,7 @@ export class MapCadRegistry implements CadBackendRegistry {
 export function makeCadRegistry(env: OpsEnv, o?: { fetcher?: UnfoldFetcher }): CadBackendRegistry {
   if (stubTokens(env).has('cad')) return new MapCadRegistry([new FakeCadBackend('vps'), new InlineBackend()], 'vps');
   const backends: CadBackend[] = [new InlineBackend(), new ContainerBackend()];
-  if (missingCadConfig(env).length === 0) {
+  if (missingCadConfig(env).length === 0 && invalidCadConfig(env).length === 0) {
     const fetcher: UnfoldFetcher = o?.fetcher ?? ((req) => fetch(req));
     backends.push(
       new HttpUnfoldBackend('vps', fetcher, {

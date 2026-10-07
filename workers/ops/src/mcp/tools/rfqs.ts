@@ -3,8 +3,8 @@
 //   start_quote: the logic of POST /api/agent/start kind 'quote', run in-process with the caller's staff principal
 //   (flag agent.quote on, RFQ exists, no active quote, next version, Workflow create; "already exists" = created
 //   false).
-// Personal data: lists mask sender addresses; get_rfq shows the RFQ's own contact fields and the linked e-mails'
-// subjects and excerpt length only (never e-mail bodies; the excerpt stays in the dashboard).
+// Personal data: lists mask sender addresses; get_rfq shows the RFQ's own contact fields and, for the linked
+// e-mails, the masked sender address and the subject only (never e-mail bodies; the excerpt stays in the dashboard).
 
 import { z } from 'zod';
 import { daysAgoIso, isoTime, maskEmail } from '../format';
@@ -87,7 +87,7 @@ export const getRfq = tool({
       q ? `  v${q.quote_version} ${q.status} | ${q.total_amount ?? '-'} ${q.currency || ''} | approved ${isoTime(q.approved_at, '-')} | sent ${isoTime(q.sent_at, '-')}` : '  none',
       '',
       '=== INBOUND E-MAILS ===',
-      ...((mails.data ?? []) as Array<Record<string, any>>).map((m) => `  ${isoTime(m.received_at)} ${m.status} | ${m.from_email || '-'} | ${m.subject || '(no subject)'}\n     ID: ${m.id}`),
+      ...((mails.data ?? []) as Array<Record<string, any>>).map((m) => `  ${isoTime(m.received_at)} ${m.status} | ${m.from_email ? maskEmail(m.from_email) : '-'} | ${m.subject || '(no subject)'}\n     ID: ${m.id}`),
     ].join('\n');
     return { text };
   },

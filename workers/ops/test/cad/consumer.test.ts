@@ -10,9 +10,9 @@ import type { CadRouterClient } from '../../src/cad/router-client';
 import { CAD_BACKENDS, INLINE_TOO_LARGE, type BackendName, type CadBackend, type CadFinalStatus, type CadJobStatus, type CadOutcome } from '../../src/cad/types';
 import { cadJobKey } from '../../src/agents/ids';
 import { enqueueCadJob, getCadJob, type CadJobRow, type NewCadJob } from '../../src/db/repos/cad-jobs';
-import { CadRouter } from '../../src/do/cad-router';
+import { CadRouter, LEASE_GRACE_S } from '../../src/do/cad-router';
 import type { OpsEnv } from '../../src/env';
-import { MAX_DELIVERIES, cadJobsConsumer, isCadJobMessage } from '../../src/queues/cad-jobs';
+import { BUSY_MARGIN_S, MAX_DELIVERIES, NOTIFY_RETRY_S, busyRetryDelayS, cadJobsConsumer, isCadJobMessage } from '../../src/queues/cad-jobs';
 import type { CadJobMessageV1 } from '../../src/queues/messages';
 import { FakeQueue, agentBindings, agentPorts, type AgentTestPorts } from '../helpers/agent-env';
 import { checkList, sorted } from '../helpers/check-lists';
@@ -68,6 +68,11 @@ interface Setup {
   finals: Array<{ rfq: string; job: string; status: CadFinalStatus }>;
   queue: FakeQueue<CadJobMessageV1>;
   sleeps: number[];
+  /** Calls of RfqThread.cadJobFinal that throw before one succeeds (each failing call is counted in noticeCalls). */
+  noticeFailures: number;
+  noticeCalls: number;
+  /** Runs during an injected sleep (the clock has already moved by the slept time). */
+  onSleep?: (ms: number) => Promise<void>;
   run(m: FakeMessage, o?: { router?: CadRouterClient; leaseWaitMs?: number }): Promise<void>;
   enqueue(o?: Partial<NewCadJob>): Promise<CadJobMessageV1>;
   row(id: string): Promise<CadJobRow>;
@@ -90,6 +95,8 @@ async function setup(o: { inline?: boolean } = {}): Promise<Setup> {
     finals,
     queue,
     sleeps,
+    noticeFailures: 0,
+    noticeCalls: 0,
     run: (m, ro = {}) =>
       cadJobsConsumer(batch(m), env, {} as ExecutionContext, {
         ports,
@@ -97,8 +104,15 @@ async function setup(o: { inline?: boolean } = {}): Promise<Setup> {
         leaseWaitMs: ro.leaseWaitMs ?? 0,
         sleep: async (ms) => {
           sleeps.push(ms);
+          ports.clock.advance(ms);
+          await s.onSleep?.(ms);
         },
         notifyFinal: async (rfq, job, status) => {
+          s.noticeCalls++;
+          if (s.noticeFailures > 0) {
+            s.noticeFailures--;
+            throw new Error('thread unavailable');
+          }
           finals.push({ rfq, job, status });
         },
       }),
@@ -250,21 +264,118 @@ describe('cad-jobs consumer', () => {
     const other = await t.enqueue({ input: { r2_key: `rfq/${RFQ}/f3-notes.txt`, sha256: sha('d'), content_type: 'text/plain', size_bytes: 318, file_name: 'notes.txt' } });
     await t.run(msg(other));
     expect((await t.row(other.job_id)).error).toBe('unsupported: analyse of other (sheet_metal)');
+
+    // a configured unfold URL that is not https: (outside generated test configs) is not used
+    t.env.CAD_UNFOLD_URL = 'http://cad.example.test';
+    const plain = await t.enqueue({ input: { r2_key: `rfq/${RFQ}/f4-part.step`, sha256: sha('e'), content_type: 'application/step', size_bytes: 318, file_name: 'part.step' } });
+    await t.run(msg(plain));
+    expect((await t.row(plain.job_id)).error).toBe('config_invalid: CAD_UNFOLD_URL');
   });
 
-  it('a delivery that finds the job running elsewhere is retried later; a stale running row is taken over', async () => {
+  it('a delivery that finds the job running elsewhere is retried after the lease window; the next delivery takes the stale row over', async () => {
     const s = await setup();
     const body = await s.enqueue();
+    // delivery 1 claimed the job, then its invocation ended without finishing it (deploy, CPU or memory limit)
     await s.ports.db.update('cad_jobs', { status: 'running', started_at: s.ports.clock.now().toISOString(), attempts: 1 }, { filters: [['id', 'eq', body.job_id]] });
+    s.ports.clock.advance(60_000);
     const m = msg(body, 2);
     await s.run(m);
-    expect(m.retry).toHaveBeenCalledWith({ delaySeconds: 60 });
+    const windowS = body.deadline_s + LEASE_GRACE_S;
+    expect(m.retry).toHaveBeenCalledWith({ delaySeconds: windowS - 60 + BUSY_MARGIN_S });
+    expect(m.ack).not.toHaveBeenCalled();
     expect(s.vps.runs).toEqual([]);
-    s.ports.clock.advance(400_000);
+    // the next delivery arrives after the retry's own delay
+    s.ports.clock.advance((m.retry.mock.calls[0][0] as { delaySeconds: number }).delaySeconds * 1000);
     const later = msg(body, 3);
     await s.run(later);
+    expect(later.retry).not.toHaveBeenCalled();
+    expect(later.ack).toHaveBeenCalledOnce();
+    expect(s.sleeps).toEqual([]);
     expect(s.vps.runs).toEqual([body.job_id]);
     expect(await s.row(body.job_id)).toMatchObject({ status: 'succeeded', attempts: 2 });
+    expect(s.finals).toEqual([{ rfq: RFQ, job: body.job_id, status: 'succeeded' }]);
+  });
+
+  it('the last delivery that finds the job running waits out the window in its invocation and takes the job over (no dead letter)', async () => {
+    const s = await setup();
+    const body = await s.enqueue();
+    await s.ports.db.update('cad_jobs', { status: 'running', started_at: s.ports.clock.now().toISOString(), attempts: 2 }, { filters: [['id', 'eq', body.job_id]] });
+    s.ports.clock.advance(60_000);
+    const last = msg(body, MAX_DELIVERIES);
+    await s.run(last);
+    expect(last.retry).not.toHaveBeenCalled();
+    expect(last.ack).toHaveBeenCalledOnce();
+    expect(s.sleeps).toEqual([(body.deadline_s + LEASE_GRACE_S - 60 + BUSY_MARGIN_S) * 1000]);
+    expect(s.vps.runs).toEqual([body.job_id]);
+    expect(await s.row(body.job_id)).toMatchObject({ status: 'succeeded', attempts: 3 });
+    expect(s.finals).toEqual([{ rfq: RFQ, job: body.job_id, status: 'succeeded' }]);
+    // the wait stays far below the 15-minute wall time of a consumer invocation
+    expect(s.sleeps[0]).toBeLessThan(15 * 60_000 - body.deadline_s * 1000);
+  });
+
+  it('the last delivery leaves the job alone when the other delivery finishes it during the wait', async () => {
+    const s = await setup();
+    const body = await s.enqueue();
+    await s.ports.db.update('cad_jobs', { status: 'running', started_at: s.ports.clock.now().toISOString(), attempts: 2 }, { filters: [['id', 'eq', body.job_id]] });
+    s.onSleep = async () => {
+      await s.ports.db.update('cad_jobs', { status: 'succeeded', finished_at: s.ports.clock.now().toISOString() }, { filters: [['id', 'eq', body.job_id]] });
+    };
+    const last = msg(body, MAX_DELIVERIES);
+    await s.run(last);
+    expect(last.ack).toHaveBeenCalledOnce();
+    expect(last.retry).not.toHaveBeenCalled();
+    expect(s.vps.runs).toEqual([]);
+    expect(s.finals).toEqual([]);
+  });
+
+  it('busy retry delays cover the rest of the window and stay within the queue limit', () => {
+    expect(busyRetryDelayS(300_000)).toBe(300 + BUSY_MARGIN_S);
+    expect(busyRetryDelayS(1)).toBe(1 + BUSY_MARGIN_S);
+    expect(busyRetryDelayS(10 * 86_400_000)).toBe(86_400);
+  });
+
+  it('a failed final notice retries the message with the run open; the redelivery repeats the notice and closes the run', async () => {
+    const s = await setup();
+    const body = await s.enqueue();
+    s.noticeFailures = 1;
+    const m = msg(body, 1);
+    await s.run(m);
+    expect(m.retry).toHaveBeenCalledWith({ delaySeconds: NOTIFY_RETRY_S });
+    expect(m.ack).not.toHaveBeenCalled();
+    expect(await s.row(body.job_id)).toMatchObject({ status: 'succeeded' });
+    expect(s.ports.db.rows('agent_runs', ['agent', 'eq', 'cad'])[0]).toMatchObject({ status: 'running' });
+    expect(s.finals).toEqual([]);
+
+    const again = msg(body, 2);
+    await s.run(again);
+    expect(again.ack).toHaveBeenCalledOnce();
+    expect(again.retry).not.toHaveBeenCalled();
+    expect(s.vps.runs).toEqual([body.job_id]);
+    expect(s.finals).toEqual([{ rfq: RFQ, job: body.job_id, status: 'succeeded' }]);
+    expect(s.ports.db.rows('agent_runs', ['agent', 'eq', 'cad'])[0]).toMatchObject({ status: 'succeeded', output: expect.objectContaining({ outcome: 'notice_repeated', notice: 'sent' }) });
+
+    // a further duplicate: the run is closed, nothing is repeated
+    const third = msg(body, 3);
+    await s.run(third);
+    expect(third.ack).toHaveBeenCalledOnce();
+    expect(s.noticeCalls).toBe(2);
+  });
+
+  it('a final notice that fails on the last delivery closes the run with notice failed and acknowledges', async () => {
+    const s = await setup();
+    const body = await s.enqueue();
+    s.vps.outcomes = [{ ok: false, retryable: false, code: 'invalid_input', message: 'unfold 400', httpStatus: 400 }];
+    s.noticeFailures = MAX_DELIVERIES;
+    for (let attempt = 1; attempt <= MAX_DELIVERIES; attempt++) {
+      const m = msg(body, attempt);
+      await s.run(m);
+      if (attempt < MAX_DELIVERIES) expect(m.retry, `delivery ${attempt}`).toHaveBeenCalledWith({ delaySeconds: NOTIFY_RETRY_S });
+      else expect(m.ack).toHaveBeenCalledOnce();
+    }
+    expect(s.noticeCalls).toBe(MAX_DELIVERIES);
+    expect(s.vps.runs).toEqual([body.job_id]);
+    expect(await s.row(body.job_id)).toMatchObject({ status: 'failed', error: 'invalid_input: unfold 400' });
+    expect(s.ports.db.rows('agent_runs', ['agent', 'eq', 'cad'])[0]).toMatchObject({ status: 'failed', output: expect.objectContaining({ notice: 'failed' }) });
   });
 
   it('an unexpected error releases the lease and retries the message', async () => {

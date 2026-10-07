@@ -10,7 +10,7 @@
  * | Hosts | BASE_URL must be http://localhost:<port> or http://127.0.0.1:<port>, else every test stops in beforeAll (playwright.config.ts defaults to production) |
  * | Network | Requests to the BASE_URL origin go to the preview, except /api/agent/* (mocked per test). Every other host is answered by the mocks of this file (Supabase /rest/v1 and /auth/v1 paths) or aborted; WebSockets are closed without connecting |
  * | Session | A signed-in staff session is placed where supabase-js reads it (an init script answers its storage key); the access token is a made-up JWT built at run time and never valid anywhere |
- * | Cases | tables missing -> "not installed", no polling, no action; staff with data -> lists and nav entries render; status probe answered by the SPA shell -> actions disabled with a hint; a decision -> one POST with run_id + token_sha256 (no raw token); 409 -> toast and reload; quote approval with an edited price -> edits in the POST; non-staff -> /login; e-mail text rendered as text |
+ * | Cases | tables missing -> "not installed", no polling past the 30 s / 60 s intervals (page clock advanced), no action; tables present -> both lists polled (control); staff with data -> lists and nav entries render; status probe answered by the SPA shell -> actions disabled with a hint; a decision -> one POST with run_id + token_sha256 (no raw token); 409 -> toast and reload; quote approval with an edited price -> edits in the POST; non-staff -> /login; e-mail text rendered as text |
  */
 import { test, expect, type Page, type Route } from '@playwright/test';
 
@@ -229,18 +229,58 @@ async function setup(page: Page, s: Scenario, signedIn = true): Promise<Recorder
   return rec;
 }
 
+/** Reads of a table so far (the list reads the pages poll: pending approvals and the inbox list). */
+function readsOf(rec: Recorder, table: 'agent_runs' | 'inbound_emails', marker: string): number {
+  return rec.rest.filter((r) => r.startsWith(`${table}?`) && r.includes(marker)).length;
+}
+const PENDING_READ = 'status=eq.waiting_human';
+// The inbox list is ordered by received_at; the drawer's single-row reads are not.
+const INBOX_READ = 'order=received_at';
+// The page clock is advanced past each poll interval (approvals 30 s, inbox 60 s); requests a timer starts reach
+// the recorder shortly after, so each check waits this long in real time first.
+const SETTLE_MS = 1000;
+
 test.describe('agent dashboard pages', () => {
-  test('tables missing -> "not installed" on both pages, no polling, no action', async ({ page }) => {
+  test('tables missing -> "not installed" on both pages, no polling past the 30 s / 60 s intervals, no action', async ({ page }) => {
     const rec = await setup(page, { role: 'admin', tablesMissing: true, status: STATUS_STAFF });
+    await page.clock.install();
     await page.goto('/dashboard/approvals');
     await expect(page.getByTestId('agent-not-installed').first()).toBeVisible();
     await expect(page.getByTestId('approval-card')).toHaveCount(0);
-    const reads = rec.rest.filter((r) => r.startsWith('agent_runs')).length;
+    const reads = readsOf(rec, 'agent_runs', PENDING_READ);
     expect(reads).toBe(1);
-    await page.waitForTimeout(1500);
-    expect(rec.rest.filter((r) => r.startsWith('agent_runs')).length).toBe(reads);
+    await page.clock.runFor(31_000);
+    await page.clock.runFor(31_000);
+    await page.waitForTimeout(SETTLE_MS);
+    expect(readsOf(rec, 'agent_runs', PENDING_READ)).toBe(reads);
+
     await page.goto('/dashboard/rfq-inbox');
     await expect(page.getByTestId('agent-not-installed')).toBeVisible();
+    const inboxReads = readsOf(rec, 'inbound_emails', INBOX_READ);
+    expect(inboxReads).toBe(1);
+    await page.clock.runFor(61_000);
+    await page.clock.runFor(61_000);
+    await page.waitForTimeout(SETTLE_MS);
+    expect(readsOf(rec, 'inbound_emails', INBOX_READ)).toBe(inboxReads);
+    expect(rec.decisions).toEqual([]);
+  });
+
+  test('tables present -> both lists are read again after their poll interval (control for the test above)', async ({ page }) => {
+    const rec = await setup(page, { role: 'admin', status: STATUS_STAFF });
+    await page.clock.install();
+    await page.goto('/dashboard/approvals');
+    await expect(page.getByTestId('approval-card')).toHaveCount(2);
+    const reads = readsOf(rec, 'agent_runs', PENDING_READ);
+    expect(reads).toBeGreaterThanOrEqual(1);
+    await page.clock.runFor(31_000);
+    await expect.poll(() => readsOf(rec, 'agent_runs', PENDING_READ)).toBeGreaterThan(reads);
+
+    await page.goto('/dashboard/rfq-inbox');
+    await expect(page.getByText('Request for 10 brackets')).toBeVisible();
+    const inboxReads = readsOf(rec, 'inbound_emails', INBOX_READ);
+    expect(inboxReads).toBeGreaterThanOrEqual(1);
+    await page.clock.runFor(61_000);
+    await expect.poll(() => readsOf(rec, 'inbound_emails', INBOX_READ)).toBeGreaterThan(inboxReads);
     expect(rec.decisions).toEqual([]);
   });
 

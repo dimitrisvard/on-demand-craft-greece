@@ -212,6 +212,34 @@ describe('a permitted scan', () => {
   });
 });
 
+describe('outcomes', () => {
+  it('no page read (every page answers 500): failed pages_failed, scan_logs failed', async () => {
+    const runId = await openScan();
+    const net = routedFetch({ [SEARCH]: { status: 500, body: 'error' }, [`${SEARCH}/page/2`]: { status: 500, body: 'error' } });
+    const scraper = testDeps(net.fetch, { permitted: new Map([['www.wlw.de', 'owner-permission-2026-10']]) });
+    const m = message(envelope(runId));
+    await directoryScanConsumer(batchOf(m), env, testContext(), deps(scraper));
+    expect(m.acked).toBe(true);
+    expect(runOf(runId)).toMatchObject({ status: 'failed', error: 'pages_failed', output: { pages: 0, errors: 2 } });
+    expect(ports.db.rows('scan_logs')).toEqual([expect.objectContaining({ status: 'failed', error_message: 'Page 1: Directory returned HTTP 500' })]);
+  });
+
+  it('a profile host that refuses during enrichment: failed host_blocked, the pause recorded in its own scan_logs row', async () => {
+    const runId = await openScan();
+    const net = routedFetch({ [SEARCH]: { body: page('wlw-search-links.html') }, 'https://www.wlw.com/en/company/example-cnc-service-4711': { status: 403, body: 'Forbidden' } });
+    const scraper = testDeps(net.fetch, { permitted: new Map([['www.wlw.de', 'owner-permission-2026-10'], ['www.wlw.com', 'owner-permission-2026-10']]) });
+    const { db } = leadsRecordingDb(ports.db);
+    const m = message(envelope(runId, { max_pages: 1, enrich_profiles: true }));
+    await directoryScanConsumer(batchOf(m), env, testContext(), deps(scraper, db));
+    expect(m.acked).toBe(true);
+    expect(runOf(runId)).toMatchObject({ status: 'failed', error: 'host_blocked', output: { pages: 1, paused_host: 'www.wlw.com' } });
+    expect(ports.db.rows('scan_logs')).toEqual([
+      expect.objectContaining({ scan_type: 'directory', status: 'completed', error_message: null }),
+      expect.objectContaining({ scan_type: 'profile', status: 'failed', error_message: 'blocked:www.wlw.com', url: 'https://www.wlw.com/en/company/example-cnc-service-4711' }),
+    ]);
+  });
+});
+
 describe('retries', () => {
   it('a thrown error retries after 300 s; on the last attempt the run closes failed (consumer_failed)', async () => {
     const runId = await openScan();

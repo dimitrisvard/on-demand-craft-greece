@@ -2,7 +2,7 @@
 // writes deduplicated by arguments digest and 10-minute bucket, opened before the effect.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { summaryOf, WRITE_BUCKET_MS, writeKey } from '../../src/mcp/audit';
+import { redact, restoreArgs, summaryOf, WRITE_BUCKET_MS, writeKey } from '../../src/mcp/audit';
 import { STAFF_UID, connectV1, mcpHarness, settle, textOf } from './helpers';
 
 beforeEach(() => {
@@ -48,7 +48,8 @@ describe('X-3 audit', () => {
     const rows = h.ports.db.rows('agent_runs');
     expect(rows).toHaveLength(1);
     expect(rows[0].idempotency_key).toBe(await writeKey(STAFF_UID, 'update_lead_status', args, h.ports.clock.now().getTime()));
-    expect(rows[0]).toMatchObject({ status: 'succeeded', output: { tool: 'update_lead_status', ok: true, result_text: first } });
+    // The stored text names the arguments by marker only; the repeated call gets them back from its own arguments.
+    expect(rows[0]).toMatchObject({ status: 'succeeded', output: { tool: 'update_lead_status', ok: true, result_text: 'Lead [arg1] status updated to: [arg2]' } });
     // Other arguments are another call.
     await client.callTool({ name: 'update_lead_status', arguments: { lead_id: LEAD, status: 'saved' } });
     expect(h.sb.requests.filter((r) => r.method === 'PATCH')).toHaveLength(2);
@@ -88,6 +89,44 @@ describe('X-3 audit', () => {
     expect(result.isError).toBe(true);
     expect(h.sb.requests.filter((r) => r.method === 'PATCH')).toHaveLength(0);
     await client.close();
+  });
+
+  it('stored write output holds no argument of 3 or more characters and no e-mail address; the repeated call gets the first answer', async () => {
+    const h = await mcpHarness({ flag: { enabled: true, value: { writes: true, write_tools: ['save_response_draft'] } } });
+    const client = await connectV1(h, await h.token());
+    const draft = 'Hi Jane Doe, please send the drawings to jane.doe@example.de or call +49 30 1234567.';
+    const args = { lead_id: '11111111-2222-4333-8444-555555555555', response_text: draft, platform: 'email' };
+    const first = textOf(await client.callTool({ name: 'save_response_draft', arguments: args }));
+    expect(first).toContain(draft);
+    const [row] = h.ports.db.rows('agent_runs');
+    const stored = JSON.stringify(row.output);
+    for (const value of Object.values(args)) expect(stored).not.toContain(value);
+    expect(stored).not.toMatch(/[A-Za-z0-9._%+-]{2,}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+    expect(row.output).toMatchObject({ result_summary: 'Response draft saved for lead [arg2].', result_text: 'Response draft saved for lead [arg2].\n\nDraft:\n[arg1]' });
+    // Within the bucket the same call answers the first result again, without a second effect.
+    const again = textOf(await client.callTool({ name: 'save_response_draft', arguments: args }));
+    expect(again).toBe(first);
+    expect(h.sb.requests.filter((r) => r.method === 'PATCH')).toHaveLength(1);
+    await client.close();
+  });
+
+  it('flag mcp.remote off: mcp_status calls write no agent_runs row', async () => {
+    const h = await mcpHarness({ flag: null });
+    const client = await connectV1(h, await h.token());
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(['mcp_status']);
+    for (let i = 0; i < 3; i++) await client.callTool({ name: 'mcp_status', arguments: {} });
+    await settle(h);
+    expect(h.ports.db.rows('agent_runs')).toEqual([]);
+    await client.close();
+  });
+
+  it('redaction: one pass, markers restored exactly from the same arguments, other addresses masked', () => {
+    const args = { q: 'cargo bay', tag: 'arg', note: 'see owner@example.com' };
+    const text = 'cargo bay and arg; contact buyer.one@example.de; see owner@example.com';
+    const stored = redact(text, args);
+    expect(stored).toBe('[arg2] and [arg3]; contact b***@example.de; [arg1]');
+    expect(restoreArgs(stored, args)).toBe('cargo bay and arg; contact b***@example.de; see owner@example.com');
+    expect(redact('no arguments, a@example.org', {})).toBe('no arguments, a***@example.org');
   });
 
   it('keys and summaries', async () => {

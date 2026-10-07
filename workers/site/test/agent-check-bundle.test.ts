@@ -103,10 +103,23 @@ describe('script exit status on a fixture metafile', () => {
       ['node_modules/resend/dist/index.mjs', 'node_modules/postal-mime/src/postal-mime.js'],
       ['node_modules/postal-mime/src/postal-mime.js', 'node_modules/postal-mime/src/mime-node.js'],
     ];
-    expect((await run(files, viaResend)).code).toBe(0);
+    const ok = await run(files, viaResend);
+    expect(ok.code).toBe(0);
+    expect(ok.stdout).toContain('postal-mime allowed as a dependency of resend only; importers: node_modules/resend/dist/index.mjs');
     const direct = await run([...files, 'workers/site/src/mail.ts'], [...viaResend, ['workers/site/src/mail.ts', 'node_modules/postal-mime/src/postal-mime.js']]);
     expect(direct.code).toBe(1);
     expect(direct.stdout).toContain('node_modules/postal-mime/src/postal-mime.js (agent-layer package)');
+    expect(direct.stdout).not.toContain('postal-mime allowed');
+    // Any other importer beside resend: another package, a microns-ops source, a shared module.
+    for (const other of ['node_modules/agents/dist/mail.js', 'workers/ops/src/mail-in/parse.ts', 'workers/shared/src/mail.ts']) {
+      const result = await run([...files, other], [...viaResend, [other, 'node_modules/postal-mime/src/mime-node.js']]);
+      expect(result.code, other).toBe(1);
+      expect(result.stdout, other).toContain('node_modules/postal-mime/src/mime-node.js (agent-layer package)');
+    }
+    // postal-mime with no importer recorded at all is not "a dependency of resend".
+    const orphan = await run(['workers/site/src/index.ts', 'node_modules/postal-mime/src/postal-mime.js']);
+    expect(orphan.code).toBe(1);
+    expect(orphan.stdout).toContain('node_modules/postal-mime/src/postal-mime.js (agent-layer package)');
   });
 
   it('passes (exit 0) on site-only inputs', async () => {

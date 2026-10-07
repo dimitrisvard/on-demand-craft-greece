@@ -5,8 +5,8 @@
 // Rules
 //   - Business fields only: RFQ number and version, company and country, number of lines and manual lines, totals,
 //     margin range, similar-quote counts, the number of model notes (never their text), page count, the masked
-//     sender of a reply and the classified outcome with its confidence. Never an e-mail text, a full address, the
-//     model's notes or summary, or a token.
+//     sender of a reply, the classified outcome with its confidence and the reply's thread and sender checks.
+//     Never an e-mail text, a full address, the model's notes or summary, or a token.
 //   - "Open" goes to the approvals page of the run (/dashboard/approvals?run=<run_id>).
 
 import type { PricingV1 } from '../../pricing/types';
@@ -104,6 +104,10 @@ export interface ReplyCardInput {
   sender_masked: string | null;
   outcome: string;
   confidence: number;
+  /** Thread and sender checks of the reply (quote Workflow step reply-check). */
+  checks?: { in_thread: boolean; sender_authenticated: boolean; sender_is_contact: boolean };
+  /** The reply text carries a delimiter of the model's data blocks. */
+  injection_suspected?: boolean;
   reminder?: boolean;
 }
 
@@ -111,19 +115,30 @@ function pct(n: number): string {
   return `${Math.round(Math.min(1, Math.max(0, n)) * 100)} %`;
 }
 
-/** Reply-confirmation card (kind 'reply'): a human decides what the customer's reply means. */
+const yesNo = (v: boolean): string => (v ? 'yes' : 'no');
+
+/** Reply-confirmation card (kind 'reply'): a human decides what the customer's reply means. Flags: low_confidence
+ *  below 0.8, dmarc_fail when the sender is not authenticated, injection_suspected; the checks are one line. */
 export function quoteReplyCard(i: ReplyCardInput): CardV1 {
+  const lines: CardV1['lines'] = [
+    { label: 'Offer', value: `${i.rfq_number} v${i.version}` },
+    { label: 'Sender', value: i.sender_masked ?? 'unknown' },
+    { label: 'Classified', value: `${i.outcome} (${pct(i.confidence)})` },
+  ];
+  if (i.checks) {
+    lines.push({ label: 'Checks', value: `reply to our e-mail: ${yesNo(i.checks.in_thread)} · sender authenticated: ${yesNo(i.checks.sender_authenticated)} · RFQ contact: ${yesNo(i.checks.sender_is_contact)}` });
+  }
+  const flags: CardFlag[] = [];
+  if (i.confidence < 0.8) flags.push('low_confidence');
+  if (i.checks && !i.checks.sender_authenticated) flags.push('dmarc_fail');
+  if (i.injection_suspected) flags.push('injection_suspected');
   return {
     v: 1,
     kind: 'reply',
     run_id: i.run_id,
     title: `${i.reminder ? 'Reminder: ' : ''}${i.rfq_number} reply · classified ${i.outcome} (${pct(i.confidence)})`,
-    lines: [
-      { label: 'Offer', value: `${i.rfq_number} v${i.version}` },
-      { label: 'Sender', value: i.sender_masked ?? 'unknown' },
-      { label: 'Classified', value: `${i.outcome} (${pct(i.confidence)})` },
-    ],
-    flags: i.confidence < 0.8 ? ['low_confidence'] : [],
+    lines,
+    flags,
     allowed_verbs: [...REPLY_VERBS],
     open_url: cardOpenUrl(i.site_origin, i.run_id),
   };

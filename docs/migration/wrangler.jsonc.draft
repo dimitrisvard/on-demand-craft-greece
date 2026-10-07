@@ -1,5 +1,7 @@
 // Microns Hub wrangler configuration draft (three Workers and one Container app)
 // Status: Phase 0 planning deliverable · 2026-09-30 · nothing here is deployed.
+// Phase 4 build (2026-10-07): the Phase 4 entries of microns-ops and the microns-mail object below match the built
+// workers/ops/wrangler.jsonc and workers/mail/wrangler.jsonc (PLAN.md §5.4, deviations DC-1, DC-2).
 // Related: README.md · PLAN.md · ARCHITECTURE.md · INVENTORY.md · inventory.csv · SEO_PARITY.md · AGENTS.md ·
 //          RISKS.md · COSTS.md (all in docs/migration/)
 //
@@ -23,8 +25,9 @@
 //   index, Hyperdrive config or container image that does not exist yet makes the deploy fail.
 // - Kept as comments on purpose, because enabling them changes production behaviour instead of adding an
 //   idle binding: the Phase 3 routes (they take production traffic; PLAN.md §6 runbook S11-S14), the
-//   Phase 4 mcp.micronshub.eu Custom Domain, the Phase 5 crons (each replaces a live pg_cron job or the
-//   GitHub Action; enabled one at a time at P5-8) and the optional Phase 7 D1 entries.
+//   Phase 5 crons (each replaces a live pg_cron job or the GitHub Action; enabled one at a time at P5-8) and the
+//   optional Phase 7 D1 entries. The Phase 4 mcp.micronshub.eu Custom Domain is active in the built ops file:
+//   it serves only the remote MCP host, which offers a status tool alone until the flag mcp.remote is on.
 // - IDs are placeholders in angle brackets, for example "<KV_ID_SEO_CACHE>". Replace them with the IDs that
 //   `wrangler kv namespace create`, `wrangler hyperdrive create` and the dashboard print. A placeholder is
 //   never replaced by a secret value.
@@ -46,13 +49,18 @@
 //                 Phase 2: SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY, TURNSTILE_SECRET_KEY, R2_ACCESS_KEY_ID,
 //                          R2_SECRET_ACCESS_KEY, LEGACY_AWS_ACCESS_KEY_ID, LEGACY_AWS_SECRET_ACCESS_KEY,
 //                          ACCESS_MACHINE_CLIENT_IDS
+//                 Phase 4 (optional, not in secrets.required): AGENT_APPROVAL_SECRET (relay signature check)
 //   microns-ops   Phase 2: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, RESEND_API_KEY, RESEND_WEBHOOK_SECRET,
 //                          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
 //                          GOOGLE_REDIRECT_URI, APOLLO_API_KEY, GSC_SERVICE_ACCOUNT_JSON (reserved; note in the ops secrets block)
-//                 Phase 4: ANTHROPIC_API_KEY (not needed if AI Gateway BYOK is used, P4-3), MCP_OAUTH_* (exact
-//                          names fixed in P4-11)
-//                 Phase 5: GEMINI_API_KEY (not needed with BYOK), XOMETRY_TOKEN, CAD_SHARED_SECRET, INDEXNOW_KEY
-//   microns-mail  Phase 4: SUPABASE_SERVICE_ROLE_KEY
+//                 Phase 4 (optional, not in secrets.required, checked where used): AI_GATEWAY_TOKEN, CAD_UNFOLD_URL,
+//                          CAD_SHARED_SECRET, AGENT_APPROVAL_SECRET, CAD_ACCESS_CLIENT_ID and CAD_ACCESS_CLIENT_SECRET
+//                          (only with the CAD network path chosen at OW-11). ANTHROPIC_API_KEY is not set (AI Gateway
+//                          BYOK) and no MCP_OAUTH_* secret exists (stateless MCP handler + Access Managed OAuth, DC-1)
+//                 Phase 5 (optional, not in secrets.required): GEMINI_API_KEY (not needed with BYOK), XOMETRY_TOKEN,
+//                          INDEXNOW_KEY
+//   microns-mail  Phase 4: SUPABASE_SERVICE_ROLE_KEY; optional MAIL_COPY_TO, MAIL_FALLBACK_TO (verified destination
+//                          addresses, secrets so that no address sits in the repository)
 //
 // Where today's names differ (for the P0-2 checklist): the Xometry scanner reads XB_PARTNER_AUTH_TOKEN
 // (xometry-bot/xometry_bot/config.py:153) and xometry-review reads XOMETRY_PARTNER_AUTH_TOKEN
@@ -226,6 +234,8 @@
         "LEGACY_AWS_SECRET_ACCESS_KEY",
         // Phase 2. "<client-id>=collector,<client-id>=mcp": maps each machine service token to its consumer.
         "ACCESS_MACHINE_CLIENT_IDS"
+        // Phase 4. AGENT_APPROVAL_SECRET (relay signature check on /api/agent/decision) is optional and checked per
+        // request, so it is not listed: a site deploy never fails for agent configuration (PLAN.md §5.4 DF-72).
       ]
     },
 
@@ -250,7 +260,7 @@
 
   // ===================================================================================================
   // microns-ops: ops/admin API (Hono), Cron Triggers, Queue consumers, Workflows, Durable Objects,
-  // Container, Vectorize, AI Gateway, Browser Rendering, remote MCP on mcp.micronshub.eu
+  // Container, Vectorize, AI Gateway, Browser Rendering, remote MCP on mcp.micronshub.eu (stateless handler, no DO)
   // ===================================================================================================
   "workers/ops/wrangler.jsonc": {
     "$schema": "../../node_modules/wrangler/config-schema.json",
@@ -259,7 +269,8 @@
     // fetch answers 404). Routes run api/*.js unchanged through workers/ops/src/compat/express-shim.ts, the Hono
     // adapter over the shared @vercel/node shim (workers/shared/src/compat/vercel-node.ts). Plus the queue()
     // handler (Phase 2) and scheduled() (Phase 4); exports the Workflow, Durable Object and Container classes
-    // listed below.
+    // listed below and (Phase 4) the named entrypoint MailIngest (RPC startIntake, ingestReply from microns-mail).
+    // Phase 4: the default fetch serves the remote MCP when the host is MCP_HOSTNAME and keeps the 404 otherwise.
     "main": "src/index.ts",
     "compatibility_date": "2026-09-01",
     "compatibility_flags": [
@@ -297,15 +308,33 @@
       // ARCHITECTURE.md should list them too.
       "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
       "SITE_ORIGIN": "https://www.micronshub.eu",
-      // Phase 4. AI Gateway id. The gateway has no binding of its own; calls go through the AI binding or
-      // the gateway URL with routes extract, classify, translate and embed, each carrying
-      // cf-aig-metadata {"agent", "run_id", "tenant_id"} (ARCHITECTURE.md; P4-3).
-      "AI_GATEWAY_ID": "microns"
+      // Phase 4. AI Gateway id. The gateway has no binding of its own: Anthropic calls use the provider-native URL
+      // from env.AI.gateway(AI_GATEWAY_ID).getUrl('anthropic'), embeddings env.AI.run with the gateway option; routes
+      // extract, classify, embed (translate in Phase 5); each call carries cf-aig-metadata with five keys (agent,
+      // run_id, tenant_id, step, prompt) and payload logging off (ARCHITECTURE.md §13; P4-3).
+      "AI_GATEWAY_ID": "microns",
+      // Phase 4. Default tenant of agent rows; quote sender identity and our Message-ID domain; default CAD backend
+      // (container from Phase 5); remote MCP host and route; Access identifiers of the MCP application (not
+      // secrets; placeholders replaced at OW-5 and OW-15); crawler identity and the owner-recorded host permissions
+      // of the scrapers (JSON host -> permission reference; empty = no host permitted). Local-test overrides
+      // (AGENT_STUBS, AGENT_LLM_BASE_URL, *_API_BASE, GOOGLE_TOKEN_URL) never appear here: the bundle check refuses them.
+      "AGENT_TENANT_ID": "00000000-0000-0000-0000-000000000001",
+      "QUOTE_FROM": "MicronsHub Quotations <info@micronshub.eu>",
+      "QUOTE_REPLY_TO": "replies@rfq.micronshub.eu",
+      "MESSAGE_ID_DOMAIN": "rfq.micronshub.eu",
+      "CAD_BACKEND_DEFAULT": "vps",
+      "MCP_HOSTNAME": "mcp.micronshub.eu",
+      "MCP_ROUTE": "/mcp",
+      "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
+      "MCP_ACCESS_AUD": "<ACCESS_AUD_MCP>",
+      "SCRAPER_USER_AGENT": "MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)",
+      "SCRAPER_PERMITTED_HOSTS": "{}"
     },
 
     "kv_namespaces": [
-      // Phase 4 (agent flags; writer: the every-minute cron mirrors table feature_flags here, P4-2). The Phase 2
-      // ops Worker reads no flag: api.forward_to_vercel is read by microns-site. Same namespace as microns-site.
+      // Phase 4 (agent flags, read with cacheTtl 30 s and fail closed; writer: the every-minute cron mirrors table
+      // feature_flags here by revision, plus write-through on dashboard edits, P4-2). api.forward_to_vercel stays a
+      // microns-site read. Same namespace as microns-site.
       { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" },
       // Phase 5. Purge of SEO entries when content-daily publishes (same namespace as microns-site).
       // KV allows 1 write per second to the same key (CF docs, verified 2026-09-30); purges are per key.
@@ -313,8 +342,8 @@
     ],
 
     "r2_buckets": [
-      // Phase 4. Prefixes email/<message_id_sha256>/..., cad/<job_id>/{input,output}/...,
-      // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf; Phase 5 adds sitemaps/...
+      // Phase 4. Prefixes email/<message_id_sha256>/..., rfq/<rfq_id>/<file_id>-<name>, cad/<job_id>/output/...,
+      // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf, eval/golden/...; Phase 5 adds sitemaps/...
       // (served by microns-site at the identical sitemap URLs). Same jurisdiction as the site binding.
       { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" },
       // Phase 5. Public objects behind the R2 custom domain files.micronshub.eu (connected in P3-6):
@@ -329,11 +358,12 @@
       "producers": [
         // Phase 2. Tender scans started by a machine caller (/api/tender-scan POST; answered 200 with queued and
         // run_id). Staff scans, the funded-startups scan and GSC bulk actions stay synchronous in Phase 2 (P2-6,
-        // PLAN.md §5.2 DV-3); GSC kinds come in Phase 5, scraper jobs in Phase 4.
+        // PLAN.md §5.2 DV-3); GSC kinds come in Phase 5. Phase 4 adds directory scans in their own envelope
+        // (kind directory-scan); the Phase 2 message and consumer stay unchanged.
         { "binding": "SCRAPES", "queue": "scrapes" },
         // Phase 4. CAD analysis jobs from rfq-intake and quote (P4-6).
         { "binding": "CAD_JOBS", "queue": "cad-jobs" },
-        // Phase 4. Agent events (see AGENTS.md).
+        // Phase 4. Agent events: inbound-reply, order-created, resume-parked, card (AGENTS.md §4).
         { "binding": "AGENT_EVENTS", "queue": "agent-events" },
         // Phase 5. One message per article and language (P5-2; fixes the translation lag of H-19).
         { "binding": "TRANSLATIONS", "queue": "translations" },
@@ -356,7 +386,8 @@
         },
         {
           // Phase 4. One CAD job per message; concurrency equals the Container max_instances below,
-          // because each instance runs one synchronous uvicorn worker (README.md §7 item 3).
+          // because each instance runs one synchronous uvicorn worker (README.md §7 item 3). The consumer runs the
+          // job under a CadRouter lease, which limits each backend further (Phase 4: unfold service 1, inline 1).
           "queue": "cad-jobs",
           "max_batch_size": 1,
           "max_retries": 2,
@@ -364,7 +395,7 @@
           "dead_letter_queue": "cad-jobs-dlq"
         },
         {
-          // Phase 4.
+          // Phase 4. Per-message ack or retry.
           "queue": "agent-events",
           "max_batch_size": 25,
           "max_batch_timeout": 10,
@@ -419,13 +450,11 @@
         { "name": "RFQ_THREAD", "class_name": "RfqThread" },
         // Phase 4. One per material/stock key: a single writer per material prevents double-booking (P4-9).
         { "name": "MATERIAL_STOCK", "class_name": "MaterialStock" },
-        // Phase 4. Fronts the CAD backend: the existing unfold service until Phase 5, then CadContainer (P4-6).
+        // Phase 4. Lease and health coordinator of the CAD backends (the existing unfold service and the inline
+        // backend until Phase 5, then CadContainer); the cad-jobs consumer runs the job (P4-6, DC-3).
         { "name": "CAD_ROUTER", "class_name": "CadRouter" },
-        // Phase 4. Agents SDK McpAgent (as planned). MCP_OBJECT is the binding name McpAgent.serve() is believed
-        // to look for by default (re-check at execution). CF docs (verified 2026-09-30) mark McpAgent as
-        // deprecated and feature-frozen in favour of createMcpHandler (stateless); P4-11 re-decides, and with
-        // createMcpHandler this binding and the class leave migration tag v1 before it is first deployed.
-        { "name": "MCP_OBJECT", "class_name": "MicronsMcp" },
+        // No MCP_OBJECT / MicronsMcp: the remote MCP is the stateless createMcpHandler of the Agents SDK in the default
+        // fetch (McpAgent is deprecated and feature-frozen, CF docs fetched 2026-10-03; DC-1).
         // Phase 5. One per sender account (P5-4).
         { "name": "SENDER_LIMITER", "class_name": "SenderLimiter" },
         // Phase 5. Container-enabled Durable Object class of microns-cad (P5-6).
@@ -436,11 +465,11 @@
     // storage, which Containers and the Agents SDK expect (CF docs, re-check at execution).
     // CF docs (verified 2026-09-30) now show a declarative "exports" block, for example
     // "exports": { "RfqThread": { "type": "durable-object", "storage": "sqlite" } }, and call "migrations" the
-    // legacy form: it keeps working, but the two cannot be combined in one Worker. Choose one when the real
-    // file first declares a Durable Object (Phase 4) and never mix them.
+    // legacy form: it keeps working, but the two cannot be combined in one Worker. Phase 4 chose "migrations"
+    // (workers/ops/wrangler.jsonc); never mix the two forms.
     "migrations": [
-      // Phase 4.
-      { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter", "MicronsMcp"] },
+      // Phase 4 (deployed once, then never edited).
+      { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter"] },
       // Phase 5.
       { "tag": "v2", "new_sqlite_classes": ["SenderLimiter", "CadContainer"] }
     ],
@@ -464,16 +493,29 @@
     ],
 
     "vectorize": [
-      // Phase 4. RAG over past won/lost quotes. Create with
-      // `wrangler vectorize create quotes-v1 --dimensions=1024 --metric=cosine` (bge-m3 embeddings).
+      // Phase 4. RAG over past won/lost quotes (one vector per quote line, namespace = tenant). Create with
+      // `wrangler vectorize create quotes-v1 --dimensions=1024 --metric=cosine` (bge-m3 embeddings), then the metadata
+      // indexes (process, material_family, outcome, thickness_mm, sent_at_unix) before any insert (OW-4).
       { "binding": "QUOTES_INDEX", "index_name": "quotes-v1" }
     ],
 
     // Phase 4. Workers AI (@cf/baai/bge-m3 for the embed route) and access to AI Gateway "microns".
     "ai": { "binding": "AI" },
 
-    // Phase 4 (P4-10). Europages and wlw scrapers; at most 6 concurrent connections per invocation.
+    // Phase 4 (P4-10). Europages and wlw scrapers: only client-rendered pages of owner-permitted hosts, after the
+    // robots.txt gate; one browser per invocation; at most 6 concurrent connections per invocation.
     "browser": { "binding": "BROWSER" },
+
+    // Phase 4 (P4-11). Remote MCP calls per user; namespace on the P0-2 checklist.
+    "ratelimits": [
+      { "name": "MCP_RATE_LIMIT", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } }
+    ],
+
+    // Phase 4. Prompt files are bundled as text, PDF fonts and the logo as bytes.
+    "rules": [
+      { "type": "Data", "globs": ["**/*.ttf", "**/*.png"], "fallthrough": true },
+      { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
+    ],
 
     "hyperdrive": [
       // Phase 5, optional (P5-5): only for bulk upserts such as xometry_offers. The database connection
@@ -483,7 +525,7 @@
     ],
 
     "analytics_engine_datasets": [
-      // Phase 4 (P4-13). Per-agent counters and cost events.
+      // Phase 4 (P4-13). Data points llm_call, embed_call, step, run_end, cad_job, mail_in, send (index run_id).
       { "binding": "EVENTS", "dataset": "microns_events" }
     ],
 
@@ -512,20 +554,15 @@
         "GOOGLE_CLIENT_SECRET",
         // Replaces the VERCEL_URL-derived default of api/marketing.js:46-47.
         "GOOGLE_REDIRECT_URI",
-        "APOLLO_API_KEY",
-        // Reserved, not required yet: the GSC client reads its Google credentials from the database today
-        // (api/_lib/gsc-client.js:4), not from env. Add it here only if they move to a Worker secret.
+        "APOLLO_API_KEY"
+        // Reserved, not required: the GSC client reads its Google credentials from the database
+        // (api/_lib/gsc-client.js:4), not from env. Add it only if they move to a Worker secret.
         // "GSC_SERVICE_ACCOUNT_JSON",
-        // Phase 4. Required only if AI Gateway BYOK is not used (P4-3).
-        // "ANTHROPIC_API_KEY",
-        // Phase 4. MCP_OAUTH_* for the remote MCP OAuth flow; exact names fixed in P4-11.
-        // Phase 5. GEMINI_API_KEY only without BYOK.
-        // "GEMINI_API_KEY",
-        // Phase 5. Copy these three only when their jobs ship: a listed secret that does not exist on the
-        // Worker makes every deploy fail (the Phase 2 file lists the Phase 2 names above only).
-        "XOMETRY_TOKEN",
-        "CAD_SHARED_SECRET",
-        "INDEXNOW_KEY"
+        // Not listed on purpose: a listed secret that does not exist on the Worker makes every deploy fail, so the
+        // Phase 4 and Phase 5 secrets are optional and checked where they are used (PLAN.md §5.2 DV-9, §5.4 DF-72):
+        // Phase 4 AI_GATEWAY_TOKEN, CAD_UNFOLD_URL, CAD_SHARED_SECRET, AGENT_APPROVAL_SECRET, CAD_ACCESS_CLIENT_ID,
+        // CAD_ACCESS_CLIENT_SECRET; Phase 5 GEMINI_API_KEY (only without BYOK), XOMETRY_TOKEN, INDEXNOW_KEY.
+        // ANTHROPIC_API_KEY is not set (BYOK) and no MCP_OAUTH_* secret exists (DC-1).
       ]
     },
 
@@ -557,19 +594,22 @@
         // ops-digest Workflow, Mondays 06:30 (flag agent.ops_digest).
         // "30 6 * * mon",
         //
-        // Phase 4 (P4-2). Mirror table feature_flags to KV FLAGS every minute.
+        // Phase 4 (P4-2). Mirror table feature_flags to KV FLAGS every minute; drift report at minute 0.
         "* * * * *",
-        // Phase 4 (P4-8). Gmail reply poller for the 2 Workspace sender accounts (live 2026-09-30).
+        // Phase 4. Dispatcher: Gmail reply poller for the 2 Workspace sender accounts (P4-8, live 2026-09-30),
+        // inbound rows left received, portal orders without a post-order run, parked runs, old failure cards,
+        // stuck CAD jobs.
         "*/10 * * * *"
       ]
     },
 
     // Phase 4 (P4-11). Remote MCP on a Custom Domain (Cloudflare creates the DNS record and certificate;
-    // CF docs, verified 2026-09-27). Needs the Phase 3 zone and the Worker "None" route for
-    // mcp.micronshub.eu/* described under microns-site "routes". Access + OAuth protect it. If the OAuth flow
-    // uses a library that stores grants in KV, that namespace is added to ARCHITECTURE.md first.
+    // CF docs, verified 2026-09-27). Active in workers/ops/wrangler.jsonc since the Phase 4 build, so the first
+    // deploy with it waits for the zone (OW-5) and the Worker "None" route for mcp.micronshub.eu/* described under
+    // microns-site "routes". An Access "MCP server" application with Managed OAuth protects it (OW-15); no grant
+    // store in the Worker.
     "routes": [
-      // { "pattern": "mcp.micronshub.eu", "custom_domain": true }
+      { "pattern": "mcp.micronshub.eu", "custom_domain": true }
     ]
   },
 
@@ -580,11 +620,12 @@
     "$schema": "../../node_modules/wrangler/config-schema.json",
     "name": "microns-mail",
     // Exports email() only. Email Routing on the subdomain rfq.micronshub.eu sends rfq@ and replies@ here
-    // (P4-4). Raw MIME goes to R2, one inbound_emails row is written, then rfq-intake is started through OPS.
+    // (P4-4). Raw MIME goes to R2, one inbound_emails row is written, then the mail is handed to microns-ops
+    // through OPS (rfq@: startIntake; replies@: ingestReply). Steps M0-M7: workers/mail/README.md.
     // The routing rules are set in the dashboard, so there are no routes. Apex MX stays untouched.
     "main": "src/index.ts",
     "compatibility_date": "2026-09-01",
-    // Buffer for the MIME parser and SHA-256 of the Message-ID (node:crypto or Web Crypto).
+    // As built the Worker parses headers only (no MIME library) and hashes the Message-ID with Web Crypto.
     "compatibility_flags": ["nodejs_compat"],
     // No HTTP surface.
     "workers_dev": false,
@@ -598,9 +639,10 @@
       // Recipients accepted; anything else is refused with setReject(). Catch-all rules exist only on the
       // apex (CF docs, verified 2026-09-27), so both are explicit Email Routing addresses.
       "ALLOWED_RCPT": "rfq@rfq.micronshub.eu,replies@rfq.micronshub.eu",
-      // Not in the planned binding list for microns-mail; needed to write the inbound_emails row.
-      // ARCHITECTURE.md should list it too.
-      "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co"
+      // Needed to write the inbound_emails row (ARCHITECTURE.md §7.3).
+      "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+      // Phase 4. Tenant of the inbound_emails rows (default tenant).
+      "AGENT_TENANT_ID": "00000000-0000-0000-0000-000000000001"
     },
 
     "r2_buckets": [
@@ -610,14 +652,14 @@
     ],
 
     "services": [
-      // Phase 4. Starts the rfq-intake Workflow, which lives in microns-ops. P4-4 picks the entrypoint: the
-      // default fetch of microns-ops answers 404 since Phase 2, and OpsApi carries the /api calls of the site.
-      { "binding": "OPS", "service": "microns-ops" }
+      // Phase 4. Named entrypoint MailIngest (RPC startIntake, ingestReply, ids only): the mail Worker never uses
+      // OpsApi, which carries the /api calls of the site (DC-2). microns-ops is deployed first.
+      { "binding": "OPS", "service": "microns-ops", "entrypoint": "MailIngest" }
     ],
 
     "secrets": {
       "required": [
-        // Phase 4. Writes the inbound_emails row.
+        // Phase 4. Writes the inbound_emails row. MAIL_COPY_TO and MAIL_FALLBACK_TO are optional and checked per mail.
         "SUPABASE_SERVICE_ROLE_KEY"
       ]
     }

@@ -4,7 +4,9 @@
 //   - the reminder is issued only while the run still waits on the token it had: a decision made after the first wait
 //     timed out (before the reminder step, or while the reminder card is being sent) keeps the run decided, stores no
 //     new token, leaves no reminder card with live buttons, and the decision's event reaches the second wait;
-//   - a second decision on any card of that run is refused (already_decided) and no second event is sent.
+//   - a second decision on any card of that run is refused (already_decided) and no second event is sent;
+//   - two overlapping attempts of the reminder step (a retry while the first attempt still runs) store one reminder
+//     token: the stored token is the one on the card that keeps its buttons, and the other reminder card loses them.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CARD_OUTPUT_KEYS, callerOutput, request, waitWithReminder } from '../../src/agents/approval';
@@ -153,6 +155,38 @@ describe('reminder only while the run waits on its token', () => {
     expect(await decide(env, ports, { channel: 'telegram', actor: 'telegram:4242', token: reminder.token as string, code: 'ok' })).toEqual({ ok: false, error: 'already_decided' });
     expect(await decide(env, ports, dash(q.runId, await sha256hex(reminder.token as string)))).toEqual({ ok: false, error: 'already_decided' });
     expect(await decide(env, ports, dash(q.runId, q.firstHash))).toEqual({ ok: false, error: 'already_decided' });
+    expect(events()).toHaveLength(1);
+  });
+
+  it('two overlapping reminder attempts: one reminder token is stored, its card keeps the buttons, the other reminder card loses them', async () => {
+    const q = await waitingQuote();
+    const opts = { run_id: q.runId, type: 'quote-approved', first: '7 days', second: '7 days', card: q.card, onTimeout: async () => {} } as const;
+    // Attempt A has sent its reminder card (message 101) when attempt B starts and runs to its end (message 102).
+    const send = ports.telegram.sendCard.bind(ports.telegram);
+    let attemptB: Promise<unknown> | null = null;
+    ports.telegram.sendCard = (async (c: CardV1, token: string | null) => {
+      const sent = await send(c, token);
+      if (!attemptB) {
+        attemptB = waitWithReminder(new FakeStep(), opts, { env, ports });
+        await attemptB;
+      }
+      return sent;
+    }) as typeof ports.telegram.sendCard;
+    await waitWithReminder(new FakeStep(), opts, { env, ports });
+    expect(ports.telegram.cards.map((c) => c.message_id)).toEqual([100, 101, 102]);
+    const [, cardA, cardB] = ports.telegram.cards;
+    const hashA = await sha256hex(cardA.token as string);
+    const hashB = await sha256hex(cardB.token as string);
+    secrets.push(cardA.token as string, cardB.token as string, hashA, hashB);
+    expect(row(q.runId)).toMatchObject({ status: 'waiting_human', approval_token_sha256: hashB });
+    expect(row(q.runId).output).toMatchObject({ telegram_message_id: 102, line_count: 2, quote_workflow_id: QWID });
+    // The first card and attempt A's card are edited without buttons; attempt B's card is not edited.
+    const edited = ports.telegram.edits.map((e) => e.message_id).sort();
+    expect(edited).toEqual([100, 101]);
+    for (const e of ports.telegram.edits) expect(e.card).toMatchObject({ allowed_verbs: [] });
+    expect(await decide(env, ports, { channel: 'telegram', actor: 'telegram:4242', token: cardA.token as string, code: 'ok' })).toEqual({ ok: false, error: 'already_decided' });
+    expect(await decide(env, ports, dash(q.runId, q.firstHash))).toEqual({ ok: false, error: 'already_decided' });
+    expect(await decide(env, ports, { channel: 'telegram', actor: 'telegram:4242', token: cardB.token as string, code: 'ok' })).toMatchObject({ ok: true, result: { outcome: 'event_sent' } });
     expect(events()).toHaveLength(1);
   });
 

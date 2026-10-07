@@ -12,8 +12,10 @@
 //   - Flag agent.growth.scrapers off -> the run closes 'skipped' (error 'flag_off'); a URL outside the directory
 //     hosts -> 'failed' ('url_not_allowed'); both acknowledged.
 //   - The scan runs through the scraper module (robots gate, crawler identity, page delays, host pause); companies
-//     are upserted, scan_logs written, the saved search marked. Outcome: robots refusal -> 'skipped'
-//     ('robots_disallowed'); host paused -> 'failed' ('host_blocked'); otherwise 'succeeded'. Acknowledged.
+//     are upserted, scan_logs written, the saved search marked. Outcome (scrapers/service.ts directoryJobOutcome):
+//     a host paused during the job (directory or profile) -> 'failed' ('host_blocked'); robots refusal before any
+//     page -> 'skipped' ('robots_disallowed'); no page read and page errors -> 'failed' ('pages_failed'); otherwise
+//     'succeeded'. Acknowledged.
 //   - A thrown error: retry({delaySeconds: 300}); after max_retries (3) the run is closed 'failed' and the message
 //     goes to scrapes-dlq.
 //   - One log line per delivery: source, pages, found, stored, outcome, run_id, attempts (never URLs' queries or
@@ -28,7 +30,7 @@ import { LOG_PREFIX, type OpsEnv } from '../env';
 import { makePorts, type Ports } from '../ports/index';
 import { scraperBrowser } from '../scrapers/browser';
 import { MAX_PAGES, scraperDeps, type ScraperDeps } from '../scrapers/context';
-import { runDirectoryJob } from '../scrapers/service';
+import { directoryJobOutcome, runDirectoryJob } from '../scrapers/service';
 import { MAX_MESSAGE_BYTES, isDirectoryScanMessage, type DirectoryScanMessage, type ScrapeMessage } from './messages';
 import { MAX_RETRIES, RETRY_DELAY_SECONDS } from './scrapes';
 
@@ -120,9 +122,8 @@ async function processMessage(message: Message<unknown>, env: OpsEnv, deps: Dire
       errors: r.errors.length,
     };
     if (r.robots?.permission) output.permission = r.robots.permission;
-    const outcome = r.stopped === 'robots' && r.pages === 0
-      ? { status: 'skipped' as const, error: 'robots_disallowed' }
-      : r.paused ? { status: 'failed' as const, error: 'host_blocked' } : { status: 'succeeded' as const };
+    if (job.paused) output.paused_host = job.paused;
+    const outcome = directoryJobOutcome(job);
     await closeRun(ports.db, body.run_id, { ...outcome, output }, ZERO());
     logLine(LOG_PREFIX, 'directory-scan', { source: p.source, pages: r.pages, found: r.companies.length, stored: job.stored, status: outcome.status, ...tail, outcome: 'ack' });
     message.ack();

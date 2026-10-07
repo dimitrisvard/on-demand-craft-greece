@@ -129,6 +129,47 @@ describe('RFC 9309 matching', () => {
     expect(patternMatches('/unternehmen/', '/unternehmen/x')).toBe(true);
     expect(patternMatches('/företag/', '/f%C3%B6retag/x')).toBe(true);
   });
+
+  it('patterns: the segment matcher answers as a whole-pattern match on every short pattern and path', () => {
+    // Reference: the pattern as an anchored regular expression (fine for these short inputs).
+    const reference = (pattern: string, path: string) => {
+      const anchored = pattern.endsWith('$');
+      const body = anchored ? pattern.slice(0, -1) : pattern;
+      const source = body.split('*').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+      return new RegExp(`^${source}${anchored ? '$' : ''}`).test(path);
+    };
+    let seed = 7;
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const pick = (alphabet: string, max: number) => Array.from({ length: next(max + 1) }, () => alphabet[next(alphabet.length)]).join('');
+    for (let i = 0; i < 4000; i++) {
+      const pattern = `/${pick('ab*', 6)}${next(3) === 0 ? '$' : ''}`;
+      const path = `/${pick('ab', 8)}`;
+      expect(patternMatches(pattern, path), `${pattern} on ${path}`).toBe(reference(pattern, path));
+    }
+  });
+
+  it('patterns: matching time grows linearly with the path for rules with many wildcards', () => {
+    const rule = `/${'*a'.repeat(10)}*b`;
+    const path = `/de/suche/${'a'.repeat(4000)}`;
+    const started = performance.now();
+    for (let i = 0; i < 200; i++) expect(patternMatches(rule, path)).toBe(false);
+    expect(patternMatches(`/${'*a'.repeat(4)}*b`, `/de/suche/${'a'.repeat(110)}`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it('a rule with more than 10 wildcards counts as a Disallow that matches every path', () => {
+    const wide = `/${'*x'.repeat(11)}`;
+    const robots = parseRobots(`User-agent: *\nAllow: ${wide}\nAllow: /de/\n`);
+    expect(decide(robots, PRODUCT_TOKEN, '/de/suche/cnc')).toMatchObject({ allowed: false, rule: { allow: false, pattern: wide } });
+    expect(decide(robots, PRODUCT_TOKEN, '/robots.txt').allowed).toBe(true);
+    // Ten wildcards are matched as written.
+    const ten = parseRobots(`User-agent: *\nDisallow: /${'*x'.repeat(10)}\n`);
+    expect(decide(ten, PRODUCT_TOKEN, '/de/suche/cnc').allowed).toBe(true);
+    expect(decide(ten, PRODUCT_TOKEN, `/${'x'.repeat(10)}`).allowed).toBe(false);
+  });
 });
 
 describe('fetching robots.txt', () => {

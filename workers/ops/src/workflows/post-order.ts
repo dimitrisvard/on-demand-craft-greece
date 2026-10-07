@@ -29,6 +29,8 @@
 //   - Every step runs inside one try/catch: a step that throws ends in step 'fail-run', which puts the run behind a
 //     failure card (Retry restarts the instance from that step). LLM steps park the run as 'budget' (gateway 429) or
 //     'llm_unavailable' (retries used up), and every side-effecting step re-reads the flag first (flag_off park).
+//   - Prompt data blocks (<order_items>, <partner>, <reorder>) hold JSON whose '<' and '>' are written as \u003c and
+//     \u003e (blockJson), so no value can end its block or open another one.
 //   - Step results carry ids, numbers and short business fields only: the partner's address and the customer's
 //     texts are read by the step that needs them and never returned. Nothing here logs an address or a token.
 
@@ -166,6 +168,11 @@ export function errorCode(e: unknown): string {
   if (known) return (known[0].startsWith('postgrest') ? `db_error ${known[1]}` : known[1]).slice(0, 200);
   const name = e instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,59}$/.test(e.name) ? e.name : 'Error';
   return name === 'Error' ? 'error' : name;
+}
+
+/** JSON for a prompt data block: '<' and '>' as JSON escapes (same data, no tag-like text). */
+export function blockJson(value: unknown, indent?: number): string {
+  return JSON.stringify(value, null, indent).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
 }
 
 function clip(text: unknown, max: number): string {
@@ -415,8 +422,8 @@ export async function runPostOrder(p: PostOrderParams, instanceId: string, d: Po
           description: it.part_index !== null ? clip(parts[it.part_index]?.description, DESCRIPTION_CHARS) || null : null,
         }));
         return [
-          { type: 'text', text: `<order_items>\n${JSON.stringify(items, null, 1)}\n</order_items>` },
-          { type: 'text', text: `<partner>\n${JSON.stringify({ language: snap.language, due_date: snap.order.due_date ? snap.order.due_date.slice(0, 10) : null })}\n</partner>` },
+          { type: 'text', text: `<order_items>\n${blockJson(items, 1)}\n</order_items>` },
+          { type: 'text', text: `<partner>\n${blockJson({ language: snap.language, due_date: snap.order.due_date ? snap.order.due_date.slice(0, 10) : null })}\n</partner>` },
         ];
       },
       (v) => ({
@@ -630,7 +637,7 @@ export async function runPostOrder(p: PostOrderParams, instanceId: string, d: Po
       const draft = await llmStep<{ subject: string; body_text: string }, { subject: string; body_text: string }>(
         'reorder-draft',
         prompts.reorder,
-        async () => [{ type: 'text', text: `<reorder>\n${JSON.stringify({ po_number: snap.order.po_number, materials: reorder.map((r) => ({ name: r.label, grade: r.grade, thickness_mm: r.thickness_mm, missing: r.missing, low_stock_alert: r.low_stock_alert, supplier: r.supplier, supplier_sku: r.supplier_sku })) }, null, 1)}\n</reorder>` }],
+        async () => [{ type: 'text', text: `<reorder>\n${blockJson({ po_number: snap.order.po_number, materials: reorder.map((r) => ({ name: r.label, grade: r.grade, thickness_mm: r.thickness_mm, missing: r.missing, low_stock_alert: r.low_stock_alert, supplier: r.supplier, supplier_sku: r.supplier_sku })) }, 1)}\n</reorder>` }],
         (v) => ({ subject: clip(v.subject, DRAFT_SUBJECT_CHARS), body_text: String(v.body_text ?? '').slice(0, DRAFT_BODY_CHARS) }),
       );
       const card = (reminder: boolean) => reorderCard({ run_id, site_origin: env.SITE_ORIGIN, po_number: snap.order.po_number, materials: reorder, reminder });

@@ -1,7 +1,8 @@
 // RP-2 / P-2: MaterialStock with a fake Durable Object state and MemoryDb RPCs: concurrent reserve calls never
 // hold more than the remaining stock, reserve is idempotent per order item, stock choice order, shortfall and
-// not-stocked, commit and release, the daily expiry alarm (run row and notice card), the held-above-remaining
-// check, and the CHECK list of stock_reservations.status.
+// not-stocked, commit and release, the daily expiry alarm (run row and notice card while agent.post_order is on;
+// with the flag off expired holds are still released, without a run or a card), the held-above-remaining check,
+// and the CHECK list of stock_reservations.status.
 
 import { describe, expect, it } from 'vitest';
 import { allocate, availability, MaterialStock, pickOrder, ALARM_INTERVAL_MS } from '../../src/do/material-stock';
@@ -9,7 +10,7 @@ import type { ReservationStatus } from '../../src/db/repos/stock';
 import { mapMaterial, stockObjectName } from '../../src/db/repos/stock';
 import type { OpsEnv } from '../../src/env';
 import type { AgentEventV1 } from '../../src/queues/messages';
-import { agentBindings, FakeClock, FakeQueue } from '../helpers/agent-env';
+import { agentBindings, FakeClock, FakeQueue, type FakeKV } from '../helpers/agent-env';
 import { checkList } from '../helpers/check-lists';
 import { fakeNamespace, type FakeDurableObjectState } from '../helpers/fake-do';
 import { MemoryDb } from '../helpers/memory-db';
@@ -25,7 +26,7 @@ const REMNANT_BIG = '5a000000-0000-4000-8000-000000000003';
 const REMNANT_SMALL = '5a000000-0000-4000-8000-000000000004';
 const item = (n: number) => `6a000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-function setup(o: { stock?: boolean } = {}) {
+function setup(o: { stock?: boolean; postOrder?: boolean } = {}) {
   const clock = new FakeClock(Date.UTC(2026, 9, 5, 9, 0, 0));
   const db = new MemoryDb({ clock: () => clock.now() });
   db.seed('materials', [
@@ -45,6 +46,7 @@ function setup(o: { stock?: boolean } = {}) {
   db.seed('order_items', Array.from({ length: 12 }, (_, i) => ({ id: item(i + 1), order_id: ORDER, product_name: `Part ${i + 1}`, quantity: 1, tenant_id: TENANT })));
   const events = new FakeQueue<AgentEventV1>();
   const env = opsEnv({ ...agentBindings({ AGENT_EVENTS: events as unknown as OpsEnv['AGENT_EVENTS'] }) }) as OpsEnv;
+  (env.FLAGS as unknown as FakeKV).setJson('agent.post_order', { enabled: o.postOrder !== false, value: { mode: 'assist' }, rev: 1 });
   const ns = fakeNamespace((state) => {
     const s = new MaterialStock(state as unknown as DurableObjectState, env);
     (s as unknown as { dbInstance: MemoryDb }).dbInstance = db;
@@ -201,6 +203,19 @@ describe('MaterialStock.alarm', () => {
     const msg = events.sent[0].body;
     expect(msg.type === 'card' && msg.card).toMatchObject({ kind: 'reorder', allowed_verbs: [], run_id: runs[0].id });
     expect(JSON.stringify(msg)).not.toMatch(/@/);
+    expect(await state.storage.getAlarm()).toBe(clock.now().getTime() + ALARM_INTERVAL_MS);
+  });
+
+  it('agent.post_order off: expired holds are still released and the alarm re-armed, but no run is written and no card sent', async () => {
+    const { stock, db, clock, events, state } = setup({ postOrder: false });
+    await stock.reserve(item(1), { area_mm2: 10_000 });
+    clock.advance(10 * 86_400_000);
+    await stock.reserve(item(2), { area_mm2: 10_000 });
+    clock.advance(5 * 86_400_000);
+    await stock.alarm();
+    expect(db.rows('stock_reservations').filter((r) => r.order_item_id === item(1)).map((r) => [r.status, r.release_reason])).toEqual([['released', 'expired']]);
+    expect(db.rows('agent_runs')).toHaveLength(0);
+    expect(events.sent).toHaveLength(0);
     expect(await state.storage.getAlarm()).toBe(clock.now().getTime() + ALARM_INTERVAL_MS);
   });
 
