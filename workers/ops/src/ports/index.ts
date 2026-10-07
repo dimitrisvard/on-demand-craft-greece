@@ -194,12 +194,20 @@ export interface GmailHeaders {
   from: string | null;
   subject: string | null;
   auto_submitted: string | null;
+  /** Gmail's sizeEstimate of the whole message in bytes (null when the answer carries no usable number), so a
+   *  caller can pass over a large message before reading it in full. */
+  size_estimate?: number | null;
 }
 
 export interface GmailPort {
-  /** Stored access token when valid for at least 5 more minutes, else a refresh in memory (never written back). */
-  accessToken(account: SenderAccountRow): Promise<{ token: string } | { error: 'invalid_grant' | 'unavailable' }>;
-  history(token: string, startHistoryId: string): Promise<{ messageIds: string[]; historyId: string } | { error: 'stale_history' | 'unavailable' }>;
+  /** Stored access token when valid for at least 5 more minutes, else a refresh in memory (never written back).
+   *  rotated: true when the refresh answer carried a refresh token other than the stored one; that value is never
+   *  returned, stored or logged (the caller recommends a reconnect instead). */
+  accessToken(account: SenderAccountRow): Promise<{ token: string; rotated?: boolean } | { error: 'invalid_grant' | 'unavailable' }>;
+  /** Ids of the messages added to INBOX after startHistoryId, over at most HISTORY_MAX_PAGES pages. historyId is the
+   *  mailbox's current history id when every page was read; when the page cap stopped the listing (truncated: true)
+   *  it is the id of the last history record read, so a listing started from it skips nothing. */
+  history(token: string, startHistoryId: string): Promise<{ messageIds: string[]; historyId: string; truncated?: boolean } | { error: 'stale_history' | 'unavailable' }>;
   listRecent(token: string, query: string, max: number): Promise<{ messageIds: string[] }>;
   profileHistoryId(token: string): Promise<string>;
   metadata(token: string, id: string): Promise<GmailHeaders>;

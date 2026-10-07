@@ -1,7 +1,8 @@
 // K-2 ports: makePorts refuses AGENT_STUBS while AI or QUOTES_INDEX is bound and unknown stub tokens, and selects the
 // stub adapters by token; PostgrestDb request shapes (filters, Prefer, on_conflict, errors without body text);
-// Telegram Bot API calls (errors never carry the bot URL); Gmail token rule (no write-back); R2 blob; HashEmbed and
-// MemoryVectorIndex.
+// Telegram Bot API calls (errors never carry the bot URL); Gmail token rule (no write-back; a new refresh token in
+// the refresh answer is reported as rotated, never returned), Gmail sizeEstimate in the metadata answer, a history
+// listing cut by its page cap ending at the last record read; R2 blob; HashEmbed and MemoryVectorIndex.
 
 import { describe, expect, it } from 'vitest';
 import { renderTelegram } from '../../src/agents/cards/index';
@@ -199,10 +200,55 @@ describe('GmailApi', () => {
     expect(await gmail.history('tok', '5')).toEqual({ messageIds: ['m1', 'm2'], historyId: '12' });
     expect(seen[0].url).toBe('http://127.0.0.1:9/gmail/users/me/history?startHistoryId=5&historyTypes=messageAdded&labelId=INBOX');
     expect(seen[0].headers.authorization).toBe('Bearer tok');
-    expect(await gmail.metadata('tok', 'm1')).toEqual({ message_id: '<x@example.com>', in_reply_to: null, references: ['<a@x>', '<b@x>'], from: null, subject: 'Re: quote', auto_submitted: null });
+    expect(await gmail.metadata('tok', 'm1')).toEqual({ message_id: '<x@example.com>', in_reply_to: null, references: ['<a@x>', '<b@x>'], from: null, subject: 'Re: quote', auto_submitted: null, size_estimate: null });
     expect(new TextDecoder().decode(await gmail.raw('tok', 'm1'))).toBe('From: a\r\n\r\nhi');
     const stale = fetchRecorder(() => json({}, 404));
     expect(await new GmailApi(opsEnv({}), { fetch: stale.fetchImpl }).history('tok', '1')).toEqual({ error: 'stale_history' });
+  });
+
+  it('metadata carries Gmail sizeEstimate as size_estimate, null when the answer has no usable number', async () => {
+    const { seen, fetchImpl } = fetchRecorder((req) =>
+      req.url.includes('/messages/m-big?')
+        ? json({ id: 'm-big', sizeEstimate: 11_534_336, payload: { headers: [{ name: 'Subject', value: 'Drawings' }] } })
+        : json({ id: 'm-odd', sizeEstimate: 'large', payload: { headers: [] } }),
+    );
+    const gmail = new GmailApi(opsEnv({}), { fetch: fetchImpl });
+    expect(await gmail.metadata('tok', 'm-big')).toMatchObject({ subject: 'Drawings', size_estimate: 11_534_336 });
+    expect((await gmail.metadata('tok', 'm-odd')).size_estimate).toBeNull();
+    // the estimate comes with the metadata answer: no raw read is needed to know the size
+    expect(seen.every((s) => new URL(s.url).searchParams.get('format') === 'metadata')).toBe(true);
+  });
+
+  it('a refresh answer that carries a new refresh token: rotated true, and the new value is never returned', async () => {
+    const NEW_GRANT = 'second-grant-value';
+    const { fetchImpl } = fetchRecorder(() => json({ access_token: 'fresh-value', expires_in: 3599, refresh_token: NEW_GRANT }));
+    const answer = await new GmailApi(opsEnv({}), { fetch: fetchImpl, now: () => now }).accessToken(account({ refresh_token: 'refresh-value' }));
+    expect(answer).toEqual({ token: 'fresh-value', rotated: true });
+    expect(JSON.stringify(answer)).not.toContain(NEW_GRANT);
+    // the stored grant echoed back is not a rotation; neither is a refresh answer without a refresh token
+    const echo = fetchRecorder(() => json({ access_token: 'fresh-value', expires_in: 3599, refresh_token: 'refresh-value' }));
+    expect(await new GmailApi(opsEnv({}), { fetch: echo.fetchImpl, now: () => now }).accessToken(account({ refresh_token: 'refresh-value' }))).toEqual({ token: 'fresh-value' });
+    const plain = fetchRecorder(() => json({ access_token: 'fresh-value', expires_in: 3599 }));
+    expect(await new GmailApi(opsEnv({}), { fetch: plain.fetchImpl, now: () => now }).accessToken(account({ refresh_token: 'refresh-value' }))).toEqual({ token: 'fresh-value' });
+  });
+
+  it('history stopped by its 20-page cap returns the id of the last record it read and truncated, so the next listing starts right after it', async () => {
+    // A mailbox whose history after id 100 holds 25 records (ids 101..125, one added message each, one record per
+    // page); its current history id is 130.
+    const records = Array.from({ length: 25 }, (_, i) => ({ id: String(101 + i), messagesAdded: [{ message: { id: `m${i + 1}` } }] }));
+    const { seen, fetchImpl } = fetchRecorder((req) => {
+      const q = new URL(req.url).searchParams;
+      const after = records.filter((r) => Number(r.id) > Number(q.get('startHistoryId')));
+      const at = Number(q.get('pageToken') ?? '0');
+      return json({ history: after.slice(at, at + 1), historyId: '130', ...(at + 1 < after.length ? { nextPageToken: String(at + 1) } : {}) });
+    });
+    const gmail = new GmailApi(opsEnv({}), { fetch: fetchImpl });
+    const first = await gmail.history('tok', '100');
+    expect(seen).toHaveLength(20);
+    expect(first).toEqual({ messageIds: Array.from({ length: 20 }, (_, i) => `m${i + 1}`), historyId: '120', truncated: true });
+    // listing again from the returned id reads the five records the cap left, and then the mailbox's current id
+    const second = await gmail.history('tok', (first as { historyId: string }).historyId);
+    expect(second).toEqual({ messageIds: ['m21', 'm22', 'm23', 'm24', 'm25'], historyId: '130' });
   });
 });
 

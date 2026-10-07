@@ -11,7 +11,7 @@ import type { AgentRunRow } from '@/types/agent';
 import { NotInstalled } from './NotInstalled';
 
 /** Agents written by Phase 4 (agent_runs.agent); 'all' shows every agent. */
-const AGENTS = ['all', 'rfq_intake', 'quote', 'post_order', 'quote.reply_poller', 'cad', 'mcp', 'flags', 'eval', 'growth.scrapers'] as const;
+const AGENTS = ['all', 'rfq_intake', 'quote', 'post_order', 'post_order.stock', 'quote.reply_poller', 'cad', 'mcp', 'flags', 'eval', 'growth.scrapers'] as const;
 const OUTPUT_PREVIEW_CHARS = 300;
 
 function costText(run: AgentRunRow): string {

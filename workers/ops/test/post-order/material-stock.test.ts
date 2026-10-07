@@ -1,10 +1,11 @@
 // RP-2 / P-2: MaterialStock with a fake Durable Object state and MemoryDb RPCs: concurrent reserve calls never
 // hold more than the remaining stock, reserve is idempotent per order item, stock choice order, shortfall and
-// not-stocked, commit and release, the daily expiry alarm (run row and notice card while agent.post_order is on;
-// with the flag off expired holds are still released, without a run or a card), the held-above-remaining check,
-// and the CHECK list of stock_reservations.status.
+// not-stocked, commit and release, the daily expiry alarm (run row under agent post_order.stock and notice card while
+// agent.post_order is on, outside PostOrderWorkflow's daily cap; with the flag off expired holds are still released,
+// without a run or a card), the held-above-remaining check, and the CHECK list of stock_reservations.status.
 
 import { describe, expect, it } from 'vitest';
+import { checkDailyCap, openRun } from '../../src/agents/runs';
 import { allocate, availability, MaterialStock, pickOrder, ALARM_INTERVAL_MS } from '../../src/do/material-stock';
 import type { ReservationStatus } from '../../src/db/repos/stock';
 import { mapMaterial, stockObjectName } from '../../src/db/repos/stock';
@@ -198,7 +199,8 @@ describe('MaterialStock.alarm', () => {
     expect(byItem(item(2))).toEqual([['held', null]]);
     const runs = db.rows('agent_runs');
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ agent: 'post_order', trigger: 'cron', status: 'succeeded', subject_type: 'material', subject_id: MAT, output: { released: 1, over_held: 0 } });
+    expect(runs[0]).toMatchObject({ agent: 'post_order.stock', trigger: 'cron', status: 'succeeded', subject_type: 'material', subject_id: MAT, output: { released: 1, over_held: 0 } });
+    expect(String(runs[0].idempotency_key)).toBe(`post_order.stock:${MAT}:${clock.now().toISOString().slice(0, 16)}`);
     expect(events.sent).toHaveLength(1);
     const msg = events.sent[0].body;
     expect(msg.type === 'card' && msg.card).toMatchObject({ kind: 'reorder', allowed_verbs: [], run_id: runs[0].id });
@@ -217,6 +219,20 @@ describe('MaterialStock.alarm', () => {
     expect(db.rows('agent_runs')).toHaveLength(0);
     expect(events.sent).toHaveLength(0);
     expect(await state.storage.getAlarm()).toBe(clock.now().getTime() + ALARM_INTERVAL_MS);
+  });
+
+  it('stock notices are runs of their own agent key: they never count toward the daily run cap of PostOrderWorkflow', async () => {
+    const { stock, db, clock } = setup();
+    await stock.reserve(item(1), { area_mm2: 10_000 });
+    clock.advance(15 * 86_400_000);
+    await stock.alarm();
+    expect(db.rows('agent_runs')).toHaveLength(1);
+    // The first PostOrderWorkflow run of this UTC day, with agent.post_order max_runs_per_day 1, is within its cap.
+    const order = await openRun(db, { agent: 'post_order', trigger: 'queue', idempotency_key: ORDER, tenant_id: TENANT });
+    expect(order.created).toBe(true);
+    const cap = await checkDailyCap(db, 'post_order', { enabled: true, mode: 'assist', value: { max_runs_per_day: 1 } }, clock.now());
+    expect(cap).toEqual({ reached: false, first: false, cap: 1 });
+    expect(db.rows('agent_runs').map((r) => r.agent)).toEqual(['post_order.stock', 'post_order']);
   });
 
   it('an alarm with nothing to do writes no run and no card, and is not re-armed without held holds', async () => {

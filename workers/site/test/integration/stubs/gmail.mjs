@@ -5,7 +5,8 @@
 //                                                  script.staleHistory 404
 //   GET /gmail/users/me/messages?q=…               {messages: [{id}]}
 //   GET /gmail/users/me/profile                    {historyId}
-//   GET /gmail/users/me/messages/<id>?format=metadata|raw   payload.headers / raw (base64url)
+//   GET /gmail/users/me/messages/<id>?format=metadata|raw   sizeEstimate (bytes of the raw text) and
+//                                                  payload.headers / raw (base64url)
 //   POST /__stub/gmail/script   {historyId?, added?: [ids], staleHistory?, messages?: {<id>: {headers: {name: value},
 //                               raw: <text>}}}
 //   GET  /__stub/gmail/calls    recorded paths (no Authorization value)
@@ -69,7 +70,7 @@ export function createStubModule() {
       send(res, 200, { id: match[1], raw: base64url(message.raw ?? '') });
       return true;
     }
-    send(res, 200, { id: match[1], payload: { headers: Object.entries(message.headers ?? {}).map(([name, value]) => ({ name, value })) } });
+    send(res, 200, { id: match[1], sizeEstimate: Buffer.byteLength(message.raw ?? '', 'utf8'), payload: { headers: Object.entries(message.headers ?? {}).map(([name, value]) => ({ name, value })) } });
     return true;
   }
 

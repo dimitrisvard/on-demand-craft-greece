@@ -8,7 +8,11 @@
 //     a response body or an e-mail address.
 //   - Gmail: a stored access token is used while it stays valid for at least 5 more minutes; otherwise it is
 //     refreshed in memory and never written back. 'invalid_grant' is reported as such; every other refresh problem
-//     is 'unavailable'. Only read endpoints are called.
+//     is 'unavailable'. A refresh answer that carries a refresh token other than the stored one is reported as
+//     rotated: true, and that value goes no further than the parsing of the answer. Only read endpoints are called.
+//   - Gmail history is read over at most HISTORY_MAX_PAGES pages. When pages remain after the cap, the answer is
+//     truncated and its historyId is the id of the last history record read (not the mailbox's current id), so the
+//     caller's next listing starts right after what it was given. Metadata answers carry Gmail's sizeEstimate.
 //   - Blob: names are R2 keys; copy() is get + put for objects up to 25 MiB; a sha256 given to put() is checked by R2
 //     and stored as custom metadata.
 
@@ -92,6 +96,23 @@ export class BotTelegram implements TelegramPort {
 
 const METADATA_HEADERS = ['Message-ID', 'In-Reply-To', 'References', 'From', 'Subject', 'Auto-Submitted'];
 const TOKEN_MIN_VALIDITY_MS = 5 * 60_000;
+/** Pages of one history listing at most. */
+export const HISTORY_MAX_PAGES = 20;
+
+/** True when history id `a` (decimal digits, as Gmail sends its uint64 ids) is later than `b` (null: none yet). */
+function laterHistoryId(a: string, b: string | null): boolean {
+  if (!/^\d+$/.test(a)) return false;
+  if (b === null) return true;
+  const x = a.replace(/^0+(?=\d)/, '');
+  const y = b.replace(/^0+(?=\d)/, '');
+  return x.length !== y.length ? x.length > y.length : x > y;
+}
+
+/** A history id field of a Gmail answer as text (null when absent or not an id). */
+function historyIdOf(v: unknown): string | null {
+  const s = typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? String(v) : v;
+  return typeof s === 'string' && /^\d+$/.test(s) ? s : null;
+}
 
 function base64UrlToBytes(text: string): Uint8Array {
   const b64 = text.replace(/-/g, '+').replace(/_/g, '/');
@@ -116,7 +137,7 @@ export class GmailApi implements GmailPort {
     return (this.env.GMAIL_API_BASE ?? GMAIL_API).replace(/\/+$/, '');
   }
 
-  async accessToken(account: SenderAccountRow): Promise<{ token: string } | { error: 'invalid_grant' | 'unavailable' }> {
+  async accessToken(account: SenderAccountRow): Promise<{ token: string; rotated?: boolean } | { error: 'invalid_grant' | 'unavailable' }> {
     const config = account.provider_config ?? {};
     const now = (this.o.now ?? (() => new Date()))().getTime();
     const expiry = typeof config.token_expiry === 'string' ? Date.parse(config.token_expiry) : Number.NaN;
@@ -137,20 +158,26 @@ export class GmailApi implements GmailPort {
     } catch {
       return { error: 'unavailable' };
     }
-    const data = (await res.json().catch(() => ({}))) as { access_token?: unknown; error?: unknown };
+    const data = (await res.json().catch(() => ({}))) as { access_token?: unknown; refresh_token?: unknown; error?: unknown };
     if (!res.ok) return { error: data.error === 'invalid_grant' ? 'invalid_grant' : 'unavailable' };
-    return typeof data.access_token === 'string' && data.access_token ? { token: data.access_token } : { error: 'unavailable' };
+    if (typeof data.access_token !== 'string' || !data.access_token) return { error: 'unavailable' };
+    // Only the fact of a new grant leaves this method, never its value (the poller stores nothing).
+    const rotated = typeof data.refresh_token === 'string' && data.refresh_token !== '' && data.refresh_token !== config.refresh_token;
+    return rotated ? { token: data.access_token, rotated: true } : { token: data.access_token };
   }
 
   private async get(token: string, path: string, label: string): Promise<Response> {
     return call(this.fetchImpl, `${this.base()}${path}`, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' } }, `gmail ${label}`);
   }
 
-  async history(token: string, startHistoryId: string): Promise<{ messageIds: string[]; historyId: string } | { error: 'stale_history' | 'unavailable' }> {
+  async history(token: string, startHistoryId: string): Promise<{ messageIds: string[]; historyId: string; truncated?: boolean } | { error: 'stale_history' | 'unavailable' }> {
     const ids = new Set<string>();
     let pageToken: string | undefined;
-    let historyId = startHistoryId;
-    for (let page = 0; page < 20; page++) {
+    /** The mailbox's current history id, as the latest page reported it. */
+    let current = startHistoryId;
+    /** Id of the latest history record read so far. */
+    let lastRead: string | null = null;
+    for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
       const q = new URLSearchParams({ startHistoryId, historyTypes: 'messageAdded', labelId: 'INBOX' });
       if (pageToken) q.set('pageToken', pageToken);
       let res: Response;
@@ -161,13 +188,19 @@ export class GmailApi implements GmailPort {
       }
       if (res.status === 404) return { error: 'stale_history' };
       if (!res.ok) return { error: 'unavailable' };
-      const data = (await res.json()) as { history?: Array<{ messagesAdded?: Array<{ message?: { id?: string } }> }>; historyId?: string; nextPageToken?: string };
-      for (const h of data.history ?? []) for (const m of h.messagesAdded ?? []) if (m.message?.id) ids.add(m.message.id);
-      if (data.historyId) historyId = data.historyId;
-      if (!data.nextPageToken) break;
+      const data = (await res.json()) as { history?: Array<{ id?: unknown; messagesAdded?: Array<{ message?: { id?: string } }> }>; historyId?: unknown; nextPageToken?: string };
+      for (const h of data.history ?? []) {
+        for (const m of h.messagesAdded ?? []) if (m.message?.id) ids.add(m.message.id);
+        const id = historyIdOf(h.id);
+        if (id !== null && laterHistoryId(id, lastRead)) lastRead = id;
+      }
+      current = historyIdOf(data.historyId) ?? current;
+      if (!data.nextPageToken) return { messageIds: [...ids], historyId: current };
       pageToken = data.nextPageToken;
     }
-    return { messageIds: [...ids], historyId };
+    // Pages remain after the cap: the listing resumes right after the last record read. Without any record read
+    // the start id is kept, so nothing is passed over either way.
+    return { messageIds: [...ids], historyId: lastRead ?? startHistoryId, truncated: true };
   }
 
   async listRecent(token: string, query: string, max: number): Promise<{ messageIds: string[] }> {
@@ -190,11 +223,12 @@ export class GmailApi implements GmailPort {
     for (const h of METADATA_HEADERS) q.append('metadataHeaders', h);
     const res = await this.get(token, `/users/me/messages/${encodeURIComponent(id)}?${q}`, 'metadata');
     if (!res.ok) throw new Error(`gmail metadata: ${res.status}`);
-    const data = (await res.json()) as { payload?: { headers?: Array<{ name?: string; value?: string }> } };
+    const data = (await res.json()) as { sizeEstimate?: unknown; payload?: { headers?: Array<{ name?: string; value?: string }> } };
     const header = (name: string): string | null => {
       const found = (data.payload?.headers ?? []).find((h) => (h.name ?? '').toLowerCase() === name.toLowerCase());
       return found?.value ?? null;
     };
+    const size = data.sizeEstimate;
     return {
       message_id: header('Message-ID'),
       in_reply_to: header('In-Reply-To'),
@@ -202,6 +236,7 @@ export class GmailApi implements GmailPort {
       from: header('From'),
       subject: header('Subject'),
       auto_submitted: header('Auto-Submitted'),
+      size_estimate: typeof size === 'number' && Number.isFinite(size) && size >= 0 ? size : null,
     };
   }
 

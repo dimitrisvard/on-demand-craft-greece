@@ -20,8 +20,9 @@
 //   - SQLite storage holds(order_item_id, status, holds JSON, updated_at) mirrors the outcome per order item; the
 //     database is always re-checked before a stored outcome is returned.
 //   - Daily alarm: holds past their expiry are released ('expired'); when it released something or a stock item is
-//     held above its remaining stock and agent.post_order is on, it records one agent_runs row (agent post_order,
-//     trigger cron) and posts a notice card through the queue agent-events; with the flag off it only releases
+//     held above its remaining stock and agent.post_order is on, it records one agent_runs row (agent
+//     post_order.stock, trigger cron: a key of its own, so these notices never count toward PostOrderWorkflow's
+//     daily run cap) and posts a notice card through the queue agent-events; with the flag off it only releases
 //     expired holds (no run, no card). The alarm is re-armed while held holds remain.
 //   - Log lines carry ids and counts only.
 
@@ -29,7 +30,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { formatLogLine } from '../../../shared/src/http/log';
 import { stockNoticeCard } from '../agents/cards/reorder';
 import { readFlag } from '../agents/flags';
-import { closeRun, EMPTY_USAGE, openRun } from '../agents/runs';
+import { closeRun, EMPTY_USAGE, openRun, type AgentKey } from '../agents/runs';
 import { PostgrestDb, type Db } from '../db/postgrest';
 import {
   activeReservations,
@@ -76,6 +77,8 @@ export interface StockCheck {
 }
 
 export const ALARM_INTERVAL_MS = 86_400_000;
+/** Agent key of the daily stock notices (outside PostOrderWorkflow's daily cap, which counts 'post_order'). */
+export const STOCK_NOTICE_AGENT: AgentKey = 'post_order.stock';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EPS = 1e-6;
 
@@ -343,9 +346,9 @@ export class MaterialStock extends DurableObject<OpsEnv> {
   private async notice(tenantId: string, materialId: string, released: number, overHeld: number, now: Date): Promise<void> {
     const db = this.db();
     const run = await openRun(db, {
-      agent: 'post_order',
+      agent: STOCK_NOTICE_AGENT,
       trigger: 'cron',
-      idempotency_key: `post_order:stock:${materialId}:${now.toISOString().slice(0, 16)}`,
+      idempotency_key: `${STOCK_NOTICE_AGENT}:${materialId}:${now.toISOString().slice(0, 16)}`,
       subject_type: 'material',
       subject_id: materialId,
       tenant_id: tenantId,

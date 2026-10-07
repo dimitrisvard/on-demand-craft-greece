@@ -5,7 +5,9 @@
 // messages per tick with the listing worked through over several ticks; the size limit (Gmail's estimate and the
 // decoded size), the raw bytes written without a copy, per-message attempts (failed reads, interrupted ticks) and
 // passing a message over with a notice; Gmail copies use rules 1-3 only; no token value in any log line or
-// agent_runs.output.
+// agent_runs.output. Over the GmailApi adapter itself (Gmail-shaped HTTP answers): an over-size message is passed
+// over on sizeEstimate before any raw read, a refresh answer with a new refresh token raises the reconnect card,
+// and a history listing cut at the adapter's 20-page cap skips no message.
 
 import { describe, expect, it } from 'vitest';
 import { messageIdSha256, trimmedMessageId } from '../../../mail/src/headers';
@@ -13,6 +15,7 @@ import { fromAddress, gmailPollerTick, FULL_SYNC_QUERY, INTERRUPTED_AFTER_MS, MA
 
 const ATTEMPTS = 3;
 import { DbError } from '../../src/db/postgrest';
+import { GmailApi } from '../../src/ports/http-adapters';
 import type { GmailHeaders, GmailPort, SenderAccountRow } from '../../src/ports/index';
 import type { AgentEventV1 } from '../../src/queues/messages';
 import { assertNoSecretsLogged, RecordingLogger } from '../helpers/recorders';
@@ -27,7 +30,7 @@ const REFRESH_2 = '1//refresh-value-of-account-two';
 const SUBSCRIBER = '8b000000-0000-4000-8000-00000000000b';
 
 interface ScriptedMessage {
-  headers: GmailHeaders & { size_estimate?: number };
+  headers: GmailHeaders;
   raw: string;
 }
 
@@ -311,6 +314,18 @@ describe('gmail poller: listing budget, size, attempts', () => {
     expect(pollerRuns(h)[0].output).toMatchObject({ accounts: { [ACC_1]: { history_id: '5000', skipped: 1, matched_quote: 0 } } });
   });
 
+  it('a large reply already stored by microns-mail counts as stored: no notice card, no download', async () => {
+    const { h, gmail } = setup();
+    const bare = ' gq-big@example.de ';
+    gmail.messages.set('g-quote', { ...gmail.messages.get('g-quote')!, headers: { ...headers({ message_id: bare, in_reply_to: OUT_A, from: 'erika.beispiel@example.de' }), size_estimate: 30 * 1024 * 1024 } });
+    const mailSha = await messageIdSha256(trimmedMessageId(bare), new ArrayBuffer(0));
+    h.ports.db.seed('inbound_emails', [{ tenant_id: TENANT, message_id: 'gq-big@example.de', message_id_sha256: mailSha, mailbox: 'replies', source: 'email_routing', from_email: 'erika.beispiel@example.de', received_at: '2026-10-05T08:00:00.000Z', status: 'matched' }]);
+    await tick(h);
+    expect(gmail.calls.some((c) => c.startsWith('raw'))).toBe(false);
+    expect(h.ports.db.rows('inbound_emails')).toHaveLength(1);
+    expect(cards(h)).toHaveLength(0);
+  });
+
   it('a message whose decoded size is above the limit is not stored either', async () => {
     const { h, gmail } = setup();
     gmail.rawSize = RAW_MAX_BYTES + 1;
@@ -476,5 +491,130 @@ describe('gmail poller: a refresh answer with a new grant', () => {
     }
     assertNoSecretsLogged(logger.lines, [ACCESS_1, REFRESH_1]);
     expect(JSON.stringify(h.ports.db.rows('agent_runs').map((r) => r.output))).not.toContain(ACCESS_1);
+  });
+});
+
+/**
+ * Gmail API and Google token answers in the shape of the real endpoints (only the fields GmailApi reads), served
+ * through fetch to the GmailApi adapter itself; any other address is refused, so nothing leaves the test.
+ */
+class GmailHttp {
+  static readonly BASE = 'http://gmail.test/gmail/v1';
+  static readonly TOKEN = 'http://token.test/oauth2/token';
+  /** Paths asked under users/me/ with their format, never a credential. */
+  readonly asked: string[] = [];
+  /** History records in ascending id order, each adding one message; served one record per page. */
+  records: Array<{ id: number; message: string }> = [];
+  /** The mailbox's current history id. */
+  current = 100;
+  inbox: string[] = [];
+  messages = new Map<string, { headers: Record<string, string>; raw: string; sizeEstimate?: number }>();
+  /** refresh_token carried by the token endpoint's answer (null: none, as Google usually answers). */
+  grant: string | null = null;
+
+  readonly fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    if (url.href === GmailHttp.TOKEN) return reply({ access_token: 'adapter-access-value', expires_in: 3599, token_type: 'Bearer', ...(this.grant ? { refresh_token: this.grant } : {}) });
+    const prefix = `${GmailHttp.BASE}/users/me/`;
+    if (!url.href.startsWith(prefix)) throw new Error('GmailHttp: unexpected address');
+    const path = url.pathname.slice(new URL(prefix).pathname.length);
+    const format = url.searchParams.get('format');
+    this.asked.push(format ? `${path}?format=${format}` : path);
+    if (path === 'history') {
+      const after = this.records.filter((r) => r.id > Number(url.searchParams.get('startHistoryId')));
+      const at = Number(url.searchParams.get('pageToken') ?? '0');
+      const page = after.slice(at, at + 1).map((r) => ({ id: String(r.id), messages: [{ id: r.message }], messagesAdded: [{ message: { id: r.message } }] }));
+      return reply({ history: page, historyId: String(this.current), ...(at + 1 < after.length ? { nextPageToken: String(at + 1) } : {}) });
+    }
+    if (path === 'profile') return reply({ historyId: String(this.current) });
+    if (path === 'messages') return reply({ messages: this.inbox.map((id) => ({ id })), resultSizeEstimate: this.inbox.length });
+    const m = this.messages.get(path.replace(/^messages\//, ''));
+    if (!path.startsWith('messages/') || !m) return reply({ error: { code: 404, message: 'Requested entity was not found.' } }, 404);
+    const id = path.slice('messages/'.length);
+    if (format === 'raw') return reply({ id, raw: btoa(m.raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') });
+    return reply({ id, sizeEstimate: m.sizeEstimate ?? m.raw.length, payload: { headers: Object.entries(m.headers).map(([name, value]) => ({ name, value })) } });
+  }) as typeof fetch;
+}
+
+describe('gmail poller over the GmailApi adapter', () => {
+  const quoteReply = (n: number, sizeEstimate?: number) => ({
+    headers: { 'Message-ID': `<gq${n}@example.de>`, 'In-Reply-To': OUT_A, References: OUT_A, From: 'Erika Beispiel <erika.beispiel@example.de>', Subject: 'Re: Angebot' },
+    raw: `From: erika.beispiel@example.de\r\nMessage-ID: <gq${n}@example.de>\r\nIn-Reply-To: ${OUT_A}\r\nSubject: Re: Angebot\r\n\r\nOK ${n}\r\n`,
+    sizeEstimate,
+  });
+  const other = (id: string) => ({ headers: { 'Message-ID': `<${id}@example.net>`, From: 'news@example.net', Subject: 'Hello' }, raw: `Subject: Hello\r\n\r\n${id}\r\n` });
+  const cards = (h: Harness) => h.events.sent.map((s) => s.body).filter((b): b is Extract<AgentEventV1, { type: 'card' }> => b.type === 'card');
+
+  function adapterSetup() {
+    const { h } = setup();
+    const http = new GmailHttp();
+    h.ports.gmail = new GmailApi({ ...h.env, GMAIL_API_BASE: GmailHttp.BASE, GOOGLE_TOKEN_URL: GmailHttp.TOKEN }, { fetch: http.fetch, now: () => h.ports.clock.now() });
+    return { h, http };
+  }
+
+  it('a message above the size limit by Gmail sizeEstimate is passed over before any raw read', async () => {
+    const { h, http } = adapterSetup();
+    http.inbox = ['g-big', 'g-other'];
+    http.messages.set('g-big', quoteReply(1, RAW_MAX_BYTES + 1));
+    http.messages.set('g-other', other('g-other'));
+    await tick(h);
+    expect(http.asked).toContain('messages/g-big?format=metadata');
+    expect(http.asked.filter((p) => p.endsWith('?format=raw'))).toEqual([]);
+    expect(h.ports.db.rows('inbound_emails')).toHaveLength(0);
+    expect(h.bucket.objects.size).toBe(0);
+    expect(cards(h)).toHaveLength(1);
+    expect(JSON.stringify(cards(h)[0].card)).toContain('too large to import (about 11 MB)');
+    expect(pollerRuns(h)[0].output).toMatchObject({ accounts: { [ACC_1]: { history_id: '100', skipped: 1, matched_quote: 0 } } });
+  });
+
+  it('a token refresh answer with a new refresh token raises the reconnect card; the new value is stored, logged and shown nowhere', async () => {
+    const NEW_GRANT = 'second-grant-value-of-account-one';
+    const { h, http } = adapterSetup();
+    http.grant = NEW_GRANT;
+    const at = Date.UTC(2026, 9, 5, 9, 56, 0); // the stored access token has 4 minutes left: refreshed in memory
+    h.ports.clock.set(at);
+    const logger = new RecordingLogger();
+    const stop = logger.start();
+    try {
+      await tick(h, at);
+    } finally {
+      stop();
+    }
+    expect(cards(h)).toHaveLength(1);
+    expect(cards(h)[0].card).toMatchObject({ kind: 'reply', title: 'Gmail connection: reconnect recommended', allowed_verbs: [] });
+    expect(pollerRuns(h)[0].output).toMatchObject({ accounts: { [ACC_1]: { rotation_notice_day: '2026-10-05', errors: [] } } });
+    expect(h.ports.db.rows('marketing_sender_accounts')[0].provider_config).toEqual({ access_token: ACCESS_1, refresh_token: REFRESH_1, token_expiry: '2026-10-05T10:00:00.000Z' });
+    assertNoSecretsLogged(logger.lines, [NEW_GRANT, REFRESH_1, 'adapter-access-value']);
+    for (const text of [JSON.stringify(h.events.sent), JSON.stringify(h.ports.db.rows('agent_runs'))]) {
+      expect(text).not.toContain(NEW_GRANT);
+      expect(text).not.toContain('adapter-access-value');
+    }
+  });
+
+  it('a history listing cut at 20 pages moves the stored historyId only to the last record read: no message beyond the cap is skipped', async () => {
+    const { h, http } = adapterSetup();
+    await tick(h); // first run: full sync of an empty inbox, historyId 100 from the profile
+    expect(pollerRuns(h)[0].output).toMatchObject({ accounts: { [ACC_1]: { history_id: '100' } } });
+    // 25 new messages in 25 history records (ids 101..125); the mailbox's current id is 130 by now
+    const ids = Array.from({ length: 25 }, (_, i) => `n${i + 1}`);
+    http.records = ids.map((message, i) => ({ id: 101 + i, message }));
+    http.current = 130;
+    for (const id of ids) http.messages.set(id, other(id));
+    http.messages.set('n23', quoteReply(23)); // a quote reply beyond the 20-page cap
+    const metadataAsked = () => http.asked.filter((p) => p.endsWith('?format=metadata')).map((p) => p.slice('messages/'.length, -'?format=metadata'.length));
+
+    h.ports.clock.set(Date.UTC(2026, 9, 5, 9, 10, 0));
+    await tick(h, Date.UTC(2026, 9, 5, 9, 10, 0));
+    expect(http.asked.filter((p) => p === 'history')).toHaveLength(20);
+    expect(metadataAsked()).toEqual(ids.slice(0, 20));
+    expect(pollerRuns(h).at(-1)?.output).toMatchObject({ accounts: { [ACC_1]: { history_id: '120', offset: 0, listed: 20 } } });
+
+    http.asked.length = 0;
+    h.ports.clock.set(Date.UTC(2026, 9, 5, 9, 20, 0));
+    await tick(h, Date.UTC(2026, 9, 5, 9, 20, 0));
+    expect(metadataAsked()).toEqual(ids.slice(20));
+    expect(h.ports.db.rows('inbound_emails').map((r) => r.message_id)).toEqual(['<gq23@example.de>']);
+    expect(pollerRuns(h).at(-1)?.output).toMatchObject({ accounts: { [ACC_1]: { history_id: '130', offset: 0, listed: 5, matched_quote: 1 } } });
   });
 });

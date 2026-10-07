@@ -15,7 +15,8 @@
 //   list      history since the stored historyId (paged); first run or a stale id (404) -> the inbox of the last two
 //             days (at most 100) and a new historyId from the profile. At most 100 messages per account and tick: a
 //             longer history listing is worked through over several ticks (output offset), and the stored historyId
-//             moves on only once every listed message was handled
+//             moves on only once every listed message was handled. A listing cut by the adapter's page cap
+//             (truncated) ends at the last history record read, so the next listing picks up the rest
 //   route     per message (metadata only): auto-submitted mail is ignored; a quote-thread match (reply rules 1-3)
 //             -> raw MIME to R2 email/<sha>/raw.eml, inbound_emails row (mailbox gmail, source gmail_poller,
 //             sender_account_id), agent-events 'inbound-reply'; a campaign reply (the sender is a subscriber, the
@@ -51,7 +52,7 @@ import { checkpointRun, closeRun, EMPTY_USAGE, isFinal, openRun, type UsageAcc }
 import { activeGoogleAccounts, campaignSubscriber, GmailTokenStore, recordCampaignReply, type SenderAccount } from '../db/repos/senders';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import { rawKey } from '../mail-in/safe-name';
-import type { GmailHeaders, GmailPort, Ports } from '../ports/index';
+import type { GmailHeaders, Ports } from '../ports/index';
 import type { AgentEventV1 } from '../queues/messages';
 import { matchReply, normaliseMessageId } from '../replies/match';
 
@@ -96,11 +97,6 @@ export interface PollerDeps {
 }
 
 export type PollerResult = { ran: false; reason: 'gate_off' | 'exists' } | { ran: true; run_id: string; accounts: Record<string, AccountState> };
-
-/** accessToken() answer; `rotated` is true when Google's refresh answer carried a new grant. */
-type TokenAnswer = Awaited<ReturnType<GmailPort['accessToken']>> & { rotated?: boolean };
-/** metadata() answer; `size_estimate` is Gmail's sizeEstimate of the message when the answer carries it. */
-type MessageMeta = GmailHeaders & { size_estimate?: number | null };
 
 /** The address of a From header value ('Name <a@b>' or 'a@b'), or null. */
 export function fromAddress(value: string | null | undefined): { email: string; name: string | null } | null {
@@ -175,7 +171,7 @@ export function receivedMessageId(value: string | null | undefined): string | nu
 }
 
 /** Gmail's size estimate of a message from its metadata answer, or null. */
-export function sizeEstimateOf(h: MessageMeta): number | null {
+export function sizeEstimateOf(h: GmailHeaders): number | null {
   const v = h.size_estimate;
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 }
@@ -240,15 +236,16 @@ async function failedAttempt(t: AccountTick, gmailId: string): Promise<'retry' |
 
 /** Stores a quote-thread reply found in Gmail and queues it; false when it was stored before or passed over.
  *  message_id is the received form (receivedMessageId), which is also what is hashed. */
-async function storeQuoteReply(t: AccountTick, o: { gmail_id: string; h: MessageMeta; message_id: string }): Promise<'stored' | 'exists' | 'skipped' | 'retry'> {
+async function storeQuoteReply(t: AccountTick, o: { gmail_id: string; h: GmailHeaders; message_id: string }): Promise<'stored' | 'exists' | 'skipped' | 'retry'> {
   const { env, ports } = t;
+  // A reply already stored by another path counts as stored, whatever its size.
+  const sha = await sha256hex(o.message_id);
+  if (await alreadyStored(ports, t.tenant, sha)) return 'exists';
   const estimate = sizeEstimateOf(o.h);
   if (estimate !== null && estimate > RAW_MAX_BYTES) {
     await giveUp(t, o.gmail_id, 'too_large', estimate);
     return 'skipped';
   }
-  const sha = await sha256hex(o.message_id);
-  if (await alreadyStored(ports, t.tenant, sha)) return 'exists';
   // The message being read is recorded first: a tick that ends during the read counts one attempt (see resume).
   await checkpointRun(ports.db, t.run_id, t.usage, { output: { accounts: t.accounts, reading: { account_id: t.account.id, gmail_id: o.gmail_id } } });
   let bytes: Uint8Array;
@@ -305,7 +302,7 @@ async function routeMessage(t: AccountTick, gmailId: string): Promise<'done' | '
     await giveUp(t, gmailId, 'unreadable', null);
     return 'done';
   }
-  let h: MessageMeta;
+  let h: GmailHeaders;
   try {
     h = await ports.gmail.metadata(t.token, gmailId);
   } catch (error) {
@@ -373,7 +370,7 @@ export async function gmailPollerTick(env: OpsEnv, controller: Pick<ScheduledCon
       accounts[account.id] = state;
       try {
         const config = await store.readProviderConfig(account.id);
-        const auth: TokenAnswer = await ports.gmail.accessToken({ ...account, provider_config: config });
+        const auth = await ports.gmail.accessToken({ ...account, provider_config: config });
         if ('error' in auth) {
           state.errors.push(auth.error);
           if (auth.error === 'invalid_grant' && state.notice_day !== today && env.AGENT_EVENTS) {

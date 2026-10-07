@@ -21,13 +21,14 @@ import {
   openRun,
   parkRun,
   usageColumns,
+  type AgentKey,
   type ParkReason,
   type RunStatus,
   type RunTrigger,
   type UsageAcc,
 } from '../../src/agents/runs';
 import { agentBindings, agentPorts } from '../helpers/agent-env';
-import { checkList, sorted } from '../helpers/check-lists';
+import { checkBody, checkList, sorted } from '../helpers/check-lists';
 import { FakeStep } from '../helpers/fake-step';
 import { opsEnv } from '../helpers/ops';
 
@@ -50,6 +51,20 @@ describe('CHECK lists of agent_runs equal the TypeScript unions', () => {
     expect(sorted(['running', 'waiting_human', 'succeeded', 'failed', 'cancelled', 'skipped'] satisfies RunStatus[])).toEqual(sorted(checkList('agent_runs_status_check')));
     expect(sorted(['email', 'cron', 'queue', 'workflow', 'dashboard', 'telegram', 'mcp', 'manual'] satisfies RunTrigger[])).toEqual(sorted(checkList('agent_runs_trigger_check')));
     expect(sorted(['flag_off', 'budget', 'llm_unavailable', 'failed'] satisfies ParkReason[])).toEqual(sorted(checkList('agent_runs_parked_reason_check')));
+  });
+
+  it('the Phase 4 agent keys pass agent_runs_agent_check (pattern and length); no migration change is needed for a new dotted key', () => {
+    const body = checkBody('agent_runs_agent_check');
+    const pattern = /agent\s*~\s*'([^']+)'/.exec(body)?.[1];
+    const max = Number(/char_length\(agent\)\s*<=\s*(\d+)/.exec(body)?.[1]);
+    expect(pattern).toBe('^[a-z0-9_]+(\\.[a-z0-9_]+)*$');
+    expect(max).toBe(64);
+    // a type-level list: a key outside AgentKey fails the typecheck (the list need not name every key)
+    const keys = ['rfq_intake', 'quote', 'post_order', 'post_order.stock', 'quote.reply_poller', 'cad', 'eval', 'mcp', 'flags', 'growth.scrapers'] satisfies AgentKey[];
+    for (const key of keys) {
+      expect(key).toMatch(new RegExp(pattern as string));
+      expect(key.length).toBeLessThanOrEqual(max);
+    }
   });
 });
 

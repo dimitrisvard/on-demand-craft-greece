@@ -15,7 +15,10 @@
 //     cost_cents = 100 x the run's USD (rounded up to 4 decimals). A run with llm_calls > 0 and no priced spend is
 //     written with the smallest cost (0.0001) and output.price_missing, so exit gate 4 never sees an unpriced call.
 //   - idempotency keys start with '<agent>:' or a fixed prefix (rfq_intake: the message_id_sha256; quote:
-//     '<rfq_id>:v<n>'; post-order: the order id; cad: the cad_jobs id).
+//     '<rfq_id>:v<n>'; post-order: the order id; cad: the cad_jobs id; stock notices:
+//     'post_order.stock:<material_id>:<minute>').
+//   - The daily cap counts the runs of one agent key, so work that must not use up an agent's cap runs under a key
+//     of its own (MaterialStock's daily stock notices are 'post_order.stock', not 'post_order').
 // Phase 5 extends AgentKey in this file and changes nothing else here.
 
 import type { AgentFlag } from './flags';
@@ -36,6 +39,8 @@ export type AgentKey =
   | 'rfq_intake'
   | 'quote'
   | 'post_order'
+  /** MaterialStock's daily stock notices (no LLM call; outside PostOrderWorkflow's daily cap). */
+  | 'post_order.stock'
   | 'quote.reply_poller'
   | 'cad'
   | 'eval'
