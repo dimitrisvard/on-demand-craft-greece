@@ -174,6 +174,13 @@ describe('AnthropicLlm outcome mapping', () => {
     expect(r).toMatchObject({ ok: false, code: 'max_tokens', retryable: false, usage: { input_tokens: 2000, output_tokens: 200 } });
   });
 
+  it('a call asking for more than 8,192 output tokens is sent with max_tokens 8,192', async () => {
+    const { requests, fetchImpl } = recorder([{ body: message({ text: '{"kind":"rfq","confidence":1,"injection_suspected":false}' }) }]);
+    const r = await new AnthropicLlm(prodEnv(), { fetch: fetchImpl }).call(call('classify', 20_000));
+    expect(r).toMatchObject({ ok: true });
+    expect(requests.map((q) => q.body.max_tokens)).toEqual([8192]);
+  });
+
   it('max_tokens then a valid answer -> ok with the usage of both calls', async () => {
     const { fetchImpl } = recorder([{ body: message({ stop: 'max_tokens', text: '{' }) }, { body: message({ text: '{"kind":"rfq","confidence":1,"injection_suspected":false}' }) }]);
     const r = await new AnthropicLlm(prodEnv(), { fetch: fetchImpl }).call(call('classify', 256));

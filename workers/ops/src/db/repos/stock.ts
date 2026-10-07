@@ -128,6 +128,16 @@ export async function availableStockItems(db: Db, materialId: string): Promise<S
   });
 }
 
+/** Stock items by id, whatever their status (the check of holds on items that are no longer available). */
+export async function stockItemsByIds(db: Db, ids: readonly string[]): Promise<StockItemRow[]> {
+  if (ids.length === 0) return [];
+  return db.select<StockItemRow & Record<string, unknown>>('stock_items', {
+    columns: 'id,material_id,status,origin,width_mm,height_mm,remaining_area_mm2,remaining_quantity,created_at',
+    filters: [['id', 'in', [...ids]]],
+    limit: ids.length,
+  });
+}
+
 /** Active holds (held or committed) of a material. */
 export async function activeReservations(db: Db, materialId: string): Promise<ReservationRow[]> {
   return db.select<ReservationRow & Record<string, unknown>>('stock_reservations', {

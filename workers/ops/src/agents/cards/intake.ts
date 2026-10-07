@@ -1,6 +1,7 @@
 // Intake cards of the rfq-intake Workflow: the confirmation card (verbs confirm_sheet_metal, confirm_cnc,
-// confirm_mixed, not_rfq), its reminder, and the notices without buttons (shadow result, mail not classified as an
-// RFQ, follow-up attached to an RFQ, RFQ created).
+// confirm_mixed, not_rfq), its reminder, the follow-up card (kind reply_pick: attach_1 = attach to the matched RFQ,
+// new_rfq = handle it as a new RFQ, ignore), and the notices without buttons (shadow result, mail not classified as
+// an RFQ, follow-up attached to an RFQ, reply held while the quote agent is off, RFQ created).
 //
 // Rules
 //   - Business fields only: RFQ number, company, country, language, masked sender, number of parts, file kinds,
@@ -141,6 +142,90 @@ export function attachedCard(i: { run_id: string; site_origin: string; inbound_e
       { label: 'CAD jobs', value: String(i.cad_jobs) },
     ],
     flags: [],
+    allowed_verbs: [],
+    open_url: cardOpenUrl(i.site_origin, i.run_id, i.inbound_email_id),
+  };
+}
+
+/** Verbs of the follow-up card; attach_1 is the matched RFQ (output.candidates[0]). */
+export const FOLLOW_UP_VERBS = ['attach_1', 'new_rfq', 'ignore'] as const;
+
+const RULE_TEXT: Readonly<Record<number, string>> = { 1: 'reply to our quote mail', 2: 'reply headers of the RFQ thread', 3: 'RFQ number in the subject' };
+
+export interface FollowUpCardInput {
+  run_id: string;
+  site_origin: string;
+  inbound_email_id: string;
+  rfq_number: string | null;
+  sender_masked: string | null;
+  /** Reply attribution rule that matched (1-3). */
+  rule: number;
+  file_kinds: string[];
+  /** RFQ-file attachments (CAD, PDF, images) the attach would add. */
+  files: number;
+  reasons: string[];
+  dmarc_pass: boolean;
+  injection_suspected: boolean;
+}
+
+function followUpLines(i: FollowUpCardInput): CardV1['lines'] {
+  const lines: CardV1['lines'] = [
+    { label: 'Sender', value: i.sender_masked ? maskEmail(i.sender_masked) : 'unknown' },
+    { label: 'RFQ', value: i.rfq_number ?? 'RFQ without number' },
+    { label: 'Matched by', value: RULE_TEXT[i.rule] ?? `rule ${i.rule}` },
+    { label: 'Files', value: i.file_kinds.length ? `${i.files} (${i.file_kinds.join(', ')})` : 'none' },
+  ];
+  if (i.reasons.length) lines.push({ label: 'Why a check', value: i.reasons.map((r) => REASON_TEXT[r] ?? r).join(', ') });
+  return lines;
+}
+
+function followUpFlags(i: FollowUpCardInput): CardFlag[] {
+  const flags: CardFlag[] = [];
+  if (!i.dmarc_pass) flags.push('dmarc_fail');
+  if (i.injection_suspected) flags.push('injection_suspected');
+  if (i.reasons.includes('low_confidence')) flags.push('low_confidence');
+  return flags;
+}
+
+/** A mail that names an existing RFQ: attach it (files, CAD jobs, the open quote) only after a human confirms. */
+export function followUpCard(i: FollowUpCardInput, o: { reminder?: boolean } = {}): CardV1 {
+  return {
+    v: 1,
+    kind: 'reply_pick',
+    run_id: i.run_id,
+    title: `${o.reminder ? 'Reminder: ' : ''}Follow-up for ${i.rfq_number ?? 'an RFQ'}? · ${i.sender_masked ? maskEmail(i.sender_masked) : 'unknown sender'}`,
+    lines: followUpLines(i),
+    flags: followUpFlags(i),
+    allowed_verbs: [...FOLLOW_UP_VERBS],
+    open_url: cardOpenUrl(i.site_origin, i.run_id, i.inbound_email_id),
+  };
+}
+
+/** Shadow mode on the follow-up path: what the agent would have done; no buttons. */
+export function followUpShadowCard(i: FollowUpCardInput, needsCard: boolean): CardV1 {
+  const lines = followUpLines(i);
+  lines.push({ label: 'Shadow result', value: needsCard ? 'would ask before attaching' : 'would attach to the RFQ' });
+  return {
+    v: 1,
+    kind: 'intake',
+    run_id: i.run_id,
+    title: `Shadow: follow-up for ${i.rfq_number ?? 'an RFQ'} · ${i.sender_masked ? maskEmail(i.sender_masked) : 'unknown sender'}`,
+    lines,
+    flags: followUpFlags(i),
+    allowed_verbs: [],
+    open_url: cardOpenUrl(i.site_origin, i.run_id, i.inbound_email_id),
+  };
+}
+
+/** A reply that reached the RFQ mailbox while the quote agent is off: left for staff in the inbox; no buttons. */
+export function replyHeldCard(i: { run_id: string; site_origin: string; inbound_email_id: string; sender_email: string | null }): CardV1 {
+  return {
+    v: 1,
+    kind: 'intake',
+    run_id: i.run_id,
+    title: `Reply in the RFQ mailbox, quote agent off · ${i.sender_email ? maskEmail(i.sender_email) : 'unknown sender'}`,
+    lines: [{ label: 'Next', value: 'check it in the inbox (marked for review)' }],
+    flags: ['flag_off'],
     allowed_verbs: [],
     open_url: cardOpenUrl(i.site_origin, i.run_id, i.inbound_email_id),
   };

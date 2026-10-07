@@ -7,8 +7,12 @@
 //   - Nothing here writes a token back, logs a token or returns one beyond the caller that needs it for one tick.
 //   - Campaign replies keep the semantics of supabase/functions/check-replies/index.ts:110-140: the subscriber is
 //     found by the lower-cased sender address; replied_at is set once (only while it is null) and one
-//     marketing_events row 'replied' with {gmail_message_id, from_account} is written for that change.
+//     marketing_events row 'replied' with {gmail_message_id, from_account} is written for that change. The event
+//     insert is best effort, as there (index.ts:127-137): a failed insert is logged with the subscriber id only and
+//     the reply still counts, because replied_at is the state the campaigns read.
 
+import { formatLogLine } from '../../../../shared/src/http/log';
+import { LOG_PREFIX } from '../../env';
 import type { GmailProviderConfig } from '../../ports/index';
 import type { Db } from '../postgrest';
 
@@ -69,6 +73,10 @@ export async function recordCampaignReply(db: Db, subscriberId: string, meta: { 
     returning: 'id',
   });
   if (changed.length === 0) return false;
-  await db.insert('marketing_events', { subscriber_id: subscriberId, campaign_id: null, event_type: 'replied', metadata: meta });
+  try {
+    await db.insert('marketing_events', { subscriber_id: subscriberId, campaign_id: null, event_type: 'replied', metadata: meta });
+  } catch {
+    console.error(formatLogLine(LOG_PREFIX, 'campaign reply event not written', { subscriber_id: subscriberId }));
+  }
   return true;
 }

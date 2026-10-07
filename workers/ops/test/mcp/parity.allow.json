@@ -1,0 +1,49 @@
+{
+  "description": "Documented differences between the remote MCP port (workers/ops/src/mcp) and the local stdio server (mcp-server/src/index.ts), checked by test/mcp/parity.test.ts. Everything not listed here must be equal. remote_only_tools are the tools of the widest stage that the local server does not have (the status tool mcp_status exists only while flag mcp.remote is off).",
+  "remote_only_tools": [
+    "list_rfqs",
+    "get_rfq",
+    "list_inbound_emails",
+    "get_quote_workflow",
+    "list_pending_approvals",
+    "list_orders",
+    "get_order",
+    "get_stock_summary",
+    "list_agent_runs",
+    "search_similar_quotes",
+    "decide_approval",
+    "start_quote"
+  ],
+  "write_notice": "Changes data in Microns Hub; confirm with the user before calling.",
+  "removed_properties": {
+    "trigger_country_scan": {
+      "properties": [
+        "api_base_url"
+      ],
+      "reason": "The remote server never fetches a caller-supplied base URL; the scan is queued in-process."
+    },
+    "export_tenders_csv": {
+      "properties": [
+        "api_base_url"
+      ],
+      "reason": "The remote server never fetches a caller-supplied base URL; the export runs the ops handler in-process."
+    },
+    "trigger_funding_scan": {
+      "properties": [
+        "api_base_url"
+      ],
+      "reason": "The remote server never fetches a caller-supplied base URL; the scan is queued in-process."
+    }
+  },
+  "changed_properties": {
+    "run_saved_search": {
+      "properties": {
+        "saved_search_id": {
+          "type": "string",
+          "description": "The saved search ID from get_saved_searches"
+        }
+      },
+      "reason": "saved_searches.id is a uuid in the live schema (the local tool's number id cannot match a row)."
+    }
+  }
+}

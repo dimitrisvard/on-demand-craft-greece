@@ -4,7 +4,9 @@
 // day; no token value in any log line or agent_runs.output.
 
 import { describe, expect, it } from 'vitest';
+import { messageIdSha256, trimmedMessageId } from '../../../mail/src/headers';
 import { fromAddress, gmailPollerTick, FULL_SYNC_QUERY } from '../../src/cron/gmail-poller';
+import { DbError } from '../../src/db/postgrest';
 import type { GmailHeaders, GmailPort, SenderAccountRow } from '../../src/ports/index';
 import type { AgentEventV1 } from '../../src/queues/messages';
 import { assertNoSecretsLogged, RecordingLogger } from '../helpers/recorders';
@@ -172,6 +174,47 @@ describe('gmail poller', () => {
     h.ports.clock.set(Date.UTC(2026, 9, 6, 9, 0, 0));
     await tick(h, Date.UTC(2026, 9, 6, 9, 0, 0));
     expect(h.events.sent.filter((s) => s.body.type === 'card')).toHaveLength(2);
+  });
+
+  it('Message-ID as microns-mail stores it: a bare id is hashed and stored as received, so the same mail is never stored twice', async () => {
+    const { h, gmail } = setup();
+    const bare = ' gq-bare@example.de ';
+    gmail.messages.set('g-quote', { ...gmail.messages.get('g-quote')!, headers: headers({ message_id: bare, in_reply_to: OUT_A, from: 'erika.beispiel@example.de' }) });
+    // microns-mail hashes the trimmed header value as received (workers/mail/src/headers.ts messageIdSha256)
+    const mailSha = await messageIdSha256(trimmedMessageId(bare), new ArrayBuffer(0));
+    await tick(h);
+    const [stored] = h.ports.db.rows('inbound_emails');
+    expect(stored).toMatchObject({ message_id: 'gq-bare@example.de', message_id_sha256: mailSha, raw_r2_key: `email/${mailSha}/raw.eml` });
+
+    // the same mail already received at replies@ (row written by microns-mail): not stored or queued again
+    const { h: h2, gmail: gmail2 } = setup();
+    gmail2.messages.set('g-quote', { ...gmail2.messages.get('g-quote')!, headers: headers({ message_id: bare, in_reply_to: OUT_A, from: 'erika.beispiel@example.de' }) });
+    h2.ports.db.seed('inbound_emails', [{ tenant_id: TENANT, message_id: 'gq-bare@example.de', message_id_sha256: mailSha, mailbox: 'replies', source: 'email_routing', from_email: 'erika.beispiel@example.de', received_at: '2026-10-05T08:00:00.000Z', status: 'matched' }]);
+    await tick(h2);
+    expect(h2.ports.db.rows('inbound_emails')).toHaveLength(1);
+    expect(gmail2.calls.some((c) => c.startsWith('raw'))).toBe(false);
+    expect(h2.events.sent).toHaveLength(0);
+  });
+
+  it('campaign reply: a failed replied event insert keeps replied_at and the count (best effort, as check-replies)', async () => {
+    const { h } = setup({ flag: { enabled: true, value: { campaign_replies: true } } });
+    const db = h.ports.db as unknown as { insert: (table: string, rows: unknown, o?: unknown) => Promise<unknown[]> };
+    const insert = db.insert.bind(db);
+    db.insert = async (table, rows, o) => {
+      if (table === 'marketing_events') throw new DbError(409, '23503', 'insert or update violates a foreign key');
+      return insert(table, rows, o);
+    };
+    const logger = new RecordingLogger();
+    const stop = logger.start();
+    try {
+      await tick(h);
+    } finally {
+      stop();
+    }
+    expect(h.ports.db.rows('marketing_subscribers')[0].replied_at).toBe('2026-10-05T09:00:00.000Z');
+    expect(pollerRuns(h)[0].output).toMatchObject({ accounts: { [ACC_1]: { matched_campaign: 1, matched_quote: 1, errors: [] } } });
+    expect(logger.lines.join('\n')).toContain('campaign reply event not written');
+    expect(logger.lines.join('\n')).not.toContain('lead@example.org');
   });
 
   it('campaign path only (agent.quote off, campaign_replies on): quote replies are not stored', async () => {

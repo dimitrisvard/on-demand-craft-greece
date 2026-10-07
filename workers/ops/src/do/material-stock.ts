@@ -4,7 +4,9 @@
 //
 // Rules
 //   - reserve is idempotent per order item; holds expire after 14 days (daily alarm releases them as 'expired').
-//   - Remaining stock is re-read on every call; holds above the remaining stock raise a card.
+//   - Remaining stock is re-read on every call; holds above the remaining stock raise a card. The check covers every
+//     stock item that carries an active hold, whatever its status (a held item that was used up or taken out of
+//     stock is held above its remaining stock), plus the available ones.
 //   - Calls of one object run one after the other (an in-memory queue spans the database round trips), so two
 //     reserve calls never both count the same remaining stock.
 //   - Availability of a stock item = remaining_area_mm2 (or remaining_quantity) minus its active holds (held or
@@ -37,6 +39,7 @@ import {
   stockCommit,
   stockHold,
   stockObjectName,
+  stockItemsByIds,
   stockRelease,
   type HoldInput,
   type ReservationRow,
@@ -296,10 +299,19 @@ export class MaterialStock extends DurableObject<OpsEnv> {
     });
   }
 
+  /** Available stock items plus every other item that carries an active hold. */
+  private async checkInputs(db: Db, materialId: string): Promise<{ items: StockItemRow[]; holds: ReservationRow[] }> {
+    const [available, holds] = await Promise.all([availableStockItems(db, materialId), activeReservations(db, materialId)]);
+    const known = new Set(available.map((i) => i.id));
+    const missing = [...new Set(holds.map((h) => h.stock_item_id).filter((id): id is string => !!id && !known.has(id)))];
+    const others = (await stockItemsByIds(db, missing)).filter((i) => i.material_id === materialId);
+    return { items: [...available, ...others], holds };
+  }
+
   async check(): Promise<StockCheck> {
     return this.serial(async () => {
       const { material_id } = this.names();
-      const [items, holds] = await Promise.all([availableStockItems(this.db(), material_id), activeReservations(this.db(), material_id)]);
+      const { items, holds } = await this.checkInputs(this.db(), material_id);
       return stockCheckOf(material_id, items, holds);
     });
   }
@@ -316,7 +328,7 @@ export class MaterialStock extends DurableObject<OpsEnv> {
         await stockRelease(db, id, 'expired');
         this.record(id, 'released', []);
       }
-      const [items, holds] = await Promise.all([availableStockItems(db, material_id), activeReservations(db, material_id)]);
+      const { items, holds } = await this.checkInputs(db, material_id);
       const check = stockCheckOf(material_id, items, holds);
       if (orderItems.length > 0 || check.over_held.length > 0) await this.notice(tenant_id, material_id, orderItems.length, check.over_held.length, now);
       if (holds.some((h) => h.status === 'held')) await this.ctx.storage.setAlarm(now.getTime() + ALARM_INTERVAL_MS);

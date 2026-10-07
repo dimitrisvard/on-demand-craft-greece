@@ -148,6 +148,33 @@ describe('stuck CAD jobs', () => {
     ]);
     expect(h.ports.db.rows('agent_runs', ['agent', 'eq', 'cad'])[0]).toMatchObject({ status: 'failed', error: 'stuck' });
   });
+
+  it('an RfqThread call that fails for one job is logged; the next job is still dead-lettered and told, and its run closed', async () => {
+    const h = setup();
+    const rfq = id('0a', 1);
+    const job = (n: number, age: number) => ({ id: id('7a', n), rfq_id: rfq, idempotency_key: `${'a'.repeat(64)}:analyse:${String(n).repeat(64).slice(0, 64)}`, job_type: 'analyse', input_r2_key: `rfq/${rfq}/f${n}.step`, input_sha256: 'a'.repeat(64), status: 'running', updated_at: ago(age), tenant_id: TENANT });
+    h.ports.db.seed('cad_jobs', [job(1, 50 * MIN), job(2, 40 * MIN)]);
+    h.ports.db.seed('agent_runs', [
+      { agent: 'cad', trigger: 'queue', idempotency_key: id('7a', 1), status: 'running' },
+      { agent: 'cad', trigger: 'queue', idempotency_key: id('7a', 2), status: 'running' },
+    ]);
+    const told: string[] = [];
+    h.env.RFQ_THREAD = {
+      idFromName: (name: string) => name,
+      get: () => ({
+        cadJobFinal: async (jobId: string) => {
+          if (jobId === id('7a', 1)) throw new Error('durable object reset');
+          told.push(jobId);
+        },
+      }),
+    } as unknown as typeof h.env.RFQ_THREAD;
+    const report = await dispatcherTick(h.env, controller, { ports: h.ports });
+    expect(report.cad_dead_lettered).toBe(2);
+    expect(report.errors).toEqual([`stuck_cad:${id('7a', 1)}`]);
+    expect(told).toEqual([id('7a', 2)]);
+    expect(h.ports.db.rows('cad_jobs').map((j) => j.status)).toEqual(['dead_letter', 'dead_letter']);
+    expect(h.ports.db.rows('agent_runs', ['agent', 'eq', 'cad']).map((r) => r.status)).toEqual(['failed', 'failed']);
+  });
 });
 
 describe('isolation', () => {

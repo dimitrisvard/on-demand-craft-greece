@@ -1,0 +1,2 @@
+# Output of `npm run build` (tsc); the server is built locally, never committed.
+build/

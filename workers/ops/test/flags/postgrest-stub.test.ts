@@ -9,7 +9,7 @@ import { DbError, PostgrestDb } from '../../src/db/postgrest';
 import { DEFAULT_TENANT_ID } from '../../src/db/repos/feature-flags';
 import type { OpsEnv } from '../../src/env';
 import { FakeKv } from './table-db';
-import { checkSeedCases, runScenario, VECTORS, type VectorWorld } from './vectors';
+import { checkSeedCases, runScenario, seedCaseKv, VECTORS, type VectorWorld } from './vectors';
 
 interface StubInstance {
   tables: Record<string, Array<Record<string, unknown>>>;
@@ -65,7 +65,7 @@ const rest = (path: string, init: RequestInit & { headers?: Record<string, strin
 
 describe('PostgrestDb over the mini-PostgREST: shared KV vectors end to end', () => {
   it('seed rules', async () => {
-    const w = world(Object.fromEntries(VECTORS.seed_cases.filter((c) => c.kv !== null).map((c) => [c.key, c.kv as string])));
+    const w = world(seedCaseKv());
     await checkSeedCases(w, T0 + 60_000);
   });
 
@@ -108,6 +108,41 @@ describe('mini-PostgREST: REST behaviours', () => {
     const bad = await rest('/agent_runs?colour=eq.red');
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ code: '42703' });
+  });
+
+  it('is.true / is.false match only those booleans; neq, not.eq and not.in never match NULL, as in SQL', async () => {
+    server.stub.seed({ tables: { probe_rows: [
+      { id: 1, b: true, s: 'a' }, { id: 2, b: false, s: 'b' }, { id: 3, b: null, s: null }, { id: 4, b: 1, s: 'a' },
+    ] } });
+    const ids = async (q: string) => ((await (await rest(`/probe_rows?select=id&order=id${q}`)).json()) as Array<{ id: number }>).map((r) => r.id);
+    expect(await ids('&b=is.true')).toEqual([1]);
+    expect(await ids('&b=is.false')).toEqual([2]);
+    expect(await ids('&b=is.null')).toEqual([3]);
+    expect(await ids('&b=not.is.null')).toEqual([1, 2, 4]);
+    expect(await ids('&s=neq.a')).toEqual([2]);
+    expect(await ids('&s=not.eq.a')).toEqual([2]);
+    expect(await ids('&s=not.in.(a,c)')).toEqual([2]);
+  });
+
+  it('the Range header selects rows by offset and inclusive end, with a Content-Range answer', async () => {
+    server.stub.seed({ tables: { probe_rows: [1, 2, 3, 4, 5].map((id) => ({ id })) } });
+    const res = await rest('/probe_rows?select=id&order=id', { headers: { range: '1-2' } });
+    expect(await res.json()).toEqual([{ id: 2 }, { id: 3 }]);
+    expect(res.headers.get('content-range')).toBe('1-2/*');
+    const open = await rest('/probe_rows?select=id&order=id', { headers: { range: '3-' } });
+    expect(await open.json()).toEqual([{ id: 4 }, { id: 5 }]);
+  });
+
+  it('an RPC asked for a single object answers that object, or 406 PGRST116 when it returns no row or several', async () => {
+    const accept = { accept: 'application/vnd.pgrst.object+json', 'content-type': 'application/json' };
+    const one = await rest('/rpc/agent_run_begin', { method: 'POST', headers: accept, body: JSON.stringify({ p_agent: 'eval', p_trigger: 'manual', p_idempotency_key: 'obj-1' }) });
+    expect(one.status).toBe(200);
+    expect(await one.json()).toEqual({ run_id: expect.stringMatching(/^[0-9a-f-]{36}$/), created: true, run_status: 'running' });
+    const none = await rest('/rpc/agent_staff_for_email', { method: 'POST', headers: accept, body: JSON.stringify({ p_email: 'nobody@example.com' }) });
+    expect(none.status).toBe(406);
+    expect(await none.json()).toMatchObject({ code: 'PGRST116' });
+    const many = await rest('/rpc/feature_flags_sync_batch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(Array.isArray(await many.json())).toBe(true);
   });
 
   it('array filters: ov and cs on text[] columns (reply lookup by outbound Message-ID)', async () => {

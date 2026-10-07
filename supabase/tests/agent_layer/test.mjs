@@ -220,7 +220,8 @@ function portalTotal(parts, shipping) {
 // ---- shared KV vectors (also run by workers/ops/test/flags against microns-ops' flagsSyncTick) ---------------
 const FLAG_VECTORS = JSON.parse(fs.readFileSync(path.join(HERE, 'vectors', 'flags-sync.json'), 'utf8'));
 const vsub = (s) => (typeof s === 'string'
-  ? s.replaceAll('$admin', FLAG_VECTORS.admin_user).replaceAll('$other_tenant', FLAG_VECTORS.other_tenant) : s);
+  ? s.replaceAll('$admin', FLAG_VECTORS.admin_user).replaceAll('$other_tenant', FLAG_VECTORS.other_tenant)
+    .replace(/\$x(\d+)/g, (_m, n) => 'x'.repeat(Number(n))) : s);
 const vsubAll = (o) => (Array.isArray(o) ? o.map(vsubAll)
   : o && typeof o === 'object' ? Object.fromEntries(Object.entries(o).map(([k, v]) => [vsub(k), vsubAll(v)])) : vsub(o));
 function sameJson(a, b) {
@@ -253,20 +254,27 @@ async function runFlagVectors(step, check) {
     await d.exec(UP);
     return d;
   };
-  // Seed rules: one tick over the 13 seeded rows, one KV state per key.
+  // Seed rules: one tick over the 13 seeded rows plus the pending rows of seed_rows, one KV state per key.
   const d1 = await fresh();
   const svc1 = (sql, params) => as(d1, who.service, async () => (await d1.q(sql, params)).rows);
   const cases = vsubAll(FLAG_VECTORS.seed_cases);
-  const kv1 = new FakeKV(Object.fromEntries(cases.filter((c) => c.kv !== null).map((c) => [c.key, c.kv])));
+  for (const r of vsubAll(FLAG_VECTORS.seed_rows)) {
+    await svc1(`insert into public.feature_flags (key, tenant_id, value, kv_seed_pending) values ($1, $2, $3::jsonb, true)`,
+      [r.key, r.tenant, JSON.stringify(r.value)]);
+  }
+  const kvKeyOf = (c) => (c.tenant && c.tenant !== T1 ? `t:${c.tenant}:${c.key}` : c.key);
+  const kv1 = new FakeKV(Object.fromEntries(cases.filter((c) => c.kv !== null).map((c) => [kvKeyOf(c), c.kv])));
   const t = await flagsSyncTick(svc1, kv1);
+  check(t.seed_failed.length === 0, 'seed vectors: no seed import call fails', t.seed_failed);
   for (const c of cases) {
+    const k = kvKeyOf(c);
     const bucket = { imported: t.imported, absent: t.absent, invalid: t.invalid }[c.result];
-    check(bucket.includes(c.key), `seed vector "${c.name}": ${c.result}`, t);
-    const [row] = await svc1(`select enabled, value, kv_seed_pending p from public.feature_flags where key = $1 and tenant_id = $2`, [c.key, T1]);
+    check(bucket.includes(k), `seed vector "${c.name}": ${c.result}`, t);
+    const [row] = await svc1(`select enabled, value, kv_seed_pending p from public.feature_flags where key = $1 and tenant_id = $2`, [c.key, c.tenant ?? T1]);
     check(row.enabled === c.row.enabled && sameJson(row.value, c.row.value), `seed vector "${c.name}": row`, row);
     check(row.p === (c.result === 'invalid'), `seed vector "${c.name}": pending only when invalid`, row);
-    if ('kv_after' in c) check(kvMismatch(kv1.map.get(c.key), c.kv_after) === null, `seed vector "${c.name}": KV`, kvMismatch(kv1.map.get(c.key), c.kv_after));
-    else check(kv1.map.get(c.key) === c.kv, `seed vector "${c.name}": KV left as it was`, kv1.map.get(c.key));
+    if ('kv_after' in c) check(kvMismatch(kv1.map.get(k), c.kv_after) === null, `seed vector "${c.name}": KV`, kvMismatch(kv1.map.get(k), c.kv_after));
+    else check(kv1.map.get(k) === c.kv, `seed vector "${c.name}": KV left as it was`, kv1.map.get(k));
   }
   await d1.close();
 
@@ -288,9 +296,18 @@ async function runFlagVectors(step, check) {
       } else if (s.op === 'kv_fail_next') {
         kv.failNext.add(s.key);
       } else if (s.op === 'race') {
-        await svc(`update public.feature_flags set ${setSql(s.first, 2)} where key = $1`, [s.key, ...Object.values(s.first)]);
-        const [stale] = (await svc(`select * from public.feature_flags_sync_batch()`)).filter((r) => r.flag_key === s.key);
-        await svc(`update public.feature_flags set ${setSql(s.then, 2)} where key = $1`, [s.key, ...Object.values(s.then)]);
+        const batchRow = async () => (await svc(`select * from public.feature_flags_sync_batch()`)).find((r) => r.flag_key === s.key && r.flag_tenant_id === T1);
+        await svc(`update public.feature_flags set ${setSql(s.first, 3)} where key = $1 and tenant_id = $2`, [s.key, T1, ...Object.values(s.first)]);
+        const stale = await batchRow();
+        await svc(`update public.feature_flags set ${setSql(s.then, 3)} where key = $1 and tenant_id = $2`, [s.key, T1, ...Object.values(s.then)]);
+        if (s.newer_first) {
+          // The newer rev is written and marked first (e.g. the edit's write-through); the older put lands after it.
+          const newer = await batchRow();
+          check(Number(newer.rev) > Number(stale.rev), `${label}: newer rev in the batch`, newer);
+          await kv.put(newer.kv_key, JSON.stringify(newer.kv_value));
+          const [{ m: n }] = await svc(`select public.feature_flags_mark_synced($1, $2, $3) m`, [newer.flag_key, newer.flag_tenant_id, newer.rev]);
+          check(n === true, `${label}: newer rev marked`, n);
+        }
         await kv.put(stale.kv_key, JSON.stringify(stale.kv_value));
         const [{ m }] = await svc(`select public.feature_flags_mark_synced($1, $2, $3) m`, [stale.flag_key, stale.flag_tenant_id, stale.rev]);
         check(m === s.expect_mark, `${label}: mark_synced answers ${s.expect_mark}`, m);
@@ -1235,7 +1252,11 @@ async function runParityEngine(engine, scalarRpcs, t0) {
         continue;
       }
       if (s.update) {
-        await engine.update(s.update.table, s.update.where, resolveValue(s.update.set, engine.now()), s.update.set_from);
+        const run = () => engine.update(s.update.table, s.update.where, resolveValue(s.update.set, engine.now()), s.update.set_from);
+        if (!s.update.compare) { await run(); continue; }
+        let u = 'ok';
+        try { await run(); } catch (e) { u = { error: { code: e.code ?? null, message: String(e.message) } }; }
+        results.push({ update: s.update.table, result: u });
         continue;
       }
       let r;
@@ -1269,7 +1290,7 @@ async function rpcParity() {
       const a = sql[c.name];
       const b = mem[c.name];
       a.results.forEach((x, i) => {
-        ok(canon(x) === canon(b.results[i]), `${c.name}: step ${i + 1} ${x.rpc} result`, { sql: x.result, memory: b.results[i].result });
+        ok(canon(x) === canon(b.results[i]), `${c.name}: step ${i + 1} ${x.rpc ?? `update ${x.update}`} result`, { sql: x.result, memory: b.results[i].result });
       });
       for (const t of c.tables) {
         const missing = a.tables[t].filter((x) => !b.tables[t].includes(x));

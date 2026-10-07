@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { FakeStep } from '../helpers/fake-step';
 import {
   addressesIn,
+  DecidingStep,
   harness,
   ITEM_BRACKET,
   ITEM_COVER,
@@ -22,6 +23,7 @@ import {
   PARTNER_CNC_EMAIL,
   PARTNER_LASER,
   PARTNER_LASER_EMAIL,
+  NOTES_ANSWER,
   REORDER_ANSWER,
   runCase,
   runOf,
@@ -207,6 +209,70 @@ describe('post-order: modes, flags and failures', () => {
     next.sendEvent('handoff-approved', { verb: 'hold', actor: 'user:11111111-1111-4111-8111-111111111111', channel: 'dashboard' });
     const again = await runCase(h, { step: next });
     expect(again.result.outcome).toBe('held');
+  });
+
+  it('daily cap: above value.max_runs_per_day the run closes skipped (daily_cap) before any LLM call, one notice', async () => {
+    const h = harness({ flag: { enabled: true, value: { mode: 'assist', max_runs_per_day: 1 } } });
+    // one post-order run already today (UTC)
+    h.ports.db.seed('agent_runs', [{ agent: 'post_order', trigger: 'queue', idempotency_key: '4f000000-0000-4000-8000-00000000000f', status: 'succeeded', finished_at: h.ports.clock.now().toISOString(), started_at: h.ports.clock.now().toISOString() }]);
+    const { result } = await runCase(h, { step: new FakeStep() });
+    expect(result.outcome).toBe('daily_cap');
+    expect(runOf(h)).toMatchObject({ status: 'skipped', error: 'daily_cap', llm_calls: 0, approval_token_sha256: null });
+    expect(h.llm.users).toHaveLength(0);
+    expect(h.bucket.objects.has(`orders/${ORDER}/traveler.pdf`)).toBe(false);
+    expect(holds(h)).toHaveLength(0);
+    expect(h.ports.telegram.texts).toHaveLength(1);
+    expect(h.ports.telegram.texts[0].text).toContain('post_order');
+  });
+
+  it('a gateway 429 parks the run (budget) without a token; agent-resumed runs the notes step again and the run goes on', async () => {
+    const h = harness();
+    h.llm.answer('post_order.traveller_notes@v1', { status: 429, body: { type: 'error', error: { type: 'rate_limit_error', message: 'limit' } } });
+    const step = new DecidingStep();
+    let parked: Record<string, unknown> | undefined;
+    step.onWait = (type) => {
+      if (type !== 'agent-resumed') return;
+      parked = { ...runOf(h) };
+      h.llm.answer('post_order.traveller_notes@v1', NOTES_ANSWER);
+      step.sendEvent('agent-resumed', { run_id: String(runOf(h).id) });
+    };
+    const { result } = await runCase(h, { step, decisions: { 'handoff-approved': ['hold'] } });
+    expect(parked).toMatchObject({ status: 'waiting_human', parked_reason: 'budget', approval_token_sha256: null });
+    expect(result.outcome).toBe('held');
+    expect(step.trace()).toEqual(expect.arrayContaining(['traveller-notes:ok', 'park-traveller-notes:ok', 'resumed-traveller-notes:ok', 'traveller-notes-2:ok']));
+    expect(runOf(h)).toMatchObject({ status: 'succeeded', parked_reason: null, llm_calls: 1 });
+  });
+
+  it('a park without agent-resumed for 7 days closes the run cancelled with the park reason; nothing is held or sent', async () => {
+    const h = harness({ flag: { enabled: false } });
+    const { result } = await runCase(h, { step: new FakeStep() });
+    expect(result.outcome).toBe('cancelled');
+    expect(runOf(h)).toMatchObject({ status: 'cancelled', error: 'flag_off', parked_reason: null, approval_token_sha256: null });
+    expect(runOf(h).finished_at).toBeTruthy();
+    expect(holds(h)).toHaveLength(0);
+    expect(h.ports.mailer.sent).toHaveLength(0);
+  });
+
+  it('the flag is read again before the reorder draft: switched off during the hand-off wait -> parked flag_off, no draft until resumed', async () => {
+    const h = harness({ sheet: [500, 500] });
+    const step = new DecidingStep();
+    let draftsWhileParked = -1;
+    step.onWait = (type) => {
+      if (type !== 'agent-resumed') return;
+      draftsWhileParked = h.llm.users.filter((u) => u.prompt === 'post_order.reorder_draft@v1').length;
+      expect(runOf(h)).toMatchObject({ status: 'waiting_human', parked_reason: 'flag_off' });
+      h.kv.setJson('agent.post_order', { enabled: true, value: { mode: 'assist' } });
+      step.sendEvent('agent-resumed', { run_id: String(runOf(h).id) });
+    };
+    const { result } = await runCase(h, {
+      step,
+      decisions: { 'handoff-approved': ['hold'], 'reorder-approved': ['dismiss'] },
+      before: { 'handoff-approved:hold': (x) => x.kv.setJson('agent.post_order', { enabled: false }) },
+    });
+    expect(result.outcome).toBe('held');
+    expect(draftsWhileParked).toBe(0);
+    expect(step.trace()).toEqual(expect.arrayContaining(['flag-reorder:ok', 'park-flag-reorder:ok', 'resumed-flag-reorder:ok', 'flag-reorder-2:ok', 'reorder-draft:ok']));
+    expect(runOf(h)).toMatchObject({ status: 'succeeded', output: { reorder: 'dismissed' } });
   });
 
   it('invalid params are refused before anything runs', async () => {

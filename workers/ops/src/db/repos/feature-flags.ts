@@ -7,8 +7,9 @@
 //     KV write exactly when it is not waiting for the seed import and kv_synced_rev differs from rev.
 //   - KV key: the flag key for the default tenant, 't:<tenant_id>:<key>' otherwise. KV value:
 //     {"enabled", "value", "updated_at", "rev"} plus "mode" when value.mode is set.
-//   - A row is marked synced only after its KV put succeeded, and only for the rev that was put; a row that changed
-//     in between keeps its newer rev unsynced and the next tick writes it.
+//   - A row is marked synced only after its KV put succeeded, and only for the rev that was put. When the row changed
+//     in between, mark_synced answers false and leaves the row unsynced: puts of one key land in any order, so the
+//     older put may have landed after a newer one, and the next tick writes the current rev.
 //   - Flag rows are never deleted (the table refuses DELETE); a flag is retired with enabled = false.
 
 import type { Db } from '../postgrest';
@@ -135,9 +136,49 @@ export async function syncBatch(db: Db): Promise<SyncBatchRow[]> {
   return db.rpc<SyncBatchRow[]>('feature_flags_sync_batch', {});
 }
 
-/** rpc/feature_flags_mark_synced; false when the row's rev moved on since `rev` was put. */
+/**
+ * rpc/feature_flags_mark_synced; false when the row's rev moved on since `rev` was put (the function then leaves the
+ * row unsynced, so the next tick writes the current rev).
+ */
 export async function markSynced(db: Db, key: string, tenantId: string, rev: number): Promise<boolean> {
   return (await db.rpc<boolean>('feature_flags_mark_synced', { p_key: key, p_tenant_id: tenantId, p_rev: rev })) === true;
+}
+
+/** Outcome of one KV write: put and marked; put refused (left for the next tick); put, but the row moved on. */
+export type PutOutcome = 'written' | 'put_failed' | 'stale';
+
+/** One revision to write: the row's key and tenant, its KV key and record, and the rev the record carries. */
+export interface KvWrite {
+  key: string;
+  tenant_id: string;
+  kv_key: string;
+  kv_value: FlagKvRecord;
+  rev: number;
+}
+
+/** FLAGS.put of one record, then rpc/feature_flags_mark_synced, only after the put succeeded. */
+export async function putAndMark(db: Db, kv: Pick<KVNamespace, 'put'>, w: KvWrite): Promise<PutOutcome> {
+  try {
+    await kv.put(w.kv_key, JSON.stringify(w.kv_value));
+  } catch {
+    return 'put_failed';
+  }
+  return (await markSynced(db, w.key, w.tenant_id, w.rev)) ? 'written' : 'stale';
+}
+
+/** The KV key and record of a row, from rpc/feature_flags_kv_key and rpc/feature_flags_kv_value. */
+export async function kvWriteOf(
+  db: Db,
+  row: Pick<FeatureFlagRow, 'key' | 'tenant_id' | 'enabled' | 'value' | 'updated_at' | 'rev'>,
+): Promise<KvWrite> {
+  const kvKey = await db.rpc<string>('feature_flags_kv_key', { p_key: row.key, p_tenant_id: row.tenant_id });
+  const kvValue = await db.rpc<FlagKvRecord>('feature_flags_kv_value', {
+    p_enabled: row.enabled,
+    p_value: row.value,
+    p_updated_at: row.updated_at,
+    p_rev: row.rev,
+  });
+  return { key: row.key, tenant_id: row.tenant_id, kv_key: kvKey, kv_value: kvValue, rev: Number(row.rev) };
 }
 
 /**
@@ -161,25 +202,13 @@ export async function updateFlagIfRev(
 
 /**
  * Write-through of an edited row: rpc/feature_flags_kv_key, rpc/feature_flags_kv_value, KV put, rpc/feature_flags_
- * mark_synced, in that order. 'pending' when the put failed or the row changed meanwhile; the every-minute
- * flags-sync tick then converges.
+ * mark_synced, in that order. 'pending' when the put failed or the row changed meanwhile (the row is then unsynced);
+ * the every-minute flags-sync tick then converges.
  */
 export async function writeThrough(
   db: Db,
   kv: Pick<KVNamespace, 'put'>,
   row: Pick<FeatureFlagRow, 'key' | 'tenant_id' | 'enabled' | 'value' | 'updated_at' | 'rev'>,
 ): Promise<'written' | 'pending'> {
-  const key = await db.rpc<string>('feature_flags_kv_key', { p_key: row.key, p_tenant_id: row.tenant_id });
-  const value = await db.rpc<FlagKvRecord>('feature_flags_kv_value', {
-    p_enabled: row.enabled,
-    p_value: row.value,
-    p_updated_at: row.updated_at,
-    p_rev: row.rev,
-  });
-  try {
-    await kv.put(key, JSON.stringify(value));
-  } catch {
-    return 'pending';
-  }
-  return (await markSynced(db, row.key, row.tenant_id, row.rev)) ? 'written' : 'pending';
+  return (await putAndMark(db, kv, await kvWriteOf(db, row))) === 'written' ? 'written' : 'pending';
 }

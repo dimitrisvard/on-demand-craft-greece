@@ -11,9 +11,11 @@ import { sha256hex } from '../../src/agents/ids';
 import {
   EMPTY_USAGE,
   addUsage,
+  DEFAULT_MAX_RUNS_PER_DAY,
   applyDailyCap,
   checkpointRun,
   closeRun,
+  dailyCap,
   dailyCapReached,
   failRun,
   openRun,
@@ -228,19 +230,20 @@ describe('waitWithReminder through FakeStep', () => {
     expect(JSON.stringify([...step.cache.values()])).not.toContain(ports.telegram.cards[1].token as string);
   });
 
-  it('second timeout -> onTimeout and { timedOut: true }; a replay reuses the reminder (no second card)', async () => {
+  it('second timeout -> onTimeout and { timedOut: true }; a replay reuses the reminder (no further card)', async () => {
     const { env, ports, db, step, card } = waitSetup();
     const run = await open(db);
+    await request(env, ports, { run_id: run.run_id, card: card() });
     const onTimeout = vi.fn(async () => {});
     const start = step.now;
     const result = await waitWithReminder(step, { run_id: run.run_id, type: 'handoff-approved', first: '7 days', second: '7 days', card, onTimeout }, { env, ports });
     expect(result).toEqual({ timedOut: true });
     expect(onTimeout).toHaveBeenCalledTimes(1);
     expect(step.now - start).toBe(14 * 86_400_000);
-    expect(ports.telegram.cards).toHaveLength(1);
+    expect(ports.telegram.cards).toHaveLength(2);
     const replay = step.replay();
     await waitWithReminder(replay, { run_id: run.run_id, type: 'handoff-approved', first: '7 days', second: '7 days', card, onTimeout }, { env, ports });
-    expect(ports.telegram.cards).toHaveLength(1);
+    expect(ports.telegram.cards).toHaveLength(2);
     expect(replay.trace()).toContain('remind-handoff-approved:cached');
   });
 
@@ -268,6 +271,18 @@ describe('daily cap (flood control)', () => {
     expect(await dailyCapReached(db, 'quote', flag({ max_runs_per_day: 1 }), now)).toBe(false);
     const selects = db.calls.filter((c) => c.method === 'select' && c.target === 'agent_runs');
     expect(selects.length).toBeGreaterThan(0);
+  });
+
+  it('without a valid max_runs_per_day the cap is 200: reached at the 201st run of the UTC day, not at the 200th', async () => {
+    expect(DEFAULT_MAX_RUNS_PER_DAY).toBe(200);
+    for (const value of [{}, { max_runs_per_day: 0 }, { max_runs_per_day: -3 }, { max_runs_per_day: 2.5 }, { max_runs_per_day: '50' }]) expect(dailyCap(flag(value))).toBe(200);
+    expect(dailyCap(flag({ max_runs_per_day: 7 }))).toBe(7);
+    const { db } = setup();
+    const now = new Date('2026-10-05T12:00:00Z');
+    await seedRuns(db, 200, '2026-10-05T01:00:00Z');
+    expect(await dailyCapReached(db, 'rfq_intake', flag(), now)).toBe(false);
+    await seedRuns(db, 1, '2026-10-05T02:00:00Z');
+    expect(await dailyCapReached(db, 'rfq_intake', flag(), now)).toBe(true);
   });
 
   it('applyDailyCap closes the run skipped/daily_cap without LLM calls and sends one notice per day', async () => {

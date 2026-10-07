@@ -1,7 +1,9 @@
 // K-2 decide(): both bodies (relay token + code, dashboard hash + verb), a hash from the relay channel, verb not
 // allowed, double claim -> already_decided, run_id mismatch, every outcome kind (event_sent, terminated, restarted,
 // dismissed), edits validation, the failure card (rty -> restart from the failed step once, dis -> failed,
-// restart error -> restart_failed), cards edited for every channel, and no token or hash in any log line.
+// restart error -> restart_failed), cards edited for every channel, notes without HTML, a decision whose step 5
+// fails leaves the run waiting on the same token (failure cards keep parked_reason 'failed'), and no token or hash
+// in any log line.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { request } from '../../src/agents/approval';
@@ -72,6 +74,15 @@ describe('input rules', () => {
     expect(await decide(env, ports, { ...dash(w.runId, w.hash, 'dismiss'), actor: 'someone@example.com' })).toEqual({ ok: false, error: 'bad_request' });
     expect(await decide(env, ports, { ...relay(w.token, 'dis'), verb: 'dismiss' })).toEqual({ ok: false, error: 'bad_request' });
     expect(runRow(w.runId).status).toBe('waiting_human');
+  });
+
+  it('a note with HTML or above 500 characters -> bad_request, before any claim', async () => {
+    const w = await waiting({ kind: 'test', allowed: ['dismiss'] });
+    for (const note of ['ok <b>now</b>', '<script>x</script>', 'see </i>', 'n'.repeat(501)]) {
+      expect(await decide(env, ports, dash(w.runId, w.hash, 'dismiss', { note }))).toEqual({ ok: false, error: 'bad_request' });
+    }
+    expect(ports.db.calls.filter((c) => c.target === 'agent_run_claim_approval')).toHaveLength(0);
+    expect(await decide(env, ports, dash(w.runId, w.hash, 'dismiss', { note: 'price 5 < 6 is fine' }))).toMatchObject({ ok: true });
   });
 
   it('unknown hash -> already_decided; run_id of another run -> not_found', async () => {
@@ -198,6 +209,71 @@ describe('outcomes', () => {
   it('mcp channel decides with a hash and a verb like the dashboard', async () => {
     const w = await waiting({ kind: 'test', allowed: ['dismiss'] });
     expect(await decide(env, ports, { channel: 'mcp', actor: `user:${UID}`, token_sha256: w.hash, verb: 'dismiss' })).toMatchObject({ ok: true, result: { outcome: 'dismissed' } });
+  });
+});
+
+describe('a decision that cannot be carried out leaves the card decidable', () => {
+  it('Workflow event send fails -> the error is thrown, the run waits on the same token again, the card is not edited; a retry is accepted once', async () => {
+    const instance = (env.QUOTE as unknown as FakeWorkflow).ensure(QUOTE_INSTANCE);
+    const w = await waiting({ kind: 'quote', allowed: ['approve', 'reject'], instance: QUOTE_INSTANCE, output: { line_count: 2 } });
+    instance.failures.set('sendEvent', new Error('transient'));
+    await expect(decide(env, ports, dash(w.runId, w.hash, 'approve'))).rejects.toThrow('transient');
+    expect(runRow(w.runId)).toMatchObject({ status: 'waiting_human', approval_token_sha256: w.hash, parked_reason: null, human_action: null, finished_at: null });
+    expect(ports.telegram.edits).toHaveLength(0);
+    expect(logger.lines.some((l) => l.includes('decision not applied') && l.includes(w.runId))).toBe(true);
+    expect(await decide(env, ports, relay(w.token, 'ok'))).toMatchObject({ ok: true, result: { outcome: 'event_sent' } });
+    expect(instance.calls.filter((c) => c.method === 'sendEvent')).toHaveLength(1);
+    expect(runRow(w.runId)).toMatchObject({ status: 'running', approval_token_sha256: null, human_action: { channel: 'telegram' } });
+    expect(await decide(env, ports, relay(w.token, 'ok'))).toEqual({ ok: false, error: 'already_decided' });
+  });
+
+  it('agent-events send fails for a consumer card -> the run waits again; the retry sends one message', async () => {
+    const queue = env.AGENT_EVENTS as unknown as FakeQueue;
+    const w = await waiting({ kind: 'reply_pick', allowed: ['attach_1', 'new_rfq', 'ignore'], output: { candidates: [{ rfq_number: 'RFQ-1' }] } });
+    queue.failWith = new Error('queue unavailable');
+    await expect(decide(env, ports, relay(w.token, 'new'))).rejects.toThrow('queue unavailable');
+    expect(runRow(w.runId)).toMatchObject({ status: 'waiting_human', approval_token_sha256: w.hash, human_action: null });
+    queue.failWith = undefined;
+    expect(await decide(env, ports, relay(w.token, 'new'))).toMatchObject({ ok: true, result: { outcome: 'event_sent', verb: 'new_rfq' } });
+    expect(queue.sent).toHaveLength(1);
+  });
+
+  it('a failure card whose dismissal cannot be written waits again with parked_reason failed; the retry closes it', async () => {
+    const run = await openRun(ports.db, { agent: 'rfq_intake', trigger: 'workflow', idempotency_key: 'fail-write', workflow_name: 'rfq-intake', workflow_instance_id: INTAKE_INSTANCE });
+    await failRun(env, ports, run.run_id, { error: 'schema', failed_step: 'extract', restartable: true }, { ...EMPTY_USAGE, by_step: {} });
+    const token = ports.telegram.cards.at(-1)?.token as string;
+    const hash = await sha256hex(token);
+    secrets.push(token, hash);
+    const update = ports.db.update.bind(ports.db);
+    let failOnce = true;
+    ports.db.update = (async (table: string, patch: Record<string, unknown>, o: never) => {
+      if (failOnce && table === 'agent_runs' && patch.status === 'failed') {
+        failOnce = false;
+        throw new Error('database unavailable');
+      }
+      return update(table, patch, o);
+    }) as typeof ports.db.update;
+    await expect(decide(env, ports, relay(token, 'dis'))).rejects.toThrow('database unavailable');
+    expect(runRow(run.run_id)).toMatchObject({ status: 'waiting_human', parked_reason: 'failed', approval_token_sha256: hash, error: 'schema' });
+    expect(await decide(env, ports, relay(token, 'dis'))).toMatchObject({ ok: true, result: { outcome: 'dismissed' } });
+    expect(runRow(run.run_id)).toMatchObject({ status: 'failed', parked_reason: null, approval_token_sha256: null });
+  });
+
+  it('a run another decision already moved on is not reopened', async () => {
+    const instance = (env.QUOTE as unknown as FakeWorkflow).ensure(QUOTE_INSTANCE);
+    const w = await waiting({ kind: 'quote', allowed: ['approve', 'reject'], instance: QUOTE_INSTANCE });
+    // The Workflow continued and asked for a new card before the failed send returned.
+    instance.sendEvent = async () => {
+      await request(env, ports, { run_id: w.runId, card: card('quote', ['approve'], w.runId) });
+      secrets.push(ports.telegram.cards.at(-1)?.token as string);
+      throw new Error('transient');
+    };
+    await expect(decide(env, ports, dash(w.runId, w.hash, 'approve'))).rejects.toThrow('transient');
+    const after = runRow(w.runId);
+    secrets.push(after.approval_token_sha256 as string);
+    expect(after.status).toBe('waiting_human');
+    expect(after.approval_token_sha256).not.toBe(w.hash);
+    expect(after.output).toMatchObject({ allowed_verbs: ['approve'] });
   });
 });
 

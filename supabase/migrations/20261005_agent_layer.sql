@@ -241,18 +241,22 @@ AS $$
   ORDER BY ff.tenant_id, ff.key;
 $$;
 
--- Called after a successful KV put of rev p_rev. Returns false when the row changed meanwhile
--- (the next tick writes the newer rev).
+-- Called after a successful KV put of rev p_rev.
+--   true   the row still has rev p_rev: kv_synced_rev = p_rev.
+--   false  the row changed meanwhile (rev > p_rev). Puts of one key land in any order, so the put of p_rev may have
+--          landed after the put of a newer rev that is already marked; the row is therefore marked unsynced
+--          (kv_synced_rev = NULL) and the next sync batch writes its current rev.
 CREATE FUNCTION public.feature_flags_mark_synced(p_key text, p_tenant_id uuid, p_rev bigint)
 RETURNS boolean
 LANGUAGE sql VOLATILE SET search_path = public
 AS $$
   WITH u AS (
     UPDATE public.feature_flags ff
-       SET kv_synced_rev = p_rev, kv_synced_at = now()
-     WHERE ff.key = p_key AND ff.tenant_id = p_tenant_id AND ff.rev = p_rev
-     RETURNING 1)
-  SELECT EXISTS (SELECT 1 FROM u);
+       SET kv_synced_rev = CASE WHEN ff.rev = p_rev THEN p_rev END,
+           kv_synced_at  = CASE WHEN ff.rev = p_rev THEN now() ELSE ff.kv_synced_at END
+     WHERE ff.key = p_key AND ff.tenant_id = p_tenant_id AND ff.rev >= p_rev
+     RETURNING ff.rev = p_rev AS synced)
+  SELECT COALESCE(bool_or(synced), false) FROM u;
 $$;
 
 -- One-time seed from the values set by hand in KV during Phases 1-3 (PLAN.md P4-2).
@@ -261,7 +265,10 @@ $$;
 --                 in the canonical shape.
 --   'absent'      KV key absent: row marked as in sync WITHOUT writing KV, so readers keep their fallback
 --                 (var SEO_STRICT_404 / API_FORWARD_TO_VERCEL, or "off" for agent flags) until the row is edited.
---   'invalid'     KV value malformed: row stays pending; the caller reports it.
+--   'invalid'     KV value malformed, or a record the table refuses: row stays pending; the caller reports it.
+--                 A record is a flag record when it is an object with a boolean "enabled", an object "value" if
+--                 any, a "mode" (top level or in "value") that is one of shadow, assist, auto if any (JSON null is
+--                 not a mode), and the merged value passes the table's CHECKs (object of at most 8 KiB).
 --   'not_pending' row missing or already seeded: nothing changes.
 CREATE FUNCTION public.feature_flags_seed_from_kv(p_key text, p_tenant_id uuid, p_kv jsonb)
 RETURNS text
@@ -288,17 +295,24 @@ BEGIN
   IF jsonb_typeof(p_kv) <> 'object'
      OR jsonb_typeof(p_kv->'enabled') IS DISTINCT FROM 'boolean'
      OR (p_kv ? 'value' AND jsonb_typeof(p_kv->'value') <> 'object')
-     OR (p_kv ? 'mode' AND p_kv->>'mode' NOT IN ('shadow','assist','auto')) THEN
+     OR (p_kv ? 'mode' AND NOT COALESCE(p_kv->>'mode' IN ('shadow','assist','auto'), false))
+     OR (jsonb_typeof(p_kv->'value') IS NOT DISTINCT FROM 'object' AND (p_kv->'value') ? 'mode'
+         AND NOT COALESCE((p_kv->'value')->>'mode' IN ('shadow','assist','auto'), false)) THEN
     RETURN 'invalid';
   END IF;
 
   v_kv_value := COALESCE(p_kv->'value', '{}'::jsonb)
                 || CASE WHEN p_kv ? 'mode' THEN jsonb_build_object('mode', p_kv->'mode') ELSE '{}'::jsonb END;
-  UPDATE public.feature_flags
-     SET enabled = (p_kv->>'enabled')::boolean,
-         value = v_row.value || v_kv_value,     -- KV wins for every key it sets
-         kv_seed_pending = false
-   WHERE key = p_key AND tenant_id = p_tenant_id;
+  BEGIN
+    UPDATE public.feature_flags
+       SET enabled = (p_kv->>'enabled')::boolean,
+           value = v_row.value || v_kv_value,     -- KV wins for every key it sets
+           kv_seed_pending = false
+     WHERE key = p_key AND tenant_id = p_tenant_id;
+  EXCEPTION WHEN check_violation THEN
+    -- A merged value the table's CHECKs refuse (e.g. over 8 KiB) is a KV value the import refuses, not an error.
+    RETURN 'invalid';
+  END;
   RETURN 'imported';
 END $$;
 

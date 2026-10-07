@@ -1,4 +1,5 @@
-// K-2 cards and prompts: Telegram rendering (HTML escaped, <= 4,096 chars, callback buttons only for allowed verbs
+// K-2 cards and prompts: Telegram rendering (labels and values HTML escaped, <= 4,096 chars after escaping with the
+// title and the flags line always kept and no entity cut, callback buttons only for allowed verbs
 // with a code, "Open" URL button, token null -> URL button only), maskEmail, failure and test cards; prompt
 // selection with a flag pin; front matter; registration; LOCK.json hashes and the schema rules (N-7) for every
 // prompt file present under src/agents/prompts/.
@@ -65,6 +66,37 @@ describe('renderTelegram', () => {
     expect(clamped.title).toHaveLength(120);
     expect(clamped.lines).toHaveLength(12);
     expect(clamped.lines[0].value).toHaveLength(200);
+  });
+
+  it('labels are HTML-escaped like values', () => {
+    const m = renderTelegram(card({ lines: [{ label: 'Qty <b>&', value: '2' }] }), null);
+    expect(m.text).toBe('<b>RFQ-20261005-1 \u00b7 Example GmbH (DE)</b>\nQty &lt;b&gt;&amp;: 2');
+  });
+
+  it('a card at its limits whose text grows by escaping stays within 4,096 characters, cuts no entity and keeps the title and the flags line', () => {
+    const lines = Array.from({ length: 12 }, (_, i) => ({ label: `L${i}`, value: (i % 2 ? '"' : '&').repeat(200) }));
+    for (const flags of [['injection_suspected'], ['dmarc_fail', 'injection_suspected', 'low_confidence', 'flag_off', 'manual_lines']] as CardV1['flags'][]) {
+      const m = renderTelegram(card({ title: '<'.repeat(120), lines, flags }), null);
+      expect(m.text.length).toBeLessThanOrEqual(4096);
+      expect(m.text.startsWith(`<b>${'&lt;'.repeat(120)}</b>\n`)).toBe(true);
+      expect(m.text).toMatch(/\n<i>Check: [^<]*instructions found in the e-mail[^<]*<\/i>$/);
+      // Every '&' starts a complete entity and the markup is exactly <b>…</b> and <i>…</i>.
+      expect(m.text.replace(/&(amp|lt|gt|quot);/g, '')).not.toMatch(/&/);
+      expect(m.text.match(/<[^>]*>/g)).toEqual(['<b>', '</b>', '<i>', '</i>']);
+      // Lines are kept in order while they fit; the first that does not fit is shortened with an ellipsis.
+      const body = m.text.split('\n').slice(1, -1);
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.length).toBeLessThan(12);
+      body.forEach((l, i) => expect(l.startsWith(`L${i}: `)).toBe(true));
+      expect(body.at(-1)?.endsWith('\u2026')).toBe(true);
+    }
+  });
+
+  it('a card that fits is rendered in full', () => {
+    const lines = Array.from({ length: 12 }, (_, i) => ({ label: `Line ${i}`, value: 'v'.repeat(200) }));
+    const m = renderTelegram(card({ lines, flags: ['low_confidence'] }), null);
+    expect(m.text.split('\n')).toHaveLength(14);
+    expect(m.text).not.toContain('\u2026');
   });
 
   it('decidedCard adds the decision line and removes the verbs', () => {

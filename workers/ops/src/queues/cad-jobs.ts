@@ -3,8 +3,12 @@
 //
 // Steps per message
 //   1 Load     the cad_jobs row by job_id (the row is the record; the message only names it). A missing row or a
-//              malformed message is acknowledged and logged; a final row is acknowledged (duplicate delivery); a row
-//              another delivery is running (dispatched/running within the deadline plus 60 s) is retried later.
+//              malformed message is acknowledged and logged; a final row is acknowledged (duplicate delivery), after
+//              repeating the final notice when the job's run is still open (an earlier delivery made the row final but
+//              did not get its notice through). A row another delivery is running (dispatched/running within the
+//              deadline plus LEASE_GRACE_S) is retried once that window has passed (delay = the rest of the window);
+//              the last delivery waits for the end of the window in its own invocation instead, then takes the job
+//              over unless it became final meanwhile. A row whose window has passed is taken over at once.
 //   2 Run row  agent_runs (agent 'cad', trigger 'queue', idempotency key = job id) through rpc/agent_run_begin.
 //   3 Reuse    a succeeded job with the same idempotency key (any RFQ): its result and outputs are copied (the R2
 //              objects are referenced, not copied).
@@ -19,11 +23,17 @@
 //   9 Finish   succeeded / failed (not retryable) / back to queued with message.retry() (retryable, deliveries
 //              left) / timed_out or failed on the last delivery; release the lease (backend_down for unreachable
 //              services); RfqThread(rfq_id).cadJobFinal(job_id, status) once the row is final; closeRun; one
-//              Analytics Engine point (event 'cad_job').
+//              Analytics Engine point (event 'cad_job'). When cadJobFinal throws, the message is retried with the
+//              run left open (the redelivery repeats the notice, step 1); on the last delivery the run closes with
+//              notice 'failed' and the quote's CAD wait ends by its own timeout.
 // Rules
-//   - A row becomes final exactly once, so cadJobFinal is called once per job; retries never pass through a final
-//     status. Messages that throw unexpectedly are retried; after the queue's retries they land in cad-jobs-dlq and
-//     the dispatcher marks the row dead_letter.
+//   - A row becomes final exactly once, and cadJobFinal is called until one call succeeds (RfqThread stores the
+//     final status per job, so a repeated call changes nothing); retries never pass through a final status.
+//     Messages that throw unexpectedly are retried; after the queue's retries they land in cad-jobs-dlq and the
+//     dispatcher marks the row dead_letter.
+//   - Retry delays stay within the queue limit of 24 hours (CF docs (fetched 2026-10-03)
+//     https://developers.cloudflare.com/queues/platform/limits/, delaySeconds); the last-delivery wait stays far
+//     below the 15-minute wall time of a consumer invocation (same page).
 //   - Log lines carry ids, codes and sizes only (never file names or service answers).
 
 import { formatLogLine } from '../../../shared/src/http/log';
@@ -55,8 +65,17 @@ import type { CadJobMessageV1 } from './messages';
 export const MAX_DELIVERIES = 3;
 /** Longest in-invocation wait for a free backend slot before the message is retried. */
 export const LEASE_WAIT_MS = 120_000;
-/** Delay of a retry while another delivery runs the job. */
-export const BUSY_RETRY_S = 60;
+/** Added to the rest of the lease window when a delivery finds the job running elsewhere. */
+export const BUSY_MARGIN_S = 5;
+/** Longest delaySeconds of a queue retry (24 hours, CF docs Queues limits, fetched 2026-10-03). */
+export const MAX_RETRY_DELAY_S = 86_400;
+/** Delay of a retry after a failed RfqThread.cadJobFinal call. */
+export const NOTIFY_RETRY_S = 30;
+
+/** Retry delay of a delivery that finds the job running elsewhere: the rest of the lease window plus a margin. */
+export function busyRetryDelayS(remainingMs: number): number {
+  return Math.min(MAX_RETRY_DELAY_S, Math.max(1, Math.ceil(remainingMs / 1000)) + BUSY_MARGIN_S);
+}
 /** log.txt and the stored error stay short. */
 export const LOG_MAX_CHARS = 4000;
 
@@ -140,26 +159,37 @@ class Job {
       this.message.ack();
       return;
     }
-    const row = await getCadJob(this.ports.db, body.job_id);
+    let row = await getCadJob(this.ports.db, body.job_id);
     if (!row) {
       log('cad job row missing', { job_id: body.job_id });
       this.message.ack();
       return;
     }
-    if (isFinalCadStatus(row.status)) {
-      this.message.ack();
-      return;
-    }
     const job = jobFromRow(row, body);
+    if (isFinalCadStatus(row.status)) return this.finalRow(row, job);
     if (row.status === 'dispatched' || row.status === 'running') {
       const started = row.started_at ? Date.parse(row.started_at) : NaN;
-      if (Number.isFinite(started) && this.now().getTime() - started < (job.deadline_s + LEASE_GRACE_S) * 1000) {
-        this.message.retry({ delaySeconds: BUSY_RETRY_S });
-        return;
+      const remainingMs = Number.isFinite(started) ? started + (job.deadline_s + LEASE_GRACE_S) * 1000 - this.now().getTime() : 0;
+      if (remainingMs > 0) {
+        if (this.message.attempts < MAX_DELIVERIES) {
+          this.message.retry({ delaySeconds: busyRetryDelayS(remainingMs) });
+          return;
+        }
+        // The last delivery: no later one would take the job over, so this one waits for the window to end.
+        await this.deps.sleep(remainingMs + BUSY_MARGIN_S * 1000);
+        const again = await getCadJob(this.ports.db, row.id);
+        if (!again) {
+          this.message.ack();
+          return;
+        }
+        if (isFinalCadStatus(again.status)) return this.finalRow(again, job);
+        row = again;
       }
-      // An earlier delivery stopped without finishing (its lease has expired): the job is queued again.
-      await this.ports.db.update('cad_jobs', { status: 'queued' }, { filters: [['id', 'eq', row.id], ['status', 'in', ['dispatched', 'running']]] });
-      row.status = 'queued';
+      if (row.status === 'dispatched' || row.status === 'running') {
+        // An earlier delivery stopped without finishing (its lease has expired): the job is queued again.
+        await this.ports.db.update('cad_jobs', { status: 'queued' }, { filters: [['id', 'eq', row.id], ['status', 'in', ['dispatched', 'running']]] });
+        row.status = 'queued';
+      }
     }
 
     const run = await openRun(this.ports.db, {
@@ -321,12 +351,39 @@ class Job {
     await this.finish(row, job, { status: 'failed', backend, outcome: code, error, duration_ms: 0 });
   }
 
+  /** A row that is already final: the final notice is repeated when the job's run is still open, then the message
+   *  is acknowledged (a duplicate delivery of a finished job changes nothing). */
+  private async finalRow(row: CadJobRow, job: CadJobMessageV1): Promise<void> {
+    const open = (
+      await this.ports.db.select<{ id: string; status: string }>('agent_runs', {
+        columns: 'id,status',
+        filters: [['agent', 'eq', 'cad'], ['idempotency_key', 'eq', row.id], ['status', 'eq', 'running']],
+        limit: 1,
+      })
+    )[0];
+    if (!open) {
+      this.message.ack();
+      return;
+    }
+    this.runId = open.id;
+    const status = row.status as CadFinalStatus;
+    await this.finish(row, job, { status, backend: row.backend, outcome: 'notice_repeated', ...(status === 'succeeded' ? {} : { error: row.error ?? status }), duration_ms: row.duration_ms ?? 0 });
+  }
+
   private async finish(row: CadJobRow, job: CadJobMessageV1, f: Finish, extra: Record<string, unknown> = {}): Promise<void> {
+    let notice: 'sent' | 'failed' | 'none' = 'none';
     if (row.rfq_id) {
       try {
         await this.deps.notifyFinal(row.rfq_id, row.id, f.status);
+        notice = 'sent';
       } catch {
-        log('cad job final notice failed', { job_id: row.id });
+        log('cad job final notice failed', { job_id: row.id, attempt: this.message.attempts });
+        if (this.message.attempts < MAX_DELIVERIES) {
+          // The run stays open: the redelivery finds the final row and repeats the notice (finalRow).
+          this.message.retry({ delaySeconds: NOTIFY_RETRY_S });
+          return;
+        }
+        notice = 'failed';
       }
     }
     if (this.runId) {
@@ -336,7 +393,7 @@ class Job {
         {
           status: f.status === 'succeeded' ? 'succeeded' : 'failed',
           ...(f.error ? { error: f.error } : {}),
-          output: { job_id: row.id, job_type: job.job_type, backend: f.backend, status: f.status, outcome: f.outcome, duration_ms: f.duration_ms, ...extra },
+          output: { job_id: row.id, job_type: job.job_type, backend: f.backend, status: f.status, outcome: f.outcome, duration_ms: f.duration_ms, notice, ...extra },
         },
         { ...EMPTY_USAGE, by_step: {} },
       );

@@ -1,7 +1,7 @@
 // M4 insert-row: one inbound_emails row per (tenant_id, message_id_sha256) through PostgREST with the service role:
 // POST /rest/v1/inbound_emails?on_conflict=tenant_id,message_id_sha256 with
 // Prefer: resolution=ignore-duplicates,return=representation. An empty answer means the row exists (a redelivery):
-// the handler stops there.
+// the handler stops there. inboundEmailExists() is the same key as a read (asked by M3, see store.ts).
 //
 // Rules
 //   - Fields come from the headers and the envelope only; the body is never read here.
@@ -37,14 +37,44 @@ export class InsertError extends Error {
   constructor(
     readonly status: number,
     readonly code: string | null,
+    action: 'insert' | 'select' = 'insert',
   ) {
-    super(`inbound_emails insert failed: ${status}${code ? ` ${code}` : ''}`);
+    super(`inbound_emails ${action} failed: ${status}${code ? ` ${code}` : ''}`);
     this.name = 'InsertError';
   }
 }
 
 function retryable(status: number): boolean {
   return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+/** True when an inbound_emails row exists for (tenant_id, message_id_sha256); same retries as the insert. */
+export async function inboundEmailExists(
+  o: { supabaseUrl: string; serviceRoleKey: string; tenantId: string; messageIdSha256: string },
+  fetchImpl: typeof fetch = fetch,
+  sleep: Sleep = realSleep,
+): Promise<boolean> {
+  const query = new URLSearchParams({ select: 'id', tenant_id: `eq.${o.tenantId}`, message_id_sha256: `eq.${o.messageIdSha256}`, limit: '1' });
+  const url = `${o.supabaseUrl.replace(/\/+$/, '')}/rest/v1/inbound_emails?${query.toString()}`;
+  let last: InsertError = new InsertError(0, null, 'select');
+  for (let attempt = 0; attempt <= INSERT_DELAYS_MS.length; attempt++) {
+    let status = 0;
+    try {
+      const res = await fetchImpl(url, { method: 'GET', headers: { apikey: o.serviceRoleKey, authorization: `Bearer ${o.serviceRoleKey}`, accept: 'application/json' } });
+      status = res.status;
+      const text = await res.text();
+      if (res.ok) {
+        const rows = text ? (JSON.parse(text) as unknown) : [];
+        return Array.isArray(rows) && rows.length > 0;
+      }
+    } catch {
+      status = 0;
+    }
+    last = new InsertError(status, null, 'select');
+    if (!retryable(status)) break;
+    if (attempt < INSERT_DELAYS_MS.length) await sleep(INSERT_DELAYS_MS[attempt]);
+  }
+  throw last;
 }
 
 export async function insertInboundEmail(

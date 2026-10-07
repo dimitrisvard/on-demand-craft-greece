@@ -11,9 +11,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { NonRetryableError } from 'cloudflare:workflows';
-import type { LlmCall, LlmFailure, LlmPort, LlmResult } from '../../src/ports/index';
+import type { BlobPort, LlmCall, LlmContent, LlmFailure, LlmPort, LlmResult } from '../../src/ports/index';
+import type { AttachmentRecord } from '../../src/mail-in/attachments';
+import { MAX_IMAGES } from '../../src/mail-in/intake';
+import { stripQuoted } from '../../src/mail-in/quote-strip';
 import { uuidV5 } from '../../src/mail-in/safe-name';
-import { runIntake, type IntakeDeps } from '../../src/workflows/rfq-intake';
+import { extractInput, runIntake, type IntakeDeps } from '../../src/workflows/rfq-intake';
+import type { TriageV1 } from '../../src/mail-in/intake';
 import type { ReplyMatch } from '../../src/replies/match';
 import { FakeQueue, FakeWorkflow, type FakeLlm } from '../helpers/agent-env';
 import { FakeStep } from '../helpers/fake-step';
@@ -136,6 +140,72 @@ describe('every MIME fixture reaches its terminal status (assist mode, confirmat
   });
 });
 
+/** Replaces the stored raw MIME of a seeded mail. */
+function setRaw(h: IntakeHarness, sha: string, edit: (text: string) => string): void {
+  const key = `email/${sha}/raw.eml`;
+  const obj = h.bucket.objects.get(key)!;
+  h.bucket.objects.set(key, { ...obj, bytes: new TextEncoder().encode(edit(new TextDecoder().decode(obj.bytes))) });
+}
+
+describe('parse-and-store and the model input', () => {
+  it('body_excerpt is the first 4,000 characters of the quote-stripped text (long mail with quoted history)', async () => {
+    const h = harness();
+    const mail = await seedMail(h, 'de-sheet-metal-step.eml');
+    const own = Array.from({ length: 120 }, (_, i) => `Line ${String(i + 1).padStart(3, '0')}: please quote 20 brackets, 2 mm S235, laser cut.`).join('\n');
+    // interleaved quoting at the top (removed wherever it is) and the quoted history below a reply header
+    const top = Array.from({ length: 12 }, (_, i) => `> older question ${i + 1} from the previous conversation`).join('\n');
+    const quoted = ['On Mon, 5 Oct 2026 at 08:00, Purchasing <buyer@example.com> wrote:', ...Array.from({ length: 80 }, (_, i) => `> older message line ${i + 1} with the previous conversation`)].join('\n');
+    const body = `${top}\n${own}\n\n${quoted}\n`;
+    expect(own.length).toBeGreaterThan(4000);
+    setRaw(h, mail.sha, () => ['From: Anna Becker <anna.becker@example.com>', 'To: rfq@example.com', 'Subject: Long enquiry', 'Message-ID: <long-1@mail.example.com>', 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', '', body].join('\r\n'));
+    h.ports.llm = new ByPromptLlm({ 'rfq_intake.triage@v1': { kind: 'other', language: 'en', injection_suspected: false, confidence: 0.6 } }) as unknown as FakeLlm;
+    await runCase(h, mail);
+    const stripped = stripQuoted(body);
+    expect(stripped).toBe(own);
+    const excerpt = String(inboundOf(h, mail.id).body_excerpt);
+    expect(excerpt).toHaveLength(4000);
+    expect(excerpt).toBe(stripped.slice(0, 4000));
+    expect(excerpt).not.toMatch(/wrote:|older (message|question)/);
+    const stored = h.bucket.objects.get(`email/${mail.sha}/body.txt`)!;
+    expect(new TextDecoder().decode(stored.bytes)).toBe(stripped);
+  });
+
+  it('a STEP file and a PDF sent with Content-Disposition inline reach the RFQ files, the CAD queue and the model', async () => {
+    const h = harness({ quoteFlag: true });
+    const mail = await seedMail(h, 'en-step-pdf.eml');
+    setRaw(h, mail.sha, (t) =>
+      t.replace('Content-Disposition: attachment; filename="bracket.step"', 'Content-Disposition: inline; filename="bracket.step"').replace('Content-Disposition: attachment; filename="drawing BR-100.pdf"', 'Content-Disposition: inline; filename="drawing BR-100.pdf"'),
+    );
+    expect(new TextDecoder().decode(h.bucket.objects.get(`email/${mail.sha}/raw.eml`)!.bytes)).toContain('inline; filename="bracket.step"');
+    const llm = new ByPromptLlm(valuesOf('en-step-pdf.eml'));
+    const seen: Array<{ prompt: string; user: LlmContent[] }> = [];
+    h.ports.llm = { call: async (c: LlmCall<unknown>) => (seen.push({ prompt: c.prompt, user: c.user }), llm.call(c)) } as unknown as FakeLlm;
+    const { result } = await runCase(h, mail, { verb: 'confirm_sheet_metal' });
+    expect(result.outcome).toBe('rfq_created');
+    const records = inboundOf(h, mail.id).attachments as AttachmentRecord[];
+    expect(records.map((r) => [r.kind, Boolean(r.inline)])).toEqual([['step', false], ['pdf', false]]);
+    expect(rows(h, 'rfq_files')).toHaveLength(2);
+    expect(rows(h, 'cad_jobs')).toHaveLength(1);
+    const extract = seen.find((x) => x.prompt === 'rfq_intake.extract@v1')!.user;
+    expect(extract.filter((c) => c.type === 'pdf')).toHaveLength(1);
+    expect(JSON.stringify(extract)).toContain('name=\\"bracket.step\\" kind=\\"step\\"');
+  });
+
+  it(`at most ${MAX_IMAGES} images are read and sent to the model, in message order`, async () => {
+    const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+    const records: AttachmentRecord[] = Array.from({ length: 5 }, (_, i) => ({ n: i + 1, r2_key: `email/x/att/${i + 1}-p.png`, filename: `p${i + 1}.png`, content_type: 'image/png', size_bytes: png.byteLength, sha256: String(i).repeat(64), kind: 'image' }));
+    const reads: string[] = [];
+    const blob = {
+      get: async (key: string) => (reads.push(key), { body: new Response(png).body!, size: png.byteLength }),
+    } as unknown as BlobPort;
+    const { user } = await extractInput({ blob }, records, { subject: 's', from_name: null, from_email: null, text: 'please quote' });
+    expect(reads).toEqual(records.slice(0, MAX_IMAGES).map((r) => r.r2_key));
+    const images = user.filter((c) => c.type === 'image');
+    expect(images).toHaveLength(MAX_IMAGES);
+    expect(user.filter((c) => c.type === 'text' && c.text.startsWith('<attachment n=')).map((c) => (c as { text: string }).text.slice(0, 16))).toEqual(['<attachment n="1', '<attachment n="2', '<attachment n="3']);
+  });
+});
+
 describe('replay after a crash at every step', () => {
   it.each([['en-zip.eml'], ['en-step-pdf.eml']])('%s: one RFQ, one rfq_files row per file, one cad_jobs row per CAD file, one quote', async (file) => {
     const c = caseOf(file);
@@ -166,6 +236,20 @@ describe('replay after a crash at every step', () => {
 });
 
 describe('flood control (daily cap)', () => {
+  it('a daily-cap step that fails ends on a failure card (failed_step daily-cap) and the mail failed', async () => {
+    const h = harness();
+    const mail = await seedMail(h, 'de-sheet-metal-step.eml');
+    const step = new FakeStep();
+    step.crashAt('daily-cap');
+    const { result } = await runCase(h, mail, { step });
+    expect(result).toMatchObject({ outcome: 'failed', failed_step: 'daily-cap' });
+    const run = runOf(h);
+    expect(run).toMatchObject({ status: 'waiting_human', parked_reason: 'failed', output: expect.objectContaining({ card_kind: 'failure', failed_step: 'daily-cap', allowed_verbs: ['retry', 'dismiss'] }) });
+    expect(run.approval_token_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(inboundOf(h, mail.id)).toMatchObject({ status: 'failed' });
+    expect(step.trace()).toEqual(['open-run:ok', 'daily-cap:threw', 'fail-run:ok']);
+  });
+
   it('above value.max_runs_per_day: run skipped (daily_cap), no LLM call, mail needs_review, one notice', async () => {
     const h = harness({ flag: { enabled: true, value: { mode: 'assist', max_runs_per_day: 2 }, rev: 1 } });
     h.ports.db.seed('agent_runs', [
@@ -233,7 +317,7 @@ describe('parks', () => {
     expect(result.outcome).toBe('rfq_created');
     expect(parked[0]).toMatchObject({ status: 'waiting_human', parked_reason: 'budget' });
     expect(llm.calls.filter((p) => p === 'rfq_intake.triage@v1')).toHaveLength(2);
-    expect(step.trace()).toEqual(expect.arrayContaining(['triage:ok', 'park-triage:ok', 'resume-triage:ok', 'triage-2:ok']));
+    expect(step.trace()).toEqual(expect.arrayContaining(['triage:ok', 'park-triage:ok', 'resume-triage:ok', 'resumed-triage:ok', 'flag-resumed-triage:ok', 'triage-2:ok']));
   });
 
   it('a retryable LLM failure is retried by the step; when the retries are used up the run parks (llm_unavailable)', async () => {
@@ -251,6 +335,66 @@ describe('parks', () => {
     expect(llm.calls.filter((p) => p === 'rfq_intake.extract@v1')).toHaveLength(4);
     expect(parked).toMatchObject({ status: 'waiting_human', parked_reason: 'llm_unavailable' });
     expect(runOf(h)).toMatchObject({ status: 'cancelled', error: 'llm_unavailable' });
+  });
+
+  it.each([
+    ['triage', 'rfq_intake.triage@v1', 'triage-2'],
+    ['extract', 'rfq_intake.extract@v1', 'extract-2'],
+  ] as const)('a run resumed from an llm_unavailable park at %s reads the flag first: switched off meanwhile, it parks (flag_off) with no model call or write', async (at, prompt, retryStep) => {
+    const h = harness({ quoteFlag: true });
+    h.ports.db.seed('rfqs', [{ id: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', rfq_number: 'RFQ-05102026-1', company_name: 'Example Fabrication Ltd', title: 't', parts_details: [], status: 'draft', currency: 'EUR' }]);
+    const llm = new ByPromptLlm(valuesOf('de-sheet-metal-step.eml'), { [prompt]: { ok: false, code: 'provider_5xx', retryable: true, message: '503' } });
+    h.ports.llm = llm as unknown as FakeLlm;
+    const mail = await seedMail(h, 'de-sheet-metal-step.eml');
+    const step = new FakeStep();
+    const waits: Array<{ type: string; run: Row }> = [];
+    step.onWait = (type) => {
+      waits.push({ type, run: runOf(h) });
+      if (type === 'agent-resumed' && waits.length === 1) {
+        // the agent is switched off while the run is parked; the dispatcher still resumes llm_unavailable parks
+        h.kv.setJson('agent.rfq_intake', { enabled: false, value: { mode: 'assist' }, rev: 9 });
+        llm.fail = {};
+        step.sendEvent('agent-resumed', {});
+      }
+    };
+    const match: IntakeDeps['match'] = async () => ({ rule: 3, confidence: 0.8, rfq_id: '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f', quote_workflow_id: null });
+    const callsBefore = () => llm.calls.length;
+    const { result } = await runCase(h, mail, { step, deps: { match } });
+    const t = step.trace();
+    expect(result.outcome).toBe('cancelled');
+    expect(waits.map((w) => [w.type, w.run.parked_reason])).toEqual([
+      ['agent-resumed', 'llm_unavailable'],
+      ['agent-resumed', 'flag_off'],
+    ]);
+    expect(t).toEqual(expect.arrayContaining([`resumed-${at}:ok`, `flag-resumed-${at}:ok`, `resume-flag-resumed-${at}:timed_out`]));
+    expect(t.some((x) => x.startsWith(`${retryStep}:`))).toBe(false);
+    // no call after the park: the four attempts of the failed step only, nothing later
+    expect(llm.calls.filter((c) => c === prompt)).toHaveLength(4);
+    expect(llm.calls.at(-1)).toBe(prompt);
+    expect(callsBefore()).toBe(at === 'triage' ? 4 : 5);
+    expect(rows(h, 'rfq_files')).toHaveLength(0);
+    expect(rows(h, 'cad_jobs')).toHaveLength(0);
+    expect(rows(h, 'rfqs')).toHaveLength(1);
+    expect(runOf(h)).toMatchObject({ status: 'cancelled', error: 'flag_off' });
+  });
+
+  it('a run resumed from a budget park goes on when the flag is still on (flag-resumed-<step> then the retry)', async () => {
+    const h = harness({ quoteFlag: true });
+    const llm = new ByPromptLlm(valuesOf('de-sheet-metal-step.eml'), { 'rfq_intake.extract@v1': { ok: false, code: 'budget', retryable: false, message: '429' } });
+    h.ports.llm = llm as unknown as FakeLlm;
+    const mail = await seedMail(h, 'de-sheet-metal-step.eml');
+    const step = new FakeStep();
+    step.onWait = (type) => {
+      if (type === 'agent-resumed') {
+        llm.fail = {};
+        step.sendEvent('agent-resumed', {});
+      }
+    };
+    const { result } = await runCase(h, mail, { step, verb: 'confirm_sheet_metal' });
+    expect(result.outcome).toBe('rfq_created');
+    const t = step.trace();
+    expect(t.indexOf('flag-resumed-extract:ok')).toBeGreaterThan(t.indexOf('resumed-extract:ok'));
+    expect(t.indexOf('flag-resumed-extract:ok')).toBeLessThan(t.indexOf('extract-2:ok'));
   });
 });
 
@@ -374,26 +518,57 @@ describe('modes and the human wait', () => {
   });
 });
 
-describe('follow-up of a known RFQ (thread-check -> attach-to-rfq)', () => {
+describe('follow-up of a known RFQ (thread-check -> follow-up checks -> attach-to-rfq)', () => {
   const RFQ_ID = '3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f';
+  const SUBJECT = 'Additional drawing for RFQ-05102026-1';
 
-  it('rules 1-3 match: files and CAD jobs added to the RFQ, thread mirror updated, mail attached, no extraction', async () => {
-    const h = harness();
+  /** en-step-pdf.eml as a follow-up (subject names an existing RFQ); reply attribution answers rule 3. */
+  async function followUp(o: { flag?: Record<string, unknown>; triage?: Partial<TriageV1>; quoteFlag?: boolean; values?: Record<string, unknown> } = {}) {
+    const h = harness({ flag: o.flag, quoteFlag: o.quoteFlag });
     h.ports.db.seed('rfqs', [{ id: RFQ_ID, rfq_number: 'RFQ-05102026-1', company_name: 'Example Fabrication Ltd', title: 'RFQ-05102026-1 - Example', parts_details: [], status: 'draft', currency: 'EUR' }]);
-    const llm = new ByPromptLlm({ 'rfq_intake.triage@v1': { kind: 'rfq', language: 'en', injection_suspected: false, confidence: 0.9 } });
+    const llm = new ByPromptLlm({ ...o.values, 'rfq_intake.triage@v1': { kind: 'rfq', language: 'en', injection_suspected: false, confidence: 0.9, ...o.triage } });
     h.ports.llm = llm as unknown as FakeLlm;
     const mail = await seedMail(h, 'en-step-pdf.eml');
+    await h.ports.db.update('inbound_emails', { subject: SUBJECT }, { filters: [['id', 'eq', mail.id]] });
+    const key = `email/${mail.sha}/raw.eml`;
+    h.bucket.objects.set(key, { ...h.bucket.objects.get(key)!, bytes: new TextEncoder().encode(new TextDecoder().decode(h.bucket.objects.get(key)!.bytes).replace('Subject: RFQ: 50 laser-cut brackets', `Subject: ${SUBJECT}`)) });
     const matched: unknown[] = [];
-    const match: IntakeDeps['match'] = async (_db, headers, o) => {
-      matched.push({ headers, o });
+    const match: IntakeDeps['match'] = async (_db, headers, m) => {
+      matched.push({ headers, o: m });
       return { rule: 3, confidence: 0.8, rfq_id: RFQ_ID, quote_workflow_id: null } satisfies ReplyMatch;
     };
-    // The fixture has no RFQ number or reply headers, so the subject is changed as a follow-up would read.
-    await h.ports.db.update('inbound_emails', { subject: 'Additional drawing for RFQ-05102026-1' }, { filters: [['id', 'eq', mail.id]] });
-    h.bucket.objects.set(`email/${mail.sha}/raw.eml`, { ...h.bucket.objects.get(`email/${mail.sha}/raw.eml`)!, bytes: new TextEncoder().encode(new TextDecoder().decode(h.bucket.objects.get(`email/${mail.sha}/raw.eml`)!.bytes).replace('Subject: RFQ: 50 laser-cut brackets', 'Subject: Additional drawing for RFQ-05102026-1')) });
-    const { result } = await runCase(h, mail, { deps: { match } });
+    return { h, mail, llm, matched, match };
+  }
+
+  /** Business effects of the follow-up path so far. */
+  function effects(h: IntakeHarness, mailId: string) {
+    return {
+      files: rows(h, 'rfq_files').length,
+      jobs: rows(h, 'cad_jobs').length,
+      queued: (h.env.CAD_JOBS as unknown as FakeQueue).sent.length,
+      thread: (h.env.RFQ_THREAD as unknown as { calls: unknown[] }).calls.length,
+      status: inboundOf(h, mailId).status,
+    };
+  }
+  const NONE = { files: 0, jobs: 0, queued: 0, thread: 0, status: 'parsed' };
+  const decision = (verb: string) => ({ verb, actor: STAFF, channel: 'dashboard', ...(verb === 'attach_1' ? { candidate: 1 } : {}) });
+
+  it('assist mode: a reply_pick card (attach_1, new_rfq, ignore) before any write; attach_1 then adds files and CAD jobs, mirrors the thread, mail attached', async () => {
+    const { h, mail, llm, matched, match } = await followUp();
+    const step = new FakeStep();
+    let atWait: { effects: ReturnType<typeof effects>; run: Row } | null = null;
+    step.onWait = (type) => {
+      if (type !== 'reply-confirmed') return;
+      atWait = { effects: effects(h, mail.id), run: runOf(h) };
+      step.sendEvent('reply-confirmed', decision('attach_1'));
+    };
+    const { result } = await runCase(h, mail, { step, deps: { match } });
     expect(result).toMatchObject({ outcome: 'attached', rfq_id: RFQ_ID });
-    expect(matched).toEqual([{ headers: expect.objectContaining({ subject: 'Additional drawing for RFQ-05102026-1' }), o: { tenant_id: TENANT, rules: [1, 2, 3] } }]);
+    expect(atWait!.effects).toEqual(NONE);
+    expect(atWait!.run).toMatchObject({ status: 'waiting_human', parked_reason: null });
+    expect(atWait!.run.approval_token_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(atWait!.run.output).toMatchObject({ card_kind: 'reply_pick', allowed_verbs: ['attach_1', 'new_rfq', 'ignore'], inbound_email_id: mail.id, rule: 3, candidates: [{ rfq_id: RFQ_ID, quote_workflow_id: null }] });
+    expect(matched).toEqual([{ headers: expect.objectContaining({ subject: SUBJECT }), o: { tenant_id: TENANT, rules: [1, 2, 3] } }]);
     expect(llm.calls).toEqual(['rfq_intake.triage@v1']);
     expect(rows(h, 'rfq_files')).toHaveLength(2);
     expect(rows(h, 'cad_jobs')).toHaveLength(1);
@@ -404,8 +579,101 @@ describe('follow-up of a known RFQ (thread-check -> attach-to-rfq)', () => {
     ]);
     expect(calls[0].args).toEqual([mail.id, '<rfq-en-step-pdf-001@mail.example.com>']);
     expect(inboundOf(h, mail.id)).toMatchObject({ status: 'attached', rfq_id: RFQ_ID });
-    expect(runOf(h)).toMatchObject({ status: 'succeeded' });
-    expect(h.ports.telegram.cards[0].card.title).toBe('Follow-up mail attached to RFQ-05102026-1');
+    expect(runOf(h)).toMatchObject({ status: 'succeeded', approval_token_sha256: null });
+    const cards = h.ports.telegram.cards.map((c) => c.card);
+    expect(cards.map((c) => [c.kind, c.allowed_verbs])).toEqual([
+      ['reply_pick', ['attach_1', 'new_rfq', 'ignore']],
+      ['intake', []],
+    ]);
+    expect(cards[0].title).toBe('Follow-up for RFQ-05102026-1? · a***@example.com');
+    expect(cards[0].flags).toEqual(['dmarc_fail']);
+    expect(cards[1].title).toBe('Follow-up mail attached to RFQ-05102026-1');
+    const t = step.trace();
+    expect(t.indexOf('flag-attach:ok')).toBeGreaterThan(t.indexOf('thread-check:ok'));
+    expect(t.indexOf('flag-attach-confirmed:ok')).toBeLessThan(t.indexOf('attach-to-rfq:ok'));
+    expect(t.indexOf('flag-attach-confirmed:ok')).toBeGreaterThan(t.indexOf('wait-reply-confirmed:ok'));
+  });
+
+  it.each([
+    ['auto mode, sender not authenticated', { mode: 'auto' }, {}, null, ['sender_not_authenticated']],
+    ['auto mode, instructions in the e-mail', { mode: 'auto' }, { injection_suspected: true }, 'mx.example.net', ['injection_suspected']],
+    ['auto mode, match below the threshold', { mode: 'auto', min_confidence: 0.9 }, {}, 'mx.example.net', ['low_confidence']],
+    ['assist mode, everything else passes', { mode: 'assist' }, {}, 'mx.example.net', ['mode_assist']],
+  ] as const)('%s: the card is required; ignore rejects the mail with no file, job or thread call', async (_name, value, triage, authserv, reasons) => {
+    const { h, mail, match } = await followUp({ flag: { enabled: true, value, rev: 1 }, triage });
+    const step = new FakeStep();
+    step.sendEvent('reply-confirmed', decision('ignore'));
+    const { result } = await runCase(h, mail, { step, deps: { match, authserv } });
+    expect(result.outcome).toBe('ignored');
+    expect(effects(h, mail.id)).toEqual({ ...NONE, status: 'rejected' });
+    expect(runOf(h)).toMatchObject({ status: 'cancelled', approval_token_sha256: null, output: { verb: 'ignore', follow_up: true } });
+    const card = h.ports.telegram.cards[0].card;
+    expect(card.kind).toBe('reply_pick');
+    expect(card.lines.find((l) => l.label === 'Why a check')?.value).toBe(reasons.map((r) => ({ sender_not_authenticated: 'sender not authenticated', injection_suspected: 'instructions in the e-mail', low_confidence: 'low confidence', mode_assist: 'assist mode' })[r]).join(', '));
+    expect(h.ports.telegram.cards).toHaveLength(1);
+  });
+
+  it('auto mode, authenticated sender, no instructions, match above the threshold: attached without a card', async () => {
+    const { h, mail, match } = await followUp({ flag: { enabled: true, value: { mode: 'auto' }, rev: 1 } });
+    const { result, step } = await runCase(h, mail, { deps: { match, authserv: 'mx.example.net' } });
+    expect(result).toMatchObject({ outcome: 'attached', rfq_id: RFQ_ID });
+    expect(effects(h, mail.id)).toEqual({ files: 2, jobs: 1, queued: 1, thread: 2, status: 'attached' });
+    expect(h.ports.telegram.cards.map((c) => [c.card.kind, c.token])).toEqual([['intake', null]]);
+    expect(step.trace().some((x) => x.startsWith('wait-'))).toBe(false);
+  });
+
+  it('new_rfq on the card: the mail goes on as a new RFQ (extract, confirmation, RFQ created), nothing attached', async () => {
+    const { h, mail, match, llm } = await followUp({ quoteFlag: true, values: valuesOf('en-step-pdf.eml') });
+    const step = new FakeStep();
+    step.sendEvent('reply-confirmed', decision('new_rfq'));
+    step.sendEvent('intake-confirmed', { verb: 'confirm_sheet_metal', actor: STAFF, channel: 'dashboard' });
+    const { result } = await runCase(h, mail, { step, deps: { match } });
+    expect(result.outcome).toBe('rfq_created');
+    expect(rows(h, 'rfqs').filter((r) => r.id !== RFQ_ID)).toHaveLength(1);
+    expect(llm.calls).toEqual(['rfq_intake.triage@v1', 'rfq_intake.extract@v1', 'rfq_intake.classify_process@v1']);
+    const calls = (h.env.RFQ_THREAD as unknown as { calls: Array<{ method: string }> }).calls;
+    expect(calls.map((c) => c.method)).toEqual(['expectCadJobs']);
+    expect(rows(h, 'rfq_files').every((f) => f.rfq_id !== RFQ_ID)).toBe(true);
+    expect(h.ports.telegram.cards.map((c) => c.card.kind)).toEqual(['reply_pick', 'intake', 'intake']);
+  });
+
+  it('shadow mode: one notice without buttons; no file, CAD job, thread call or status change', async () => {
+    const { h, mail, match } = await followUp({ flag: { enabled: true, value: { mode: 'shadow' }, rev: 1 } });
+    const { result, step } = await runCase(h, mail, { deps: { match } });
+    expect(result.outcome).toBe('shadow');
+    expect(effects(h, mail.id)).toEqual(NONE);
+    expect(inboundOf(h, mail.id)).toMatchObject({ kind: 'rfq', rfq_id: null, classification: { follow_up_rule: 3 } });
+    expect(h.ports.telegram.cards).toHaveLength(1);
+    expect(h.ports.telegram.cards[0]).toMatchObject({ token: null, card: { kind: 'intake', allowed_verbs: [], title: 'Shadow: follow-up for RFQ-05102026-1 · a***@example.com' } });
+    expect(runOf(h)).toMatchObject({ status: 'succeeded', approval_token_sha256: null, output: { mode: 'shadow', follow_up: true, rule: 3, needs_card: true } });
+    expect(step.trace()).not.toContain('attach-to-rfq:ok');
+  });
+
+  it('no answer on the follow-up card: reminder after 7 days, then mail needs_review and run cancelled, nothing attached', async () => {
+    const { h, mail, match } = await followUp();
+    const { result } = await runCase(h, mail, { deps: { match } });
+    expect(result.outcome).toBe('timed_out');
+    expect(h.ports.telegram.cards.map((c) => c.card.title)).toEqual(['Follow-up for RFQ-05102026-1? · a***@example.com', 'Reminder: Follow-up for RFQ-05102026-1? · a***@example.com']);
+    expect(effects(h, mail.id)).toEqual({ ...NONE, status: 'needs_review' });
+    expect(runOf(h)).toMatchObject({ status: 'cancelled', error: 'confirmation_timeout', approval_token_sha256: null });
+  });
+
+  it('the flag is read before the follow-up path writes: switched off after the thread check, the run parks (flag_off) and attaches nothing', async () => {
+    const { h, mail, match } = await followUp({ flag: { enabled: true, value: { mode: 'auto' }, rev: 1 } });
+    const switchOff: IntakeDeps['match'] = async (...a) => {
+      h.kv.setJson('agent.rfq_intake', { enabled: false, value: { mode: 'auto' }, rev: 2 });
+      return match!(...a);
+    };
+    const step = new FakeStep();
+    let parked: Row | null = null;
+    step.onWait = (type) => {
+      if (type === 'agent-resumed') parked = runOf(h);
+    };
+    const { result } = await runCase(h, mail, { step, deps: { match: switchOff, authserv: 'mx.example.net' } });
+    expect(result.outcome).toBe('cancelled');
+    expect(parked).toMatchObject({ status: 'waiting_human', parked_reason: 'flag_off' });
+    expect(effects(h, mail.id)).toEqual({ ...NONE, status: 'needs_review' });
+    expect(step.trace()).toEqual(expect.arrayContaining(['thread-check:ok', 'flag-attach:ok', 'resume-flag-attach:timed_out']));
   });
 
   it('a mail without reply headers or an RFQ number is not matched (no attribution call)', async () => {
@@ -415,6 +683,31 @@ describe('follow-up of a known RFQ (thread-check -> attach-to-rfq)', () => {
     const { result } = await runCase(h, mail, { verb: 'confirm_sheet_metal', deps: { match: async () => (called++, { rule: 5, confidence: 0 }) } });
     expect(result.outcome).toBe('rfq_created');
     expect(called).toBe(0);
+  });
+});
+
+describe('a reply in the RFQ mailbox (hand-to-replies)', () => {
+  it('agent.quote on: inbound-reply queued for the reply consumer, run succeeded', async () => {
+    const h = harness({ quoteFlag: true });
+    const mail = await seedMail(h, 'reply-known-quote.eml');
+    const { result } = await runCase(h, mail);
+    expect(result.outcome).toBe('reply');
+    expect((h.env.AGENT_EVENTS as unknown as FakeQueue).sent.map((m) => m.body)).toEqual([{ v: 1, type: 'inbound-reply', inbound_email_id: mail.id, tenant_id: TENANT }]);
+    expect(inboundOf(h, mail.id)).toMatchObject({ kind: 'reply', status: 'parsed' });
+    expect(runOf(h)).toMatchObject({ status: 'succeeded' });
+  });
+
+  it('agent.quote off: nothing queued; the mail goes to needs_review with a notice, run skipped', async () => {
+    const h = harness();
+    const mail = await seedMail(h, 'reply-known-quote.eml');
+    const { result } = await runCase(h, mail);
+    expect(result.outcome).toBe('reply_held');
+    expect((h.env.AGENT_EVENTS as unknown as FakeQueue).sent).toEqual([]);
+    expect(inboundOf(h, mail.id)).toMatchObject({ kind: 'reply', status: 'needs_review', error: 'quote_agent_off' });
+    expect(runOf(h)).toMatchObject({ status: 'skipped', error: 'quote_agent_off', approval_token_sha256: null });
+    expect(h.ports.telegram.cards).toHaveLength(1);
+    expect(h.ports.telegram.cards[0]).toMatchObject({ token: null, card: { kind: 'intake', allowed_verbs: [], flags: ['flag_off'] } });
+    expect(addressesIn(h.ports.telegram.cards[0].card)).toEqual([]);
   });
 });
 

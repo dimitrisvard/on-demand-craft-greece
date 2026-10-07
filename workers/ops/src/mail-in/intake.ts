@@ -264,6 +264,27 @@ export function decideCard(i: {
   return { needs_card: reasons.length > 0, reasons };
 }
 
+/**
+ * The follow-up path (a mail matched to an existing RFQ by reply attribution): the same checks as decideCard()
+ * without the extraction ones. A human confirms unless the mode is 'auto', the match confidence reaches the threshold,
+ * the sender is authenticated and the mail holds no instructions to the agent.
+ */
+export function decideFollowUp(i: {
+  mode: 'shadow' | 'assist' | 'auto';
+  match_confidence: number;
+  min_confidence: number;
+  dmarc_pass: boolean;
+  injection_suspected: boolean;
+}): { needs_card: boolean; reasons: CardReason[] } {
+  const reasons: CardReason[] = [];
+  if (i.mode === 'shadow') reasons.push('mode_shadow');
+  if (i.mode === 'assist') reasons.push('mode_assist');
+  if (!(i.match_confidence >= i.min_confidence)) reasons.push('low_confidence');
+  if (!i.dmarc_pass) reasons.push('sender_not_authenticated');
+  if (i.injection_suspected) reasons.push('injection_suspected');
+  return { needs_card: reasons.length > 0, reasons };
+}
+
 // ----- addresses -----
 
 const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;

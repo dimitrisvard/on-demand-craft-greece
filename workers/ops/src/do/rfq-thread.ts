@@ -7,7 +7,10 @@
 //     claimed in storage before the event goes out; a failed send releases the claim and an alarm retries it every
 //     30 s, at most 5 times.
 //   - customer-reply ({inbound_email_id}) is forwarded to the bound quote instance once per inbound e-mail after
-//     reply attribution; without a bound quote the mail is only recorded.
+//     reply attribution, and only while that quote waits for the customer's answer: its quote_workflows row is
+//     'sent' or 'follow_up' and the mail was received at or after the quote's sent_at. Any other mail (no bound
+//     quote, a quote not sent yet, a quote that has ended, a mail older than the quote) is only recorded and is
+//     never forwarded later. A failed status read throws, so the caller retries the same mail.
 //   - A job reported final before it was registered is recorded as final; registering it later keeps that status.
 //   - Storage: SQLite tables cad(job_id, status), meta(key, value), msgid(id, direction, quote_workflow_id,
 //     inbound_email_id, sent). Message ids are kept trimmed with their brackets.
@@ -36,6 +39,8 @@ export const CAD_DONE_MAX_ATTEMPTS = 5;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const QUOTE_FINAL = ['won', 'lost', 'expired', 'rejected', 'failed', 'cancelled'];
+/** quote_workflows statuses in which the quote waits for the customer's answer (its follow-up waits). */
+export const QUOTE_AWAITING_REPLY: readonly string[] = ['sent', 'follow_up'];
 
 type Row = Record<string, SqlStorageValue>;
 
@@ -210,9 +215,24 @@ export class RfqThread extends DurableObject<OpsEnv> {
     const id = String(messageId).trim();
     this.ctx.storage.sql.exec('INSERT INTO msgid (id, direction, inbound_email_id, sent, at) VALUES (?, ?, ?, 0, ?) ON CONFLICT (id) DO NOTHING', id, 'in', inboundEmailId, new Date().toISOString());
     const row = this.rows('SELECT sent, inbound_email_id FROM msgid WHERE id = ?', id)[0];
-    if (!row || Number(row.sent) === 1 || !this.quote()) return;
-    await this.sendEvent('customer-reply', { inbound_email_id: String(row.inbound_email_id ?? inboundEmailId) });
+    const quote = this.quote();
+    if (!row || Number(row.sent) === 1 || !quote) return;
+    const inboundId = String(row.inbound_email_id ?? inboundEmailId);
+    if (!(await this.awaitsReply(quote.quote_workflow_id, inboundId))) return;
+    await this.sendEvent('customer-reply', { inbound_email_id: inboundId });
     this.ctx.storage.sql.exec('UPDATE msgid SET sent = 1 WHERE id = ?', id);
+  }
+
+  /** True when the quote waits for the customer's answer and the mail is not older than the quote mail. */
+  private async awaitsReply(quoteWorkflowId: string, inboundEmailId: string): Promise<boolean> {
+    if (!UUID.test(quoteWorkflowId) || !UUID.test(inboundEmailId)) return false;
+    const db = this.db();
+    const [quote] = await db.select<{ status: string; sent_at: string | null }>('quote_workflows', { columns: 'status,sent_at', filters: [['id', 'eq', quoteWorkflowId]], limit: 1 });
+    if (!quote || !QUOTE_AWAITING_REPLY.includes(quote.status) || !quote.sent_at) return false;
+    const [mail] = await db.select<{ received_at: string | null }>('inbound_emails', { columns: 'received_at', filters: [['id', 'eq', inboundEmailId]], limit: 1 });
+    const received = Date.parse(mail?.received_at ?? '');
+    const sent = Date.parse(quote.sent_at);
+    return Number.isFinite(received) && Number.isFinite(sent) && received >= sent;
   }
 
   async state(): Promise<RfqThreadState> {

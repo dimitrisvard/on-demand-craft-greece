@@ -165,6 +165,22 @@ describe('MaterialStock.commit / release / check', () => {
     expect(check.over_held).toEqual([REMNANT_SMALL]);
     expect(check.items.find((x) => x.stock_item_id === REMNANT_SMALL)).toMatchObject({ remaining_area_mm2: 10_000, held_area_mm2: 60_000 });
   });
+
+  it('check also covers a held stock item that is no longer available (used up or taken out of stock)', async () => {
+    const { stock, db, clock, events } = setup();
+    await stock.reserve(item(1), { area_mm2: 60_000 });
+    // the held remnant is used up outside the agent: status changes and nothing remains
+    const i = db.tables.stock_items.findIndex((s) => s.id === REMNANT_SMALL);
+    db.tables.stock_items[i] = { ...db.tables.stock_items[i], status: 'depleted', remaining_area_mm2: 0 };
+    const check = await stock.check();
+    expect(check.over_held).toEqual([REMNANT_SMALL]);
+    expect(check.items.find((x) => x.stock_item_id === REMNANT_SMALL)).toMatchObject({ remaining_area_mm2: 0, held_area_mm2: 60_000 });
+    // the daily alarm reports it on a notice card too
+    clock.advance(86_400_000);
+    await stock.alarm();
+    expect(db.rows('agent_runs')[0]).toMatchObject({ status: 'succeeded', output: { released: 0, over_held: 1 } });
+    expect(events.sent).toHaveLength(1);
+  });
 });
 
 describe('MaterialStock.alarm', () => {

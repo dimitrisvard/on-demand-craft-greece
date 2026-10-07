@@ -23,6 +23,10 @@
 //                       ('event_sent'); a run without a Workflow instance (cards of queue consumers): an
 //                       agent-events message {type: 'decision'} for the consumer that owns the card ('event_sent');
 //                       'dismiss' on such a run closes it 'cancelled' ('dismissed')
+//   any step 5 error    the claimed run waits on the same token again (status waiting_human, the token hash,
+//                       parked_reason 'failed' for a failure card, human_action cleared; written only while the run
+//                       is still in the claimed state) and the error is rethrown, so the same card can be decided
+//                       again; the Telegram card keeps its buttons
 // Edits (dashboard, quote approve): line numbers 1..output.line_count (1..1,000 when the card does not say), unique;
 // prices and shipping 0..10,000,000; notes <= 500 chars; draft subject <= 200 and body <= 10,000 chars; no HTML.
 
@@ -41,7 +45,7 @@ import {
   type QuoteEdits,
 } from '../../../shared/src/agent-api';
 import { formatLogLine } from '../../../shared/src/http/log';
-import { findWaitingRunByTokenHash, type WaitingRun } from '../db/repos/agent-runs';
+import { findWaitingRunByTokenHash, reopenClaimedRun, type WaitingRun } from '../db/repos/agent-runs';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import type { AgentEventV1 } from '../queues/messages';
 import type { Ports } from '../ports/index';
@@ -194,6 +198,16 @@ async function rejectBusinessRow(ports: Ports, run: WaitingRun, kind: CardKind):
   }
 }
 
+/** After a failed step 5: the claimed run waits on the same token again (a failure card keeps parked_reason
+ *  'failed'), so the same card can be decided again. Best effort; the original error is rethrown by the caller. */
+async function reopen(ports: Ports, runId: string, tokenHash: string, kind: CardKind): Promise<void> {
+  try {
+    await reopenClaimedRun(ports.db, runId, tokenHash, kind === 'failure' ? 'failed' : null);
+  } catch {
+    console.error(formatLogLine(LOG_PREFIX, 'decision reopen failed', { run_id: runId }));
+  }
+}
+
 /** Steps 5 (act) for a claimed run; returns the outcome. */
 async function act(env: OpsEnv, ports: Ports, run: WaitingRun, kind: CardKind, verb: string, i: DecideInput, output: Record<string, unknown>): Promise<DecisionOutcome> {
   const acc = usageFromRow(run);
@@ -292,8 +306,15 @@ export async function decide(env: OpsEnv, ports: Ports, i: DecideInput): Promise
   const claimedRows = Array.isArray(claimed) ? claimed : claimed ? [claimed] : [];
   if (claimedRows.length === 0) return fail('already_decided');
 
-  // 5 Act
-  const outcome = await act(env, ports, run, kind, verb, i, output);
+  // 5 Act (a decision that cannot be carried out puts the run back to waiting on the same token, then rethrows)
+  let outcome: DecisionOutcome;
+  try {
+    outcome = await act(env, ports, run, kind, verb, i, output);
+  } catch (error) {
+    await reopen(ports, run.id, tokenHash, kind);
+    console.error(formatLogLine(LOG_PREFIX, 'decision not applied', { run_id: run.id, kind, verb, channel: i.channel }));
+    throw error;
+  }
   const text = outcome === 'dismissed' && verb === 'retry' ? 'Retry not possible; closed' : label(verb);
 
   // 6 Card

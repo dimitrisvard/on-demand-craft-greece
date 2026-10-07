@@ -19,8 +19,13 @@
 //             notice_day}}}: no addresses, no message ids beyond Gmail's opaque ids
 // Rules
 //   - Tokens and refresh answers are never logged, returned, stored or put on a card.
+//   - message_id and message_id_sha256 follow microns-mail (workers/mail/src/headers.ts): the trimmed Message-ID
+//     header value as received (brackets and case kept) and the SHA-256 hex of it, so the same mail read here and
+//     received at replies@ gets one row. Reply matching uses the bracket-normalised id.
 //   - A message already stored (same Message-ID hash and tenant) is not stored or queued again, so a tick that is
 //     repeated after a crash adds nothing twice; the historyId only advances with a succeeded run.
+//   - A campaign reply's 'replied' event is written best effort after replied_at (a failed insert is logged and
+//     the reply still counts), as supabase/functions/check-replies/index.ts:127-137 does.
 //   - Budget per tick: at most 100 messages per account.
 
 import { formatLogLine } from '../../../shared/src/http/log';
@@ -89,7 +94,14 @@ async function alreadyStored(ports: Ports, tenantId: string, sha: string): Promi
   return rows.length > 0;
 }
 
-/** Stores a quote-thread reply found in Gmail and queues it; false when it was stored before. */
+/** The trimmed Message-ID header value as received (null when absent or blank), as microns-mail stores it. */
+export function receivedMessageId(value: string | null | undefined): string | null {
+  const trimmed = String(value ?? '').trim();
+  return trimmed ? trimmed : null;
+}
+
+/** Stores a quote-thread reply found in Gmail and queues it; false when it was stored before. message_id is the
+ *  received form (receivedMessageId), which is also what is hashed. */
 async function storeQuoteReply(env: OpsEnv, ports: Ports, o: { tenant_id: string; account: SenderAccount; token: string; gmail_id: string; h: GmailHeaders; message_id: string; now: Date }): Promise<boolean> {
   const sha = await sha256hex(o.message_id);
   if (await alreadyStored(ports, o.tenant_id, sha)) return false;
@@ -179,11 +191,12 @@ export async function gmailPollerTick(env: OpsEnv, controller: Pick<ScheduledCon
         for (const gmailId of ids) {
           const h = await ports.gmail.metadata(token, gmailId);
           if (h.auto_submitted && h.auto_submitted.trim().toLowerCase() !== 'no') continue;
-          const messageId = normaliseMessageId(h.message_id ?? '');
-          if (quotePath && messageId) {
+          const received = receivedMessageId(h.message_id);
+          const messageId = normaliseMessageId(received ?? '');
+          if (quotePath && received && messageId) {
             const m = await (deps.match ?? matchReply)(ports.db, { message_id: messageId, in_reply_to: h.in_reply_to, references: h.references, subject: h.subject, from_email: fromAddress(h.from)?.email ?? null }, { tenant_id: tenant, rules: [1, 2, 3] });
             if (m.rule === 1 || m.rule === 2 || m.rule === 3) {
-              if (await storeQuoteReply(env, ports, { tenant_id: tenant, account, token, gmail_id: gmailId, h, message_id: messageId, now })) state.matched_quote++;
+              if (await storeQuoteReply(env, ports, { tenant_id: tenant, account, token, gmail_id: gmailId, h, message_id: received, now })) state.matched_quote++;
               continue;
             }
           }

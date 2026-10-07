@@ -8,7 +8,9 @@
 //                   instance; an instance that has ended closes the run 'cancelled' (instance_ended)
 //   card            a notice card of a consumer or cron unit: Telegram sendMessage without buttons
 //   decision        a decision on a card of a run without a Workflow instance (decide() sends it): reply_pick cards
-//                   are handled by src/replies/inbound.ts; other kinds are acked and logged
+//                   are handled by src/replies/inbound.ts; for any other kind no consumer acts on the decision, so a
+//                   claimed run of that kind without a Workflow instance closes 'cancelled' (error
+//                   'unhandled_decision') instead of staying 'running'
 // Rules
 //   - Messages are handled one at a time; a thrown error retries that message only (queue max_retries 3, then the
 //     DLQ agent-events-dlq). An inbound reply that fails on its last attempt is closed: run 'failed' with the error
@@ -102,6 +104,12 @@ async function sendCard(ports: Ports, m: Extract<AgentEventV1, { type: 'card' }>
 async function decision(d: ReplyDeps, m: DecisionMessageV1): Promise<string> {
   if (!UUID_RE.test(m.run_id ?? '')) return 'bad_input';
   if (m.card_kind === 'reply_pick') return handleReplyPick(m, d);
+  // decide() claimed the run (status 'running'); nothing else will close it.
+  const run = await getRun(d.ports.db, m.run_id);
+  if (run && run.status === 'running' && !run.workflow_instance_id) {
+    await closeRun(d.ports.db, run.id, { status: 'cancelled', error: 'unhandled_decision' }, usageFromRow(run));
+    return 'closed_unhandled';
+  }
   return 'unhandled_kind';
 }
 

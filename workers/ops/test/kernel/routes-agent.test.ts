@@ -160,9 +160,10 @@ describe('signed partner file links', () => {
     const bad = await fileApp.request(`https://x/api/agent/file?k=${encodeURIComponent(key)}&exp=${exp}&sig=${sig.slice(0, -2)}AA`, { method: 'GET' }, env);
     expect([bad.status, await bad.json()]).toEqual([403, { error: 'forbidden' }]);
 
-    // A CAD drawing of an RFQ whose order has no partner yet.
+    // A CAD drawing of an RFQ that has no order yet (the object exists).
     const cadKey = `cad/${JOB}/output/drawing.pdf`;
     ports.db.seed('cad_jobs', [{ id: JOB, rfq_id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', idempotency_key: 'k', job_type: 'drawing_pdf', input_r2_key: 'rfq/x', input_sha256: 'a'.repeat(64) }]);
+    await ports.bucket.put(cadKey, 'DRAWING', { httpMetadata: { contentType: 'application/pdf' } });
     const cadSig = await fileLinkSignature(SECRET, cadKey, exp);
     expect((await fileApp.request(`https://x/api/agent/file?k=${encodeURIComponent(cadKey)}&exp=${exp}&sig=${cadSig}`, { method: 'GET' }, env)).status).toBe(403);
 
@@ -170,6 +171,71 @@ describe('signed partner file links', () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect((await fileApp.request(`https://x/api/agent/file?k=${encodeURIComponent(key)}&exp=${exp}&sig=${sig}`, { method: 'GET' }, noSecret)).status).toBe(403);
     errors.mockRestore();
+  });
+
+  it('a signed CAD file link answers only once an order of the job\'s RFQ has a production partner', async () => {
+    const { env, ports } = setup();
+    ports.clock.set(now);
+    const CAD_RFQ = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+    const CAD_ORDER = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
+    const cadKey = `cad/${JOB}/output/flat.dxf`;
+    ports.db.seed('cad_jobs', [{ id: JOB, rfq_id: CAD_RFQ, idempotency_key: 'k', job_type: 'flat_dxf', input_r2_key: 'rfq/x', input_sha256: 'a'.repeat(64) }]);
+    ports.db.seed('orders', [{ id: CAD_ORDER, rfq_id: CAD_RFQ, partner_id: null }]);
+    await ports.bucket.put(cadKey, 'DXF-BYTES', { httpMetadata: { contentType: 'application/dxf' } });
+    const exp = Math.floor(now.getTime() / 1000) + 3600;
+    const url = `https://x/api/agent/file?k=${encodeURIComponent(cadKey)}&exp=${exp}&sig=${await fileLinkSignature(SECRET, cadKey, exp)}`;
+    const fileApp = app(ports, { class: 'ANON' }, 'file');
+    const refused = await fileApp.request(url, { method: 'GET' }, env);
+    expect([refused.status, await refused.json()]).toEqual([403, { error: 'forbidden' }]);
+    // A second order of the same RFQ that has a production partner.
+    ports.db.seed('orders', [{ id: '3c4d5e6f-7a8b-4c9d-8e0f-2a3b4c5d6e7f', rfq_id: CAD_RFQ, partner_id: '5a5b5c5d-1e2f-4a3b-8c4d-5e6f7a8b9c0d' }]);
+    const ok = await fileApp.request(url, { method: 'GET' }, env);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('content-disposition')).toBe('attachment; filename="flat.dxf"');
+    expect(await ok.text()).toBe('DXF-BYTES');
+  });
+
+  it('a signed traveller link answers only when its order has a production partner', async () => {
+    const { env, ports } = setup();
+    ports.clock.set(now);
+    const PARTNER_ORDER = '4d5e6f7a-8b9c-4d0e-9f1a-3b4c5d6e7f8a';
+    ports.db.seed('orders', [
+      { id: ORDER, rfq_id: RFQ, partner_id: null },
+      { id: PARTNER_ORDER, rfq_id: RFQ, partner_id: '5a5b5c5d-1e2f-4a3b-8c4d-5e6f7a8b9c0d' },
+    ]);
+    const partnerKey = `orders/${PARTNER_ORDER}/traveler.pdf`;
+    await ports.bucket.put(key, 'PDF-BYTES', { httpMetadata: { contentType: 'application/pdf' } });
+    await ports.bucket.put(partnerKey, 'PDF-BYTES', { httpMetadata: { contentType: 'application/pdf' } });
+    const exp = Math.floor(now.getTime() / 1000) + 3600;
+    const link = async (k: string) => `https://x/api/agent/file?k=${encodeURIComponent(k)}&exp=${exp}&sig=${await fileLinkSignature(SECRET, k, exp)}`;
+    const fileApp = app(ports, { class: 'ANON' }, 'file');
+    const refused = await fileApp.request(await link(key), { method: 'GET' }, env);
+    expect([refused.status, await refused.json()]).toEqual([403, { error: 'forbidden' }]);
+    expect((await fileApp.request(await link(partnerKey), { method: 'GET' }, env)).status).toBe(200);
+  });
+
+  it('a link signed for a key outside the partner file patterns answers 403, even for a partner order whose object exists', async () => {
+    const { env, ports } = setup();
+    ports.clock.set(now);
+    ports.db.seed('orders', [{ id: ORDER, rfq_id: RFQ, partner_id: '5a5b5c5d-1e2f-4a3b-8c4d-5e6f7a8b9c0d' }]);
+    ports.db.seed('cad_jobs', [{ id: JOB, rfq_id: RFQ, idempotency_key: 'k', job_type: 'analyse', input_r2_key: 'rfq/x', input_sha256: 'a'.repeat(64) }]);
+    const exp = Math.floor(now.getTime() / 1000) + 3600;
+    const fileApp = app(ports, { class: 'ANON' }, 'file');
+    const outside = [
+      `orders/${ORDER}/other.pdf`,
+      `orders/${ORDER}/traveler.pdf.bak`,
+      `cad/${JOB}/output/result.json`,
+      `cad/${JOB}/output/log.txt`,
+      `quotes/${RFQ}/v1/quote.pdf`,
+    ];
+    for (const k of outside) {
+      await ports.bucket.put(k, 'BYTES', { httpMetadata: { contentType: 'application/octet-stream' } });
+      const res = await fileApp.request(`https://x/api/agent/file?k=${encodeURIComponent(k)}&exp=${exp}&sig=${await fileLinkSignature(SECRET, k, exp)}`, { method: 'GET' }, env);
+      expect([k, res.status, await res.json()]).toEqual([k, 403, { error: 'forbidden' }]);
+    }
+    // The same order's traveller answers, so the refusals above come from the key rule.
+    await ports.bucket.put(key, 'PDF-BYTES', { httpMetadata: { contentType: 'application/pdf' } });
+    expect((await fileApp.request(`https://x/api/agent/file?k=${encodeURIComponent(key)}&exp=${exp}&sig=${await fileLinkSignature(SECRET, key, exp)}`, { method: 'GET' }, env)).status).toBe(200);
   });
 
   it('without sig, a non-staff principal answers 403 (staff previews go to the admin handler)', async () => {

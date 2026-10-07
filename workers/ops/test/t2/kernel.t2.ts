@@ -82,6 +82,8 @@ describe('harness (profile agents)', () => {
 describe('cron through the Local Explorer', () => {
   it("'* * * * *' reaches microns-ops and runs flagsSyncTick: every seeded flag mirrored, one flags run", async () => {
     await stubPost('/__stub/seed', { flags: 'migration', replace: true });
+    // Other T2 files share this harness instance: only the flags runs this tick writes are counted.
+    const earlier = new Set((await stubGet<Array<Record<string, unknown>>>('/__stub/rows/agent_runs')).filter((x) => x.agent === 'flags').map((x) => x.id));
     const before = await stubGet<Array<Record<string, unknown>>>('/__stub/rows/feature_flags');
     expect(before).toHaveLength(13);
     expect(before.every((r) => r.kv_synced_rev === null || r.kv_synced_rev === undefined)).toBe(true);
@@ -93,11 +95,12 @@ describe('cron through the Local Explorer', () => {
       (r) => r.every((x) => x.kv_synced_rev === x.rev),
     );
     expect(rows.every((x) => x.kv_synced_rev === x.rev)).toBe(true);
+    const fresh = (r: Array<Record<string, unknown>>) => r.filter((x) => x.agent === 'flags' && !earlier.has(x.id));
     const runs = await until(
       () => stubGet<Array<Record<string, unknown>>>('/__stub/rows/agent_runs'),
-      (r) => r.some((x) => x.agent === 'flags' && x.status !== 'running'),
+      (r) => fresh(r).some((x) => x.status !== 'running'),
     );
-    expect(runs.filter((x) => x.agent === 'flags')).toEqual([expect.objectContaining({ agent: 'flags', trigger: 'cron', status: 'succeeded' })]);
+    expect(fresh(runs)).toEqual([expect.objectContaining({ agent: 'flags', trigger: 'cron', status: 'succeeded' })]);
   });
 });
 
@@ -121,6 +124,9 @@ describe.skipIf(!W_PRESENT)('/api/agent/* through the site (needs unit W: site r
 
   it('test_card start -> one Telegram card with ap: buttons; relay-signed dis -> run succeeded and card edited', async () => {
     const callsBefore = (await stubGet<Array<{ method: string }>>('/__stub/telegram/calls')).length;
+    // Other T2 files share this harness instance and may hold test-card runs of their own.
+    const isTestCard = (r: Record<string, unknown>) => String(r.idempotency_key).startsWith('test-card:');
+    const earlier = new Set((await stubGet<Array<Record<string, unknown>>>('/__stub/rows/agent_runs')).filter(isTestCard).map((r) => r.id));
     const start = await fetch(`${SITE}/api/agent/start`, { method: 'POST', headers: { authorization: `Bearer ${jwt}`, 'content-type': 'application/json' }, body: JSON.stringify({ v: 1, kind: 'test_card' }) });
     expect(start.status).toBe(200);
     expect(await json(start)).toMatchObject({ v: 1, ok: true, created: true });
@@ -144,7 +150,9 @@ describe.skipIf(!W_PRESENT)('/api/agent/* through the site (needs unit W: site r
     expect(await json(decision)).toMatchObject({ v: 1, ok: true, verb: 'dismiss', outcome: 'dismissed' });
 
     const runs = await stubGet<Array<Record<string, unknown>>>('/__stub/rows/agent_runs');
-    const testRun = runs.find((r) => String(r.idempotency_key).startsWith('test-card:'));
+    const created = runs.filter((r) => isTestCard(r) && !earlier.has(r.id));
+    expect(created).toHaveLength(1);
+    const testRun = created[0];
     expect(testRun).toMatchObject({ status: 'succeeded', approval_token_sha256: null, human_action: expect.objectContaining({ channel: 'telegram', actor: 'telegram:4242' }) });
     const calls = await stubGet<Array<{ method: string }>>('/__stub/telegram/calls');
     expect(calls.slice(callsBefore).map((c) => c.method)).toContain('editMessageText');

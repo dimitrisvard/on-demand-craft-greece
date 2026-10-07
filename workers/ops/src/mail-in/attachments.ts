@@ -27,7 +27,7 @@ export interface AttachmentRecord {
   size_bytes: number;
   sha256: string;
   kind: AttachmentKind;
-  /** Inline part (e.g. a signature logo). */
+  /** A signature or logo (a small image the HTML part references by Content-ID, parse.ts); never another kind. */
   inline?: boolean;
   /** n of the archive this entry was extracted from. */
   parent?: number;
@@ -52,7 +52,8 @@ async function storeOne(blob: BlobPort, sha: string, a: ParsedAttachment): Promi
     sha256: digest,
     kind,
   };
-  if (a.inline) record.inline = true;
+  // Only an image can be a signature or logo; any other kind (STEP, PDF, ...) is always an RFQ file.
+  if (a.inline && kind === 'image') record.inline = true;
   return record;
 }
 

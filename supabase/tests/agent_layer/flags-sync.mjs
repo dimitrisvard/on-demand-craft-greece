@@ -7,7 +7,7 @@
 // Returns a summary the cron writes to agent_runs.output when something happened.
 
 export async function flagsSyncTick(sql, kv) {
-  const summary = { imported: [], absent: [], invalid: [], written: [], stale: [], failed: [] };
+  const summary = { imported: [], absent: [], invalid: [], written: [], stale: [], failed: [], seed_failed: [] };
 
   // 1. One-time seed: rows still waiting for the KV import (only on the first runs after the migration).
   const pending = await sql(
@@ -25,9 +25,15 @@ export async function flagsSyncTick(sql, kv) {
         try { parsed = JSON.parse(raw); } catch { parsed = null; }
         arg = JSON.stringify(parsed === null ? { unparsable: true } : parsed);
       }
-      const [{ result }] = await sql(
-        `select public.feature_flags_seed_from_kv($1, $2, $3::jsonb) as result`,
-        [row.key, row.tenant_id, arg]);
+      let result;
+      try {
+        [{ result }] = await sql(
+          `select public.feature_flags_seed_from_kv($1, $2, $3::jsonb) as result`,
+          [row.key, row.tenant_id, arg]);
+      } catch {
+        summary.seed_failed.push(row.kv_key);   // one row's failure stops neither the other rows nor the mirror step
+        continue;
+      }
       if (result === 'imported') summary.imported.push(row.kv_key);
       else if (result === 'absent') summary.absent.push(row.kv_key);
       else if (result === 'invalid') summary.invalid.push(row.kv_key);   // reported (Telegram card), row stays pending
@@ -45,7 +51,8 @@ export async function flagsSyncTick(sql, kv) {
     }
     const [{ ok }] = await sql(`select public.feature_flags_mark_synced($1, $2, $3) as ok`,
       [row.flag_key, row.flag_tenant_id, row.rev]);
-    (ok ? summary.written : summary.stale).push(row.kv_key);   // stale: row changed meanwhile, next tick writes it
+    // stale: the row changed meanwhile; mark_synced also left it unsynced, so the next tick writes its current rev.
+    (ok ? summary.written : summary.stale).push(row.kv_key);
   }
   return summary;
 }

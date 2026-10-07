@@ -9,6 +9,9 @@
 //   - Message ids keep their angle brackets and case (trimmed); References is split into at most 100 <...> ids.
 //   - Header values used for rules (Auto-Submitted, Precedence, List-Id, Content-Type) are returned as they are,
 //     trimmed; every Authentication-Results instance is returned top to bottom.
+//   - An attachment is 'inline' (a signature or logo, left out of RFQ files, CAD jobs and the model input) only when
+//     it is an image of at most INLINE_LOGO_MAX_BYTES whose Content-ID the HTML part references (cid:). The
+//     Content-Disposition decides nothing: mail clients send PDFs, drawings and photos inline as well.
 
 import PostalMime from 'postal-mime';
 
@@ -38,7 +41,7 @@ export interface ParsedAttachment {
   mime: string;
   size: number;
   content: ArrayBuffer;
-  /** Content-Disposition inline (e.g. a signature logo referenced from the HTML part). */
+  /** A signature or logo: a small image referenced by Content-ID from the HTML part (see the rules above). */
   inline?: boolean;
 }
 
@@ -52,6 +55,32 @@ export interface ParsedMail {
 }
 
 export const MAX_REFERENCES = 100;
+/** Largest image treated as a signature or logo when the HTML part references it by Content-ID. */
+export const INLINE_LOGO_MAX_BYTES = 64 * 1024;
+
+/** A Content-ID or cid: reference without angle brackets, URL escapes decoded, lower case. */
+function normaliseCid(value: string): string {
+  let v = value.trim().replace(/^<|>$/g, '');
+  try {
+    v = decodeURIComponent(v);
+  } catch {
+    // keep the value as written
+  }
+  return v.toLowerCase();
+}
+
+/** Content-IDs the HTML part references (cid:...). */
+export function cidReferences(html: string | null | undefined): Set<string> {
+  const refs = new Set<string>();
+  for (const m of String(html ?? '').matchAll(/\bcid:([^"'\s)>]+)/gi)) refs.add(normaliseCid(m[1]));
+  return refs;
+}
+
+/** True for a signature or logo (see the rules above). */
+export function isInlineLogo(a: { mime: string; size: number; contentId?: string | null }, refs: ReadonlySet<string>): boolean {
+  if (!a.mime.startsWith('image/') || a.size > INLINE_LOGO_MAX_BYTES || !a.contentId) return false;
+  return refs.has(normaliseCid(a.contentId));
+}
 
 /** Message ids of a References / In-Reply-To value: the <...> tokens in order, at most `max`. */
 export function messageIdTokens(value: string | null | undefined, max = MAX_REFERENCES): string[] {
@@ -127,15 +156,17 @@ export async function parseMime(raw: ArrayBuffer | Uint8Array): Promise<ParsedMa
   const plain = typeof email.text === 'string' ? email.text.trim() : '';
   const fromHtml = !plain && typeof email.html === 'string' && email.html.trim() !== '';
   const text = fromHtml ? htmlToText(email.html as string) : plain;
+  const refs = cidReferences(email.html);
   const attachments: ParsedAttachment[] = (email.attachments ?? []).map((a, i) => {
     const content = toArrayBuffer(a.content);
+    const mime = (a.mimeType || 'application/octet-stream').toLowerCase();
     return {
       n: i + 1,
       filename: a.filename ?? `attachment-${i + 1}`,
-      mime: (a.mimeType || 'application/octet-stream').toLowerCase(),
+      mime,
       size: content.byteLength,
       content,
-      inline: a.disposition === 'inline' || Boolean(a.related),
+      inline: isInlineLogo({ mime, size: content.byteLength, contentId: a.contentId }, refs),
     };
   });
   return {

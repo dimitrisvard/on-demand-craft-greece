@@ -3,7 +3,8 @@
 //   M0 check-rcpt   recipient must be in ALLOWED_RCPT, else setReject
 //   M1 buffer       raw MIME read once (at most 25 MiB by the routing limit)
 //   M2 hash         message_id_sha256 of the trimmed Message-ID header (of the raw bytes when it is missing)
-//   M3 store-raw    R2 email/<sha>/raw.eml (same key on redelivery)
+//   M3 store-raw    R2 email/<sha>/raw.eml; bytes a row already stands for are never replaced (store.ts):
+//                   other bytes under the Message-ID of an existing row -> log duplicate_mismatch, stop
 //   M4 insert-row   inbound_emails (on_conflict tenant_id,message_id_sha256, ignore-duplicates); duplicate -> stop
 //   M5 hand-over    OPS.startIntake (rfq) or OPS.ingestReply (replies); an RPC error is logged and ignored
 //   M6 shadow-copy  forward to MAIL_COPY_TO when set
@@ -13,7 +14,7 @@
 
 import type { MailIngestRpc } from '../../shared/src/agent-types';
 import { missingNames } from '../../shared/src/http/env-check';
-import { insertInboundEmail, type InboundEmailInsert } from './db';
+import { inboundEmailExists, insertInboundEmail, type InboundEmailInsert } from './db';
 import {
   authResultsOfRaw,
   inReplyToOf,
@@ -103,7 +104,12 @@ export async function handleEmail(message: ForwardableEmailMessage, env: MailEnv
     const rawSha256 = messageId ? await sha256hex(raw) : sha;
     const receivedAt = new Date(now()).toISOString();
     // M3 store-raw
-    const key = await storeRaw(env.PRIVATE_FILES, { sha, raw, rawSha256, mailbox, receivedAt }, sleep);
+    const db = { supabaseUrl: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY };
+    const stored = await storeRaw(env.PRIVATE_FILES, { sha, raw, rawSha256, mailbox, receivedAt }, () => inboundEmailExists({ ...db, tenantId: env.AGENT_TENANT_ID, messageIdSha256: sha }, deps.fetch, sleep), sleep);
+    if (stored.outcome === 'kept') {
+      logLine(mailbox, sha, 'duplicate_mismatch', elapsed());
+      return;
+    }
     // M4 insert-row
     const from = parseFrom(message.headers.get('from'), message.from);
     const row: InboundEmailInsert = {
@@ -119,12 +125,12 @@ export async function handleEmail(message: ForwardableEmailMessage, env: MailEnv
       in_reply_to: inReplyToOf(message.headers.get('in-reply-to')),
       references_ids: messageIdTokens(message.headers.get('references')),
       received_at: receivedAt,
-      raw_r2_key: key,
+      raw_r2_key: stored.key,
       raw_size_bytes: raw.byteLength,
       auth_results: authResultsOfRaw(raw),
       status: 'received',
     };
-    const inserted = await insertInboundEmail({ supabaseUrl: env.SUPABASE_URL, serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY, row }, deps.fetch, sleep);
+    const inserted = await insertInboundEmail({ ...db, row }, deps.fetch, sleep);
     if (inserted.status === 'duplicate') {
       logLine(mailbox, sha, 'duplicate', elapsed());
       return;

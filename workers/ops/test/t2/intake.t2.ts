@@ -149,12 +149,14 @@ describe.skipIf(!U.site || !U.stub)('rfq-intake in workerd (I-4)', () => {
     expect(String(files[0].r2_key)).toBe(`rfq/${String(files[0].file_path)}`);
     const copy = await call(`${U.explorer}/r2/buckets/microns-private/objects/${encodeURIComponent(String(files[0].r2_key))}`);
     expect(copy.status).toBe(200);
-    const jobs = (await rows(U, 'cad_jobs')).filter((r) => r.rfq_id === rfq.id);
+    // the analyse job of this run (the quote it started may add its own jobs, e.g. a drawing PDF, once it succeeds)
+    const jobs = (await rows(U, 'cad_jobs')).filter((r) => r.rfq_id === rfq.id && r.job_type === 'analyse' && r.requested_by_run_id === run.id);
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ job_type: 'analyse', rfq_file_id: files[0].id, requested_by_run_id: run.id, params: expect.objectContaining({ process: 'sheet_metal', material: '1.4301' }) });
     expect((await instance(U, 'quote', `quote-${String(rfq.id)}-v1`)).status).toBe(200);
 
-    const calls = (await llmRequests(U)).slice(before);
+    // the intake's own calls (the quote it started runs at the same time and makes its own model calls)
+    const calls = (await llmRequests(U)).slice(before).filter((c) => c.prompt.startsWith('rfq_intake.'));
     expect(calls.map((c) => c.prompt).sort()).toEqual(['rfq_intake.classify_process@v1', 'rfq_intake.extract@v1', 'rfq_intake.triage@v1']);
     for (const c of calls) {
       expect(c).toMatchObject({ x_api_key: false, cf_aig_authorization: true, cf_aig_collect_log_payload: 'false' });

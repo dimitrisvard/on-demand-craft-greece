@@ -3,7 +3,7 @@
 // material parameter, error codes, the intake cards and CHECK-LISTS for the status and source unions IN writes.
 
 import { describe, expect, it } from 'vitest';
-import { attachedCard, createdCard, intakeCard, INTAKE_VERBS, notRfqCard, shadowCard, type IntakeCardInput } from '../../src/agents/cards/intake';
+import { attachedCard, createdCard, FOLLOW_UP_VERBS, followUpCard, followUpShadowCard, intakeCard, INTAKE_VERBS, notRfqCard, replyHeldCard, shadowCard, type FollowUpCardInput, type IntakeCardInput } from '../../src/agents/cards/intake';
 import { renderTelegram } from '../../src/agents/cards/index';
 import { VERB_CODES } from '../../../shared/src/agent-api';
 import type { InboundKind, InboundMailbox, InboundSource, InboundStatus } from '../../src/db/repos/inbound-emails';
@@ -17,6 +17,7 @@ import {
   companyFallback,
   contactEmailFor,
   decideCard,
+  decideFollowUp,
   emailBlock,
   extractConfidence,
   extractContent,
@@ -137,6 +138,21 @@ describe('confidence and the confirmation table', () => {
     ['known customer without company', { company: null, customer_id: 'c1' }, false, []],
   ] as const)('%s', (_name, over, needs, reasons) => {
     expect(decideCard({ ...base, ...over })).toEqual({ needs_card: needs, reasons });
+  });
+
+  const follow = { mode: 'auto' as const, match_confidence: 0.8, min_confidence: 0.7, dmarc_pass: true, injection_suspected: false };
+  it.each([
+    ['follow-up: auto, every check passes', {}, false, []],
+    ['follow-up: match at the threshold', { match_confidence: 0.7 }, false, []],
+    ['follow-up: assist', { mode: 'assist' }, true, ['mode_assist']],
+    ['follow-up: shadow', { mode: 'shadow' }, true, ['mode_shadow']],
+    ['follow-up: match below the threshold', { match_confidence: 0.69 }, true, ['low_confidence']],
+    ['follow-up: match confidence not a number', { match_confidence: Number.NaN }, true, ['low_confidence']],
+    ['follow-up: sender not authenticated', { dmarc_pass: false }, true, ['sender_not_authenticated']],
+    ['follow-up: injection', { injection_suspected: true }, true, ['injection_suspected']],
+    ['follow-up: every reason', { mode: 'assist', match_confidence: 0.5, dmarc_pass: false, injection_suspected: true }, true, ['mode_assist', 'low_confidence', 'sender_not_authenticated', 'injection_suspected']],
+  ] as const)('%s', (_name, over, needs, reasons) => {
+    expect(decideFollowUp({ ...follow, ...over })).toEqual({ needs_card: needs, reasons });
   });
 });
 
@@ -287,5 +303,45 @@ describe('intake cards', () => {
       expect(JSON.stringify(c)).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+/);
     }
     expect(cards[3].open_url).toBe('https://x/rfq/f1');
+  });
+
+  const follow: FollowUpCardInput = {
+    run_id: 'run-2',
+    site_origin: 'https://www.micronshub.eu',
+    inbound_email_id: '7d0f8f4e-1b2c-4d3e-8f9a-0b1c2d3e4f51',
+    rfq_number: 'RFQ-05102026-1',
+    sender_masked: 'a***@example.com',
+    rule: 3,
+    file_kinds: ['pdf', 'step'],
+    files: 2,
+    reasons: ['mode_assist', 'sender_not_authenticated', 'injection_suspected'],
+    dmarc_pass: false,
+    injection_suspected: true,
+  };
+
+  it('the follow-up card: kind reply_pick, attach_1 / new_rfq / ignore with Telegram codes, the match and the checks shown, inbox link', () => {
+    const card = followUpCard(follow);
+    expect(card.kind).toBe('reply_pick');
+    expect(card.allowed_verbs).toEqual([...FOLLOW_UP_VERBS]);
+    for (const verb of card.allowed_verbs) expect(VERB_CODES.reply_pick[verb]).toBeTruthy();
+    expect(card.title).toBe('Follow-up for RFQ-05102026-1? · a***@example.com');
+    expect(card.flags).toEqual(['dmarc_fail', 'injection_suspected']);
+    expect(card.lines).toEqual([
+      { label: 'Sender', value: 'a***@example.com' },
+      { label: 'RFQ', value: 'RFQ-05102026-1' },
+      { label: 'Matched by', value: 'RFQ number in the subject' },
+      { label: 'Files', value: '2 (pdf, step)' },
+      { label: 'Why a check', value: 'assist mode, sender not authenticated, instructions in the e-mail' },
+    ]);
+    expect(card.open_url).toBe('https://www.micronshub.eu/dashboard/rfq-inbox?email=7d0f8f4e-1b2c-4d3e-8f9a-0b1c2d3e4f51');
+    expect(followUpCard(follow, { reminder: true }).title).toMatch(/^Reminder: Follow-up for /);
+    const tg = renderTelegram(card, 'ABCDEFGHIJKLMNOPQRSTUVWX27');
+    expect((tg.reply_markup.inline_keyboard[0] as Array<{ callback_data: string }>).map((b) => b.callback_data)).toEqual(['ap:ABCDEFGHIJKLMNOPQRSTUVWX27:a1', 'ap:ABCDEFGHIJKLMNOPQRSTUVWX27:new', 'ap:ABCDEFGHIJKLMNOPQRSTUVWX27:ign']);
+    for (const c of [followUpShadowCard(follow, true), replyHeldCard({ run_id: 'r', site_origin: 'https://x', inbound_email_id: 'e', sender_email: 'anna.becker@example.com' })]) {
+      expect(c.kind).toBe('intake');
+      expect(c.allowed_verbs).toEqual([]);
+      expect(JSON.stringify(c)).not.toMatch(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+/);
+    }
+    expect(followUpShadowCard(follow, false).lines.at(-1)).toEqual({ label: 'Shadow result', value: 'would attach to the RFQ' });
   });
 });

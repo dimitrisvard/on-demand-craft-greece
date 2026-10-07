@@ -25,7 +25,9 @@ import {
   Rocket,
   Euro,
   Layers,
-  Globe
+  Globe,
+  MailOpen,
+  ClipboardCheck
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -44,13 +46,16 @@ interface PersistentDashboardLayoutProps {
 const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Check if user is a production partner
   const isProductionPartner = user?.role === 'partner_seller';
   // Check if user is a tenant admin (has limited dashboard access - no Lead Monitor, no Content)
   const isTenantAdminUser = user?.tenantRole === 'tenant_admin';
+  // Agent pages (RFQ Inbox, Approvals): the Operations gate plus a staff role (admin, sales_rep, production_manager,
+  // accountant) from user_roles.
+  const showAgentPages = !isProductionPartner && !isTenantAdminUser && isAdmin();
   
   // Close mobile menu when route changes
   useEffect(() => {
@@ -86,6 +91,8 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
     if (path === '/dashboard/tenders') return 'tenders';
     if (path === '/dashboard/funded-startups') return 'funded-startups';
     if (path === '/dashboard/xometry') return 'xometry';
+    if (path === '/dashboard/rfq-inbox') return 'rfq-inbox';
+    if (path === '/dashboard/approvals') return 'approvals';
     if (path === '/dashboard/seo') return 'seo';
     if (path.startsWith('/dashboard/tenants')) return 'tenants';
     return 'overview';
@@ -271,6 +278,22 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                     icon={<Euro className="h-4 w-4" />}
                     label="Xometry Queue"
                   />
+                 )}
+                 {showAgentPages && (
+                  <>
+                    <NavButton
+                      active={activeModule === "rfq-inbox"}
+                      onClick={() => handleNavigation("/dashboard/rfq-inbox")}
+                      icon={<MailOpen className="h-4 w-4" />}
+                      label="RFQ Inbox"
+                    />
+                    <NavButton
+                      active={activeModule === "approvals"}
+                      onClick={() => handleNavigation("/dashboard/approvals")}
+                      icon={<ClipboardCheck className="h-4 w-4" />}
+                      label="Approvals"
+                    />
+                  </>
                  )}
               </AccordionContent>
             </AccordionItem>
@@ -507,6 +530,22 @@ const PersistentDashboardLayout = ({ children }: PersistentDashboardLayoutProps)
                     icon={<Euro className="h-4 w-4" />}
                     label="Xometry Queue"
                   />
+                 )}
+                 {showAgentPages && (
+                  <>
+                    <NavButton
+                      active={activeModule === "rfq-inbox"}
+                      onClick={() => handleNavigation("/dashboard/rfq-inbox")}
+                      icon={<MailOpen className="h-4 w-4" />}
+                      label="RFQ Inbox"
+                    />
+                    <NavButton
+                      active={activeModule === "approvals"}
+                      onClick={() => handleNavigation("/dashboard/approvals")}
+                      icon={<ClipboardCheck className="h-4 w-4" />}
+                      label="Approvals"
+                    />
+                  </>
                  )}
               </AccordionContent>
             </AccordionItem>

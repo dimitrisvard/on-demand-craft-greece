@@ -89,24 +89,80 @@ describe('RfqThread', () => {
     expect(events(second.instance)).toEqual([]);
   });
 
-  it('customer-reply is forwarded once per inbound mail when a quote is bound; outbound ids are mirrored', async () => {
-    const { thread, instance } = setup();
+  /** A database with the quote row and inbound rows (not linked to the RFQ yet) with their receive times. */
+  function replyDb(quote: { status: string; sent_at: string | null }, mails: Array<[id: string, receivedAt: string]>): MemoryDb {
+    const db = new MemoryDb();
+    db.seed('quote_workflows', [{ id: QW, rfq_id: RFQ, quote_version: 1, workflow_instance_id: QI, outbound_message_ids: [], ...quote }]);
+    db.seed('inbound_emails', mails.map(([id, received_at], i) => ({ id, message_id: `<m${i}@x.example>`, message_id_sha256: String(i).repeat(64).slice(0, 64), mailbox: 'rfq', received_at })));
+    return db;
+  }
+  const replies = (i: FakeWorkflowInstance) => events(i).filter((e) => e.type === 'customer-reply');
+  const SENT_AT = '2026-10-05T10:00:00.000Z';
+
+  it('customer-reply is forwarded once per inbound mail while the bound quote waits for the answer; outbound ids are mirrored', async () => {
+    const db = replyDb({ status: 'sent', sent_at: SENT_AT }, [
+      ['11111111-1111-4111-8111-111111111111', '2026-10-05T09:00:00.000Z'],
+      ['22222222-2222-4222-8222-222222222222', '2026-10-05T11:00:00.000Z'],
+    ]);
+    const { thread, instance } = setup({ db });
     await thread.appendInbound('11111111-1111-4111-8111-111111111111', '<early@x.example>');
     expect(events(instance)).toEqual([]);
     await thread.bindQuote(QI, QW);
     await thread.registerOutbound([' <q.a.0@rfq.example.com> '], QW);
     await thread.appendInbound('22222222-2222-4222-8222-222222222222', ' <reply@x.example>');
     await thread.appendInbound('22222222-2222-4222-8222-222222222222', '<reply@x.example>');
-    expect(events(instance).filter((e) => e.type === 'customer-reply')).toEqual([{ type: 'customer-reply', payload: { inbound_email_id: '22222222-2222-4222-8222-222222222222' } }]);
+    // the early mail is never forwarded, also when it is appended again after the quote was sent
+    await thread.appendInbound('11111111-1111-4111-8111-111111111111', '<early@x.example>');
+    expect(replies(instance)).toEqual([{ type: 'customer-reply', payload: { inbound_email_id: '22222222-2222-4222-8222-222222222222' } }]);
     const s = await thread.state();
     expect(s.outbound_message_ids).toEqual(['<q.a.0@rfq.example.com>']);
     expect(s.inbound.map((i) => i.message_id)).toEqual(['<early@x.example>', '<reply@x.example>']);
     expect(s.quote).toEqual({ instance_id: QI, quote_workflow_id: QW });
   });
 
-  it('a failed customer-reply send is retried by the next appendInbound of the same mail', async () => {
-    const { thread, instance } = setup();
+  it('a mail attached while the bound quote has not been sent (or has ended) is recorded only, never forwarded', async () => {
+    const MAIL = '55555555-5555-4555-8555-555555555555';
+    const LATER = '66666666-6666-4666-8666-666666666666';
+    const db = replyDb({ status: 'awaiting_approval', sent_at: null }, [
+      [MAIL, '2026-10-05T09:30:00.000Z'],
+      [LATER, '2026-10-05T12:00:00.000Z'],
+    ]);
+    const { thread, instance } = setup({ db });
+    // the quote binds in its CAD step, before the approval wait
     await thread.bindQuote(QI, QW);
+    await thread.appendInbound(MAIL, '<follow-up@x.example>');
+    expect(replies(instance)).toEqual([]);
+    for (const status of ['started', 'cad_pending', 'pricing', 'awaiting_approval', 'approved']) {
+      await db.update('quote_workflows', { status }, { filters: [['id', 'eq', QW]] });
+      await thread.appendInbound(MAIL, '<follow-up@x.example>');
+    }
+    expect(replies(instance)).toEqual([]);
+    // the quote is sent afterwards: the earlier mail is still not its reply
+    await db.update('quote_workflows', { status: 'sent', sent_at: SENT_AT }, { filters: [['id', 'eq', QW]] });
+    await thread.registerOutbound(['<q.a.0@rfq.example.com>'], QW);
+    await thread.appendInbound(MAIL, '<follow-up@x.example>');
+    expect(replies(instance)).toEqual([]);
+    // a quote that has ended gets nothing either
+    await db.update('quote_workflows', { status: 'won' }, { filters: [['id', 'eq', QW]] });
+    await thread.appendInbound(LATER, '<later@x.example>');
+    expect(replies(instance)).toEqual([]);
+    // in a follow-up wait the later mail is forwarded
+    await db.update('quote_workflows', { status: 'follow_up' }, { filters: [['id', 'eq', QW]] });
+    await thread.appendInbound(LATER, '<later@x.example>');
+    expect(replies(instance)).toEqual([{ type: 'customer-reply', payload: { inbound_email_id: LATER } }]);
+  });
+
+  it('a failed status read or send throws, and the next appendInbound of the same mail forwards it', async () => {
+    const db = replyDb({ status: 'sent', sent_at: SENT_AT }, [['33333333-3333-4333-8333-333333333333', '2026-10-05T10:30:00.000Z']]);
+    const { thread, instance } = setup({ db });
+    await thread.bindQuote(QI, QW);
+    const select = db.select.bind(db);
+    db.select = (async () => {
+      throw new Error('postgrest select quote_workflows: 503');
+    }) as typeof db.select;
+    await expect(thread.appendInbound('33333333-3333-4333-8333-333333333333', '<r@x.example>')).rejects.toThrow('503');
+    db.select = select;
+    expect(events(instance)).toEqual([]);
     instance.failures.set('sendEvent', new Error('unavailable'));
     await expect(thread.appendInbound('33333333-3333-4333-8333-333333333333', '<r@x.example>')).rejects.toThrow('unavailable');
     await thread.appendInbound('33333333-3333-4333-8333-333333333333', '<r@x.example>');

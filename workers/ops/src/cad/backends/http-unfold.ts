@@ -14,7 +14,8 @@
 //     'backend_error' (retryable), 502/503/504 also mark the backend down; network error -> 'unavailable'
 //     (retryable, backend down); the job signal firing -> 'timeout' (retryable).
 //   - Analysis metrics come from the X-Part-* headers plus the in-Worker DXF metrics of the returned flat.dxf
-//     (skipped with a warning when that DXF is above the inline DXF cap).
+//     (skipped with a warning when that DXF is above the inline DXF cap); the parse runs through quietly()
+//     (cad/quiet.ts), so the parser's own console output never reaches the Worker logs.
 //   - Error messages carry the HTTP status and a short code only, never the service's response text.
 
 import type { CadJobMessageV1 } from '../../queues/messages';
@@ -22,6 +23,7 @@ import { safeName } from '../../agents/ids';
 import { dxfMetrics } from '../dxf-metrics';
 import { parseDXF } from '../inline/dxf-parser';
 import { multipartBody } from '../multipart';
+import { quietly } from '../quiet';
 import { parseUnfoldHeaders, resultFromUnfold } from '../result';
 import { INLINE_CAPS, MAX_INPUT_BYTES, type CadArtefact, type CadBackend, type CadInput, type CadKind, type CadOutcome, type UnfoldFetcher } from '../types';
 
@@ -181,7 +183,7 @@ export class HttpUnfoldBackend implements CadBackend {
       if (body.byteLength > INLINE_CAPS.dxf) warnings.push('dxf_metrics_skipped_too_large');
       else {
         try {
-          metrics = dxfMetrics(parseDXF(body));
+          metrics = dxfMetrics(quietly(() => parseDXF(body)));
         } catch {
           warnings.push('dxf_metrics_unreadable');
         }

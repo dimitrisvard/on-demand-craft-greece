@@ -6,8 +6,9 @@
 //     the mini-PostgREST, status 'received'; with agent.rfq_intake off no Workflow instance (MailIngest flag_off);
 //   - with the flag on, one rfq-intake instance 'rfq-intake-<32 hex>' whose params are ids only (Local Explorer),
 //     and a second start for the same message creates no second instance;
-//   - replies@ goes to MailIngest.ingestReply (one agent-events message, logged 'queued'); the reply consumer
-//     (unit RP) then takes the row out of 'received' (skipped with that reason until the consumer is present);
+//   - replies@ goes to MailIngest.ingestReply (one agent-events message, logged 'queued'); with agent.quote on (the
+//     consumer acts only then) the reply consumer (unit RP) takes the row out of 'received' (skipped with that reason
+//     until the consumer is present); the flag is switched off again afterwards;
 //   - an unknown recipient is rejected before anything is stored; log lines carry no address and no subject;
 //   - M-4, own harness instance with MAIL_COPY_TO in the generated .dev.vars: the shadow copy is forwarded to it with
 //     X-Microns-Inbound: <first 16 hex of the sha>, as the local e-mail capture records.
@@ -122,9 +123,14 @@ describe.skipIf(!U.site || !U.stub)('microns-mail in workerd (M-3)', () => {
     );
   });
 
-  it.skipIf(!RP_PRESENT)('replies@: the agent-events consumer (unit RP) takes the row out of received', async () => {
-    const sent = await sendMail(U, { from: 'anna.becker@example.com', to: 'replies@rfq.micronshub.eu', subject: 'Re: Quotation T2 consumed', text: 'Thank you.' });
-    await until('the reply consumer', async () => (await rowOf(U, sent.sha)).status !== 'received', 30_000);
+  it.skipIf(!RP_PRESENT)('replies@ with agent.quote on: the agent-events consumer (unit RP) takes the row out of received', async () => {
+    await setFlag(U, 'agent.quote', { enabled: true, value: { mode: 'assist' }, rev: 1 });
+    try {
+      const sent = await sendMail(U, { from: 'anna.becker@example.com', to: 'replies@rfq.micronshub.eu', subject: 'Re: Quotation T2 consumed', text: 'Thank you.' });
+      await until('the reply consumer', async () => (await rowOf(U, sent.sha)).status !== 'received', 30_000);
+    } finally {
+      await setFlag(U, 'agent.quote', null);
+    }
   });
 
   it('an unknown recipient is rejected before anything is stored', async () => {

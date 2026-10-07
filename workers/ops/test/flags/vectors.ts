@@ -8,7 +8,12 @@ import { DEFAULT_TENANT_ID } from '../../src/db/repos/feature-flags';
 import type { Db } from '../../src/db/postgrest';
 
 export interface KvExpect { enabled: boolean; value: Record<string, unknown>; mode?: string }
-export interface SeedCase { name: string; key: string; kv: string | null; result: 'imported' | 'absent' | 'invalid'; row: { enabled: boolean; value: unknown }; kv_after?: KvExpect | null }
+export interface SeedCase {
+  name: string; key: string; tenant?: string; kv: string | null; result: 'imported' | 'absent' | 'invalid';
+  row: { enabled: boolean; value: unknown }; kv_after?: KvExpect | null;
+}
+/** A pending row the seed cases add before their tick (another tenant). */
+export interface SeedRow { key: string; tenant: string; value: Record<string, unknown> }
 export interface ScenarioStep {
   op: 'tick' | 'edit' | 'insert' | 'race' | 'kv_fail_next';
   name?: string;
@@ -18,17 +23,21 @@ export interface ScenarioStep {
   first?: Record<string, unknown>;
   then?: Record<string, unknown>;
   expect_mark?: boolean;
+  /** race only: the newer rev is put and marked before the put of the older rev lands. */
+  newer_first?: boolean;
   expect?: { imported?: string[]; absent_count?: number; invalid?: string[]; written?: string[]; stale?: string[]; failed?: string[]; kv?: Record<string, KvExpect | null> };
 }
 export interface Vectors {
   admin_user: string;
   other_tenant: string;
   seed_cases: SeedCase[];
+  seed_rows: SeedRow[];
   scenario: { kv: Record<string, string>; steps: ScenarioStep[] };
 }
 
 const RAW = JSON.parse(readFileSync(new URL('../../../../supabase/tests/agent_layer/vectors/flags-sync.json', import.meta.url), 'utf8')) as Vectors;
-const sub = (s: string): string => s.replaceAll('$admin', RAW.admin_user).replaceAll('$other_tenant', RAW.other_tenant);
+const sub = (s: string): string => s.replaceAll('$admin', RAW.admin_user).replaceAll('$other_tenant', RAW.other_tenant)
+  .replace(/\$x(\d+)/g, (_m, n: string) => 'x'.repeat(Number(n)));
 function subAll<T>(o: T): T {
   if (typeof o === 'string') return sub(o) as T;
   if (Array.isArray(o)) return o.map(subAll) as T;
@@ -38,6 +47,13 @@ function subAll<T>(o: T): T {
 
 /** The vectors with $admin and $other_tenant substituted. */
 export const VECTORS: Vectors = subAll(RAW);
+
+/** The KV key of a seed case (the flag key for the default tenant). */
+export const seedCaseKvKey = (c: SeedCase): string => (c.tenant && c.tenant !== DEFAULT_TENANT_ID ? `t:${c.tenant}:${c.key}` : c.key);
+
+/** The KV state the seed cases start from. */
+export const seedCaseKv = (): Record<string, string> =>
+  Object.fromEntries(VECTORS.seed_cases.filter((c) => c.kv !== null).map((c) => [seedCaseKvKey(c), c.kv as string]));
 
 /** KV text against an expectation (null = absent); null when it matches. */
 export function kvMismatch(raw: string | undefined, exp: KvExpect | null): string | null {
@@ -64,17 +80,22 @@ export interface VectorWorld {
   flag(key: string, tenant?: string): Promise<Record<string, unknown>>;
 }
 
-/** Applies the seed cases' KV, runs one tick and checks every case. */
+/** Adds the pending seed rows, runs one tick over the KV of seedCaseKv() and checks every case. */
 export async function checkSeedCases(w: VectorWorld, at: number): Promise<void> {
+  for (const r of VECTORS.seed_rows) {
+    await w.db.insert('feature_flags', { key: r.key, tenant_id: r.tenant, value: r.value, kv_seed_pending: true });
+  }
   const t = await w.tick(at);
+  expect(t.seed_failed, 'no seed import call fails').toEqual([]);
   for (const c of VECTORS.seed_cases) {
+    const kvKey = seedCaseKvKey(c);
     const bucket = { imported: t.imported, absent: t.absent, invalid: t.invalid }[c.result];
-    expect(bucket, `${c.name}: ${c.result}`).toContain(c.key);
-    const row = await w.flag(c.key);
+    expect(bucket, `${c.name}: ${c.result}`).toContain(kvKey);
+    const row = await w.flag(c.key, c.tenant);
     expect({ enabled: row.enabled, value: row.value }, `${c.name}: row`).toEqual(c.row);
     expect(row.kv_seed_pending, `${c.name}: pending only when invalid`).toBe(c.result === 'invalid');
-    if (c.kv_after !== undefined) expect(kvMismatch(w.kv.map.get(c.key), c.kv_after), `${c.name}: KV`).toBeNull();
-    else expect(w.kv.map.get(c.key), `${c.name}: KV left as it was`).toBe(c.kv);
+    if (c.kv_after !== undefined) expect(kvMismatch(w.kv.map.get(kvKey), c.kv_after), `${c.name}: KV`).toBeNull();
+    else expect(w.kv.map.get(kvKey), `${c.name}: KV left as it was`).toBe(c.kv);
   }
 }
 
@@ -91,11 +112,20 @@ export async function runScenario(w: VectorWorld, start: number): Promise<void> 
     } else if (s.op === 'kv_fail_next') {
       w.kv.failNext.add(s.key as string);
     } else if (s.op === 'race') {
+      type BatchRow = { flag_key: string; flag_tenant_id: string; kv_key: string; kv_value: unknown; rev: number };
+      const batchRow = async (): Promise<BatchRow | undefined> =>
+        (await w.db.rpc<BatchRow[]>('feature_flags_sync_batch', {})).find((r) => r.flag_key === s.key && r.flag_tenant_id === DEFAULT_TENANT_ID);
       await w.db.update('feature_flags', s.first ?? {}, { filters: [...where(s.key as string)] });
-      const batch = await w.db.rpc<Array<{ flag_key: string; flag_tenant_id: string; kv_key: string; kv_value: unknown; rev: number }>>('feature_flags_sync_batch', {});
-      const stale = batch.find((r) => r.flag_key === s.key);
+      const stale = await batchRow();
       expect(stale, `${label}: row in the batch`).toBeDefined();
       await w.db.update('feature_flags', s.then ?? {}, { filters: [...where(s.key as string)] });
+      if (s.newer_first) {
+        // The newer rev is written and marked first (e.g. the edit's write-through); the older put lands after it.
+        const newer = await batchRow();
+        expect(newer && newer.rev > stale!.rev, `${label}: newer rev in the batch`).toBe(true);
+        await w.kv.put(newer!.kv_key, JSON.stringify(newer!.kv_value));
+        expect(await w.db.rpc('feature_flags_mark_synced', { p_key: newer!.flag_key, p_tenant_id: newer!.flag_tenant_id, p_rev: newer!.rev }), `${label}: newer marked`).toBe(true);
+      }
       await w.kv.put(stale!.kv_key, JSON.stringify(stale!.kv_value));
       const marked = await w.db.rpc('feature_flags_mark_synced', { p_key: stale!.flag_key, p_tenant_id: stale!.flag_tenant_id, p_rev: stale!.rev });
       expect(marked, `${label}: mark_synced`).toBe(s.expect_mark);

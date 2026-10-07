@@ -18,7 +18,8 @@
 //                      change_partner re-reads the order's partner and asks again (at most 3 rounds)
 //   handoff            flag gate; orders.partner_id set (only while empty or the same); Resend mail to the partner with
 //                      signed 7-day links to the traveller and the drawings (Idempotency-Key order/<order_id>/handoff)
-//   reorder            shortfall or open low-stock alerts of the order's materials: post_order.reorder_draft@v1 with
+//   reorder            shortfall or open low-stock alerts of the order's materials: flag read again (flag_off park),
+//                      post_order.reorder_draft@v1 with
 //                      supplier data from catalog_materials, a reorder card (approve_draft, dismiss), 'reorder-approved'
 //                      7 days -> reminder -> 7 days; an approved draft is kept on the run for the staff member (no
 //                      supplier address is stored, nothing is sent)
@@ -624,6 +625,8 @@ export async function runPostOrder(p: PostOrderParams, instanceId: string, d: Po
     let reorderOutcome: 'none' | 'approved' | 'dismissed' | 'expired' = 'none';
     let approvedDraft: { subject: string; body_text: string } | null = null;
     if (reorder.length > 0) {
+      // the hand-off wait can last 14 days: the flag is read again before the draft and its card
+      await flagGate('reorder');
       const draft = await llmStep<{ subject: string; body_text: string }, { subject: string; body_text: string }>(
         'reorder-draft',
         prompts.reorder,

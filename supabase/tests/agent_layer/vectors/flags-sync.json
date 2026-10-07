@@ -1,5 +1,5 @@
 {
-  "description": "KV mirror vectors (PHASE4_SPEC.md §4.13 'KV mirror (P4-2) contract'). Run by test.mjs against the SQL functions with the reference tick (flags-sync.mjs) and by workers/ops/test/flags against microns-ops' flagsSyncTick over the in-memory RPCs. Both start from the 13 flag rows the migration seeds. 'kv' values are the raw KV text; null = key absent. Key lists compare as sets.",
+  "description": "KV mirror vectors (PHASE4_SPEC.md §4.13 'KV mirror (P4-2) contract'). Run by test.mjs against the SQL functions with the reference tick (flags-sync.mjs) and by workers/ops/test/flags against microns-ops' flagsSyncTick over the in-memory RPCs. Both start from the 13 flag rows the migration seeds; the seed cases add the pending rows of 'seed_rows' (another tenant, KV key t:<tenant>:<key>). 'kv' values are the raw KV text; null = key absent; '$x<n>' stands for n letters x. Key lists compare as sets.",
   "admin_user": "11111111-1111-4111-8111-111111111111",
   "other_tenant": "bb71e74e-4273-496f-a75b-319357666ebc",
   "seed_cases": [
@@ -24,7 +24,27 @@
       "row": { "enabled": false, "value": { "relevance": false, "llm_cap": 20 } } },
     { "name": "malformed: value not an object", "key": "agent.growth.scrapers", "kv": "{\"enabled\":true,\"value\":[1]}", "result": "invalid", "row": { "enabled": false, "value": {} } },
     { "name": "malformed: unknown mode", "key": "agent.growth.xometry", "kv": "{\"enabled\":true,\"mode\":\"yolo\"}", "result": "invalid", "row": { "enabled": false, "value": {} } },
-    { "name": "malformed: an array", "key": "agent.content_daily", "kv": "[]", "result": "invalid", "row": { "enabled": false, "value": {} } }
+    { "name": "malformed: an array", "key": "agent.content_daily", "kv": "[]", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: JSON null as the top-level mode", "key": "agent.quote", "tenant": "$other_tenant", "kv": "{\"enabled\":true,\"mode\":null}",
+      "result": "invalid", "row": { "enabled": false, "value": { "mode": "assist" } } },
+    { "name": "malformed: value.mode outside the enum", "key": "agent.post_order", "tenant": "$other_tenant", "kv": "{\"enabled\":true,\"value\":{\"mode\":\"on\"}}",
+      "result": "invalid", "row": { "enabled": false, "value": { "mode": "assist" } } },
+    { "name": "malformed: a valid top-level mode with value.mode outside the enum", "key": "agent.growth.reddit", "tenant": "$other_tenant",
+      "kv": "{\"enabled\":true,\"mode\":\"auto\",\"value\":{\"mode\":\"on\"}}", "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "malformed: JSON null as value.mode", "key": "agent.growth.hn", "tenant": "$other_tenant", "kv": "{\"enabled\":true,\"value\":{\"mode\":null}}",
+      "result": "invalid", "row": { "enabled": false, "value": {} } },
+    { "name": "refused by the table: merged value over 8 KiB", "key": "agent.rfq_intake", "tenant": "$other_tenant", "kv": "{\"enabled\":true,\"value\":{\"note\":\"$x9000\"}}",
+      "result": "invalid", "row": { "enabled": false, "value": { "mode": "shadow" } } },
+    { "name": "valid record: a large value within 8 KiB", "key": "agent.content_daily", "tenant": "$other_tenant", "kv": "{\"enabled\":true,\"value\":{\"note\":\"$x7000\"}}",
+      "result": "imported", "row": { "enabled": true, "value": { "note": "$x7000" } }, "kv_after": { "enabled": true, "value": { "note": "$x7000" } } }
+  ],
+  "seed_rows": [
+    { "key": "agent.quote", "tenant": "$other_tenant", "value": { "mode": "assist" } },
+    { "key": "agent.post_order", "tenant": "$other_tenant", "value": { "mode": "assist" } },
+    { "key": "agent.growth.hn", "tenant": "$other_tenant", "value": {} },
+    { "key": "agent.growth.reddit", "tenant": "$other_tenant", "value": {} },
+    { "key": "agent.rfq_intake", "tenant": "$other_tenant", "value": { "mode": "shadow" } },
+    { "key": "agent.content_daily", "tenant": "$other_tenant", "value": {} }
   ],
   "scenario": {
     "kv": {
@@ -49,6 +69,10 @@
       { "op": "race", "key": "agent.post_order", "first": { "enabled": true }, "then": { "enabled": false }, "expect_mark": false },
       { "op": "tick", "name": "a row that changed between batch and mark converges on the next tick",
         "expect": { "written": ["agent.post_order"], "kv": { "agent.post_order": { "enabled": false, "mode": "assist", "value": { "mode": "assist" } } } } },
+      { "op": "race", "key": "agent.rfq_intake", "first": { "enabled": true }, "then": { "enabled": false }, "newer_first": true, "expect_mark": false },
+      { "op": "tick", "name": "a put of an older rev that lands after the newer rev was written and marked is replaced on the next tick",
+        "expect": { "written": ["agent.rfq_intake"], "stale": [], "failed": [],
+                    "kv": { "agent.rfq_intake": { "enabled": false, "mode": "shadow", "value": { "mode": "shadow", "min_confidence": 0.7, "ack": false } } } } },
       { "op": "kv_fail_next", "key": "agent.growth.hn" },
       { "op": "edit", "key": "agent.growth.hn", "set": { "enabled": true } },
       { "op": "tick", "name": "a failed put is reported and the row stays unsynced", "expect": { "written": [], "failed": ["agent.growth.hn"] } },

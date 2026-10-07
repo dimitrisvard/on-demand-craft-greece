@@ -3,16 +3,25 @@
 //
 //   open-run            agent_runs row (agent rfq_intake, key = message_id_sha256); a final run exits; prompts pinned
 //   daily-cap           above value.max_runs_per_day: run 'skipped' (daily_cap), mail 'needs_review', no LLM call
-//   flag-start          agent.rfq_intake off -> run parked (flag_off) until 'agent-resumed' (7 days, then cancelled)
+//   flag-start          agent.rfq_intake off -> run parked (flag_off) until 'agent-resumed' (7 days, then cancelled);
+//                       every later flag-<name> step does the same, and a run that resumes from any other park reads
+//                       the flag again (flag-resumed-<step>) before it goes on
 //   parse-and-store     raw MIME from R2, attachments to email/<sha>/att/<n>-<safe> (ZIP entries streamed), the
 //                       quote-stripped text to email/<sha>/body.txt, inbound_emails.attachments, body_excerpt
 //                       (first 4,000 characters), status 'parsed'
 //   triage-rules        auto replies, bounces and bulk mail decided without a model
 //   triage              rfq_intake.triage@v1 when the rules did not decide
 //   end-non-rfq         spam / auto_reply / other: mail 'spam' or 'rejected', run 'skipped' (notice for 'other')
-//   hand-to-replies     a reply: agent-events 'inbound-reply', run 'succeeded'
+//   hand-to-replies     a reply: agent-events 'inbound-reply', run 'succeeded'; while agent.quote is off nothing would
+//                       handle it, so the mail goes to 'needs_review' with a notice and the run is 'skipped'
 //   thread-check        reply attribution rules 1-3 (In-Reply-To, References, RFQ number in the subject)
-//   attach-to-rfq       a follow-up of a known RFQ: files and CAD jobs added to it, mail 'attached'
+//   flag-attach         flag and mode re-read before the follow-up path writes anything
+//   follow-up-decide    a human confirms unless mode 'auto', the match confidence reaches the threshold, the sender
+//                       is authenticated and no injection is suspected; shadow: notice only (shadow-follow-up), then end
+//   request-follow-up, wait-reply-confirmed (card kind reply_pick: attach_1 / new_rfq / ignore; 7 days, reminder,
+//                       7 days, then mail 'needs_review', run cancelled); new_rfq goes on as a new RFQ (flag-extract)
+//   attach-to-rfq       a follow-up of a known RFQ: RfqThread.appendInbound, files and CAD jobs added to it, mail
+//                       'attached'
 //   flag-extract        flag re-read before the extraction
 //   extract             rfq_intake.extract@v1 (text, attachment list, one PDF trimmed to 5 pages, up to 3 images);
 //                       the result is stored in inbound_emails.parsed, the step keeps a summary without addresses
@@ -26,7 +35,7 @@
 //   enqueue-cad         one cad_jobs row + cad-jobs message per STEP/STL/DXF file; RfqThread.expectCadJobs
 //   start-quote         QuoteWorkflow 'quote-<rfq_id>-v1' when agent.quote is on ("already exists" = success)
 //   notify-and-close    run 'succeeded' with usage and cost; notice card with the RFQ link
-// Every step after daily-cap runs inside one try/catch: a step that throws ends in step 'fail-run', which puts
+// Every step after open-run runs inside one try/catch: a step that throws ends in step 'fail-run', which puts
 // the run behind a failure card (Retry restarts the instance from that step; Dismiss closes it) and marks the
 // mail 'failed'. LLM steps: a retryable provider failure is retried by the step; when the retries are used up the
 // run parks as 'llm_unavailable', a gateway 429 parks it as 'budget', both until 'agent-resumed'. Refusals, schema
@@ -39,7 +48,19 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type Workflo
 import { NonRetryableError } from 'cloudflare:workflows';
 import { formatLogLine } from '../../../shared/src/http/log';
 import { request, isWaitTimeout, waitWithReminder } from '../agents/approval';
-import { attachedCard, createdCard, intakeCard, notRfqCard, shadowCard, VERB_PROCESS, type IntakeCardInput } from '../agents/cards/intake';
+import {
+  attachedCard,
+  createdCard,
+  followUpCard,
+  followUpShadowCard,
+  intakeCard,
+  notRfqCard,
+  replyHeldCard,
+  shadowCard,
+  VERB_PROCESS,
+  type FollowUpCardInput,
+  type IntakeCardInput,
+} from '../agents/cards/intake';
 import { maskEmail } from '../agents/cards/index';
 import { isConfigMissing, need } from '../agents/config';
 import type { DecisionEventPayload } from '../agents/decision';
@@ -55,13 +76,14 @@ import { createEmailRfq, customerCandidates, getRfq } from '../db/repos/rfqs';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import type { AttachmentRecord } from '../mail-in/attachments';
 import { storeAttachments } from '../mail-in/attachments';
-import { authResultsOf } from '../mail-in/auth-results';
+import { authResultsOf, CF_AUTHSERV_ID } from '../mail-in/auth-results';
 import {
   classifyContent,
   combineProcess,
   companyFallback,
   contactEmailFor,
   decideCard,
+  decideFollowUp,
   extractConfidence,
   extractContent,
   EXTRACT_TEXT_CHARS,
@@ -121,7 +143,9 @@ export type IntakeOutcome =
   | 'auto_reply'
   | 'other'
   | 'reply'
+  | 'reply_held'
   | 'attached'
+  | 'ignored'
   | 'shadow'
   | 'timed_out'
   | 'not_rfq'
@@ -142,6 +166,8 @@ export interface IntakeDeps {
   step: WorkflowStep;
   /** Reply attribution (src/replies/match.ts); tests pass their own. */
   match?: (db: Ports['db'], h: ReplyHeaders, o: { tenant_id: string; rules?: ReadonlyArray<1 | 2 | 3 | 4> }) => Promise<ReplyMatch>;
+  /** Trusted authserv-id of Authentication-Results (CF_AUTHSERV_ID); tests pass their own. */
+  authserv?: string | null;
 }
 
 const AGENT = 'rfq_intake' as const;
@@ -233,6 +259,7 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
   const { env, ports, step } = d;
   const db = ports.db;
   const match = d.match ?? matchReply;
+  const authserv = d.authserv === undefined ? CF_AUTHSERV_ID : d.authserv;
   const id = p.inbound_email_id;
   const sha = p.message_id_sha256;
   const tenant = p.tenant_id;
@@ -276,18 +303,6 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
   }
   const prompts = opened.prompts as { triage: PromptId; extract: PromptId; classify: PromptId };
 
-  // 0b daily-cap (flood control, before any LLM call)
-  const capped = await run('daily-cap', DB, async () => {
-    const flag = await readFlag(env, FLAG, tenant);
-    const stop = await applyDailyCap(env, ports, { run_id, agent: AGENT, flag });
-    if (stop) await updateInboundEmail(db, id, { status: 'needs_review', error: 'daily_cap' });
-    return stop;
-  });
-  if (capped) {
-    log('daily_cap');
-    return { outcome: 'daily_cap', run_id };
-  }
-
   // ----- helpers that need the run -----
 
   const readBodyText = async (): Promise<string> => {
@@ -307,7 +322,14 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
     return { subject: row.subject, from_name: row.from_name, from_email: row.from_email, text: await readBodyText() };
   };
 
-  /** Parks the run, waits for 'agent-resumed' and resumes it; on timeout the run is cancelled (Halt). */
+  /** Mode and threshold of the latest flag read (every flag-<name> step updates it). */
+  let latest: { mode: 'shadow' | 'assist' | 'auto'; min_confidence: number } = { mode: 'shadow', min_confidence: 1 };
+
+  /**
+   * Parks the run, waits for 'agent-resumed' and resumes it; on timeout the run is cancelled (Halt). A run resumed
+   * from a budget or llm_unavailable park reads the flag again (flag-resumed-<name>) before the caller goes on, so a
+   * switched-off agent parks again instead of calling the model or writing.
+   */
   const parkAndWait = async (name: string, reason: 'flag_off' | 'budget' | 'llm_unavailable'): Promise<void> => {
     await run(`park-${name}`, DB, async () => {
       await checkpointRun(db, run_id, acc);
@@ -330,6 +352,8 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
       await checkpointRun(db, run_id, acc, { status: 'running' });
       return true;
     });
+    // The flag_off park is resumed by flagGate's own loop, which reads the flag again.
+    if (reason !== 'flag_off') await flagGate(`resumed-${name}`);
   };
 
   /** Re-reads agent.rfq_intake; while it is off the run is parked (flag_off). Returns mode and threshold. */
@@ -340,7 +364,10 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
         const flag = await readFlag(env, FLAG, tenant);
         return { enabled: flag.enabled, mode: flag.mode, min_confidence: minConfidenceOf(flag.value) };
       });
-      if (r.enabled) return { mode: r.mode, min_confidence: r.min_confidence };
+      if (r.enabled) {
+        latest = { mode: r.mode, min_confidence: r.min_confidence };
+        return latest;
+      }
       await parkAndWait(stepName, 'flag_off');
     }
   };
@@ -380,6 +407,18 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
   };
 
   try {
+    // 0b daily-cap (flood control, before any LLM call)
+    const capped = await run('daily-cap', DB, async () => {
+      const flag = await readFlag(env, FLAG, tenant);
+      const stop = await applyDailyCap(env, ports, { run_id, agent: AGENT, flag });
+      if (stop) await updateInboundEmail(db, id, { status: 'needs_review', error: 'daily_cap' });
+      return stop;
+    });
+    if (capped) {
+      log('daily_cap');
+      return { outcome: 'daily_cap', run_id };
+    }
+
     await flagGate('start');
 
     // 1 parse-and-store
@@ -391,7 +430,7 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
       const text = stripQuoted(mail.text);
       await ports.blob.put(bodyTextKey(sha), new TextEncoder().encode(text.slice(0, EXTRACT_TEXT_CHARS)).buffer as ArrayBuffer, { contentType: 'text/plain; charset=utf-8' });
       await updateInboundEmail(db, id, { attachments: records, body_excerpt: text.slice(0, 4000), status: 'parsed', error: null }, ['received', 'parsed', 'failed', 'needs_review']);
-      const auth = authResultsOf(mail.headers.authentication_results ?? []);
+      const auth = authResultsOf(mail.headers.authentication_results ?? [], authserv);
       return { signals: mailSignals(mail, auth, records), attachments: records, text_chars: text.length, from_html: mail.from_html };
     });
     records = parsed.attachments;
@@ -424,17 +463,25 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
       return { outcome: kind, run_id };
     }
 
-    // 3b hand-to-replies
+    // 3b hand-to-replies (the reply consumer acts only while agent.quote is on)
     if (triage.kind === 'reply') {
-      await run('hand-to-replies', DB, async () => {
+      const handed = await run('hand-to-replies', DB, async () => {
+        const quoteFlag = await readFlag(env, 'agent.quote', tenant);
+        if (!quoteFlag.enabled) {
+          await updateInboundEmail(db, id, { kind: 'reply', status: 'needs_review', error: 'quote_agent_off' });
+          await closeRun(db, run_id, { status: 'skipped', error: 'quote_agent_off', output: { kind: 'reply' } }, acc);
+          const row = await readRow();
+          await sendNotice(ports, replyHeldCard({ run_id, site_origin: env.SITE_ORIGIN, inbound_email_id: id, sender_email: row.from_email }), run_id);
+          return { queued: false };
+        }
         need(env, 'AGENT_EVENTS');
         await updateInboundEmail(db, id, { kind: 'reply' });
         await env.AGENT_EVENTS.send({ v: 1, type: 'inbound-reply', inbound_email_id: id, tenant_id: tenant }, { contentType: 'json' });
         await closeRun(db, run_id, { status: 'succeeded', output: { kind: 'reply' } }, acc);
-        return true;
+        return { queued: true };
       });
-      log('reply');
-      return { outcome: 'reply', run_id };
+      log(handed.queued ? 'reply' : 'reply_held');
+      return { outcome: handed.queued ? 'reply' : 'reply_held', run_id };
     }
 
     const kind: 'rfq' | 'techpilot' = triage.kind === 'techpilot' ? 'techpilot' : 'rfq';
@@ -445,12 +492,90 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
       if (!signals.in_reply_to && signals.references === 0 && !signals.rfq_number) return { matched: false as const };
       const row = await readRow();
       const m = await match(db, { message_id: row.message_id, in_reply_to: row.in_reply_to, references: row.references_ids ?? [], subject: row.subject, from_email: row.from_email }, { tenant_id: tenant, rules: [1, 2, 3] });
-      if (m.rule === 1 || m.rule === 2 || m.rule === 3) return { matched: true as const, rule: m.rule, rfq_id: m.rfq_id, quote_workflow_id: m.quote_workflow_id };
+      if (m.rule === 1 || m.rule === 2 || m.rule === 3) return { matched: true as const, rule: m.rule, confidence: m.confidence, rfq_id: m.rfq_id, quote_workflow_id: m.quote_workflow_id };
       return { matched: false as const };
     });
 
-    // 4a attach-to-rfq
+    // 4a follow-up of a known RFQ: flag and mode first, then a human confirms unless every check passes
+    let attach = thread.matched;
     if (thread.matched) {
+      const follow = await flagGate('attach');
+      const check = await run('follow-up-decide', DB, async () => {
+        const d4 = decideFollowUp({ mode: follow.mode, match_confidence: thread.confidence, min_confidence: follow.min_confidence, dmarc_pass: signals.dmarc_pass, injection_suspected: triage.injection_suspected });
+        const row = await readRow();
+        const rfq = await getRfq(db, thread.rfq_id);
+        const card: FollowUpCardInput = {
+          run_id,
+          site_origin: env.SITE_ORIGIN,
+          inbound_email_id: id,
+          rfq_number: rfq?.rfq_number ?? null,
+          sender_masked: row.from_email ? maskEmail(row.from_email) : null,
+          rule: thread.rule,
+          file_kinds: fileKinds(records),
+          files: records.filter((r) => RFQ_FILE_KINDS.has(r.kind) && !r.inline).length,
+          reasons: d4.reasons,
+          dmarc_pass: signals.dmarc_pass,
+          injection_suspected: triage.injection_suspected,
+        };
+        return { mode: follow.mode, needs_card: d4.needs_card, reasons: d4.reasons as CardReason[], card };
+      });
+
+      if (check.mode === 'shadow') {
+        await run('shadow-follow-up', DB, async () => {
+          await updateInboundEmail(db, id, { kind, classification: { triage: 'model', follow_up_rule: thread.rule, confidence: thread.confidence } });
+          await closeRun(db, run_id, { status: 'succeeded', output: { mode: 'shadow', follow_up: true, rule: thread.rule, rfq_id: thread.rfq_id, needs_card: check.needs_card, reasons: check.reasons } }, acc);
+          await sendNotice(ports, followUpShadowCard(check.card, check.needs_card), run_id);
+          return true;
+        });
+        log('shadow');
+        return { outcome: 'shadow', run_id };
+      }
+
+      if (check.needs_card) {
+        await run('request-follow-up', DB, async () => {
+          const { price_missing: _ignored, ...usage } = usageColumns(acc);
+          const { telegram_message_id } = await request(env, ports, { run_id, card: followUpCard(check.card) }, { patch: usage, output: { inbound_email_id: id, rule: thread.rule, candidates: [{ rfq_id: thread.rfq_id, quote_workflow_id: thread.quote_workflow_id ?? null }] } });
+          return { telegram_message_id };
+        });
+        current = 'request-follow-up';
+        const waited = await waitWithReminder<DecisionEventPayload>(
+          step,
+          {
+            run_id,
+            type: 'reply-confirmed',
+            first: CONFIRM_FIRST,
+            second: CONFIRM_SECOND,
+            card: () => followUpCard(check.card, { reminder: true }),
+            onTimeout: async () => {
+              await run('follow-up-timeout', DB, async () => {
+                await updateInboundEmail(db, id, { status: 'needs_review' });
+                await closeRun(db, run_id, { status: 'cancelled', error: 'confirmation_timeout' }, acc);
+                return true;
+              });
+            },
+          },
+          { env, ports },
+        );
+        if ('timedOut' in waited) {
+          log('timed_out');
+          return { outcome: 'timed_out', run_id };
+        }
+        const verb = String(waited.event.verb);
+        if (verb === 'new_rfq') attach = false;
+        else if (verb !== 'attach_1') {
+          await run('follow-up-ignored', DB, async () => {
+            await updateInboundEmail(db, id, { status: 'rejected' });
+            await closeRun(db, run_id, { status: 'cancelled', output: { verb: verb.slice(0, 40), follow_up: true } }, acc);
+            return true;
+          });
+          log('ignored');
+          return { outcome: 'ignored', run_id };
+        } else await flagGate('attach-confirmed');
+      }
+    }
+
+    // 4b attach-to-rfq
+    if (thread.matched && attach) {
       const rfqId = thread.rfq_id;
       const attached = await run('attach-to-rfq', DB, async () => {
         need(env, 'RFQ_THREAD');
@@ -474,7 +599,7 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
     }
 
     // 5 extract
-    const gate = await flagGate('extract');
+    await flagGate('extract');
     let unreadable = 0;
     const extract = await llmStep<RfqExtractV1, ExtractSummary>(
       'extract',
@@ -518,10 +643,10 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
     // 8 decide
     const decision = await run('decide', PURE, async () => {
       const d8 = decideCard({
-        mode: gate.mode,
+        mode: latest.mode,
         confidence: extract.confidence,
         process_confidence: proc.confidence,
-        min_confidence: gate.min_confidence,
+        min_confidence: latest.min_confidence,
         dmarc_pass: signals.dmarc_pass,
         injection_suspected: triage.injection_suspected || extract.injection_suspected,
         customer_id: customer.customer_id,
@@ -547,10 +672,10 @@ export async function runIntake(p: RfqIntakeParams, instanceId: string, d: Intak
         injection_suspected: triage.injection_suspected || extract.injection_suspected,
         unreadable: extract.unreadable,
       };
-      return { needs_card: d8.needs_card, reasons: d8.reasons as CardReason[], card };
+      return { mode: latest.mode, needs_card: d8.needs_card, reasons: d8.reasons as CardReason[], card };
     });
 
-    if (gate.mode === 'shadow') {
+    if (decision.mode === 'shadow') {
       await run('shadow-notice', DB, async () => {
         await closeRun(db, run_id, { status: 'succeeded', output: { mode: 'shadow', needs_card: decision.needs_card, reasons: decision.reasons, process: proc.process, confidence: extract.confidence, parts: decision.card.parts } }, acc);
         await sendNotice(ports, shadowCard(decision.card, decision.needs_card), run_id);

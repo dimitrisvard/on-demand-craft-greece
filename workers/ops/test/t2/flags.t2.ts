@@ -5,13 +5,21 @@
 // Needs the harness of PHASE4_SPEC.md §6.3 (T2_SITE_URL = the dev server, T2_STUB_URL = the stub with
 // stubs/postgrest.mjs mounted).
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const SITE = process.env.T2_SITE_URL ?? '';
 const STUB = process.env.T2_STUB_URL ?? '';
 const EXPLORER = `${SITE}/cdn-cgi/local/explorer/api`;
 const TENANT = '00000000-0000-0000-0000-000000000001';
-const HOUR = Date.parse('2026-10-05T08:00:00.000Z');
+const HOUR_MS = 3_600_000;
+/**
+ * The scheduled hour of the test ticks: the next whole UTC hour at least 3 minutes after the file loads. The stub
+ * stamps kv_synced_at and updated_at with the wall clock, and the hourly check compares only rows written at least
+ * DRIFT_SETTLE_MS (120 s) before its scheduled time, so every scheduled time of this file lies after every write.
+ */
+const HOUR = Math.ceil((Date.now() + 3 * 60_000) / HOUR_MS) * HOUR_MS;
+/** agent_runs.idempotency_key of the tick scheduled at `t` (src/cron/flags-sync.ts tickKey). */
+const tickKey = (t: number): string => `flags-sync:${new Date(t).toISOString().slice(0, 16)}Z`;
 
 type Row = Record<string, unknown>;
 
@@ -56,18 +64,36 @@ async function cron(scheduledTime: number): Promise<void> {
 const rows = async (table: string): Promise<Row[]> => (await (await call(`${STUB}/__stub/rows/${table}`)).json()) as Row[];
 const flag = async (key: string): Promise<Row> => (await rows('feature_flags')).find((r) => r.key === key && r.tenant_id === TENANT) as Row;
 
+/** Polls `fn` until it returns a truthy value; on timeout the error carries the flag-run rows and the ops log hint. */
 async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 15_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const v = await fn();
     if (v) return v;
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > end) {
+      const runs = (await rows('agent_runs').catch(() => [])).filter((r) => r.agent === 'flags')
+        .map((r) => ({ key: r.idempotency_key, status: r.status, error: r.error }));
+      throw new Error(`timed out waiting for ${what}; flags runs ${JSON.stringify(runs)} (the [microns-ops] flags-sync lines are in the wrangler log of the harness tmp dir)`);
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
 }
 
+/** The KV keys this file sets, deletes or lets the mirror write; restored afterwards (later files share the KV). */
+const TOUCHED = ['agent.quote', 'agent.post_order', 'seo.strict_404', 'api.forward_to_vercel', 'mcp.remote'];
+
 describe.skipIf(!SITE || !STUB)('flags-sync cron in workerd (T2)', () => {
+  const saved = new Map<string, string | null>();
+
+  afterAll(async () => {
+    for (const [key, value] of saved) {
+      if (value === null) await kvDelete(key);
+      else await kvPut(key, value);
+    }
+  });
+
   beforeAll(async () => {
+    for (const key of TOUCHED) saved.set(key, await kvGet(key));
     await call(`${STUB}/__stub/postgrest/reset`, { method: 'POST' });
     await call(`${STUB}/__stub/seed`, { method: 'POST', headers: json, body: JSON.stringify({ flags: 'migration' }) });
     for (const key of ['agent.quote', 'agent.post_order', 'seo.strict_404']) await kvDelete(key);
@@ -95,7 +121,7 @@ describe.skipIf(!SITE || !STUB)('flags-sync cron in workerd (T2)', () => {
       return r.length ? r : null;
     });
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ trigger: 'cron', status: 'succeeded', idempotency_key: 'flags-sync:2026-10-05T08:01Z' });
+    expect(runs[0]).toMatchObject({ trigger: 'cron', status: 'succeeded', idempotency_key: tickKey(HOUR + 60_000) });
   });
 
   it('an edited row is mirrored on the next tick (rev, mode and value in the KV record)', async () => {
@@ -113,7 +139,7 @@ describe.skipIf(!SITE || !STUB)('flags-sync cron in workerd (T2)', () => {
   it('minute 0: a KV value changed by hand is reported as drift and left as it is', async () => {
     await kvPut('agent.quote', '{"enabled":false}');
     await cron(HOUR + 60 * 60_000);
-    const run = await until('the hourly run row', async () => (await rows('agent_runs')).find((r) => r.idempotency_key === 'flags-sync:2026-10-05T09:00Z' && r.finished_at !== null));
+    const run = await until('the hourly run row', async () => (await rows('agent_runs')).find((r) => r.idempotency_key === tickKey(HOUR + 60 * 60_000) && r.finished_at !== null));
     expect((run.output as Row).drift).toEqual(expect.arrayContaining([{ kv_key: 'agent.quote', kind: 'kv_differs' }]));
     expect(await kvGet('agent.quote')).toBe('{"enabled":false}');
     expect((await flag('agent.quote')).enabled).toBe(true);

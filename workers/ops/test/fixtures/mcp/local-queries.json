@@ -1,0 +1,153 @@
+{
+  "tool:0:get_leads": [
+    "GET /leads?select=*&order=discovered_at.desc&limit=20&discovered_at=gte.<ts>"
+  ],
+  "tool:1:get_leads": [
+    "GET /leads?select=*&order=discovered_at.desc&limit=5&source=eq.reddit&auto_score=eq.high&status=eq.new&industry_tags=cs.{robotics}&matched_keywords=cs.{cnc}&discovered_at=gte.<ts>"
+  ],
+  "tool:2:get_leads": [
+    "GET /leads?select=*&order=discovered_at.desc&limit=20"
+  ],
+  "tool:3:get_lead_detail": [
+    "GET /lead_activity?select=*&lead_id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e&order=created_at.desc",
+    "GET /leads?select=*&id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e"
+  ],
+  "tool:4:score_lead": [
+    "PATCH /leads?id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "POST /lead_activity"
+  ],
+  "tool:5:update_lead_status": [
+    "PATCH /leads?id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "POST /lead_activity"
+  ],
+  "tool:6:save_response_draft": [
+    "PATCH /leads?id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "POST /lead_activity"
+  ],
+  "tool:7:add_lead_note": [
+    "GET /leads?select=notes&id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "PATCH /leads?id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e",
+    "POST /lead_activity"
+  ],
+  "tool:8:get_lead_stats": [
+    "GET /leads?select=source,auto_score,manual_score,status,discovered_at&discovered_at=gte.<ts>",
+    "HEAD /leads?select=id"
+  ],
+  "tool:9:search_leads": [
+    "GET /leads?select=*&or=(title.ilike.%sheet metal%,body.ilike.%sheet metal%)&order=discovered_at.desc&limit=5"
+  ],
+  "tool:10:manage_keywords": [
+    "GET /lead_keywords?select=*&order=category.asc,weight.desc"
+  ],
+  "tool:11:manage_keywords": [
+    "POST /lead_keywords?select=*"
+  ],
+  "tool:12:manage_keywords": [
+    "DELETE /lead_keywords?id=eq.12"
+  ],
+  "tool:13:manage_keywords": [
+    "PATCH /lead_keywords?id=eq.12"
+  ],
+  "tool:14:manage_subreddits": [
+    "GET /monitored_subreddits?select=*&order=tier.asc,subreddit.asc"
+  ],
+  "tool:15:manage_subreddits": [
+    "POST /monitored_subreddits?select=*"
+  ],
+  "tool:16:manage_subreddits": [
+    "DELETE /monitored_subreddits?id=eq.4"
+  ],
+  "tool:17:manage_subreddits": [
+    "PATCH /monitored_subreddits?id=eq.4"
+  ],
+  "tool:18:get_companies": [
+    "GET /company_leads?select=*&order=created_at.desc&limit=20"
+  ],
+  "tool:19:get_companies": [
+    "GET /company_leads?select=*&order=created_at.desc&limit=7&source=eq.wlw&outreach_status=eq.new&email_scrape_status=eq.pending&country=ilike.%Germany%&company_name=ilike.%Metall%"
+  ],
+  "tool:20:enrich_company_emails": [
+    "GET /company_leads?select=id,company_name,website_url&website_url=not.is.null&email_scrape_status=eq.pending&limit=5"
+  ],
+  "tool:21:enrich_company_emails": [
+    "GET /company_leads?select=id,company_name,website_url&id=in.(c-1,c-2)&website_url=not.is.null"
+  ],
+  "tool:22:enrich_company_emails": [
+    "GET /company_leads?select=id,company_name,website_url&website_url=not.is.null&email_scrape_status=eq.pending&limit=3&country=ilike.%Austria%"
+  ],
+  "tool:23:update_company": [
+    "PATCH /company_leads?id=eq.1f2e3d4c-5b6a-4978-8a6b-5c4d3e2f1a0b"
+  ],
+  "tool:24:get_saved_searches": [
+    "GET /saved_searches?select=*&order=created_at.desc"
+  ],
+  "tool:25:get_tenders": [
+    "GET /tenders?select=*&order=relevance_score.desc&limit=20"
+  ],
+  "tool:26:get_tenders": [
+    "GET /tenders?select=*&order=relevance_score.desc&limit=10&country_code=eq.DE&status=eq.new&is_relevant=eq.true&relevance_score=gte.40&estimated_value_eur=gte.10000&estimated_value_eur=lte.500000&or=(title.ilike.%laser%,description.ilike.%laser%,buyer_name.ilike.%laser%)&submission_deadline=gte.<ts>&submission_deadline=lte.<ts>"
+  ],
+  "tool:27:get_tender_detail": [
+    "GET /tenders?select=*&id=eq.0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d&limit=1"
+  ],
+  "tool:28:get_tender_detail": [
+    "GET /tenders?select=*&id=ilike.0a1b2c3d%&limit=1"
+  ],
+  "tool:29:update_tender_status": [
+    "PATCH /tenders?id=eq.0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+  ],
+  "tool:30:update_tender_status": [
+    "GET /tenders?select=id&id=ilike.0a1b2c3d%&limit=1"
+  ],
+  "tool:31:get_tender_stats": [
+    "GET /tenders?select=country_code,country_name&is_relevant=eq.true",
+    "GET /tenders?select=id,country_code,title,relevance_score,submission_deadline&relevance_score=gte.70&status=eq.new&order=relevance_score.desc&limit=5",
+    "HEAD /tenders?select=*",
+    "HEAD /tenders?select=*&discovered_at=gte.<ts>",
+    "HEAD /tenders?select=*&is_relevant=eq.true"
+  ],
+  "tool:32:search_tenders": [
+    "GET /tenders?select=*&or=(title.ilike.%machining%,description.ilike.%machining%,buyer_name.ilike.%machining%)&relevance_score=gte.10&order=relevance_score.desc&limit=5"
+  ],
+  "tool:33:get_connector_status": [
+    "GET /tender_connectors?select=country_code,country_name,portal_name,access_method,is_active,last_scan_at,last_scan_count,last_error,scan_frequency_hours&order=country_code.asc"
+  ],
+  "tool:34:get_funded_startups": [
+    "GET /funded_startups?select=*&discovered_at=gte.<ts>&hardware_confidence=gte.0&order=discovered_at.desc&limit=20"
+  ],
+  "tool:35:get_funded_startups": [
+    "GET /funded_startups?select=*&discovered_at=gte.<ts>&hardware_confidence=gte.40&order=discovered_at.desc&limit=5&industry_tags=cs.{robotics}&country_code=eq.DE&funding_stage=eq.seed&outreach_status=eq.new&is_hardware=eq.true&funding_amount_millions=gte.2"
+  ],
+  "tool:36:get_funded_startup_detail": [
+    "GET /funded_startups?select=*&id=eq.2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d"
+  ],
+  "tool:37:update_startup_outreach": [
+    "PATCH /funded_startups?id=eq.2b3c4d5e-6f70-4a8b-9c0d-1e2f3a4b5c6d"
+  ],
+  "tool:38:get_funding_stats": [
+    "GET /funded_startups?select=country_code&is_hardware=eq.true&discovered_at=gte.<ts>",
+    "GET /funded_startups?select=funding_stage&discovered_at=gte.<ts>",
+    "GET /funded_startups?select=outreach_status&discovered_at=gte.<ts>",
+    "HEAD /funded_startups?select=id",
+    "HEAD /funded_startups?select=id&discovered_at=gte.<ts>",
+    "HEAD /funded_startups?select=id&is_hardware=eq.true&discovered_at=gte.<ts>"
+  ],
+  "tool:39:gsc_get_unindexed_pages": [
+    "GET /gsc_monitored_urls?select=url,label,language,service_type,priority&order=priority.desc&limit=10&language=eq.de"
+  ],
+  "resource:0:leads://today": [
+    "GET /leads?select=id,source,auto_score,status,title,discovered_at&discovered_at=gte.<ts>&order=discovered_at.desc"
+  ],
+  "resource:1:leads://keywords": [
+    "GET /lead_keywords?select=*&is_active=eq.true&order=category.asc"
+  ],
+  "resource:2:leads://subreddits": [
+    "GET /monitored_subreddits?select=*&is_active=eq.true&order=tier.asc"
+  ],
+  "prompt:0:draft_lead_response": [
+    "GET /leads?select=*&id=eq.7d1e2f30-4a5b-4c6d-8e7f-901a2b3c4d5e"
+  ],
+  "prompt:1:daily_lead_review": [
+    "GET /leads?select=*&discovered_at=gte.<ts>&auto_score=in.(high,medium)&status=eq.new&order=auto_score.asc"
+  ]
+}

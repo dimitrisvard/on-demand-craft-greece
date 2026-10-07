@@ -1032,11 +1032,24 @@ function featureFlagsSyncBatch(tables: MemoryTableSet): unknown {
   }));
 }
 
+/**
+ * feature_flags_mark_synced(): true and kv_synced_rev = p_rev while the row still has rev p_rev; false when the row
+ * moved on (rev > p_rev), and then kv_synced_rev = NULL so the next sync batch writes the current rev.
+ */
 function featureFlagsMarkSynced(tables: MemoryTableSet, a: Record<string, unknown>, now: Date): unknown {
   const tenant = uuidCast(a.p_tenant_id);
-  const hits = indexWhere(tables, 'feature_flags', (r) => r.key === a.p_key && r.tenant_id === tenant && nn(a.p_rev) && num(r.rev) === num(a.p_rev));
-  for (const i of hits) updateRow(tables, 'feature_flags', i, { kv_synced_rev: num(a.p_rev), kv_synced_at: iso(now) }, now);
-  return hits.length > 0;
+  if (!nn(a.p_rev)) return false;
+  const rev = num(a.p_rev);
+  let synced = false;
+  for (const i of indexWhere(tables, 'feature_flags', (r) => r.key === a.p_key && r.tenant_id === tenant && num(r.rev) >= rev)) {
+    if (num(rowsOf(tables, 'feature_flags')[i].rev) === rev) {
+      updateRow(tables, 'feature_flags', i, { kv_synced_rev: rev, kv_synced_at: iso(now) }, now);
+      synced = true;
+    } else {
+      updateRow(tables, 'feature_flags', i, { kv_synced_rev: null }, now);
+    }
+  }
+  return synced;
 }
 
 function featureFlagsSeedFromKv(tables: MemoryTableSet, a: Record<string, unknown>, now: Date): unknown {
@@ -1050,17 +1063,24 @@ function featureFlagsSeedFromKv(tables: MemoryTableSet, a: Record<string, unknow
     updateRow(tables, 'feature_flags', i, { kv_seed_pending: false, kv_synced_rev: row.rev, kv_synced_at: iso(now) }, now);
     return 'absent';
   }
-  // jsonb_typeof checks; a JSON null mode passes this test and then fails feature_flags_mode_check, as in SQL.
+  // A flag record: object, boolean enabled, object value if any, every mode (top level or in value) one of the
+  // three (JSON null is not a mode); the merged value must then pass the table's CHECKs.
   if (!isObject(kv)
     || typeof kv.enabled !== 'boolean'
     || ('value' in kv && !isObject(kv.value))
-    || ('mode' in kv && kv.mode !== null && !inList(kv.mode, FLAG_MODES))) {
+    || ('mode' in kv && !inList(kv.mode, FLAG_MODES))
+    || (isObject(kv.value) && 'mode' in kv.value && !inList(kv.value.mode, FLAG_MODES))) {
     return 'invalid';
   }
   const fromKv: Record<string, unknown> = { ...(isObject(kv.value) ? kv.value : {}) };
   if ('mode' in kv) fromKv.mode = kv.mode;
   const merged = { ...(isObject(row.value) ? row.value : {}), ...fromKv };
-  updateRow(tables, 'feature_flags', i, { enabled: kv.enabled, value: merged, kv_seed_pending: false }, now);
+  try {
+    updateRow(tables, 'feature_flags', i, { enabled: kv.enabled, value: merged, kv_seed_pending: false }, now);
+  } catch (e) {
+    if (e instanceof MemoryRpcError && e.code === '23514') return 'invalid';   // EXCEPTION WHEN check_violation
+    throw e;
+  }
   return 'imported';
 }
 

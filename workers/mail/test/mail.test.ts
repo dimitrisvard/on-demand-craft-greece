@@ -83,6 +83,8 @@ function fakeMessage(o: { raw?: string; to?: string; from?: string; failForward?
 
 class FakeBucket {
   readonly puts: Array<{ key: string; size: number; options: R2PutOptions | undefined }> = [];
+  /** Stored objects: bytes as text, custom metadata and the SHA-256 R2 verified on put. */
+  readonly objects = new Map<string, { text: string; customMetadata?: Record<string, string>; sha256?: string }>();
   failures = 0;
   async put(key: string, body: ArrayBuffer, options?: R2PutOptions) {
     if (this.failures > 0) {
@@ -91,7 +93,14 @@ class FakeBucket {
     }
     if (options?.sha256 && options.sha256 !== (await hex(new Uint8Array(body)))) throw new Error('checksum mismatch');
     this.puts.push({ key, size: body.byteLength, options });
+    this.objects.set(key, { text: new TextDecoder().decode(body), customMetadata: options?.customMetadata as Record<string, string> | undefined, sha256: options?.sha256 as string | undefined });
     return {} as R2Object;
+  }
+  async head(key: string) {
+    const o = this.objects.get(key);
+    if (!o) return null;
+    const sha256 = o.sha256 ? Uint8Array.from(o.sha256.match(/../g)!.map((h) => parseInt(h, 16))).buffer : undefined;
+    return { key, customMetadata: o.customMetadata, checksums: { sha256 } } as unknown as R2Object;
   }
 }
 
@@ -235,7 +244,7 @@ describe('email() handler', () => {
       options: {
         httpMetadata: { contentType: 'message/rfc822' },
         sha256: await hex(RAW),
-        customMetadata: { mailbox: 'rfq', received_at: '2026-10-05T08:00:00.000Z' },
+        customMetadata: { mailbox: 'rfq', received_at: '2026-10-05T08:00:00.000Z', raw_sha256: await hex(RAW) },
       },
     }]);
     expect(f.requests).toHaveLength(1);
@@ -371,12 +380,95 @@ describe('email() handler', () => {
   });
 });
 
+describe('M3: bytes an inbound_emails row stands for are never replaced', () => {
+  const OTHER = RAW.replace('Bitte um ein Angebot.', 'Other text under the same Message-ID.');
+  const KEY = `email/${SHA_OF_ID}/raw.eml`;
+
+  it('other bytes under the Message-ID of an existing row: raw.eml keeps the first bytes; duplicate_mismatch, no insert, no hand-over', async () => {
+    const bucket = new FakeBucket();
+    const ops = fakeOps();
+    const e = env({ MAIL_COPY_TO: 'copy@example.com' }, ops, bucket);
+    const f = fakeFetch([{ status: 201, body: [{ id: ROW_ID }] }, { status: 200, body: [{ id: ROW_ID }] }]);
+    await handleEmail(fakeMessage(), e, ctx, { fetch: f, sleep: noSleep });
+    const second = fakeMessage({ raw: OTHER });
+    await handleEmail(second, e, ctx, { fetch: f, sleep: noSleep });
+    expect(bucket.objects.get(KEY)?.text).toBe(RAW);
+    expect(bucket.puts.map((p) => p.key)).toEqual([KEY]);
+    expect(f.requests.map((r) => r.init.method)).toEqual(['POST', 'GET']);
+    expect(f.requests[1].url).toBe(`https://project.supabase.test/rest/v1/inbound_emails?select=id&tenant_id=eq.${TENANT}&message_id_sha256=eq.${SHA_OF_ID}&limit=1`);
+    expect(ops.calls).toHaveLength(1);
+    expect(second.forwards).toEqual([]);
+    expect(second.rejects).toEqual([]);
+    expect(lines.at(-1)).toMatch(new RegExp(` rfq ${SHA_OF_ID.slice(0, 16)} duplicate_mismatch \\d+$`));
+  });
+
+  it('a redelivery of the same bytes writes nothing and asks no row read; the insert answers duplicate', async () => {
+    const bucket = new FakeBucket();
+    const e = env({}, fakeOps(), bucket);
+    const f = fakeFetch([{ status: 201, body: [{ id: ROW_ID }] }, { status: 201, body: [] }]);
+    await handleEmail(fakeMessage(), e, ctx, { fetch: f, sleep: noSleep });
+    await handleEmail(fakeMessage(), e, ctx, { fetch: f, sleep: noSleep });
+    expect(bucket.puts).toHaveLength(1);
+    expect(f.requests.map((r) => r.init.method)).toEqual(['POST', 'POST']);
+    expect(lines.at(-1)).toMatch(/ duplicate \d+$/);
+  });
+
+  it('an earlier delivery stored raw.eml but got no row: a resend with other bytes replaces it and gets the row', async () => {
+    const bucket = new FakeBucket();
+    const ops = fakeOps();
+    const e = env({}, ops, bucket);
+    const first = fakeMessage();
+    await handleEmail(first, e, ctx, { fetch: fakeFetch([{ status: 500 }]), sleep: noSleep });
+    expect(first.rejects).toHaveLength(1);
+    expect(bucket.objects.get(KEY)?.text).toBe(RAW);
+    const f = fakeFetch([{ status: 200, body: [] }, { status: 201, body: [{ id: ROW_ID }] }]);
+    await handleEmail(fakeMessage({ raw: OTHER }), e, ctx, { fetch: f, sleep: noSleep });
+    expect(f.requests.map((r) => r.init.method)).toEqual(['GET', 'POST']);
+    expect(bucket.objects.get(KEY)?.text).toBe(OTHER);
+    expect(JSON.parse(String(f.requests[1].init.body)).raw_r2_key).toBe(KEY);
+    expect(ops.calls).toEqual([{ method: 'startIntake', input: { v: 1, inbound_email_id: ROW_ID, message_id_sha256: SHA_OF_ID, tenant_id: TENANT } }]);
+  });
+
+  it('the row read is retried like the insert; when it keeps failing the mail falls back (M7) and raw.eml stays', async () => {
+    const bucket = new FakeBucket();
+    bucket.objects.set(KEY, { text: RAW, customMetadata: { raw_sha256: 'f'.repeat(64) } });
+    const e = env({ MAIL_FALLBACK_TO: 'fallback@example.com' }, fakeOps(), bucket);
+    const m = fakeMessage({ raw: OTHER });
+    const f = fakeFetch([{ status: 503 }]);
+    await handleEmail(m, e, ctx, { fetch: f, sleep: noSleep });
+    expect(f.requests.length).toBeGreaterThanOrEqual(3);
+    expect(f.requests.every((r) => r.init.method === 'GET')).toBe(true);
+    expect(bucket.puts).toEqual([]);
+    expect(bucket.objects.get(KEY)?.text).toBe(RAW);
+    expect(m.forwards).toEqual([{ rcpt: 'fallback@example.com', headers: {} }]);
+  });
+
+  it('storeRaw: new key -> stored; same bytes -> same; unknown checksum counts as other bytes; the row read is asked only then', async () => {
+    const sha = 'c'.repeat(64);
+    const key = `email/${sha}/raw.eml`;
+    const raw = new TextEncoder().encode('new bytes');
+    const o = { sha, raw: raw.buffer as ArrayBuffer, rawSha256: await hex(raw), mailbox: 'rfq', receivedAt: 't' };
+    const asked: boolean[] = [];
+    const rowExists = (answer: boolean) => async () => (asked.push(answer), answer);
+    const bucket = new FakeBucket();
+    expect(await storeRaw(bucket as unknown as R2Bucket, o, rowExists(true), noSleep)).toEqual({ key, outcome: 'stored' });
+    expect(await storeRaw(bucket as unknown as R2Bucket, o, rowExists(true), noSleep)).toEqual({ key, outcome: 'same' });
+    expect(asked).toEqual([]);
+    bucket.objects.set(key, { text: 'older object' });
+    expect(await storeRaw(bucket as unknown as R2Bucket, o, rowExists(true), noSleep)).toEqual({ key, outcome: 'kept' });
+    expect(bucket.objects.get(key)?.text).toBe('older object');
+    expect(await storeRaw(bucket as unknown as R2Bucket, o, rowExists(false), noSleep)).toEqual({ key, outcome: 'replaced' });
+    expect(bucket.objects.get(key)?.text).toBe('new bytes');
+    expect(asked).toEqual([true, false]);
+  });
+});
+
 describe('module helpers', () => {
   it('storeRaw uses the same key on every attempt and rethrows the last error', async () => {
     const bucket = new FakeBucket();
     bucket.failures = 5;
     const sleep = vi.fn(async () => {});
-    await expect(storeRaw(bucket as unknown as R2Bucket, { sha: 'a'.repeat(64), raw: new ArrayBuffer(1), rawSha256: 'x', mailbox: 'rfq', receivedAt: 't' }, sleep)).rejects.toThrow('R2 unavailable');
+    await expect(storeRaw(bucket as unknown as R2Bucket, { sha: 'a'.repeat(64), raw: new ArrayBuffer(1), rawSha256: 'x', mailbox: 'rfq', receivedAt: 't' }, async () => false, sleep)).rejects.toThrow('R2 unavailable');
     expect(sleep).toHaveBeenCalledTimes(2);
   });
 

@@ -178,3 +178,22 @@ describe('ZIP archives (streamed from R2, one entry at a time)', () => {
     }
   });
 });
+
+describe('inline marking', () => {
+  it('only an image record keeps the inline mark; a STEP or PDF part marked inline is an ordinary attachment', async () => {
+    const { blob } = blobWithSpies();
+    const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+    const records = await storeAttachments(blob, SHA, [
+      attachment(1, 'bracket.step', STEP, 'image/png', true),
+      attachment(2, 'drawing.pdf', '%PDF-1.4\n%%EOF\n', 'image/png', true),
+      attachment(3, 'logo.png', png, 'image/png', true),
+    ]);
+    expect(records.map((r) => [r.kind, r.inline === true])).toEqual([
+      ['step', false],
+      ['pdf', false],
+      ['image', true],
+    ]);
+    expect(kindsOf(records)).toEqual(['pdf', 'step']);
+  });
+});
+

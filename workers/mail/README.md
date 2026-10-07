@@ -9,7 +9,7 @@ Email Worker of `rfq.micronshub.eu` (Phase 4 of the Cloudflare migration, docs/m
 | M0 | check-rcpt | the envelope recipient, lower-cased, must be in `ALLOWED_RCPT`; its local part names the mailbox (`rfq`, `replies`) | `setReject('Unknown recipient')` |
 | M1 | buffer | `new Response(message.raw).arrayBuffer()`, read once (at most 25 MiB by the routing limit) | M7 |
 | M2 | hash | `message_id_sha256` = SHA-256 hex of the trimmed `Message-ID` (brackets and case kept); without the header, of the raw bytes | — |
-| M3 | store-raw | R2 `email/<sha>/raw.eml`, `message/rfc822`, SHA-256 checked by R2; the same key on redelivery; 3 attempts (200 ms, 800 ms) | M7 |
+| M3 | store-raw | R2 `email/<sha>/raw.eml`, `message/rfc822`, SHA-256 checked by R2; a redelivery of the same bytes writes nothing; other bytes replace the object only while no `inbound_emails` row exists for the hash, else the handler logs `duplicate_mismatch` and stops (src/store.ts); 3 attempts (200 ms, 800 ms) | M7 |
 | M4 | insert-row | `POST /rest/v1/inbound_emails?on_conflict=tenant_id,message_id_sha256` with `Prefer: resolution=ignore-duplicates,return=representation`; fields from the headers and the envelope only; an empty answer is a redelivery and the handler stops; network, 408, 429 and 5xx retried twice | M7 |
 | M5 | hand-over | `rfq` → `OPS.startIntake`, `replies` → `OPS.ingestReply`, ids only; an error is logged and ignored (the 10-minute dispatcher of ops starts rows left `received` after 15 minutes) | — |
 | M6 | shadow-copy | when `MAIL_COPY_TO` is set: `forward()` with `X-Microns-Inbound: <first 16 hex of the sha>` | logged |
@@ -19,7 +19,7 @@ Row fields (M4): `tenant_id` (`AGENT_TENANT_ID`), `message_id` (the trimmed head
 
 `auth_results` comes from the `Authentication-Results` instances of the raw header block, top to bottom, through the module this Worker shares with ops (`workers/ops/src/mail-in/auth-results.ts`): only an instance whose authserv-id equals the pinned value of the receiving infrastructure is trusted, and until that value is pinned (owner step OW-9) every verdict reads `none`, so every message goes to a human in the intake.
 
-Log line, one per mail: `[microns-mail] mail <mailbox> <first 16 hex of the sha> <outcome> <ms>`. Outcomes: `rejected_rcpt`, `duplicate`, `started`, `exists`, `flag_off`, `queued`, `rejected`, `handover_failed`, `fallback_forwarded`, `fallback_rejected`, with `+copy` or `+copy_failed` after a shadow copy. Never an address, a subject or a full hash.
+Log line, one per mail: `[microns-mail] mail <mailbox> <first 16 hex of the sha> <outcome> <ms>`. Outcomes: `rejected_rcpt`, `duplicate`, `duplicate_mismatch`, `started`, `exists`, `flag_off`, `queued`, `rejected`, `handover_failed`, `fallback_forwarded`, `fallback_rejected`, with `+copy` or `+copy_failed` after a shadow copy. Never an address, a subject or a full hash.
 
 ## Configuration (`wrangler.jsonc`)
 

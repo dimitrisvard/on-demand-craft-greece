@@ -12,6 +12,9 @@
 //   - a second dispatcher tick sends nothing more (the order has its run)
 // The stub client of the harness is loaded at run time by file URL.
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { seedRows, INSTANCE, MATERIAL, ORDER, PARTNER_CNC, PARTNER_CNC_EMAIL, STAFF, TENANT, ITEM_BRACKET } from '../post-order/seed-data';
 import { r2Get, r2Put, resendEmails, rows, rpc, seed, sendEvent, setFlag, telegramCalls, until, type Row, type Urls } from '../quote/t2-helpers';
@@ -25,6 +28,7 @@ async function cron(u: Urls, expression: string): Promise<void> {
 
 describe.skipIf(!ENABLED)('post-order in workerd (P-4, own harness instance)', () => {
   let own: (Urls & { stop: () => Promise<void> }) | null = null;
+  let registry = '';
   const u = (): Urls => own as Urls;
   const run = async (): Promise<Row | undefined> => (await rows(u(), 'agent_runs')).find((r) => r.agent === 'post_order' && r.idempotency_key === ORDER);
 
@@ -32,10 +36,23 @@ describe.skipIf(!ENABLED)('post-order in workerd (P-4, own harness instance)', (
     const harness = (await import(/* @vite-ignore */ new URL('../../../site/test/integration/harness.mjs', import.meta.url).href)) as {
       startHarness(o: Record<string, unknown>): Promise<{ url: string; stub: { url: string }; explorer: string; tmp: string; approvalSecret: string; stop: () => Promise<void> }>;
     };
-    const h = await harness.startHarness({ profile: 'agents', publish: false, quiet: true });
+    // The instance gets its own wrangler dev registry: the Local Explorer resolves ?worker=<name> through that
+    // registry, which every wrangler session of the machine shares by default, so a cron sent to this instance's
+    // Explorer would otherwise run in the microns-ops of the global harness instance.
+    registry = mkdtempSync(path.join(os.tmpdir(), 'microns-t2-registry-'));
+    const previous = process.env.WRANGLER_REGISTRY_PATH;
+    process.env.WRANGLER_REGISTRY_PATH = registry;
+    let h: Awaited<ReturnType<typeof harness.startHarness>>;
+    try {
+      h = await harness.startHarness({ profile: 'agents', publish: false, quiet: true });
+    } finally {
+      if (previous === undefined) delete process.env.WRANGLER_REGISTRY_PATH;
+      else process.env.WRANGLER_REGISTRY_PATH = previous;
+    }
     own = { site: h.url, stub: h.stub.url, explorer: h.explorer, tmp: h.tmp, approvalSecret: h.approvalSecret, stop: h.stop };
     const { tables, objects } = seedRows();
-    await seed(u(), tables);
+    // low_stock_alerts is a live inventory table outside the mini-PostgREST's default list: an empty seed creates it
+    await seed(u(), { ...tables, low_stock_alerts: tables.low_stock_alerts ?? [] });
     for (const [key, text] of Object.entries(objects)) await r2Put(u(), key, new TextEncoder().encode(text));
     await setFlag(u(), 'agent.post_order', { enabled: true, value: { mode: 'assist' }, rev: 31 });
     await setFlag(u(), 'agent.quote', { enabled: false, rev: 32 });
@@ -44,10 +61,19 @@ describe.skipIf(!ENABLED)('post-order in workerd (P-4, own harness instance)', (
 
   afterAll(async () => {
     await own?.stop();
+    if (registry) rmSync(registry, { recursive: true, force: true });
   });
 
   it('dispatcher -> order-created -> traveller, stock hold, hand-off card -> handoff-approved -> one partner mail', async () => {
-    await cron(u(), '*/10 * * * *');
+    // The dispatcher sends 'order-created' again on every tick while the order has no post-order run (the safety net
+    // for a lost queue message); the test repeats its tick the same way when a local server reload (wrangler dev
+    // reloads when a watched source file changes) dropped the message before the consumer ran.
+    for (let tick = 1; ; tick++) {
+      await cron(u(), '*/10 * * * *');
+      const started = await until('the post-order run', async () => ((await run()) ? true : null), 20_000).catch(() => false);
+      if (started) break;
+      if (tick >= 5) throw new Error('no post-order run after 5 dispatcher ticks');
+    }
 
     const waiting = await until('the post-order run waiting on its hand-off card', async () => {
       const r = await run();

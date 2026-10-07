@@ -99,6 +99,39 @@ export async function patchRun(db: Db, runId: string, patch: AgentRunPatch): Pro
   await db.update('agent_runs', patch as Record<string, unknown>, { filters: [['id', 'eq', runId]] });
 }
 
+/** PATCH only while the run still waits on the approval token with this hash (status waiting_human); true when a
+ *  row was written. A run decided in the meantime (claimed: status running, token cleared) is left as it is. */
+export async function patchRunWhileWaiting(db: Db, runId: string, tokenSha256: string, patch: AgentRunPatch): Promise<boolean> {
+  const rows = await db.update('agent_runs', patch as Record<string, unknown>, {
+    filters: [
+      ['id', 'eq', runId],
+      ['status', 'eq', 'waiting_human'],
+      ['approval_token_sha256', 'eq', tokenSha256],
+    ],
+    returning: 'id',
+  });
+  return rows.length > 0;
+}
+
+/** Puts a claimed run back to waiting on the same approval token (the decision could not be carried out, so the
+ *  card stays decidable): status waiting_human, the token hash, parked_reason as given, human_action cleared. Only a
+ *  run that is still in the claimed state (status running, no token) is written; true when a row was written. */
+export async function reopenClaimedRun(db: Db, runId: string, tokenSha256: string, parkedReason: ParkReason | null): Promise<boolean> {
+  const rows = await db.update(
+    'agent_runs',
+    { status: 'waiting_human', approval_token_sha256: tokenSha256, parked_reason: parkedReason, human_action: null },
+    {
+      filters: [
+        ['id', 'eq', runId],
+        ['status', 'eq', 'running'],
+        ['approval_token_sha256', 'is', null],
+      ],
+      returning: 'id',
+    },
+  );
+  return rows.length > 0;
+}
+
 /** Ids of the agent's runs started at or after `since`, at most `limit`. */
 export async function runIdsSince(db: Db, agent: string, since: Date, limit: number): Promise<string[]> {
   const rows = await db.select<{ id: string }>('agent_runs', {

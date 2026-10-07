@@ -258,4 +258,21 @@ describe('resume-parked and card', () => {
     h.ports.telegram.failNext();
     expect((await deliver(h, { v: 1, type: 'card', card: { ...card, lines: [], flags: [], allowed_verbs: [] }, run_id: card.run_id })).retried).toBe(true);
   });
+
+  it('decision on a card kind no consumer owns: the claimed run without an instance closes cancelled instead of staying running', async () => {
+    const h = harness();
+    const [orphan, workflowRun] = h.ports.db.seed('agent_runs', [
+      { agent: 'post_order', trigger: 'cron', idempotency_key: 'post_order:stock:x', status: 'running', tenant_id: TENANT },
+      { agent: 'post_order', trigger: 'queue', idempotency_key: '9d000000-0000-4000-8000-00000000000d', status: 'running', workflow_name: 'post-order', workflow_instance_id: 'post-order-9d000000-0000-4000-8000-00000000000d', tenant_id: TENANT },
+    ]);
+    const m = await deliver(h, { v: 1, type: 'decision', run_id: orphan.id as string, card_kind: 'reorder', verb: 'approve_draft', actor: STAFF_ACTOR, channel: 'dashboard' });
+    expect(m.acked).toBe(true);
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', orphan.id as string])[0]).toMatchObject({ status: 'cancelled', error: 'unhandled_decision', approval_token_sha256: null });
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', orphan.id as string])[0].finished_at).toBeTruthy();
+    // a Workflow run is never closed here (its instance owns it), and a second delivery changes nothing
+    await deliver(h, { v: 1, type: 'decision', run_id: workflowRun.id as string, card_kind: 'reorder', verb: 'approve_draft', actor: STAFF_ACTOR, channel: 'dashboard' });
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', workflowRun.id as string])[0].status).toBe('running');
+    await deliver(h, { v: 1, type: 'decision', run_id: orphan.id as string, card_kind: 'reorder', verb: 'approve_draft', actor: STAFF_ACTOR, channel: 'dashboard' });
+    expect(h.ports.db.rows('agent_runs', ['id', 'eq', orphan.id as string])[0].status).toBe('cancelled');
+  });
 });

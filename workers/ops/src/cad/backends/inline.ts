@@ -8,7 +8,8 @@
 //     any byte is read; a larger input fails 'too_large' with message 'inline_too_large' (the quote prices it by
 //     hand). The parsers hold the whole model in memory and the isolate has 128 MB.
 //   - One inline parse per isolate at a time (module-level mutex); CadRouter also grants at most one inline lease.
-//   - The parsers are synchronous: the job signal is checked before and after the parse.
+//   - The parsers are synchronous: the job signal is checked before and after the parse. They run through quietly()
+//     (cad/quiet.ts), so their own console output never reaches the Worker logs.
 
 import type { CadJobMessageV1 } from '../../queues/messages';
 import { dxfMetrics } from '../dxf-metrics';
@@ -16,6 +17,7 @@ import { parseDXF } from '../inline/dxf-parser';
 import { analyzeMesh } from '../inline/mesh-analyzer';
 import { parseSTEP } from '../inline/step-parser';
 import { parseSTL } from '../inline/stl-parser';
+import { quietly } from '../quiet';
 import { resultFromDxf, resultFromMesh } from '../result';
 import { INLINE_CAPS, INLINE_TOO_LARGE, type CadBackend, type CadInput, type CadKind, type CadOutcome } from '../types';
 
@@ -82,14 +84,13 @@ export class InlineBackend implements CadBackend {
       try {
         let outcome: CadOutcome;
         if (kind === 'dxf') {
-          const analysis = parseDXF(bytes);
+          const analysis = quietly(() => parseDXF(bytes));
           outcome = { ok: true, result: resultFromDxf(analysis, dxfMetrics(analysis), { duration_ms: this.clock() - started, versions }), artefacts: [] };
         } else if (kind === 'stl') {
-          const stl = parseSTL(bytes);
-          const mesh = analyzeMesh(stl.triangles);
+          const mesh = quietly(() => analyzeMesh(parseSTL(bytes).triangles));
           outcome = { ok: true, result: resultFromMesh('stl', mesh, { duration_ms: this.clock() - started, versions }), artefacts: [] };
         } else {
-          const mesh = await parseSTEP(bytes);
+          const mesh = await quietly(() => parseSTEP(bytes));
           outcome = { ok: true, result: resultFromMesh('step', mesh, { duration_ms: this.clock() - started, versions }), artefacts: [] };
         }
         if (signal.aborted) return { ok: false, retryable: true, code: 'timeout', message: 'inline job passed its deadline' };

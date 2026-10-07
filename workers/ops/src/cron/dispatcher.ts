@@ -17,7 +17,9 @@
 //   failures      runs behind a failure card for more than 14 days -> closed 'failed' (error kept, token and
 //                 parked_reason cleared, only while still waiting) and their Telegram card loses its buttons
 //   stuck CAD     cad_jobs 'dispatched' or 'running' for more than 30 minutes -> 'dead_letter' (only while still in
-//                 that status), RfqThread.cadJobFinal(job, 'dead_letter'), the job's 'cad' run closed 'failed'
+//                 that status), RfqThread.cadJobFinal(job, 'dead_letter'), the job's 'cad' run closed 'failed'.
+//                 Each CAD job is handled on its own: a failing RfqThread call is logged by job id and the next job
+//                 still runs (the quote's own await-cad timeout covers a thread that missed the final state)
 // Rules
 //   - Each job runs on its own; a failing job is logged and the others still run.
 //   - The dispatcher has no run row of its own: every effect is recorded on the run or row it acts on.
@@ -207,7 +209,14 @@ async function stuckCad(env: OpsEnv, ports: Ports, now: Date, r: DispatcherRepor
     });
     if (moved.length === 0) continue;
     r.cad_dead_lettered++;
-    if (job.rfq_id && env.RFQ_THREAD) await env.RFQ_THREAD.get(env.RFQ_THREAD.idFromName(job.rfq_id)).cadJobFinal(job.id, 'dead_letter');
+    if (job.rfq_id && env.RFQ_THREAD) {
+      try {
+        await env.RFQ_THREAD.get(env.RFQ_THREAD.idFromName(job.rfq_id)).cadJobFinal(job.id, 'dead_letter');
+      } catch (error) {
+        r.errors.push(`stuck_cad:${job.id}`);
+        console.error(formatLogLine(LOG_PREFIX, 'dispatcher cad thread failed', { job_id: job.id }), describeError(error));
+      }
+    }
     const runs = await db.select<{ id: string; status: string; llm_calls: number; input_tokens: number; output_tokens: number; cached_input_tokens: number; cost_cents: number | string }>('agent_runs', {
       columns: 'id,status,llm_calls,input_tokens,output_tokens,cached_input_tokens,cost_cents',
       filters: [['agent', 'eq', 'cad'], ['idempotency_key', 'eq', job.id]],

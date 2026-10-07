@@ -209,8 +209,9 @@ describe('Phase 4 additions (agent layer)', () => {
     );
   });
 
-  // Arrays that a later phase extends (workflows, Durable Object bindings, migration tags) are checked by
-  // containment, so additions need no change here; the v1 migration tag stays first and is never edited.
+  // Arrays that a later phase extends (workflows, Durable Object bindings, migration tags, KV namespaces, R2 buckets,
+  // Vectorize indexes, Analytics Engine datasets, rate limits) are checked by containment, so additions need no change
+  // here; the v1 migration tag stays first and is never edited.
   it('Workflows, Durable Objects (migration tag v1) and the other agent bindings', () => {
     expect(config.workflows).toEqual(expect.arrayContaining([
       { name: 'rfq-intake', binding: 'RFQ_INTAKE', class_name: 'RfqIntakeWorkflow' },
@@ -223,13 +224,13 @@ describe('Phase 4 additions (agent layer)', () => {
       { name: 'CAD_ROUTER', class_name: 'CadRouter' },
     ]));
     expect(config.migrations[0]).toEqual({ tag: 'v1', new_sqlite_classes: ['RfqThread', 'MaterialStock', 'CadRouter'] });
-    expect(config.kv_namespaces).toEqual([{ binding: 'FLAGS', id: '<KV_ID_FLAGS>' }]);
-    expect(config.r2_buckets).toEqual([{ binding: 'PRIVATE_FILES', bucket_name: 'microns-private', jurisdiction: 'eu' }]);
-    expect(config.vectorize).toEqual([{ binding: 'QUOTES_INDEX', index_name: 'quotes-v1' }]);
+    expect(config.kv_namespaces).toContainEqual({ binding: 'FLAGS', id: '<KV_ID_FLAGS>' });
+    expect(config.r2_buckets).toContainEqual({ binding: 'PRIVATE_FILES', bucket_name: 'microns-private', jurisdiction: 'eu' });
+    expect(config.vectorize).toContainEqual({ binding: 'QUOTES_INDEX', index_name: 'quotes-v1' });
     expect(config.ai).toEqual({ binding: 'AI' });
     expect(config.browser).toEqual({ binding: 'BROWSER' });
-    expect(config.analytics_engine_datasets).toEqual([{ binding: 'EVENTS', dataset: 'microns_events' }]);
-    expect(config.ratelimits).toEqual([{ name: 'MCP_RATE_LIMIT', namespace_id: '2004', simple: { limit: 60, period: 60 } }]);
+    expect(config.analytics_engine_datasets).toContainEqual({ binding: 'EVENTS', dataset: 'microns_events' });
+    expect(config.ratelimits).toContainEqual({ name: 'MCP_RATE_LIMIT', namespace_id: '2004', simple: { limit: 60, period: 60 } });
     expect(config.routes).toEqual(PHASE4_ROUTES);
     expect(config.rules).toEqual([
       { type: 'Data', globs: ['**/*.ttf', '**/*.png'], fallthrough: true },

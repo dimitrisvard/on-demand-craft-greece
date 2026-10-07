@@ -65,6 +65,8 @@ const CompanyScannerPage = lazy(() => import('./pages/dashboard/CompanyScannerPa
 const TenderMonitorPage = lazy(() => import('./pages/dashboard/TenderMonitorPage'));
 const FundedStartupsPage = lazy(() => import('./pages/dashboard/FundedStartupsPage'));
 const XometryQueuePage = lazy(() => import('./pages/dashboard/XometryQueuePage'));
+const RfqInboxPage = lazy(() => import('./pages/dashboard/RfqInboxPage'));
+const ApprovalsPage = lazy(() => import('./pages/dashboard/ApprovalsPage'));
 
 // Inventory Management Pages
 const InventoryDashboard = lazy(() => import('./pages/inventory/InventoryDashboard'));
@@ -293,6 +295,8 @@ function AppContent() {
                 <Route path="/dashboard/tenders" element={<TenderMonitorPage />} />
                 <Route path="/dashboard/funded-startups" element={<FundedStartupsPage />} />
                 <Route path="/dashboard/xometry" element={<XometryQueuePage />} />
+                <Route path="/dashboard/rfq-inbox" element={<RfqInboxPage />} />
+                <Route path="/dashboard/approvals" element={<ApprovalsPage />} />
 
                 {/* Material Catalog */}
                 <Route path="/dashboard/materials" element={<MaterialCatalogPage />} />

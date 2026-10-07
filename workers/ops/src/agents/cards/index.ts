@@ -71,14 +71,42 @@ const FLAG_TEXT: Record<CardFlag, string> = {
   manual_lines: 'manual price lines',
 };
 
-/** HTML-mode Telegram message for a card; token null renders the URL button only. */
+/** The escaped form of the longest start of `text` (whole characters) that fits `budget` characters together with a
+ *  closing ellipsis; '' when not even one character fits. */
+function escapedPrefix(text: string, budget: number): string {
+  const room = budget - 1;
+  let out = '';
+  for (const ch of text) {
+    const next = escapeHtml(ch);
+    if (out.length + next.length > room) break;
+    out += next;
+  }
+  return out ? `${out}\u2026` : '';
+}
+
+/** HTML-mode Telegram message for a card; token null renders the URL button only.
+ *  The text is budgeted after escaping: the title and the "Check:" flags line are always rendered; lines are added in
+ *  order while they fit, the first line that does not fit is shortened at a character boundary (never inside an
+ *  entity) and later lines are left out, so the text never exceeds TELEGRAM_TEXT_MAX. */
 export function renderTelegram(c: CardV1, token: string | null): TelegramCardMessage {
   const card = clampCard(c);
-  const parts = [`<b>${escapeHtml(card.title)}</b>`];
-  for (const line of card.lines) parts.push(`${escapeHtml(line.label)}: ${escapeHtml(line.value)}`);
-  if (card.flags.length) parts.push(`<i>Check: ${escapeHtml(card.flags.map((f) => FLAG_TEXT[f] ?? f).join(', '))}</i>`);
-  let text = parts.join('\n');
-  if (text.length > TELEGRAM_TEXT_MAX) text = text.slice(0, TELEGRAM_TEXT_MAX);
+  const head = `<b>${escapeHtml(card.title)}</b>`;
+  const tail = card.flags.length ? `\n<i>Check: ${escapeHtml(card.flags.map((f) => FLAG_TEXT[f] ?? f).join(', '))}</i>` : '';
+  let budget = TELEGRAM_TEXT_MAX - head.length - tail.length;
+  let body = '';
+  for (const line of card.lines) {
+    const prefix = `\n${escapeHtml(line.label)}: `;
+    const value = escapeHtml(line.value);
+    if (prefix.length + value.length <= budget) {
+      body += prefix + value;
+      budget -= prefix.length + value.length;
+      continue;
+    }
+    const shortened = escapedPrefix(line.value, budget - prefix.length);
+    if (shortened) body += prefix + shortened;
+    break;
+  }
+  const text = head + body + tail;
   const keyboard: unknown[][] = [];
   if (token !== null) {
     const row = card.allowed_verbs

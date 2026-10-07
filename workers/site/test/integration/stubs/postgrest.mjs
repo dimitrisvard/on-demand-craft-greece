@@ -145,7 +145,10 @@ function contains(a, b) {
   return jsonEqual(a, b);
 }
 
-/** One `column=op.value` query parameter as a row predicate. */
+/**
+ * One `column=op.value` query parameter as a row predicate, with SQL's three-valued logic: every operator except
+ * `is` compares a NULL column as unknown, `not.` keeps unknown unknown, and only true keeps the row.
+ */
 function predicate(table, column, expr) {
   const cols = TABLE_SPECS[table]?.columns;
   if (cols && !cols.includes(column)) throw new RestError(400, '42703', `column ${table}.${column} does not exist`);
@@ -159,23 +162,22 @@ function predicate(table, column, expr) {
   if (dot < 0) throw new RestError(400, 'PGRST100', `failed to parse filter (${expr})`);
   const op = rest.slice(0, dot);
   const operand = rest.slice(dot + 1);
-  const notNull = (v) => v !== null && v !== undefined;
   let test;
   switch (op) {
-    case 'eq': test = (v) => notNull(v) && compare(v, operand) === 0; break;
-    case 'neq': test = (v) => notNull(v) && compare(v, operand) !== 0; break;
-    case 'gt': test = (v) => notNull(v) && compare(v, operand) > 0; break;
-    case 'gte': test = (v) => notNull(v) && compare(v, operand) >= 0; break;
-    case 'lt': test = (v) => notNull(v) && compare(v, operand) < 0; break;
-    case 'lte': test = (v) => notNull(v) && compare(v, operand) <= 0; break;
+    case 'eq': test = (v) => compare(v, operand) === 0; break;
+    case 'neq': test = (v) => compare(v, operand) !== 0; break;
+    case 'gt': test = (v) => compare(v, operand) > 0; break;
+    case 'gte': test = (v) => compare(v, operand) >= 0; break;
+    case 'lt': test = (v) => compare(v, operand) < 0; break;
+    case 'lte': test = (v) => compare(v, operand) <= 0; break;
     case 'like': { const re = likeRegex(operand, ''); test = (v) => typeof v === 'string' && re.test(v); break; }
     case 'ilike': { const re = likeRegex(operand, 'i'); test = (v) => typeof v === 'string' && re.test(v); break; }
-    case 'in': { const items = parseList(operand, '(', ')'); test = (v) => notNull(v) && items.some((x) => compare(v, x) === 0); break; }
+    case 'in': { const items = parseList(operand, '(', ')'); test = (v) => items.some((x) => compare(v, x) === 0); break; }
     case 'is': {
       const want = operand.toLowerCase();
       if (!['null', 'true', 'false', 'unknown'].includes(want)) throw new RestError(400, 'PGRST100', `failed to parse filter (${expr})`);
-      test = (v) => (want === 'null' || want === 'unknown' ? v === null || v === undefined : v === (want === 'true'));
-      break;
+      const is = (v) => (want === 'null' || want === 'unknown' ? v === null || v === undefined : v === (want === 'true'));
+      return (row) => (negate ? !is(row[column]) : is(row[column]));
     }
     case 'cs':
     case 'cd':
@@ -183,7 +185,7 @@ function predicate(table, column, expr) {
       let json = null;
       try { json = JSON.parse(operand); } catch { json = null; }
       if (op !== 'ov' && json !== null && (isObject(json) || Array.isArray(json))) {
-        test = (v) => notNull(v) && (op === 'cs' ? contains(v, json) : contains(json, v));
+        test = (v) => (op === 'cs' ? contains(v, json) : contains(json, v));
         break;
       }
       const items = parseList(operand, '{', '}');
@@ -196,7 +198,11 @@ function predicate(table, column, expr) {
     default:
       throw new RestError(400, 'PGRST100', `unsupported filter operator ${op} in the stub`);
   }
-  return (row) => (negate ? !test(row[column]) : test(row[column]));
+  return (row) => {
+    const v = row[column];
+    if (v === null || v === undefined) return false;             // unknown, negated or not
+    return negate ? !test(v) : test(v);
+  };
 }
 
 const RESERVED = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns']);

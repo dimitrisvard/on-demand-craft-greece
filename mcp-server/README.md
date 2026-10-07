@@ -140,3 +140,42 @@ Claude: [calls update_lead_status + add_lead_note]
 You: What's our lead volume trend this week?
 Claude: [calls get_lead_stats with days_back=7]
 ```
+
+## Remote MCP
+
+The same tools are also served remotely by the `microns-ops` Worker (`workers/ops/src/mcp`), so Claude on the web, desktop and mobile can use them without this local server. This local server stays as it is.
+
+| Item | Value |
+|---|---|
+| URL | `https://mcp.micronshub.eu/mcp` (Custom Domain of `microns-ops`) |
+| Sign-in | Cloudflare Access (Managed OAuth); only staff accounts of Microns Hub (`user_roles`) are let in, every request is checked again |
+| Switch | Flag `mcp.remote` on the agent dashboard (off by default) |
+| Rate limit | 60 requests per minute per user |
+| Audit | Every tool call is recorded in `agent_runs` (agent `mcp`) with a summary that leaves out arguments and e-mail addresses |
+
+### Connect Claude
+
+1. The owner has created the Access application for the URL above and switched the flag on (stage `read` first).
+2. Claude → Settings → Connectors → Add custom connector → `https://mcp.micronshub.eu/mcp`.
+3. Sign in through Cloudflare Access with your Microns Hub staff account.
+4. Ask Claude to list the Microns Hub tools; at stage `read` it shows 35 tools, 3 resources and 2 prompts.
+
+### Stages (value of flag `mcp.remote`)
+
+| Flag | Tools offered |
+|---|---|
+| off, missing or unreadable | only `mcp_status`, which answers that the remote server is disabled |
+| `{enabled: true, value: {writes: false}}` (`read`) | the read tools of this server, plus `list_rfqs`, `get_rfq`, `list_inbound_emails`, `get_quote_workflow`, `list_pending_approvals`, `list_orders`, `get_order`, `get_stock_summary`, `list_agent_runs`, `search_similar_quotes`; the three resources and two prompts above |
+| `{enabled: true, value: {writes: true}}` (`write`) | stage `read` plus `update_lead_status`, `update_tender_status`, `trigger_country_scan`, `run_saved_search`, `decide_approval` |
+| `write_tools: [...]` together with `writes: true` | adds only the named tools of this list: `score_lead`, `save_response_draft`, `add_lead_note`, `manage_keywords` (add, remove, toggle), `manage_subreddits` (add, remove, toggle), `scan_directory`, `enrich_company_emails`, `update_company`, `update_startup_outreach`, `trigger_funding_scan`, `gsc_submit_for_indexing`, `gsc_submit_sitemap`, `start_quote` |
+
+### Differences from this local server
+
+| Point | Remote behaviour |
+|---|---|
+| Write tools | Their descriptions end with "Changes data in Microns Hub; confirm with the user before calling."; the same call with the same arguments within 10 minutes is not repeated (the first result is returned) |
+| `api_base_url` | Not offered: the remote server runs the ops handlers in-process and never calls a caller-supplied address |
+| Long scans | `trigger_country_scan`, `trigger_funding_scan`, `run_saved_search` and `scan_directory` with more than 3 pages are queued and answer with a `run_id` |
+| Directory scans | `scan_directory` and `run_saved_search` run only while flag `agent.growth.scrapers` is on; they follow each directory's robots.txt for the crawler `MicronsHubBot` unless the owner has recorded the directory's permission |
+| `run_saved_search` | `saved_search_id` is the saved search's uuid |
+| E-mail addresses | Shown masked (`o***@example.com`) in lists |
