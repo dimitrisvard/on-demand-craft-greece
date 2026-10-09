@@ -1,0 +1,18 @@
+== A micronshub.eu
+1:216.198.79.1
+== CNAME www.micronshub.eu
+5:3096eb4eb748a48f.vercel-dns-017.com.
+== A www.micronshub.eu
+5:3096eb4eb748a48f.vercel-dns-017.com. | 1:64.29.17.65 | 1:216.198.79.65
+== MX micronshub.eu
+15:1 aspmx.l.google.com. | 15:5 alt1.aspmx.l.google.com. | 15:5 alt2.aspmx.l.google.com. | 15:10 alt3.aspmx.l.google.com. | 15:10 alt4.aspmx.l.google.com.
+== TXT micronshub.eu
+16:"v=spf1 include:_spf.google.com ~all" | 16:"google-site-verification=TEST-TOKEN-0001"
+== TXT send.micronshub.eu
+16:"v=spf1 include:amazonses.com ~all"
+== MX send.micronshub.eu
+(no answer)
+== AAAA micronshub.eu
+(no answer)
+== TXT resend._domainkey.micronshub.eu
+16:"p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA

@@ -4,8 +4,19 @@
 //     the production zone (ARCHITECTURE.md §6.2), whatever PREVIEW_HOSTNAMES says.
 //   - Strict-Transport-Security only when HSTS_VALUE is set and the host is the SITE_ORIGIN host (SEO_PARITY.md F8).
 //   - HEAD: same status and headers as GET, empty body (H-28).
+//   - API_CORS_MODE (PLAN.md P6-4): "parity" (default, also when the var is absent or unknown) keeps the vercel.json
+//     CORS headers on /api/*; "allowlist" replaces them, after the parity rules, with the allow-list of
+//     workers/shared/src/http/cors.ts: only listed origins are reflected, Vary: Origin, never credentials. Status
+//     codes and bodies never change. Switching back is a deploy of the previous version or the var set to "parity".
 
+import { applyAllowlistCors } from '../../shared/src/http/cors';
 import type { Env } from './env';
+import { LOG_PREFIX } from './env';
+
+/** Env plus the P6-4 CORS switch (declared here: src/env.ts keeps the Phase 2 block that test/env-api.test.ts pins). */
+export interface CorsModeEnv extends Env {
+  API_CORS_MODE?: string; // var, "parity" (default) | "allowlist"
+}
 
 type HeaderList = ReadonlyArray<readonly [string, string]>;
 
@@ -24,8 +35,10 @@ const API_CORS_HEADERS: HeaderList = [
 
 // The vercel.json "source" patterns as path-to-regexp compiles them: anchored, case-sensitive, matched on the
 // pathname only. Rules apply to every response on a matching path, whatever its status, in file order.
+const API_PATH = /^\/api\/(.*)$/;
+
 export const HEADER_RULES: ReadonlyArray<HeaderRule> = [
-  { source: /^\/api\/(.*)$/, headers: API_CORS_HEADERS },                                          // vercel.json:163-172
+  { source: API_PATH, headers: API_CORS_HEADERS },                                                 // vercel.json:163-172
   { source: /^\/assets\/(.*\.js)$/, headers: [['Content-Type', 'application/javascript; charset=utf-8']] }, // vercel.json:173-178
   { source: /^\/assets\/(.*\.css)$/, headers: [['Content-Type', 'text/css; charset=utf-8']] },      // vercel.json:179-184
 ];
@@ -63,7 +76,23 @@ export function isPreviewHost(hostname: string, env: Env): boolean {
     .includes(host);
 }
 
-export function finalise(response: Response, request: Request, env: Env): Response {
+export type CorsMode = 'parity' | 'allowlist';
+
+const warnedCorsValues = new Set<string>();
+
+/** CORS mode of /api/* answers from API_CORS_MODE; anything but "allowlist" keeps parity (an unknown value is logged once). */
+export function corsMode(env: CorsModeEnv): CorsMode {
+  const raw = env.API_CORS_MODE ?? '';
+  const value = raw.trim().toLowerCase();
+  if (value === 'allowlist') return 'allowlist';
+  if (value !== '' && value !== 'parity' && !warnedCorsValues.has(raw)) {
+    warnedCorsValues.add(raw);
+    console.warn(`${LOG_PREFIX} API_CORS_MODE ${JSON.stringify(raw)} is neither "parity" nor "allowlist": parity CORS kept`);
+  }
+  return 'parity';
+}
+
+export function finalise(response: Response, request: Request, env: CorsModeEnv): Response {
   const url = new URL(request.url);
   const isHead = request.method === 'HEAD';
   if (isHead && response.body) {
@@ -76,6 +105,15 @@ export function finalise(response: Response, request: Request, env: Env): Respon
   for (const rule of HEADER_RULES) {
     if (!rule.source.test(url.pathname)) continue;
     for (const [name, value] of rule.headers) out.headers.set(name, value);
+  }
+
+  // After the parity rules, so that allow-list mode also replaces the grants a handler or the Vercel forward set.
+  if (API_PATH.test(url.pathname) && corsMode(env) === 'allowlist') {
+    applyAllowlistCors(out.headers, request.headers.get('Origin'), {
+      siteOrigin: env.SITE_ORIGIN,
+      requestHost: normaliseHost(url.hostname),
+      requestIsPreview: isPreviewHost(url.hostname, env),
+    });
   }
 
   if (isPreviewHost(url.hostname, env)) {

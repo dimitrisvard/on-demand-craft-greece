@@ -29,6 +29,7 @@ export const uploadArticleImageToS3 = async (
       {
         fileName,
         contentType: file.type || 'application/octet-stream',
+        size: file.size,
         prefix,
         scope: SCOPE,
       }

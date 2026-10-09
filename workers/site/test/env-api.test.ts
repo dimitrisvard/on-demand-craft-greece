@@ -277,9 +277,10 @@ describe('wrangler.jsonc, Env and the router agree', () => {
       workers_dev: true,
       preview_urls: true,
       assets: { directory: '../../dist', binding: 'ASSETS', html_handling: 'none', not_found_handling: 'single-page-application', run_worker_first: true },
-      kv_namespaces: [{ binding: 'SEO_CACHE', id: '<KV_ID_SEO_CACHE>' }, { binding: 'FLAGS', id: '<KV_ID_FLAGS>' }],
       routes: [],
     });
+    expect(site.kv_namespaces.map((k: { binding: string }) => k.binding)).toEqual(['SEO_CACHE', 'FLAGS']);
+    for (const k of site.kv_namespaces) expect(k.id).toMatch(/^(<KV_ID_[A-Z_]+>|[0-9a-f]{32})$/);
     expect(site.vars).toMatchObject({
       SUPABASE_URL: 'https://cfjrtmtaitwzggzpkhxi.supabase.co',
       SITE_ORIGIN: 'https://www.micronshub.eu',

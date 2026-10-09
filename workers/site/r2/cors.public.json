@@ -1,0 +1,21 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://www.micronshub.eu",
+          "https://micronshub.eu",
+          "https://*.micronshub.eu",
+          "https://microns-site.<WORKERS_SUBDOMAIN>.workers.dev",
+          "https://staging-microns-site.<WORKERS_SUBDOMAIN>.workers.dev",
+          "http://localhost:8080",
+          "http://localhost:8787"
+        ],
+        "methods": ["PUT", "GET", "HEAD"],
+        "headers": ["Content-Type"]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

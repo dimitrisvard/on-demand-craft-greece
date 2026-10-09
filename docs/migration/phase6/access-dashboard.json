@@ -1,0 +1,24 @@
+{
+  "name": "microns-dashboard",
+  "type": "self_hosted",
+  "domain": "www.micronshub.eu/dashboard",
+  "destinations": [
+    { "type": "public", "uri": "www.micronshub.eu/dashboard" }
+  ],
+  "session_duration": "24h",
+  "app_launcher_visible": false,
+  "http_only_cookie_attribute": true,
+  "same_site_cookie_attribute": "lax",
+  "options_preflight_bypass": false,
+  "policies": [
+    {
+      "name": "dashboard users",
+      "decision": "allow",
+      "include": [
+        { "email": { "email": "<STAFF_EMAIL_1>" } },
+        { "email": { "email": "<STAFF_EMAIL_2>" } },
+        { "email": { "email": "<DASHBOARD_EMAIL_3>" } }
+      ]
+    }
+  ]
+}

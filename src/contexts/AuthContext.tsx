@@ -77,6 +77,12 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       (event, session) => {
         setSession(session);
 
+        // A recovery link that Supabase Auth sent to another page (its Site URL, when /reset-password is not in
+        // the redirect allow-list) still ends on the page that sets the new password.
+        if (event === 'PASSWORD_RECOVERY' && window.location.pathname !== '/reset-password') {
+          navigate('/reset-password', { replace: true });
+        }
+
         if (session?.user) {
           loadUserWithRoles(session.user);
         } else {
@@ -98,6 +104,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     });
 
     return () => subscription.unsubscribe();
+    // Subscribe once: navigate is only called with an absolute path, so the first render's function is enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchUserRole = async (userId: string): Promise<UserRole | undefined> => {

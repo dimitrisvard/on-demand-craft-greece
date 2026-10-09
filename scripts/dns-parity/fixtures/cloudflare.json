@@ -1,0 +1,120 @@
+{
+ "success": true,
+ "errors": [],
+ "messages": [],
+ "result": [
+  {
+   "id": "r1",
+   "name": "micronshub.eu",
+   "type": "A",
+   "content": "216.198.79.1",
+   "proxied": false,
+   "ttl": 300
+  },
+  {
+   "id": "r2",
+   "name": "micronshub.eu",
+   "type": "MX",
+   "content": "aspmx.l.google.com",
+   "priority": 1,
+   "proxied": false,
+   "ttl": 1
+  },
+  {
+   "id": "r3",
+   "name": "micronshub.eu",
+   "type": "MX",
+   "content": "alt1.aspmx.l.google.com",
+   "priority": 5,
+   "ttl": 1
+  },
+  {
+   "id": "r4",
+   "name": "micronshub.eu",
+   "type": "MX",
+   "content": "alt2.aspmx.l.google.com",
+   "priority": 5,
+   "ttl": 1
+  },
+  {
+   "id": "r5",
+   "name": "micronshub.eu",
+   "type": "MX",
+   "content": "alt3.aspmx.l.google.com",
+   "priority": 10,
+   "ttl": 1
+  },
+  {
+   "id": "r6",
+   "name": "micronshub.eu",
+   "type": "MX",
+   "content": "alt4.aspmx.l.google.com",
+   "priority": 10,
+   "ttl": 1
+  },
+  {
+   "id": "r7",
+   "name": "micronshub.eu",
+   "type": "TXT",
+   "content": "\"v=spf1 include:_spf.google.com ~all\"",
+   "ttl": 1
+  },
+  {
+   "id": "r8",
+   "name": "micronshub.eu",
+   "type": "TXT",
+   "content": "google-site-verification=TEST-TOKEN-0001",
+   "ttl": 1
+  },
+  {
+   "id": "r9",
+   "name": "www.micronshub.eu",
+   "type": "CNAME",
+   "content": "3096eb4eb748a48f.vercel-dns-017.com",
+   "proxied": false,
+   "ttl": 300
+  },
+  {
+   "id": "r10",
+   "name": "*.micronshub.eu",
+   "type": "CNAME",
+   "content": "cname.vercel-dns.com",
+   "proxied": false,
+   "ttl": 300
+  },
+  {
+   "id": "r11",
+   "name": "_dmarc.micronshub.eu",
+   "type": "TXT",
+   "content": "v=DMARC1; p=none; rua=mailto:info@micronshub.eu",
+   "ttl": 1
+  },
+  {
+   "id": "r12",
+   "name": "resend._domainkey.micronshub.eu",
+   "type": "TXT",
+   "content": "p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBQIDAQAB",
+   "ttl": 1
+  },
+  {
+   "id": "r13",
+   "name": "google._domainkey.micronshub.eu",
+   "type": "TXT",
+   "content": "v=DKIM1;k=rsa;p=MIIBIjANTESTKEY",
+   "ttl": 1
+  },
+  {
+   "id": "r14",
+   "name": "send.micronshub.eu",
+   "type": "TXT",
+   "content": "v=spf1 include:amazonses.com ~all",
+   "ttl": 1
+  }
+ ],
+ "result_info": {
+  "page": 1,
+  "per_page": 100,
+  "count": 14,
+  "total_count": 14
+ }
+}

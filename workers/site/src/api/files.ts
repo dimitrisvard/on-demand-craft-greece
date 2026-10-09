@@ -41,6 +41,7 @@ import {
   type S3Target,
 } from '../../../shared/src/storage/s3-presign';
 import type { FileConstraints } from '../auth/constraints';
+import { articlesStore, handleArticlesR2 } from './articles-store';
 import type { ResolvedApi } from './resolve';
 
 export interface FilesEnv {
@@ -307,6 +308,7 @@ export async function handleFiles(i: {
     const body = readBody(r.body.value);
     const own = body.scope || r.query.scope || 'rfq';
     const scope: Scope = r.scope ?? (own === 'articles' ? 'articles' : 'rfq');
+    if (scope === 'articles' && articlesStore(i.env) === 'r2') return await handleArticlesR2({ action: r.action, rawAction: r.rawAction, body, env: i.env, constraints: i.constraints, fetchImpl, respond: handlerJson });
     const s = storesFor(i.env, scope, fetchImpl);
     switch (r.action) {
       case 'presign-upload':

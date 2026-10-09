@@ -21,6 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { apiAuthHeaders } from "@/utils/apiAuth";
 import type { Lead, LeadFilters, LeadStats, MonitoredSubreddit, LeadKeyword } from "@/types/leads";
 import {
   BarChart,
@@ -38,6 +39,11 @@ import {
   CartesianGrid,
 } from "recharts";
 import { format, parseISO } from "date-fns";
+
+// leads-api accepts only a signed-in staff user's access token (P6-4); `apikey` stays the public key.
+async function leadsApiHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+  return { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, ...(await apiAuthHeaders()), ...extra };
+}
 
 const PAGE_SIZE = 30;
 
@@ -113,7 +119,7 @@ export default function LeadMonitorPage() {
     try {
       const resp = await fetch(
         `${supabaseUrl}/functions/v1/leads-api/stats?days_back=7`,
-        { headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } }
+        { headers: await leadsApiHeaders() }
       );
       if (resp.ok) {
         const data = await resp.json();
@@ -154,7 +160,7 @@ export default function LeadMonitorPage() {
       }
     }
     setStatsLoading(false);
-  }, [supabaseUrl, supabaseKey]);
+  }, [supabaseUrl]);
 
   // ===== Fetch keywords =====
   const fetchKeywords = useCallback(async () => {
@@ -189,11 +195,7 @@ export default function LeadMonitorPage() {
         `${supabaseUrl}/functions/v1/leads-api/leads/${id}`,
         {
           method: "PATCH",
-          headers: {
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-            "Content-Type": "application/json",
-          },
+          headers: await leadsApiHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(updates),
         }
       );
@@ -218,7 +220,7 @@ export default function LeadMonitorPage() {
         `${supabaseUrl}/functions/v1/leads-api/collect?source=all`,
         {
           method: "GET",
-          headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
+          headers: await leadsApiHeaders(),
         }
       );
       if (resp.ok) {

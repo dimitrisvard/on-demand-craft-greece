@@ -26,17 +26,18 @@ export type TenantIdentifier =
   | { type: 'custom_domain'; hostname: string }
   | { type: 'default' };
 
-export function resolveTenantIdentifier(): TenantIdentifier {
-  const hostname = window.location.hostname;
+export function resolveTenantIdentifier(hostname: string = window.location.hostname): TenantIdentifier {
+  // Matching is case-insensitive and ignores one trailing root dot.
+  const host = hostname.toLowerCase().replace(/\.$/, '');
 
   // localhost or IP — default to Microns Hub
-  if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+  if (host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)) {
     return { type: 'default' };
   }
 
-  // *.micronshub.eu — extract subdomain
-  if (hostname.includes('micronshub.eu')) {
-    const parts = hostname.split('.');
+  // micronshub.eu itself or a host ending in .micronshub.eu (exact suffix) — extract subdomain
+  if (host === 'micronshub.eu' || host.endsWith('.micronshub.eu')) {
+    const parts = host.split('.');
     if (parts.length >= 3) {
       const subdomain = parts[0];
       if (!RESERVED_SUBDOMAINS.includes(subdomain)) {

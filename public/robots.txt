@@ -27,6 +27,7 @@ Disallow: /rfq
 Disallow: /rfq-management
 Disallow: /orders
 Disallow: /login
+Disallow: /reset-password
 
 # Block API and internal routes
 Disallow: /api/

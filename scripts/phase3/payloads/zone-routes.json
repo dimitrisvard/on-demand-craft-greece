@@ -1,0 +1,21 @@
+{
+  "rule": "Every proxied hostname of micronshub.eu that the microns-site Worker must not answer gets a Workers route without a Worker, pattern <host>/*, before its DNS record is proxied. A route without a Worker negates every less specific pattern, so the *.micronshub.eu/* route of microns-site never answers that host. List the zone routes after every change and after every routes run or production deploy of microns-site.",
+  "apply": "One POST /zones/$ZONE_ID/workers/routes per entry with the body {\"pattern\": \"<pattern>\"} and no script field; commands in scripts/phase3/README.md.",
+  "routes": [
+    {
+      "pattern": "cad-vps.micronshub.eu/*",
+      "host": "Tunnel host of the CAD service (the Phase 4 OW-11 name; if OW-11 picks another name, this entry changes with it)",
+      "when": "S11, before the routes action of cf-site-production.yml"
+    },
+    {
+      "pattern": "files.micronshub.eu/*",
+      "host": "R2 custom domain of the microns-public bucket (P3-6)",
+      "when": "S11, before the routes action of cf-site-production.yml"
+    },
+    {
+      "pattern": "mcp.micronshub.eu/*",
+      "host": "Custom Domain of the microns-ops Worker (Phase 4)",
+      "when": "S11, before the routes action of cf-site-production.yml"
+    }
+  ]
+}

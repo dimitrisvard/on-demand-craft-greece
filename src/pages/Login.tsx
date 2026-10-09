@@ -313,9 +313,9 @@ const Login = () => {
                         Remember me
                       </label>
                     </div>
-                    <a href="#" className="text-sm text-primary hover:underline">
+                    <Link to="/reset-password" rel="nofollow" className="text-sm text-primary hover:underline">
                       Forgot password?
-                    </a>
+                    </Link>
                   </div>
                 </CardContent>
 

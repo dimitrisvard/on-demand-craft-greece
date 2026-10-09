@@ -113,7 +113,15 @@
     "API_GATES_MODE": "recipient=report",
     // Hosts besides the preview hosts that accept machine callers, comma list, exact match. Empty in Phase 2; the
     // Phase 3 runbook sets "api.micronshub.eu".
-    "API_MACHINE_HOSTS": ""
+    "API_MACHINE_HOSTS": "",
+
+    // ----- Phase 3/6 switches (top level = preview: every value selects the Phase 2 behaviour) -----
+    // Article images of /api/s3 (src/api/articles-store.ts): "legacy" = legacy bucket; "r2" = the public R2 bucket.
+    "ARTICLES_STORE": "legacy",
+    // Origin of the public R2 bucket (its custom domain); used for article image URLs only when ARTICLES_STORE is "r2".
+    "PUBLIC_FILES_ORIGIN": "https://files.micronshub.eu",
+    // CORS of /api/* answers (src/preview.ts): "parity" = the vercel.json headers; "allowlist" = listed origins only.
+    "API_CORS_MODE": "parity"
   },
 
   "secrets": {
@@ -132,9 +140,96 @@
     ]
   },
 
-  // Phase 3 (runbook S11-S14): empty until the zone is on Cloudflare.
+  // Phase 3: the top level (every preview upload) never has routes; the production routes live in env.production below.
   "routes": [
     // { "pattern": "www.micronshub.eu/*", "zone_name": "micronshub.eu" },
     // { "pattern": "*.micronshub.eu/*", "zone_name": "micronshub.eu" }
-  ]
+  ],
+
+  "env": {
+    // Production of microns-site from runbook S11 on. Only .github/workflows/cf-site-production.yml and the owner's
+    // own `--env production` commands select it; cf-preview.yml and `wrangler dev` use the top level.
+    //
+    // Rules (test/env-production.test.ts resolves both environments with wrangler's own reader and enforces them):
+    //   - Keys wrangler inherits from the top level (main, compatibility_date/flags, assets, workers_dev,
+    //     preview_urls, observability, limits) are NOT repeated here.
+    //   - Keys wrangler does not inherit (vars, secrets, kv_namespaces, services, r2_buckets, ratelimits and every
+    //     other binding) are repeated in full with the same values: a binding or var added to the top level must be
+    //     added here too in the same change.
+    //   - Only the vars of the "production values" group below may differ from the top level.
+    //   - Preview and production versions belong to the same Worker and share its secrets. A site secret changes
+    //     with `npx wrangler versions secret put <NAME> --env production`, then a production upload and deploy
+    //     through the workflow; never with `wrangler secret put` or a plain `wrangler deploy`.
+    "production": {
+      // Without its own name, wrangler would deploy a second Worker called "microns-site-production".
+      "name": "microns-site",
+      // The most specific pattern wins: www first, then every other first-level host of the zone (tenants, api).
+      // "*.micronshub.eu/*" does not match the apex, which the zone redirect rule answers. Inert until the records
+      // are proxied (S12-S14). Every proxied host that this Worker must not answer gets a route without a Worker
+      // before its record is proxied (scripts/phase3/payloads/zone-routes.json; the owner creates them).
+      "routes": [
+        { "pattern": "www.micronshub.eu/*", "zone_name": "micronshub.eu" },
+        { "pattern": "*.micronshub.eu/*", "zone_name": "micronshub.eu" }
+      ],
+      "kv_namespaces": [
+        { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" },
+        { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+      ],
+      "services": [
+        { "binding": "OPS", "service": "microns-ops", "entrypoint": "OpsApi" }
+      ],
+      "r2_buckets": [
+        { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
+      ],
+      "ratelimits": [
+        { "name": "API_RATE_LIMIT", "namespace_id": "2001", "simple": { "limit": 30, "period": 60 } },
+        { "name": "API_RATE_LIMIT_MAIL", "namespace_id": "2002", "simple": { "limit": 5, "period": 60 } },
+        { "name": "API_RATE_LIMIT_BULK", "namespace_id": "2003", "simple": { "limit": 300, "period": 60 } }
+      ],
+      "vars": {
+        "SUPABASE_URL": "https://cfjrtmtaitwzggzpkhxi.supabase.co",
+        "SITE_ORIGIN": "https://www.micronshub.eu",
+        "PREVIEW_HOSTNAMES": "",
+        "SEO_STRICT_404": "false",
+        "API_FORWARD_ORIGIN": "https://on-demand-craft-greece.vercel.app",
+        "DIRECTORY_INDEX_EMULATION": "true",
+        "API_FORWARD_TO_VERCEL": "false",
+        "R2_ACCOUNT_ID": "<CF_ACCOUNT_ID>",
+        "LEGACY_S3_REGION": "eu-north-1",
+        "LEGACY_S3_RFQ_BUCKET": "<LEGACY_S3_RFQ_BUCKET>",
+        "LEGACY_S3_ARTICLES_BUCKET": "<LEGACY_S3_ARTICLES_BUCKET>",
+        "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
+        "PUBLIC_FILES_ORIGIN": "https://files.micronshub.eu",
+
+        // ----- production values (the only vars allowed to differ from the top level) -----
+        // Audiences of the preview Access app (the deployed version also answers on workers.dev) and of the
+        // api.micronshub.eu Access app, comma list (src/auth/access.ts).
+        "ACCESS_AUD": "<ACCESS_AUD_PREVIEW>,<ACCESS_AUD_API>",
+        // Gate mode per class (Phase 2 D-16 default): both classes log and keep the current link and recipient
+        // behaviour until the owner switches a class to "enforce".
+        "API_GATES_MODE": "recipient=report,redirect=report",
+        // Machine callers are accepted only on the Access-protected API host (Phase 2 D-3).
+        "API_MACHINE_HOSTS": "api.micronshub.eu",
+        // "r2" only after the owner has connected files.micronshub.eu to the public R2 bucket (P3-6 owner steps).
+        "ARTICLES_STORE": "legacy",
+        // "allowlist" only after the Phase 3 gate, preview first (P6-4).
+        "API_CORS_MODE": "parity"
+        // HSTS_VALUE: added only when scripts/phase3/redirect-rules.mjs reports "HSTS: worker = <value>" for the S11
+        // baseline. Never a placeholder: whatever string is set here is sent as the header.
+      },
+      "secrets": {
+        "required": [
+          "SUPABASE_ANON_KEY",
+          "SUPABASE_SERVICE_ROLE_KEY",
+          "RESEND_API_KEY",
+          "TURNSTILE_SECRET_KEY",
+          "R2_ACCESS_KEY_ID",
+          "R2_SECRET_ACCESS_KEY",
+          "LEGACY_AWS_ACCESS_KEY_ID",
+          "LEGACY_AWS_SECRET_ACCESS_KEY",
+          "ACCESS_MACHINE_CLIENT_IDS"
+        ]
+      }
+    }
+  }
 }

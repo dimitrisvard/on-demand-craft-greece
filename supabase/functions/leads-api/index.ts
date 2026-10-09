@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { checkStaff, supabaseStaffDeps } from "./staff-auth.ts"; // P6-4 caller authentication (line added to live v7)
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -22,6 +23,12 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // P6-4 caller authentication: begin (block added to live v7)
+  // Only a signed-in staff user's Supabase access token is accepted (staff-auth.ts). Preflights above stay open.
+  const caller = await checkStaff(req.headers.get("Authorization"), supabaseStaffDeps(supabase));
+  if (!caller.ok) return jsonResponse({ error: caller.error }, caller.status);
+  // P6-4 caller authentication: end
 
   const url = new URL(req.url);
   const pathParts = url.pathname.split("/").filter(Boolean);
@@ -260,7 +267,7 @@ serve(async (req) => {
         const body = await req.json();
         if (!body.subreddit) return jsonResponse({ error: "subreddit is required" }, 400);
         const { data, error } = await supabase.from("monitored_subreddits").insert({
-          subreddit: body.subreddit.replace(/^r\//, ""),
+          subreddit: body.subreddit.replace(/^\/r\//, ""),
           tier: body.tier || 3,
           scan_interval_minutes: body.scan_interval_minutes || 30,
           industry_tags: body.industry_tags || [],

@@ -18,6 +18,7 @@ import {
   getQuoteFieldsRegistry, getTenantQuoteFields, updateTenantQuoteFields,
   verifyTenantDomain,
 } from '@/utils/tenantApi';
+import { CustomDomainInstructions, DOMAIN_NOT_REACHABLE } from '@/components/tenants/CustomDomainInstructions';
 import { supabase } from '@/integrations/supabase/client';
 import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
 import type {
@@ -639,7 +640,7 @@ export default function TenantEditPage() {
                               setForm((prev) => ({ ...prev, domain_verified: true }));
                               toast({ title: 'Domain verified', description: `${form.custom_domain} is reachable.` });
                             } else {
-                              toast({ title: 'Domain not reachable', description: 'Check DNS configuration and Vercel domain setup.', variant: 'destructive' });
+                              toast({ title: 'Domain not reachable', description: DOMAIN_NOT_REACHABLE, variant: 'destructive' });
                             }
                           } catch {
                             toast({ title: 'Check failed', variant: 'destructive' });
@@ -660,28 +661,7 @@ export default function TenantEditPage() {
                 </div>
 
                 {form.custom_domain && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm space-y-3">
-                    <p className="font-semibold text-amber-800">Setup Instructions</p>
-                    <ol className="list-decimal list-inside space-y-2 text-amber-900">
-                      <li>
-                        <strong>Add domain in Vercel:</strong> Go to Vercel Dashboard &gt; Project &gt; Settings &gt; Domains &gt; Add <code className="bg-amber-100 px-1 rounded">{form.custom_domain}</code>
-                      </li>
-                      <li>
-                        <strong>Configure DNS:</strong> The tenant owner must add this record to their domain registrar:
-                        <div className="mt-1 bg-white border border-amber-200 rounded p-2 font-mono text-xs">
-                          <div>Type: <strong>CNAME</strong></div>
-                          <div>Name: <strong>{form.custom_domain.startsWith('www.') ? 'www' : '@'}</strong></div>
-                          <div>Value: <strong>cname.vercel-dns.com</strong></div>
-                        </div>
-                      </li>
-                      <li>
-                        <strong>Wait for SSL:</strong> Vercel will automatically provision an SSL certificate (usually &lt; 5 minutes).
-                      </li>
-                      <li>
-                        <strong>Verify:</strong> Click "Check DNS" above to confirm the domain is working.
-                      </li>
-                    </ol>
-                  </div>
+                  <CustomDomainInstructions slug={form.slug} customDomain={form.custom_domain} />
                 )}
               </CardContent>
             </Card>

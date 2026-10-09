@@ -20,6 +20,9 @@ Evidence tags used below: `path:line` = this repository at commit `9afcba8` (bra
 | [AGENTS.md](AGENTS.md) | The seven agent designs of brief §4: inputs, outputs, failure modes, idempotency key, cost per run, human view, schema additions |
 | [RISKS.md](RISKS.md) | Risk register: likelihood, impact, mitigation and owner, covering H-1…H-30 |
 | [COSTS.md](COSTS.md) | Today vs target monthly cost, assumptions and the cost gate |
+| [MANUAL_STEPS.md](MANUAL_STEPS.md) | Added 2026-10-09: the single owner checklist for every phase, in working order (accounts, dashboards, DNS, deploys, database applies, decommission) |
+| [specs/](specs/README.md) | Added 2026-10-04: public sections of the Phase 2–6 build specifications |
+| [phase6/](phase6/) | Added 2026-10-09: files prepared for the owner-run Phase 6 cleanup and the optional dashboard Access application |
 
 The GitHub repository is public (live 2026-09-30). Security findings therefore appear in these files at summary level only, each ending "Details: private security note". The full security detail was delivered to the owner out of band and is not in this repository (PLAN.md Q18 asks whether to keep this approach and whether to make the repository private).
 
@@ -31,6 +34,7 @@ The GitHub repository is public (live 2026-09-30). Security findings therefore a
 | Phase 0 proposal (2026-09-27) | Approved. It authorised these planning files only: no source edits, no `wrangler deploy`, no DNS changes, no secrets in files |
 | [PLAN.md](PLAN.md) | The decision document. Awaiting owner approval and answers to Q1–Q22 |
 | Phase 1 code | Starts only after PLAN.md is approved and P0-1 is done: `auto-merge-claude.yml` merges every push to `claude/**` into `main` (.github/workflows/auto-merge-claude.yml:5-6, :29) and this branch matches the glob (H-2). Docs-only pushes cause no runtime change |
+| Code status (2026-10-09) | The code of Phases 1, 2, 4 and 5 and the code parts of Phases 3 and 6 are built and tested locally; nothing is deployed, applied or switched, and no phase gate is signed. Build records: [PLAN.md](PLAN.md) §5.2–§5.6 (Phase 1: `workers/site/README.md`). The Phase 6 access-model migration is delivered to the owner privately and committed after the owner has applied it. Every owner step: [MANUAL_STEPS.md](MANUAL_STEPS.md) |
 
 Phases (fixed numbering): 0 Audit + pre-flight · 1 Site + SEO Worker (preview only) · 2 API port · 3 Zone + cutover · 4 Agent layer · 5 Consolidate compute · 6 Hardening + decommission.
 

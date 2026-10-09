@@ -1,0 +1,26 @@
+; Synthetic Papaki-style export of micronshub.eu for tests (values are placeholders, not the live keys).
+$ORIGIN micronshub.eu.
+$TTL 3600
+@   IN SOA dns1.papaki.gr. support.papaki.gr. (
+        2026040806 ; serial
+        10800      ; refresh
+        3600       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+    IN NS  dns1.papaki.gr.
+    IN NS  dns2.papaki.gr.
+@ 300 IN A 216.198.79.1
+@ 3600 IN MX 1 ASPMX.L.GOOGLE.COM.
+  3600 IN MX 5 alt1.aspmx.l.google.com.
+  IN MX 5 alt2.aspmx.l.google.com.
+  IN MX 10 alt3.aspmx.l.google.com.
+  IN MX 10 alt4.aspmx.l.google.com.
+@ IN TXT "v=spf1 include:_spf.google.com ~all"
+@ IN TXT "google-site-verification=TEST-TOKEN-0001"
+www 300 IN CNAME 3096eb4eb748a48f.vercel-dns-017.com.
+* 300 IN CNAME cname.vercel-dns.com.
+_dmarc IN TXT "v=DMARC1\059 p=none\059 rua=mailto:info@micronshub.eu"
+resend._domainkey IN TXT "p=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBQIDAQAB"
+google._domainkey.micronshub.eu. IN TXT ( "v=DKIM1;k=rsa;"
+    "p=MIIBIjANTESTKEY" )
+send IN TXT "v=spf1 include:amazonses.com ~all"

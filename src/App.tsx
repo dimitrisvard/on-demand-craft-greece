@@ -20,6 +20,7 @@ import { hasCustomPage } from './pages/tenants/customPageRegistry';
 // Lazy load pages to reduce initial bundle size
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Login = lazy(() => import('./pages/Login'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const CustomersPage = lazy(() => import('./pages/dashboard/CustomersPage'));
 const PartnerManagement = lazy(() => import('./pages/PartnerManagement'));
 const OrderCalendarPage = lazy(() => import('./pages/OrderCalendarPage'));
@@ -226,6 +227,8 @@ function AppContent() {
 
                 {/* Legacy routes (without language prefix) - for backward compatibility */}
                 <Route path="/login" element={<Login />} />
+                {/* Password recovery target of AuthContext.resetPassword (redirectTo); no language prefix, not indexed */}
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="/quote" element={<Quote />} />
                 <Route path="/quote/success" element={<QuoteSuccess />} />
                 <Route path="/quote-request" element={<QuoteRequestForm />} />

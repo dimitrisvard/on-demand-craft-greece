@@ -242,7 +242,7 @@ jobs:
       - name: Dry-run bundle and size report
         working-directory: workers/site
         run: |
-          npx wrangler deploy --dry-run --outdir .wrangler/dry 2>&1 | tee "$RUNNER_TEMP/wrangler-dry.log"
+          npx wrangler deploy --dry-run --env="" --outdir .wrangler/dry 2>&1 | tee "$RUNNER_TEMP/wrangler-dry.log"
           {
             echo "### microns-site dry-run size"
             echo '```'
@@ -267,6 +267,7 @@ jobs:
           RUN_MESSAGE: "cf-preview run ${{ github.run_id }} at ${{ github.sha }}"
         run: |
           npx wrangler versions upload \
+            --env="" \
             --preview-alias "$PREVIEW_ALIAS" \
             --message "$RUN_MESSAGE" 2>&1 | tee "$RUNNER_TEMP/wrangler-upload.log"
           {

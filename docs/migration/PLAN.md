@@ -46,6 +46,8 @@ Conventions:
 | Questions | Answers to §9 are recorded in this file with the date; a question marked "blocks" must be answered before the item it blocks starts |
 | Secrets | Secret values go only into `wrangler secret`, the Cloudflare dashboard, Supabase secrets or GitHub secrets, never into files (brief §2 item 7; the repository is public, live 2026-09-30) |
 
+Owner checklist (added 2026-10-09): every owner step of every phase, in working order, is in [MANUAL_STEPS.md](MANUAL_STEPS.md); the owner step IDs in the build records of §5.2–§5.6 (`O-n`, `OW-n`, `OW3-n`, `OW5-n`, `OW6-n`) are its row IDs.
+
 Gate sign-off log (filled in during execution):
 
 | Gate | Evidence (link or file) | Signed by | Date |
@@ -324,24 +326,33 @@ Goal: `micronshub.eu` DNS runs on Cloudflare with identical records, then produc
 
 | ID | Task | Owner | Effort | Refs |
 |---|---|---|---|---|
-| P3-1 | Zone preparation (runbook S1–S5): Cloudflare zone (Free plan), TTL lowering, zone export, DNS-only import, `scripts/dns-parity.mjs` | Both | 0.75 d | C9 |
+| P3-1 | Zone preparation (runbook S1–S5): Cloudflare zone (Free plan), TTL lowering, zone export, DNS-only import, `scripts/dns-parity.mjs` (built 2026-10-09: name × type comparison of two answer sources, subcommands `ds` and `names`, no dependency; one command per runbook step in [scripts/dns-parity/README.md](../../scripts/dns-parity/README.md)) | Both | 0.75 d | C9 |
 | P3-2 | DNSSEC and NS move (S6–S10) | Dimitris (Claude verifies) | 0.5 d | C9 |
-| P3-3 | Pre-flip readiness (S11): zone settings per [SEO_PARITY.md](SEO_PARITY.md), Workers Routes, edge certificates, baseline refresh, GSC snapshot | Both | 0.5 d | H-1, H-24 |
-| P3-4 | Site flip (S12–S15): `www` Route, apex Single Redirect Rule, wildcard Route, bot/cache verification | Both | 0.25 d | H-11, H-13, H-24 |
+| P3-3 | Pre-flip readiness (S11): zone settings per [SEO_PARITY.md](SEO_PARITY.md), Workers Routes, edge certificates, baseline refresh, GSC snapshot. As built: routes and production values live in `env.production` of `workers/site/wrangler.jsonc` and reach production only through the manual workflow `cf-site-production.yml` (upload, parity on the version preview URL, deploy, routes; DV36-11); three routes without a Worker come first (DV36-12); the redirect rules are generated from the refreshed baseline by `scripts/phase3/redirect-rules.mjs` | Both | 0.5 d | H-1, H-24 |
+| P3-4 | Site flip (S12–S15): `www` Route, apex Single Redirect Rule, wildcard Route, bot/cache verification. As built the apex rule is applied at S11 and acts once the apex record is proxied at S13 (DV36-9) | Both | 0.25 d | H-11, H-13, H-24 |
 | P3-5 | 48 h observation and gate (S16–S17) | Both | 0.5 d | H-9, H-14 |
-| P3-6 | Post-cutover: connect `files.micronshub.eu` to `microns-public` and switch article-image uploads to it (legacy S3 URLs unchanged); `TenantEditPage` DNS copy; README deployment section; re-submit the sitemap index in GSC once; deliverability report for `send.micronshub.eu`, SPF and DMARC with no change to the apex MX | Both | 0.5 d | H-16, H-17 |
+| P3-6 | Post-cutover: connect `files.micronshub.eu` to `microns-public` and switch article-image uploads to it (legacy S3 URLs unchanged); `TenantEditPage` DNS copy; README deployment section; re-submit the sitemap index in GSC once; deliverability report for `send.micronshub.eu`, SPF and DMARC with no change to the apex MX. Built 2026-10-09: article images in `microns-public` behind the var `ARTICLES_STORE` (`legacy` until owner step OW3-10), provider-neutral DNS copy, a README section true before and after the flip; the R2, GSC and deliverability steps are owner steps (OW3-10, OW3-11) | Both | 0.5 d | H-16, H-17 |
 | P3-7 | Follow-up, not part of the gate: after 2 weeks of flat GSC coverage and a yes to Q5, enable `seo.strict_404`; watch 404 counts for 7 days | Both | 0.25 d | H-9 |
 
-File-level change list:
+File-level change list (as built):
 
 | Change | Path | Note |
 |---|---|---|
-| New | `scripts/dns-parity.mjs` | Name × type diff between two answer sources (authoritative server, DoH resolver or Cloudflare API export) |
-| Changed | `workers/site/wrangler.jsonc` | Routes `www.micronshub.eu/*` and `*.micronshub.eu/*` |
-| Changed | `src/pages/dashboard/tenants/TenantEditPage.tsx` | Replace the Vercel DNS instructions (TenantEditPage.tsx:642, :667-678) |
-| Changed | `README.md` | Deployment section |
-| Dashboard only | Cloudflare zone, DNS records, DNSSEC, Single Redirect Rule, rate-limiting rule, zone settings, R2 custom domain | Recorded in the runbook log |
-| Untouched | `vercel.json`, `middleware.ts`, `api/*` | Vercel stays deployable (brief §2 item 9) |
+| New | `scripts/dns-parity.mjs`, `scripts/dns-parity/{lib,test,fixtures}/**`, `scripts/dns-parity/README.md` | Name × type diff between two answer sources (authoritative server, DoH resolver, zone file or Cloudflare API export); `ds` check for S6, S7 and S10; `--forbid-target` for the check before the Vercel project is deleted; synthetic or public fixtures only; tests run without network |
+| New | `scripts/phase3/redirect-rules.mjs`, `scripts/phase3/test/redirect-rules.test.mjs`, `scripts/phase3/payloads/{redirect-rules.default.json,zone-routes.json}`, `scripts/phase3/README.md` | Ruleset payload (HTTP → HTTPS, apex → `www`) from the S11 baseline, exit 1 when the baseline contradicts an assumption; the three routes without a Worker; owner command sheet with `$ZONE_ID` and `$CLOUDFLARE_API_TOKEN` placeholders |
+| Changed | `workers/site/wrangler.jsonc` | New block `env.production` (name `microns-site`, routes `www.micronshub.eu/*` and `*.micronshub.eu/*`, full copies of every non-inherited key, the production values of D3-9); top-level `routes` stays `[]`; three top-level vars that select today's behaviour (`ARTICLES_STORE`, `PUBLIC_FILES_ORIGIN`, `API_CORS_MODE`) |
+| New | `workers/site/scripts/check-production.mjs`, `workers/site/test/{env-production,check-production}.test.ts` | Both environments resolved with wrangler's own reader; placeholder check (`config`), version guard (`version`: tag `prod-<12 hex>` and the production `API_MACHINE_HOSTS`), Turnstile site-key check (`site-key`) |
+| New | `.github/workflows/cf-site-production.yml` | Manual `upload`, `deploy`, `routes`; GitHub environment `production`, `main` only |
+| Changed | `.github/workflows/cf-preview.yml` | `--env=""` on the dry run and the upload, nothing else |
+| Changed | `workers/site/test/env-api.test.ts` | KV IDs may be the placeholder or 32 hex characters, so real IDs can be committed (2 lines added, 1 removed) |
+| New | `workers/site/src/api/articles-store.ts`, `workers/site/test/articles-store.test.ts`, `workers/site/r2/cors.public.json`, `tests/frontend-api/article-image-upload.test.ts` | Article images in `microns-public` behind `ARTICLES_STORE`; no binding |
+| Changed | `workers/site/src/api/files.ts`, `src/utils/articleImageStorage.ts` | One import and one branch (2 lines); `size` in the presign body |
+| New | `src/components/tenants/CustomDomainInstructions.tsx`, `tests/frontend-api/tenant-domain-copy.test.tsx` | DNS copy that names no provider |
+| Changed | `src/pages/dashboard/tenants/TenantEditPage.tsx` | Replace the Vercel DNS instructions (TenantEditPage.tsx:642, :667-678) with the component |
+| Changed | `README.md` | Deployment section, true before and after the flip; full rewrite at P6-6 |
+| Dashboard only | Cloudflare zone, DNS records, DNSSEC, redirect ruleset, routes without a Worker, rate-limiting rule, zone settings, R2 custom domain, GitHub environment `production` | Recorded in the runbook log; owner steps OW3-2…OW3-13 |
+| Untouched | `vercel.json`, `middleware.ts`, `middleware/*`, `api/*`, `lib/*`, `vite.config.ts`, root `package.json` and lockfiles | Vercel stays deployable (brief §2 item 9) |
+| Untouched | `workers/site/src/{env,index,sitemap,redirects,static}.ts`, `workers/site/src/seo/**` | SEO path and the Phase 2 environment type unchanged |
 | Untouched | `playwright.config.ts` default `BASE_URL` | Still `https://www.micronshub.eu` (playwright.config.ts:8) |
 
 Exit gate:
@@ -360,7 +371,79 @@ Dependencies: Phase 2 gate (the zone part S1–S10 may run in parallel with Phas
 
 Risk refs: H-1, H-9, H-11, H-13, H-14, H-16, H-17, H-24, H-25.
 
-Effort total: ≈ 3.25 d of work + DS wait + 48 h observation (plan: 2–3 d + 48 h).
+Effort total: ≈ 3.25 d of work + DS wait + 48 h observation (plan: 2–3 d + 48 h); the code parts were built together with the Phase 6 code from one specification.
+
+Build record (2026-10-09): the Phase 3 code is built and tested locally on top of the commit that closes the Phase 5 build (`b694d06`); nothing is deployed, uploaded or applied, the build created no zone, record, route, rule or secret, and no production site host was called. The build followed [specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) (public sections; fixed decisions §1, defaults §2, owner checklist §9, deviations §10.1). This section was brought in line with the build on that date; the owner confirms the deviations and defaults below before the merge (OW3-1 and OW6-1 of [MANUAL_STEPS.md](MANUAL_STEPS.md), the single owner checklist for every phase). "Local" means T1 (vitest in Node), T2 (`wrangler dev --local` in front of stubs) and `node --test` for the Phase 3 tools on offline fixtures; no Cloudflare account was used.
+
+| # | Gate item | Status | Evidence |
+|---|---|---|---|
+| 1 | 48 h GSC coverage and crawl stats flat | **blocked** | Needs S1–S17 (OW3-3…OW3-8) and the 48 h window. Locally the SEO path is unchanged: `workers/site/src/{index,sitemap,redirects,static}.ts` and `src/seo/**` untouched; `node tests/middleware/smoke.mjs` green |
+| 2 | `scripts/verify-ssr.sh` green against production | **blocked** | Owner run from the owner's machine after S12 (production challenges the build container, Q1); the seven pre-existing content checks are confirmed at OW1-2 |
+| 3 | Zero 5xx on SEO paths over 48 h | **blocked** | Workers Logs during S16 |
+| 4 | Parity production vs the S11 baseline: 0 unexplained differences | **blocked** (local part passes) | The production upload is checked on its version preview URL against the S11 baseline before it is deployed (OW3-6 f); `deploy` refuses a version without the tag `prod-<12 hex>` or with another `API_MACHINE_HOSTS` (`check-production.mjs version`); the dry runs of the top level and of `env.production` produce the same `index.js`; parity tool tests 94/94. Expected explained differences: `/robots.txt` (the `/reset-password` line, P6-4) and, against a baseline captured before the merge, HTML documents without the third-party editor script (DV36-6) |
+| 5 | Mail records unchanged; mail tests | **blocked** (local part passes) | `scripts/dns-parity.mjs` compares every name × type of two sources (TXT strings joined, TTL ignored unless asked): export vs import fixtures 0 differences; a drift fixture (MX missing, SPF changed, record added, `www` proxied) exits 1; 28 tests without network. Owner runs per step (OW3-3, OW3-7); mail tests at S9 |
+| 6 | Resend domain and GSC domain property verified | **blocked** | S9 checks (owner); the verification TXT records are part of every DNS comparison |
+| 7 | DNSSEC chain validates | **blocked** (local part passes) | `scripts/dns-parity.mjs ds` with `--expect absent` and with `--expect present --key-tag N` tested offline; owner runs at S6, S7 and S10 |
+
+Other checks of the same run (2026-10-09; one gate run covers Phase 3 and Phase 6, rows G36-a…G36-k of the specification):
+
+| Check | Result |
+|---|---|
+| T1 | shared 402, site 1,434, ops 2,041 (19 opt-in tests skipped), mail 25; frontend helpers 184 (13 files); edge-function tests 15; typecheck clean in shared, site and ops |
+| T2 | Phase 2 profile `api`: site 52, ops 4; Phase 4 profile `agents`: 11 files, 46 tests; Phase 5 profile `jobs`: 7 files, 27 tests; all as at the Phase 5 close |
+| SQL | `supabase/tests/agent_layer`: 572; `supabase/tests/phase5`: 123 and 138 assertions; the Phase 6 database checks are listed in §5.6 |
+| Phase 3/6 tools | `node --test`: dns-parity 28, phase3 6, phase6 22; Phase 1 smoke and parity tool tests 94/94 |
+| Preview unchanged | Top-level config resolves as before (three new vars that select today's behaviour; no route, binding or secret added); `cf-preview.yml` differs only by `--env=""` on two lines; parity CORS and legacy article images by default |
+| Bundles | `microns-site` 3,398.22 KiB with no forbidden input; `microns-ops` upload 10,072.48 KiB; `microns-mail` 17.15 KiB |
+| Vercel side | `vercel.json`, `middleware*`, `api`, `lib`, `vite.config.ts`, root `package.json` and lockfiles, `auto-merge-claude.yml`, `xometry-scan.yml`, `scripts/dev-server.js`, `scripts/freecad-unfold`, `docs/AWS_S3_VERCEL_GUIDE.md`, `public/laserkritis`, `public/cookie-consent.html` unchanged; `npx vite build` succeeds |
+| Scans | Secret-pattern and public-wording scans over every added or changed path: no hit; the code build changed only the paths the specification allows (this docs update follows the gate) |
+| Owner checklist | [MANUAL_STEPS.md](MANUAL_STEPS.md): each owner ID of the sources once (140 IDs); every row that sets a `microns-site` secret carries the site-secret procedure; every row that proxies a new host carries the route-without-a-Worker rule |
+| Not run here | Every step that needs a Cloudflare account, the zone's name servers, a Supabase write or a production host |
+
+Deviations from this section and from the runbook (§6) as first written (DV36-n = [specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §10.1; the runbook rows S11, S13 and §6.4 are marked "as built" on the same date):
+
+| # | Planned | Built | Why |
+|---|---|---|---|
+| DV36-7 | File list: `scripts/dns-parity.mjs`, routes in `wrangler.jsonc`, `TenantEditPage`, README | Plus `env.production`, `cf-site-production.yml`, the `cf-preview.yml` flag, `scripts/phase3/**`, `articles-store.ts`, the `files.ts` branch, `size` in the article presign body, `CustomDomainInstructions.tsx`, `check-production.mjs` and tests | P3-3 and P3-6 needed them |
+| DV36-9 | S13 "enable the Single Redirect Rule" | Both redirect rules applied at S11 in one ruleset; the apex rule acts once the apex record is proxied (S13); rollback = the record back to DNS only | No switch between S11 and S13; a DNS-only record never reaches the rules (verify at execution) |
+| DV36-11 | S11 "production version = the version ID that passed the Phase 1 and 2 gates" | A new production upload of the merged commit, tagged `prod-<sha>`, checked by parity on its version preview URL against the S11 baseline, then deployed | Preview versions carry the top-level vars; routes, gate modes and the machine host exist only in `env.production` |
+| DV36-12 | S11: two Worker routes | Plus three routes without a Worker (`files.`, `mcp.`, `cad-vps.micronshub.eu`) created first, and a standing rule: every later proxied host that the site must not answer gets such a route before its record is proxied | The wildcard route answers every proxied first-level host |
+
+Build amendments (BA36-n: changes made during the build, its reviews and the gate, beyond the specification text):
+
+| # | Amendment | Where |
+|---|---|---|
+| BA36-1 | `redirect-rules.mjs` runs its command line also when started through a symlinked path, so a contradicting baseline still exits 1 (the stop rule of OW3-6 b); a test case starts it through a symlinked directory | `scripts/phase3/redirect-rules.mjs` and its test |
+| BA36-2 | The S12–S14 check of OW3-7 lists only the names proxied at that step (S12 `www,api`; S13 `www,@,api`; S14–S16 `www,@,*,api`) and runs once per assigned Cloudflare name server; the specification's single list would fail before S14 | [MANUAL_STEPS.md](MANUAL_STEPS.md) OW3-7; [scripts/dns-parity/README.md](../../scripts/dns-parity/README.md) |
+
+Defaults chosen for the owner ([specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §2.1; each can be changed before the step named). Owner-sensitive:
+
+| # | Decision | Default built | Decide before |
+|---|---|---|---|
+| D3-9 | Production vars | `API_GATES_MODE` `recipient=report,redirect=report` (today's link and recipient behaviour, logged); `API_MACHINE_HOSTS` `api.micronshub.eu`; `ACCESS_AUD` = preview AUD + API AUD; `HSTS_VALUE` only when the S11 generator reports that the Worker must send it; `ARTICLES_STORE` `legacy`; `API_CORS_MODE` `parity` | S11 (OW3-1, O-23) |
+| D3-17 | Article uploads in `r2` mode | Image types only (`jpg`, `jpeg`, `png`, `webp`, `gif`, `avif`; Content-Type must match the extension), size required and at most 5 MiB (signed as Content-Length), for every principal | OW3-10 (e) |
+
+| Area | Defaults | Built as |
+|---|---|---|
+| Release path | D3-1, D3-2, D3-3, D3-16, D3-18, D3-20, D3-21 | Routes only in `env.production`; manual workflow `cf-site-production.yml` (`upload`, `deploy`, `routes`) in the GitHub environment `production` (owner as required reviewer, `main` only, token with Zone Read); routes by `wrangler triggers deploy --env production`, fallback `wrangler deploy --env production`; `--env=""` in `cf-preview.yml`; `deploy` refuses an untagged or preview-config version; the real Turnstile pair for previews and production from S11 |
+| Redirects and hosts | D3-4…D3-8 | 308 for apex and HTTP until the baseline says otherwise (the generator stops on a contradiction); HTTP → HTTPS by a redirect rule `(not ssl)` with Always Use HTTPS off; one ruleset payload applied with one `curl`; routes without a Worker for `files.`, `mcp.` and `cad-vps.` at S11 and for every later non-site host; `api.` through the wildcard route, a proxied record and its Access application |
+| DNS tool | D3-13, D3-14 | TXT strings joined; TTL ignored unless `--ttl exact` or `--ttl max:<s>`; a wildcard at an empty non-terminal is `EXPECTED_ENT`, not a failure |
+| Copy and README | D3-10, D3-15 | Tenant DNS copy names no provider; README section true on both platforms, merged with the build |
+| Article images | D3-11, D3-12 | Var `ARTICLES_STORE` (`legacy` default, `r2`), S3 API against `microns-public` with the R2 token or an optional `R2_PUBLIC_*` pair, no binding; keys `articles/<browser key>` |
+| Not built | D3-19 | Slug blocklist on tenant save (FU-1, §5.6) |
+
+New names (built as proposed; renamed only before the first production upload): site vars `ARTICLES_STORE`, `PUBLIC_FILES_ORIGIN`, `API_CORS_MODE`; optional site secrets `R2_PUBLIC_ACCESS_KEY_ID`, `R2_PUBLIC_SECRET_ACCESS_KEY`; config block `env.production`; workflow `cf-site-production.yml` with the GitHub environment `production`; version tag `prod-<first 12 hex of the commit>`; redirect rules `microns_http_to_https`, `microns_apex_to_www`; scripts `scripts/dns-parity.mjs`, `scripts/phase3/redirect-rules.mjs`, `workers/site/scripts/check-production.mjs`.
+
+Owner steps: Phase 3 table of [MANUAL_STEPS.md](MANUAL_STEPS.md) (OW3-1…OW3-13, after the Phase 2 gate; commands in [scripts/phase3/README.md](../../scripts/phase3/README.md) and [scripts/dns-parity/README.md](../../scripts/dns-parity/README.md)). In short: OW3-1 review before the merge; OW3-2 GitHub environment and production token; OW3-3 zone move S1–S10 with a DNS check per step; OW3-4…OW3-6 S11 values, machine host, baseline, redirect payload, zone settings, Turnstile pair, routes without a Worker, production upload and deploy; OW3-7, OW3-8 flips and observation; OW3-9…OW3-12 after S17; OW3-13 standing rules from S11.
+
+Open items after the build (2026-10-09):
+
+| Item | Detail | Who |
+|---|---|---|
+| S11 values | `env.production` holds placeholders until OW3-4; `check-production.mjs config` lists them and exits 1 until then | Both |
+| Site Worker README | `workers/site/README.md` does not yet describe `env.production`, `check-production.mjs` or `ARTICLES_STORE`; the owner commands are in `scripts/phase3/README.md` and [MANUAL_STEPS.md](MANUAL_STEPS.md) | Claude |
+| Dry-run warning | `npm --prefix workers/site run build:dry` still prints wrangler's "Multiple environments" warning (cosmetic); the fix is `--env ""` in that script and in `workers/site/scripts/check-bundle.mjs` | Claude |
+| Rollback tag | `vercel-stable-2026-10-02` (commit `9afcba8`) is not on GitHub yet (OW0-1) | Owner |
 
 ### 5.4 Phase 4: agent layer
 
@@ -697,26 +780,34 @@ Goal: rotate credentials, remediate RLS, remove Vercel and the VPS, and prove th
 | ID | Task | Owner | Effort | Refs |
 |---|---|---|---|---|
 | P6-1 | Rotate all service credentials (Supabase, Google OAuth grants, AWS, Resend, Telegram, GitHub/Postgres DSN, AI keys) and re-issue them to every consumer, including the Worker secrets created in Phases 1–5; checklist in the private note. If Phase 7 proceeds, the Supabase credentials are retired with the Supabase project instead | Dimitris (Claude prepares and verifies) | 1 d | H-7, H-30 |
-| P6-2 | RLS remediation per [docs/security/rls-remediation-plan.md](../security/rls-remediation-plan.md) and the private note, incl. the tenant-role gap and the broader-than-intended policies; policy tests | Claude (Dimitris applies) | 1.5 d | H-5, H-6, H-30 |
-| P6-3 | Supabase security advisor findings and credential-storage findings (private note) | Both | 0.25 d | H-21, H-30 |
-| P6-4 | Application hardening: optional Access on `/dashboard*` (and `/customer*`, `/partner*`); CORS tightened; `/reset-password` route (src/contexts/AuthContext.tsx:220 links to it; no route in src/App.tsx:162-319); the Maps Embed key in `src/pages/Contact.tsx` referrer-restricted to production hosts; caller authentication for the `leads-api` edge function; parity re-run after each change | Claude | 1 d | H-6, H-21, H-22 |
-| P6-5 | Decommission: Vercel project paused (not deleted) for 30 days; VPS off after the Container has run ≥ 7 days; GitHub Action removed | Both | 0.5 d | — |
-| P6-6 | Repository cleanup (file list below); `README.md` rewrite; optional removal of the prerender plugin with a parity re-run | Claude | 0.5 d | H-8, H-23 |
+| P6-2 | RLS remediation per [docs/security/rls-remediation-plan.md](../security/rls-remediation-plan.md) and the private note, incl. the tenant-role gap and the broader-than-intended policies; policy tests. Built 2026-10-09: the access-model migration and its removal script are delivered to the owner privately with their test harness and are committed, with rules-only policy tests, after the owner has applied them (DV36-4, DV36-10); a separate fix for signed-in quote submissions (DBO-1) is committed with the build | Claude (Dimitris applies) | 1.5 d | H-5, H-6, H-30 |
+| P6-3 | Supabase security advisor findings and credential-storage findings (private note). The database part travels with P6-2; the settings and the credential-storage moves are owner steps (OW6-4, FU-15) | Both | 0.25 d | H-21, H-30 |
+| P6-4 | Application hardening: optional Access on `/dashboard*` (and `/customer*`, `/partner*`); CORS tightened; `/reset-password` route (src/contexts/AuthContext.tsx:220 links to it; no route in src/App.tsx:162-319); the Maps Embed key in `src/pages/Contact.tsx` referrer-restricted to production hosts; caller authentication for the `leads-api` edge function; parity re-run after each change. Built 2026-10-09: `/reset-password` with the recovery hand-over; CORS switch `API_CORS_MODE` (`parity` until the owner switches it after S17); `leads-api` requires a staff session (deployed by the owner); tenant hosts match only the exact `micronshub.eu` suffix; no browser call to the Supabase admin API; the Access application for `/dashboard` prepared, off (DV36-5); the Maps key is owner step OW6-9 | Claude | 1 d | H-6, H-21, H-22 |
+| P6-5 | Decommission: Vercel project paused (not deleted) for 30 days; VPS off after the Container has run ≥ 7 days; GitHub Action removed. Built: the cleanup retires the Vercel forward (DV36-8) and removes the Action's workflow file; the decommission itself is owner steps OW6-11, OW6-15 | Both | 0.5 d | — |
+| P6-6 | Repository cleanup (file list below); `README.md` rewrite; optional removal of the prerender plugin with a parity re-run. Built: the owner-run `scripts/phase6/cleanup.sh` with the prepared README and reference notes; the prerender plugin stays (D6-19); the `cdn.gpteng.co` script is removed by the build (DV36-6) | Claude | 0.5 d | H-8, H-23 |
 | P6-7 | Security checklist (private) and 30-day cost report against the Q14 baseline ([COSTS.md](COSTS.md)) | Both | 0.5 d | — |
 
-File-level change list:
+File-level change list (as built; "owner-run" = changed only when the owner runs `scripts/phase6/cleanup.sh` after the decommission):
 
 | Change | Path | Note |
 |---|---|---|
-| New | `supabase/migrations/2026MMDD_rls_remediation.sql`, `src/pages/ResetPassword.tsx` | H-5, H-6, H-22 |
-| Moved | `middleware/*` → `workers/site/src/seo/*` | The Worker is the only consumer |
-| Moved | `api/*.js`, `api/_lib/*` → `workers/ops/src/legacy-api/*` | The shim-wrapped routes import them from there |
-| Changed | `src/App.tsx`, `README.md`, `workers/site/src/api/router.ts` | Reset-password route; rewrite; CORS |
-| Changed | `supabase/functions/leads-api/index.ts` | Caller authentication (H-6); deployed by Dimitris |
-| Changed (optional) | `vite.config.ts`, `index.html` | Prerender plugin removal; `cdn.gpteng.co` script (index.html:89-90) removal is an owner decision |
-| Deleted | `vercel.json`, `middleware.ts`, `scripts/dev-server.js`, `scripts/freecad-unfold/`, `.github/workflows/auto-merge-claude.yml`, `.github/workflows/xometry-scan.yml`, `docs/AWS_S3_VERCEL_GUIDE.md` | — |
-| Deleted after a log check | `public/laserkritis/`, `public/cookie-consent.html` | Reachable static URLs today |
-| Untouched | `lib/*`, `sheet-metal-service/`, remaining `supabase/functions/*` | — |
+| New | `src/pages/ResetPassword.tsx`, `src/utils/passwordRecovery.ts`, `tests/frontend-api/reset-password.test.tsx` | H-22; no language prefix, `noindex, nofollow` |
+| Changed | `src/App.tsx`, `src/contexts/AuthContext.tsx`, `src/pages/Login.tsx`, `public/robots.txt` | Lazy route; recovery events outside the page forward to it; "Forgot password?" links to it; `Disallow: /reset-password` |
+| Changed | `index.html` | `cdn.gpteng.co` script (index.html:89-90) removed in a commit of its own, so it can be reverted alone (DV36-6, D6-14) |
+| Changed | `workers/site/src/preview.ts`; new `workers/site/test/cors-mode.test.ts` | CORS switch in `finalise()` (DV36-3); `workers/site/src/{env,index}.ts` unchanged |
+| Changed | `supabase/functions/leads-api/index.ts`, `src/pages/dashboard/LeadMonitorPage.tsx` | Deployed v7 source plus one import and one marked block that requires a staff session (H-6); the page sends the session token; the function is deployed by Dimitris |
+| New | `supabase/functions/leads-api/staff-auth.ts`, `tests/edge-functions/**`, `tests/frontend-api/leads-api-callers.test.ts` | Edge tests with their own config, including a hash test of the committed function against the deployed source |
+| Changed | `src/utils/tenantApi.ts`, `src/pages/dashboard/CustomersPage.tsx`; new `tests/frontend-api/{tenant-host,admin-api-usage}.test.ts` | Exact `micronshub.eu` suffix match; the back-fill block that called the Supabase admin API removed (the customer list is unchanged) |
+| New | `supabase/migrations/20261009_create_public_rfq_qualified_columns.sql`, `supabase/rollback/20261009_create_public_rfq_qualified_columns_down.sql` | DBO-1: column references table-qualified; applied by the owner (OW6-3) |
+| New after the owner's apply | `supabase/migrations/<apply date>_rls_remediation.sql`, `supabase/rollback/<apply date>_rls_remediation_down.sql`, `supabase/tests/rls/**` | Delivered privately until applied (DV36-4, DV36-10) |
+| New | `scripts/phase6/{cleanup.sh,cleanup-edits.mjs}`, `scripts/phase6/test/cleanup.test.mjs` | Owner-run cleanup: dry run by default, `--apply --decommissioned`, stages and never commits |
+| New | `docs/migration/phase6/{root-README.md,reference-vercel-README.md,reference-edge-functions-README.md,access-dashboard.json,access-dashboard.md}`, `docs/migration/MANUAL_STEPS.md` | Prepared files the cleanup moves; optional Access configuration; the owner checklist |
+| Not moved | `middleware/*`, `api/*.js`, `api/_lib/*` | DV36-1 |
+| Moved (owner-run) | `vercel.json`, `middleware.ts` → `reference/vercel/`; `supabase/functions/{process-followups,process-warmup}` → `reference/edge-functions/`; `docs/migration/phase6/root-README.md` → `README.md` | DV36-2, BA36-3 |
+| Changed (owner-run) | The moved `middleware.ts` and 9 test and tool files that read the Vercel config or middleware (repointed to `reference/vercel/`); root `package.json` (`dev:server` removed); the `XometryQueuePage.tsx` hint; the Phase 5 port-map test and marketing parity oracle; `workers/site/wrangler.jsonc` and `workers/site/test/env-api.test.ts` (`API_FORWARD_ORIGIN` = `""` in both env blocks) | Edits E1…E20 of `scripts/phase6/cleanup-edits.mjs` (DV36-8, BA36-4) |
+| Deleted (owner-run) | `scripts/dev-server.js`, `scripts/freecad-unfold/`, `.github/workflows/auto-merge-claude.yml`, `.github/workflows/xometry-scan.yml`, `docs/AWS_S3_VERCEL_GUIDE.md`, `supabase/functions/{check-replies,fix-broken-tables}` | — |
+| Deleted (owner-run, opt-in) | `public/laserkritis/`, `public/cookie-consent.html` (after a log check); the four `gsc-*` folders (OW6-13); `supabase/functions/{process-article-queue,auto-update-sitemap,auto-translate-articles,tender-collector}` (OW6-17) | Reachable static URLs today; functions only after they are deleted in Supabase |
+| Untouched | `lib/*`, `sheet-metal-service/`, `vite.config.ts` (prerender plugin kept, D6-19), remaining `supabase/functions/*`, `supabase/config.toml` | — |
 
 Exit gate:
 
@@ -731,7 +822,105 @@ Dependencies: Phase 5 gate; Q14, Q18, Q19.
 
 Risk refs: H-5, H-6, H-7, H-21, H-22, H-30.
 
-Effort total: ≈ 5.25 d (plan: 1 week).
+Effort total: ≈ 5.25 d (plan: 1 week); the code parts were built together with the Phase 3 code from one specification.
+
+Build record (2026-10-09): the Phase 6 code is built and tested locally on top of the commit that closes the Phase 5 build (`b694d06`), in the same run as the Phase 3 code (§5.3); nothing is deployed or applied, no credential was created or rotated, and the cleanup has not been run on the repository. The access-model migration of P6-2 is not in the repository: it goes to the owner privately with its test harness and apply instructions, and is committed with the public policy tests after the owner has applied it. Defaults, deviations and follow-ups below follow [specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §2.2, §2.3, §10.1 and §10.3; the owner confirms them before the merge (OW6-1 of [MANUAL_STEPS.md](MANUAL_STEPS.md)). Checks shared with Phase 3 are listed in §5.3.
+
+| # | Gate item | Status | Evidence |
+|---|---|---|---|
+| 1 | Security checklist signed (private) | **blocked** (local part passes) | Needs OW6-1…OW6-9 and OW6-16. Access-model migration and removal script: private harness on Postgres 18.3 and 16.4 (PGlite), 1,666 assertions each, 12 of 12 seeded faults caught; live definitions re-read with SELECTs only on 2026-10-09, equal to the tested snapshot. `leads-api`: 15 edge tests, including a hash test that the committed function is the deployed v7 source plus one import and one marked block; the LeadMonitorPage sends the session token. `/reset-password`: 14 tests; CORS switch, exact tenant-host match and "no admin API in browser code" each have tests that fail without the change |
+| 2 | P6-1 complete, old credentials revoked | **blocked** | Owner step OW6-10 (private checklist; site secrets by the site-secret procedure) |
+| 3 | 30-day cost ≤ target | **blocked** | OW6-16 against the Q14 baseline |
+| 4 | Parity diff after the cleanup: 0 unexplained differences | **blocked** (local part passes) | Owner run OW6-12. In a scratch clone of the built tree: dry run "35 to do, 0 blocked" with the tree unchanged; `--apply` without `--decommissioned` refused (exit 2); `--apply --decommissioned` exit 0, then site 1,434, shared 402, ops 2,039 (+19 opt-in skips; two checks of the deleted Xometry workflow go with it, BA36-4), frontend 184, edge 15, smoke, parity tool 94/94, `vite build` and the tool tests green; a second dry run "0 to do, 35 already done" |
+
+Phase 6 checks of the same run (2026-10-09):
+
+| Check | Result |
+|---|---|
+| DBO-1 fix | PGlite check of the fix and its removal script (part of the private harness), run with the repository copies: 14 assertions on each engine (the fix qualifies every column reference; the removal restores the previous text and keeps grants and `search_path`); the access-model harness also passes with the committed Phase 4 migration in place |
+| `index.html` commit | In a scratch clone committed like the build (the `index.html` change alone in a commit of its own), reverting that commit keeps the reset tests at 14/14 (D6-14) |
+| Repository | No access-model migration file is tracked or present in the working tree; under `supabase/migrations` and `supabase/rollback` only the two DBO-1 files are new |
+| Owner bundle | Migration, removal script, apply instructions, build-time check record and harness prepared as private attachments for the owner (handed over at the end of the build, never pushed); the packed copy equals the loose files |
+
+Deviations from this section as first written (DV36-n = [specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §10.1):
+
+| # | Planned | Built | Why |
+|---|---|---|---|
+| DV36-1 | `middleware/*` → `workers/site/src/seo/*`, `api/*` → `workers/ops/src/legacy-api/*` | Not moved | The SEO handler imports 17 `middleware/` modules and both Workers import `api/` through the shim (D6-11) |
+| DV36-2 | `vercel.json`, `middleware.ts` deleted | Moved to `reference/vercel/` by the cleanup, with a README | They stay the frozen parity reference of the redirect, CORS and SEO tests (D6-12) |
+| DV36-3 | CORS in `workers/site/src/api/router.ts` | In `finalise()` of `workers/site/src/preview.ts`, behind `API_CORS_MODE` | Every answer, forwards included, passes `finalise()` once; `router.ts` is extended by Phases 4 and 5 |
+| DV36-4 | `supabase/migrations/2026MMDD_rls_remediation.sql` | Same path under the apply date, committed after the owner has applied it; removal script in `supabase/rollback/` | Security detail stays private until applied (F36-9) |
+| DV36-5 | P6-4 Access also on `/customer*`, `/partner*` | `www.micronshub.eu/dashboard` only, prepared and off | External users have no Access identity (D6-10) |
+| DV36-6 | `cdn.gpteng.co` removal is an owner decision at Phase 6 | Removed by the build in a commit of its own; declining = reverting that commit alone | Platform-neutral; one explained parity difference instead of a two-step cleanup (F36-10) |
+| DV36-8 | P6-5 lists no forward retirement | The cleanup sets `API_FORWARD_ORIGIN` to `""` (E16, E17); every forward then answers 502 without an outbound request; `--keep-forward` skips it | A deleted Vercel project's host must never receive forwarded requests (F36-11) |
+| DV36-10 | P6-2 "policy tests" | Rules-only tests on the post-apply state in `supabase/tests/rls/`, committed after the owner has applied P6-2; the full harness stays in the private bundle | F36-9, D6-26 |
+
+Build amendments (continuing §5.3):
+
+| # | Amendment | Where |
+|---|---|---|
+| BA36-3 | The cleanup keeps the never-deployed `process-followups` and `process-warmup` as frozen copies in `reference/edge-functions/` instead of deleting them, because the Phase 5 parity oracle of the marketing port reads them; edit E20 points the oracle there; `check-replies` and `fix-broken-tables` are deleted as planned | `scripts/phase6/cleanup-edits.mjs`; `docs/migration/phase6/reference-edge-functions-README.md` |
+| BA36-4 | Edits E18 and E19 remove the checks of `xometry-scan.yml` from the Phase 5 port-map test together with the workflow; E17c renames the forward-origin test with E16 | `scripts/phase6/cleanup-edits.mjs` |
+| BA36-5 | The DBO-1 removal script restores the previous definition of `create_public_rfq` with LF line endings (the deployed text has CRLF): the same text, other bytes; a later digest comparison removes CR first; its check holds 14 assertions per engine (the specification said 8) | `supabase/rollback/20261009_create_public_rfq_qualified_columns_down.sql`; [MANUAL_STEPS.md](MANUAL_STEPS.md) OW6-3 |
+| BA36-6 | The DNS check before the Vercel project is deleted (OW6-11) also forbids the `www` CNAME target `vercel-dns-017.com`, which `--forbid-target vercel-dns.com` does not match | [MANUAL_STEPS.md](MANUAL_STEPS.md) OW6-11; [scripts/dns-parity/README.md](../../scripts/dns-parity/README.md) |
+
+The public copy of the build specification keeps its build-time text for OW3-7, OW6-11 and DB6-7; for those rows BA36-2, BA36-5, BA36-6 and [MANUAL_STEPS.md](MANUAL_STEPS.md) are current.
+
+Defaults chosen for the owner ([specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §2.2–§2.3; each can be changed before the step named). Owner-sensitive:
+
+| # | Decision | Default built | Decide before |
+|---|---|---|---|
+| D6-DB-2 | Tenant-scoped rows | Members read, tenant admins write | OW6-2 |
+| D6-DB-6 | Storage | RFQ and quote buckets private, object reads follow `public.rfq_files` visibility; sitemaps public read, server writes; bucket listing staff only, bucket creation super admin (`tenant-*`) | OW6-2 |
+| D6-DB-16 | Signed-in quote submissions (DBO-1) | Separate migration with a removal script, committed with the build, applied by the owner in either order with P6-2 | OW6-3 |
+| D6-7 | CORS switch-on | After S17: preview first, then production | OW6-7 |
+| D6-10 | Access on `/dashboard*` | Prepared, off; `www.micronshub.eu/dashboard` only; the allow list must hold everyone who opens the dashboard (staff, tenant admins, production partners) | OW6-8 |
+| D6-14 | `cdn.gpteng.co` script | Removed by the build in a commit of its own; it most likely ends the in-page features of the editor that added it; declining = revert that commit alone (the reset flow stays) | OW6-1, before the merge |
+| D6-22 | RFQ creation behind the site gate | Not built (FU-11): the quote form must keep working on Vercel until the decommission | OW6-1 |
+| D6-25 | Vercel deployment host after the flip | Optional Vercel Firewall rule for the project's `*.vercel.app` hosts (OW6-18), recommended right after S17; removing it restores the forward rollback flag; the DNS rollback is unaffected | OW6-18 |
+
+| Area | Defaults | Built as |
+|---|---|---|
+| Access model (P6-2, P6-3) | D6-DB-1, D6-DB-3…D6-DB-5, D6-DB-7…D6-DB-15, D6-DB-17…D6-DB-20 | Staff = `public.is_staff()`; the public reads of the specification kept (re-decided at FU-6); server-only tables without policies; `logs` staff read and write, authenticated insert kept; a fixed `search_path` (`public, pg_temp`) and EXECUTE per role on the functions the migration covers; strict drops with post-conditions that abort on any drift; dry run with `ROLLBACK;` first; applied any time after review, independent of the cutover; table privileges per role, tenant logo uploads and quote-form file references left for FU-8, FU-7 and FU-9; credential-storage moves with P6-1 (FU-15); `pg_net` moved after Phase 5; server callers use the service key (OW6-2 pre-condition); browser bucket helpers kept |
+| Reset password | D6-1…D6-5 | Implicit recovery flow; a recovery event outside the page forwards to `/reset-password`; "Forgot password?" links there (`rel="nofollow"`); `noindex, nofollow` and `Disallow` in `robots.txt`, no language variant, sitemap entry or prerender; minimum length 6 |
+| CORS, `leads-api`, tenant hosts | D6-6, D6-8, D6-9, D6-24 | `API_CORS_MODE` in `finalise()` (`parity` default); `leads-api` requires a staff session (`admin`, `sales_rep`, `production_manager`, `accountant`), fails closed (401, 403, 503), `OPTIONS` open, `verify_jwt` stays false; repository text = deployed v7 + one import + one marked block; exact `micronshub.eu` suffix; no admin-API call in browser code (a staff back-fill route is FU-14) |
+| Cleanup and decommission | D6-11…D6-13, D6-15…D6-21, D6-23 | `middleware/` and `api/` stay; `vercel.json` and `middleware.ts` frozen in `reference/vercel/`; `cleanup.sh` refuses `main` and a dirty tree, stages and never commits; Phase 5 hand-over deletions (BA36-3); statics, `gsc-*` and the cron-only functions opt-in after their checks; README from the prepared file; prerender plugin kept; forward retired (`--keep-forward` skips); dashboard buttons on old edge functions unchanged (FU-5) |
+| Policy tests | D6-26 | After the owner has applied P6-2: `supabase/tests/rls/` on the post-apply state, rule-worded cases only (DV36-10) |
+
+New names (built as proposed): route `/reset-password`; site var `API_CORS_MODE` (`parity`, `allowlist`) and type `CorsModeEnv` in `workers/site/src/preview.ts`; `supabase/functions/leads-api/staff-auth.ts`; Access application `microns-dashboard` (prepared, not created); folders `reference/vercel/` and `reference/edge-functions/` (created by the cleanup); cleanup options `--apply`, `--decommissioned`, `--with-statics`, `--with-gsc-functions`, `--with-cron-functions`, `--keep-forward`, `--allow-main`, `--allow-dirty`; database observations DBO-1 (fixed by the migration above) and DBO-2 (FU-9).
+
+Owner steps: Phase 6 table of [MANUAL_STEPS.md](MANUAL_STEPS.md) (OW6-1…OW6-18). OW6-1 (review, before the merge), OW6-2 (access model, after its pre-condition), OW6-3 (DBO-1), OW6-5 (Auth redirect URL), OW6-6 (`leads-api` deploy once the new page serves) and OW6-9 (Maps key) do not depend on the cutover; OW6-7, OW6-8 and OW6-18 follow S17; OW6-10…OW6-17 close the phase.
+
+Follow-ups not built (each needs an owner yes; [specs/PHASE36_SPEC.md](specs/PHASE36_SPEC.md) §10.3):
+
+| # | Item |
+|---|---|
+| FU-1 | Refuse the tenant slugs `www`, `api`, `files`, `mcp`, `rfq`, `send` on save |
+| FU-2 | `workers_dev: false` in `env.production` once previews use version URLs only |
+| FU-3 | Remove the forward code and the `api.forward_to_vercel` flag after E16 has run for 30 days |
+| FU-4 | Consolidate the two shims (`workers/site/src/compat/vercel-shim.ts`, `workers/shared/src/compat/vercel-node.ts`) |
+| FU-5 | Repoint the dashboard buttons that call ported edge functions; then delete those functions |
+| FU-6 | Re-decide the public reads kept by D6-DB-3 (private note) |
+| FU-7 | Upload policy for tenant logos on `tenant-*` buckets |
+| FU-8 | Table privileges per role on staff tables, as defence in depth next to RLS (private note) |
+| FU-9 | Quote-form file references (DBO-2; private note) |
+| FU-10 | Delete the three Storage helper files nothing imports (`mediaStorage.ts`, `RfqStorageDebug.tsx`, `MicronsMultiStepForm.tsx`) |
+| FU-11 | RFQ creation behind the site gate |
+| FU-12 | Docs that still describe the Xometry Action (`xometry-bot/README.md`, `xometry-bot/dashboard/README.md`) |
+| FU-13 | Sitemap reader switch to R2 (§5.5 DV5-1) |
+| FU-14 | Staff route that creates customer rows for customer-role users without one |
+| FU-15 | Credential-storage moves with P6-1: Telegram token and GSC credentials to Worker secrets, sender-account OAuth tokens to server-only storage with a connected flag for the dashboard, re-grant at Google |
+
+Open items after the build (2026-10-09):
+
+| Item | Detail | Who |
+|---|---|---|
+| Post-apply commit | On the owner's "applied" (OW6-2, with the bundle attached again if the session has ended): commit the migration and removal script under the apply date with `supabase/tests/rls/`; then check that the public tests pass, that the public copy holds no pre-apply statement, and that live equals the tested after-state | Both |
+| Shared CORS comment | `workers/shared/src/http/cors.ts` still says the allow-list is not wired into any Worker; it is, through `API_CORS_MODE` | Claude |
+| Phase 2 test timing | `workers/site/test/files.test.ts` "delete-folder > first list page…" can reach its 5 s timeout under heavy load; it passed in all four site runs of the gate | Claude (Phase 2 file) |
+| Fixture note | The cleanup dry run prints a NOTE for the frozen Phase 1 fixture `workers/site/test/fixtures/seo/shell.html`, which still names the removed editor script; reported, not edited, by design | — |
+| Helper entry checks | `workers/ops/scripts/nest-fixture.mjs`, `scripts/phase5/compare-sitemap.mjs` and `scripts/phase6/cleanup-edits.mjs` skip their command line when started directly through a symlinked path; no owner step starts them that way (`cleanup.sh` calls the helper by its real path) | Claude |
+| Owner-gated | Every Cloudflare, DNS, Supabase and deploy step of Phases 2–6: [MANUAL_STEPS.md](MANUAL_STEPS.md) | Owner |
 
 ### 5.7 Phase 7 (optional): Supabase → D1 and auth replacement
 
@@ -793,9 +982,9 @@ Anchors: **T** = NS switch at Papaki; **C** = `www` flip (earliest T + 3 d). Own
 | S8 | T (weekday morning) | Switch NS at Papaki to the two Cloudflare nameservers | Dimitris | Within 1 h the `.eu` parent lists the Cloudflare NS; zone "active"; answers equal S5 | Set NS back to `dns1/dns2.papaki.gr` (Papaki zone untouched); safe while no DS is published; effective as the parent NS TTL expires |
 | S9 | T + 1 h and T + 24 h | Verify: S5 against public resolvers; MX ×5; SPF; DKIM (`resend._domainkey`, `google._domainkey`); DMARC; `google-site-verification` TXT and GSC domain property verified; Resend domain verified; `send.` SPF unchanged; `_vercel.` answers as before; Vercel shows the domains as correctly configured; mail test both ways (external → Workspace inbox; Resend-sent mail with DKIM pass) | Both | All green | S8 rollback |
 | S10 | T + 2 d (≥ 24 h active, S9 green) | Enable DNSSEC in Cloudflare; add the DS Cloudflare shows at Papaki | Dimitris | DS at the parent matches Cloudflare; chain validates (validating DoH resolver sets `AD`; DNSViz clean) | Remove the DS at Papaki, wait the DS TTL, then disable DNSSEC in Cloudflare; see §6.3 |
-| S11 | C − 1 d | Readiness: edge certificates active for apex, `www`, `*.micronshub.eu` (Universal SSL covers first-level subdomains, CF docs verified 2026-09-27); zone settings per §6.4 applied before any record is proxied; Workers Routes `www.micronshub.eu/*` and `*.micronshub.eu/*` → `microns-site` deployed (inert while records are DNS only); production version = the version ID that passed the Phase 1 and 2 gates; `SEO_STRICT_404` = `"false"`; `api.forward_to_vercel` off; baseline re-captured (P0-3 refresh); parity preview vs production 0 diffs; GSC snapshot (coverage, crawl stats, Core Web Vitals); Vercel certificate expiry for apex, `www`, wildcard recorded; `tender-collector` and MCP send their credentials | Both | Checklist complete | — |
+| S11 | C − 1 d | Readiness: edge certificates active for apex, `www`, `*.micronshub.eu` (Universal SSL covers first-level subdomains, CF docs verified 2026-09-27); zone settings per §6.4 applied before any record is proxied; Workers Routes `www.micronshub.eu/*` and `*.micronshub.eu/*` → `microns-site` deployed (inert while records are DNS only); production version = the version ID that passed the Phase 1 and 2 gates. As built (2026-10-09, §5.3; order and commands in [MANUAL_STEPS.md](MANUAL_STEPS.md) OW3-6): the redirect ruleset (HTTP → HTTPS, apex → `www`) generated from the refreshed baseline and applied, each rule acting only on proxied records (DV36-9); routes without a Worker for `files.`, `mcp.` and `cad-vps.micronshub.eu` created before the Workers Routes, which come from `cf-site-production.yml` `routes` (DV36-12); the production version is a new upload of the merged commit through `cf-site-production.yml` (tag `prod-<sha>`), checked by parity on its version preview URL against the refreshed baseline, then deployed (DV36-11); the real Turnstile pair set for previews and production at the same moment; `SEO_STRICT_404` = `"false"`; `api.forward_to_vercel` off; baseline re-captured (P0-3 refresh); parity preview vs production 0 diffs; GSC snapshot (coverage, crawl stats, Core Web Vitals); Vercel certificate expiry for apex, `www`, wildcard recorded; `tender-collector` and MCP send their credentials | Both | Checklist complete | — |
 | S12 | C (low-traffic hour) | Flip `www`: replace the DNS-only CNAME with a proxied placeholder record (for example `AAAA 100::`; CF docs, re-check at execution) | Dimitris flips, Claude verifies | Within 10 min: `verify-ssr.sh` green on `https://www.micronshub.eu`; 20-URL parity smoke vs baseline; `/sitemap.xml`, `/robots.txt`, `/indexnow_key.txt`, `/api/track` (test ID) correct; `X-Seo-Source` present; no `X-Robots-Tag` | Restore `www` CNAME `3096eb4eb748a48f.vercel-dns-017.com`, DNS only (≈ 5–10 min, TTL 300 s) |
-| S13 | C + 15 min | Apex: replace A `216.198.79.1` with a proxied placeholder; enable the Single Redirect Rule `micronshub.eu` → `https://www.micronshub.eu${path}${query}` with the status seen in the baseline (HTTP → HTTPS is already configured at S11, §6.4) | Dimitris flips, Claude verifies | Apex and `http://` variants match the baseline (status, `Location`, HSTS), incl. apex `/api/marketing?action=track…` and `/logo.png`, which sent e-mails embed (api/emails.js:165; supabase/functions/send-campaign/index.ts:8) | Disable the rule; restore the A record, DNS only (≈ 5–10 min) |
+| S13 | C + 15 min | Apex: replace A `216.198.79.1` with a proxied placeholder; enable the Single Redirect Rule `micronshub.eu` → `https://www.micronshub.eu${path}${query}` with the status seen in the baseline (HTTP → HTTPS is already configured at S11, §6.4). As built the rule was applied at S11 and acts from the moment the record is proxied; nothing is switched on here (DV36-9) | Dimitris flips, Claude verifies | Apex and `http://` variants match the baseline (status, `Location`, HSTS), incl. apex `/api/marketing?action=track…` and `/logo.png`, which sent e-mails embed (api/emails.js:165; supabase/functions/send-campaign/index.ts:8) | Restore the A record, DNS only; the rule then no longer acts on it (≈ 5–10 min) |
 | S14 | C + 30 min | Wildcard: `*` → proxied placeholder; Route `*.micronshub.eu/*` active | Dimitris flips, Claude verifies | `laserkritis.micronshub.eu/en` 200 with the tenant page and, for parity, the Microns SEO body and `www` canonical (H-13); valid certificate; a random label behaves as in the baseline | Restore `*` CNAME `cname.vercel-dns.com`, DNS only (≈ 5–10 min) |
 | S15 | C + 1 h | Bot and cache verification per [SEO_PARITY.md](SEO_PARITY.md): no Cache Rule on HTML; Security Events show no challenge or block for verified bots; GSC URL Inspection live test succeeds on 5 URLs | Both | All green | Revert the setting; if verified bots were blocked, S12–S14 rollback |
 | S16 | C + 1 h, + 6 h, + 24 h, + 48 h | Observation: Workers Logs 5xx; parity diff production vs S11 baseline (new articles allow-listed); GSC crawl stats and coverage; outputs of the 06:00 tender run and the 07:00–09:00 content jobs; IndexNow; mail test; Resend and GSC verified | Both | Exit-gate thresholds (§5.3) hold | Record-flip rollback on any trigger in §6.5 |
@@ -819,7 +1008,7 @@ Anchors: **T** = NS switch at Papaki; **C** = `www` flip (earliest T + 3 d). Own
 | Bot Fight Mode | Off; verified bots allowed | H-1 |
 | Web Analytics automatic setup | Off (manual snippet only if wanted) | Edge injection is a parity violation (CF docs, verified 2026-09-27) |
 | Rate limiting | One rule on `/api/*` (Free plan: 1 rule, 10 s window, IP) | H-6 |
-| Always Use HTTPS / HSTS | HTTP → HTTPS status and HSTS values as in the baseline; if "Always Use HTTPS" emits a different status than the baseline, use a redirect rule with the baseline status instead (CF docs, re-check at execution) | H-24 |
+| Always Use HTTPS / HSTS | HTTP → HTTPS status and HSTS values as in the baseline; if "Always Use HTTPS" emits a different status than the baseline, use a redirect rule with the baseline status instead (CF docs, re-check at execution). As built (2026-10-09, §5.3 D3-5): Always Use HTTPS off; HTTP → HTTPS by the redirect rule `microns_http_to_https` with the baseline status (default 308); HSTS sent by the zone or by the Worker (`HSTS_VALUE` in `env.production`) as `scripts/phase3/redirect-rules.mjs` reports for the baseline | H-24 |
 
 ### 6.5 Rollback triggers during S12–S17
 

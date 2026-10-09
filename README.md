@@ -46,8 +46,8 @@
 | **Email** | Resend (transactional + marketing campaigns with A/B testing and tracking) |
 | **AI Content** | Claude (article generation) + Gemini (multi-language translation) |
 | **SEO** | Prerendered routes (210+ URLs), hreflang, structured data, XML sitemaps, IndexNow |
-| **Deployment** | Vercel (frontend + serverless API) + Docker (sheet metal service) |
-| **Monitoring** | Vercel Analytics |
+| **Deployment** | Vercel until the Phase 3 cutover, then the Cloudflare Workers `microns-site` and `microns-ops`; Docker (sheet metal service). See [Deployment](#deployment) |
+| **Monitoring** | GA4 and Google Ads tags in the page shell; Workers Logs for the Cloudflare Workers |
 
 ---
 
@@ -169,6 +169,34 @@
 ├── scripts/              # Utility scripts (FreeCAD, GSC, seeding)
 └── docs/                 # Technical documentation
 ```
+
+---
+
+## Deployment
+
+Production is served by Vercel until the Phase 3 cutover, then by the Cloudflare Worker `microns-site` (migration plan: [docs/migration/PLAN.md](docs/migration/PLAN.md)); the current state of the cutover is in [docs/migration/PLAN.md](docs/migration/PLAN.md) §6 (runbook and gate). Supabase stays the database, auth and storage provider throughout.
+
+| Part | Where it runs | How it is deployed |
+|---|---|---|
+| Website, SEO rendering, sitemaps, redirects, browser-facing `/api/*` | Worker `microns-site` with static assets (`workers/site`); after the cutover on the routes `www.micronshub.eu/*` and `*.micronshub.eu/*` | GitHub Actions, manual: `cf-preview.yml` uploads a preview version; `cf-site-production.yml` uploads, deploys and (once) applies the routes with `--env production` |
+| Back-office `/api/*` routes, queues, agents | Worker `microns-ops` (`workers/ops`), reached from `microns-site` over a service binding | `cf-ops.yml`, manual |
+| Inbound mail | Worker `microns-mail` (`workers/mail`) | `cf-mail.yml`, manual |
+| Apex `micronshub.eu` | after the cutover: zone redirect rule to `https://www.micronshub.eu` (path and query kept) | zone configuration (`scripts/phase3/`) |
+| Any `http://` request | after the cutover: zone redirect rule to `https://` on the same host (path and query kept) | zone configuration (`scripts/phase3/`) |
+| Tenant sites | `<slug>.micronshub.eu` (wildcard record); custom tenant domains are connected by the platform team | zone configuration |
+| Edge Functions, database, auth | Supabase | Supabase CLI or dashboard |
+| Sheet metal service | Docker (`sheet-metal-service/`) | Docker image (`cad-image.yml`) |
+
+Local development:
+
+```bash
+npm ci && npx vite build          # the Worker serves dist/
+npm run cf:install                 # Worker dependencies
+npm run cf:dev                     # microns-site on http://localhost:8787 (wrangler dev --local)
+npm run cf:test                    # Worker unit tests
+```
+
+Secrets are never committed; local values go in the git-ignored `.dev.vars` of each Worker (template `.dev.vars.example`). A `microns-site` secret changes with `npx wrangler versions secret put <NAME>` (with `--env production` from the cutover on), followed by an upload and a deploy. Rollback of a Worker change: deploy the previous version again; rollback of the cutover itself: the runbook in [docs/migration/PLAN.md](docs/migration/PLAN.md) §6.
 
 ---
 
