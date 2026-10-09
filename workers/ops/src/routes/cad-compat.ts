@@ -41,8 +41,8 @@ import { encodeInputUrl, isAllowedInputUrl } from '../cad-container/input-proxy'
 import { ANSWER_PREFIX_BYTES, isBackendDown, serviceAnswerOutcome } from '../cad/backends/http-unfold';
 import { CONTAINER_BASE_URL } from '../cad/backends/container';
 import { missingContainerConfig } from '../cad/registry';
-import { CAD_ROUTER_NAME } from '../cad/router-client';
-import type { AcquireRequest, AcquireResult, ReleaseOutcome } from '../cad/types';
+import { cadRouter, type CadRouterClient } from '../cad/router-client';
+import type { AcquireRequest, ReleaseOutcome } from '../cad/types';
 import { LOG_PREFIX, type OpsEnv, type OpsHono } from '../env';
 import { makeP5Ports, type ContainerPort, type TelegramTextPort } from '../ports/p5';
 
@@ -80,10 +80,7 @@ export const COMPAT_DETAIL = Object.freeze({
 });
 
 /** The CadRouter calls of the compat path. */
-export interface CompatRouter {
-  acquire(r: AcquireRequest): Promise<AcquireResult>;
-  release(lease_id: string, o: ReleaseOutcome): Promise<void>;
-}
+export type CompatRouter = Pick<CadRouterClient, 'acquire' | 'release'>;
 
 export interface CadCompatDeps {
   router?: CompatRouter;
@@ -186,11 +183,6 @@ function isAbort(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
 }
 
-function defaultRouter(env: OpsEnv): CompatRouter {
-  const ns = env.CAD_ROUTER as DurableObjectNamespace;
-  return ns.get(ns.idFromName(CAD_ROUTER_NAME)) as unknown as CompatRouter;
-}
-
 /** The compat call (steps of the header). Never throws. */
 export async function handleCadCompat(req: Request, env: OpsEnv, call: OpsCall, deps: CadCompatDeps = {}): Promise<Response> {
   const now = deps.now ?? (() => Date.now());
@@ -234,7 +226,8 @@ export async function handleCadCompat(req: Request, env: OpsEnv, call: OpsCall, 
     }
 
     // 4 Acquire
-    router = deps.router ?? defaultRouter(env);
+    // CAD_ROUTER is present here (missingCompatConfig above).
+    router = deps.router ?? cadRouter(env);
     const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     const request: AcquireRequest = {
       job_id: `compat:${(deps.uuid ?? (() => crypto.randomUUID()))()}`,

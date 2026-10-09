@@ -6,13 +6,14 @@
 
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AgentEventName } from '../../../src/agents/events';
 import type { AgentFlag } from '../../../src/agents/flags';
 import { openRun } from '../../../src/agents/runs';
 import { DbError, type Db } from '../../../src/db/postgrest';
 import type { OpsEnv } from '../../../src/env';
 import { makeTestP5Ports, P5MemoryDb, ScriptedSources, type TestP5Ports } from '../../../src/ports/p5-stub/index';
 import { SCAN_MAX_PAGES } from '../../../src/xometry/config';
-import { HISTORY_RUNS, runXometryTick, SUBREQUEST_STOP, tokenFingerprint, WALL_STOP_MS, type XometryTickLimits } from '../../../src/xometry/tick';
+import { HISTORY_RUNS, runXometryTick, SUBREQUEST_STOP, TICK_EVENT, tokenFingerprint, WALL_STOP_MS, type XometryTickLimits } from '../../../src/xometry/tick';
 import { agentBindings, agentPorts, FakeClock, FakeKV, type AgentTestPorts } from '../../helpers/agent-env';
 import { opsEnv } from '../../helpers/ops';
 import { RecordingLogger } from '../../helpers/recorders';
@@ -23,6 +24,8 @@ const DAY = '2026-10-08';
 const at = (hhmm: string, day = DAY) => Date.parse(`${day}T${hhmm}:00.000Z`);
 const slotOf = (hhmm: string, day = DAY) => `${day}T${hhmm}Z`;
 const GRAPHQL = 'https://xometry.test/partners/graphql';
+// Compile-time (npm run typecheck): the tick's Analytics Engine event is a member of AgentEventName, no cast needed.
+const TICK_EVENT_NAME: AgentEventName = 'xometry_tick';
 // Credential-shaped test values are built at runtime (G5-7).
 const TOKEN = ['t1', 'xometry', 'token', 'value'].join('-');
 const OTHER_TOKEN = ['t1', 'xometry', 'token', 'renewed'].join('-');
@@ -94,6 +97,10 @@ beforeEach(() => {
   restore = logger.start();
 });
 afterEach(() => restore());
+
+it('the Analytics Engine event of a tick is xometry_tick', () => {
+  expect(TICK_EVENT).toBe(TICK_EVENT_NAME);
+});
 
 describe('gates before any partner call', () => {
   it('flag off: the run closes skipped {reason: flag_off}; nothing is fetched, written or sent', async () => {

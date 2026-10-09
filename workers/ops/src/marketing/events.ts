@@ -88,13 +88,6 @@ export async function campaignOutcomeEvents(db: Db, campaignId: string, columns:
   return out;
 }
 
-/** Subscribers of a campaign with any 'sent' or 'bounced' event of the campaign mail (not follow-ups). */
-export function subscribersWithEvent(events: readonly EventRow[]): Set<string> {
-  const out = new Set<string>();
-  for (const e of events) if (!isFollowUpEvent(e) && e.subscriber_id) out.add(e.subscriber_id.toLowerCase());
-  return out;
-}
-
 /**
  * Subscribers a re-queue leaves out: those with a final event of the campaign mail, and those whose unfinished 'sent'
  * event is younger than IN_FLIGHT_MS at `now` (rules above).

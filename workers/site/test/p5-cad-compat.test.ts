@@ -289,6 +289,36 @@ describe('through the site Worker', () => {
     expect(api.some((l) => l.includes(' endpoint=cad-compat ') && l.includes(' action=flat-pattern ') && l.includes(' actionId=CD-1 '))).toBe(true);
     expectNoToken();
   });
+
+  it('a body that fails to read answers 500 Internal Server Error; the one log line names the path redacted, never the token', async () => {
+    // The stream fails on its first read with an error text that itself carries the path.
+    const failing = () => new ReadableStream<Uint8Array>({ pull: (c) => c.error(new TypeError(`body read failed for ${SITE}${PATH}`)) });
+    const init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: failing(), duplex: 'half' } as RequestInit;
+    const res = await call(PATH, init);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
+    expect(await res.text()).toBe('Internal Server Error');
+    expect(opsSeen).toEqual([]);
+    expect(upstreamHits).toEqual([]);
+    expect(lines.filter((l) => l.includes('/api/cad/'))).toEqual(['[microns-site] api cad compat failed method=POST path=/api/cad/<redacted>/flat-pattern error=TypeError']);
+    expectNoToken();
+    // the same for a path whose last segment could itself be a token
+    lines = [];
+    const odd = await call(`/api/cad/x/${TOKEN}`, { ...init, body: failing() } as RequestInit);
+    expect(odd.status).toBe(500);
+    expect(lines.filter((l) => l.includes('/api/cad/'))).toEqual(['[microns-site] api cad compat failed method=POST path=/api/cad/<redacted>/<redacted> error=TypeError']);
+    expectNoToken();
+  });
+
+  it('non-canonical spellings of the compat path with a failing body answer 500 and log no token', async () => {
+    const failing = () => new ReadableStream<Uint8Array>({ pull: (c) => c.error(new TypeError('body read failed')) });
+    for (const path of [`/api//cad/${TOKEN}/flat-pattern`, `/api/CAD/${TOKEN}/flat-pattern`, `/api/x/../cad/${TOKEN}/flat-pattern`, `/api/%63ad/${TOKEN}/flat-pattern`]) {
+      lines = [];
+      const res = await call(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: failing(), duplex: 'half' } as RequestInit);
+      expect([path, res.status]).toEqual([path, 500]);
+      expectNoToken();
+    }
+  });
 });
 
 describe('never forwarded to Vercel', () => {

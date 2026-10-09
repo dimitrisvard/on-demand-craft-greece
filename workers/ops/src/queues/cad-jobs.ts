@@ -73,7 +73,6 @@ import { makePorts, type Ports } from '../ports/index';
 import { makeP5Ports, type TelegramTextPort } from '../ports/p5';
 import { sendCadAlert } from '../cad-container/alerts';
 import { LEASE_GRACE_S } from '../do/cad-router';
-import type { AcquireRequest } from '../cad/types';
 import type { CadJobMessageV1 } from './messages';
 
 /** Deliveries of one message: the queue's max_retries (2, wrangler.jsonc) + 1. */
@@ -264,10 +263,9 @@ class Job {
 
     // 5 Lease
     const router = this.deps.router();
-    const request: AcquireRequest = { job_id: row.id, backend_candidates: candidates, deadline_s: job.deadline_s, priority: 'batch' };
     let waited = 0;
     for (;;) {
-      const granted = await router.acquire(request);
+      const granted = await router.acquire({ job_id: row.id, backend_candidates: candidates, deadline_s: job.deadline_s, priority: 'batch' });
       if (granted.granted) {
         this.lease = granted.slot ? { id: granted.lease_id, backend: granted.backend, slot: granted.slot } : { id: granted.lease_id, backend: granted.backend };
         break;

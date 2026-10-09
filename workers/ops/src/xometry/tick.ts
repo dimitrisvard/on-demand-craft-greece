@@ -66,9 +66,8 @@ export const HISTORY_RUNS = 30;
 export const DEFAULT_TOKEN_REMINDER_HOURS = 24;
 /** Slot of the daily reminder while a token stays rejected. */
 export const REMINDER_SLOT_TIME = '06:00';
-/** Name of the Analytics Engine point (the data point's event blob is free text; the Phase 4 union lists the
- *  Phase 4 names only). */
-export const TICK_EVENT = 'xometry_tick' as string as AgentEventName;
+/** Name of the Analytics Engine point. */
+export const TICK_EVENT: AgentEventName = 'xometry_tick';
 
 const SLOT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/;
 

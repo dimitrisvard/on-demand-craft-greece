@@ -22,12 +22,19 @@
 // preview's CF-Access-Client-Id/-Secret, which must never leave Cloudflare). Added: X-Forwarded-Host with the host
 // the client asked for. Redirects are passed back, not followed. Timeout 30 s; a network error or timeout answers
 // 502 {"error":"upstream"}. The vercel.json CORS headers are applied afterwards by finalise(), as on Vercel.
+//
+// /api/cad/* (Phase 5): every error thrown before or inside routeApi (a failed body read included) is caught here
+// and answered 500 text/plain "Internal Server Error", the router's answer to its other internal errors. Its one
+// log line names the path as redactedCadPath() prints it and the error's name only, so the path segment that
+// carries the compat token never reaches a log line. Every other /api path is handled exactly as before.
 
+import { formatLogLine } from '../../../shared/src/http/log';
+import { textResponse } from '../../../shared/src/http/json';
 import type { Env } from '../env';
 import { LOG_PREFIX } from '../env';
 import { getFlagValue } from '../flags';
 import { isPreviewHost } from '../preview';
-import { AGENT_PATH_PREFIX, CAD_PATH_PREFIX, canonicalApiPath } from './resolve';
+import { AGENT_PATH_PREFIX, CAD_PATH_PREFIX, canonicalApiPath, isCadPath } from './resolve';
 import { routeApi } from './router';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
@@ -148,7 +155,30 @@ export async function shouldForward(env: Env, url: URL): Promise<boolean> {
   return true;
 }
 
+/** A last path segment that is printed as it is: shorter than any compat token (32 characters or more). */
+const PRINTABLE_CAD_SEGMENT = /^[a-z0-9-]{1,31}$/;
+
+/** A /api/cad/ path as a log line may name it: '/api/cad/<redacted>/<last segment>', the last segment itself
+ *  replaced by '<redacted>' unless it is a short [a-z0-9-] literal. */
+export function redactedCadPath(pathname: string): string {
+  const last = pathname.split('/').filter(Boolean).pop() ?? '';
+  return `${CAD_PATH_PREFIX}<redacted>/${PRINTABLE_CAD_SEGMENT.test(last) ? last : '<redacted>'}`;
+}
+
+async function routeCadApi(request: Request, env: Env, ctx: ExecutionContext, pathname: string): Promise<Response> {
+  try {
+    return await routeApi(request, env, ctx);
+  } catch (err) {
+    const error = err instanceof Error ? err.name : typeof err;
+    console.error(formatLogLine(LOG_PREFIX, 'api cad compat failed', { method: request.method, path: redactedCadPath(pathname), error }));
+    return textResponse(500, 'Internal Server Error');
+  }
+}
+
 export async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (await shouldForward(env, new URL(request.url))) return forwardToVercel(request, env);
+  const url = new URL(request.url);
+  // /api/cad/* is never forwarded (neverForwarded), so shouldForward is not consulted for it.
+  if (isCadPath(url.pathname)) return routeCadApi(request, env, ctx, url.pathname);
+  if (await shouldForward(env, url)) return forwardToVercel(request, env);
   return routeApi(request, env, ctx);
 }

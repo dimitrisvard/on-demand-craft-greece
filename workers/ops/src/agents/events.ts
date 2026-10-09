@@ -8,7 +8,8 @@
 //               bytes
 // The writer is a no-op without the binding and never throws. No address, subject, body or token is ever a blob.
 
-export type AgentEventName = 'llm_call' | 'embed_call' | 'step' | 'run_end' | 'cad_job' | 'mail_in' | 'send';
+/** 'xometry_tick': one point per Xometry scan slot (Phase 5, src/xometry/tick.ts). */
+export type AgentEventName = 'llm_call' | 'embed_call' | 'step' | 'run_end' | 'cad_job' | 'mail_in' | 'send' | 'xometry_tick';
 
 export interface AgentEventPoint {
   event: AgentEventName;

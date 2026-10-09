@@ -2,15 +2,16 @@
 // cad-jobs consumer. Both are RPC stubs of the Durable Object namespaces in OpsEnv.
 
 import { need } from '../agents/config';
-import type { AcquireResult, CadRouterSnapshot } from '../do/cad-router';
+import type { CadRouterSnapshot } from '../do/cad-router';
 import type { OpsEnv } from '../env';
-import type { BackendName, CadFinalStatus } from './types';
+import type { AcquireRequest, AcquireResult, BackendName, CadFinalStatus, ReleaseOutcome } from './types';
 
 export const CAD_ROUTER_NAME = 'global';
 
+/** Phase 5 fields (all optional): `priority` on acquire, `slot` on a granted container lease, `recycle` on release. */
 export interface CadRouterClient {
-  acquire(r: { job_id: string; backend_candidates: BackendName[]; deadline_s: number }): Promise<AcquireResult>;
-  release(lease_id: string, outcome: { ok: boolean; retryable?: boolean; backend_down?: boolean }): Promise<void>;
+  acquire(r: AcquireRequest): Promise<AcquireResult>;
+  release(lease_id: string, outcome: ReleaseOutcome): Promise<void>;
   report(backend: BackendName, ok: boolean): Promise<void>;
   snapshot(): Promise<CadRouterSnapshot>;
 }

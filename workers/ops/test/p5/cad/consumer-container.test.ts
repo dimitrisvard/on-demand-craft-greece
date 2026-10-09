@@ -19,6 +19,16 @@ import { FakeQueue, agentBindings, agentPorts } from '../../helpers/agent-env';
 import { fakeNamespace } from '../../helpers/fake-do';
 import { serviceJson, TEST_KEY, TestCadRouter } from './helpers';
 
+// Compile-time (npm run typecheck): the CadRouter client takes the Phase 5 fields in object literals (priority on
+// acquire, recycle on release), and a granted lease carries its slot.
+type AcquireArg = Parameters<CadRouterClient['acquire']>[0];
+type ReleaseArg = Parameters<CadRouterClient['release']>[1];
+type Granted = Extract<Awaited<ReturnType<CadRouterClient['acquire']>>, { granted: true }>;
+const ACQUIRE_WITH_PRIORITY: AcquireArg = { job_id: 'j', backend_candidates: ['container'], deadline_s: 1, priority: 'batch' };
+const RELEASE_WITH_RECYCLE: ReleaseArg = { ok: false, retryable: true, backend_down: false, recycle: true };
+const GRANTED_WITH_SLOT: Granted = { granted: true, lease_id: 'l', backend: 'container', slot: 'cad-0' };
+void [ACQUIRE_WITH_PRIORITY, RELEASE_WITH_RECYCLE, GRANTED_WITH_SLOT];
+
 const FIXTURES = new URL('../../fixtures/cad/', import.meta.url).pathname;
 const FLAT = new Uint8Array(readFileSync(FIXTURES + 'unfold-flat.dxf'));
 const TENANT = '00000000-0000-0000-0000-000000000001';

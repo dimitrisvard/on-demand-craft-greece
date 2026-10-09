@@ -44,3 +44,11 @@ npm --prefix supabase/tests/phase5 test
 On PGlite (Postgres 18 and 16), no network: the two switch-over files against a pg_cron stand-in, every `parity.sql` statement against the Phase 4 schema plus stand-ins of the live tables (Q12b against hand-computed figures that the Worker's digest code is tested with too), and every `flag-values.sql` template against the migration's flag rows. Details: `supabase/tests/phase5/README.md`.
 
 Status (2026-10-09, local): 138 assertions pass on both engines. Nothing here has been run against the live database.
+
+## Literal-scan exceptions
+
+Reviewed hits of the Phase 5 literal scan (PHASE5_SPEC §7.2). A scan skips a hit only when its file, its line number and the SHA-256 of that line's text (first 16 hex digits, line ending removed) all match a row; any other hit is a finding.
+
+| File:line | Line SHA-256 | Reviewed | Why it is not a credential |
+|---|---|---|---|
+| `supabase/functions/gsc-index-url/index.ts:31` | `637cc5ed812ec28f` | 2026-10-09 | The PEM header marker is the pattern of a `.replace()` call that strips it from a key read at runtime; no key material; the file equals the live function |
