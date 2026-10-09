@@ -1,0 +1,176 @@
+name: CAD Container image (microns-cad)
+
+# Phase 5 of the Cloudflare migration (P5-6). Builds the unfold service image from sheet-metal-service/Dockerfile
+# (linux/amd64), tests the built image, and only on a manual dispatch with `push: true` pushes that same image to the
+# Cloudflare container registry. microns-ops references the pushed tag in workers/ops/wrangler.jsonc
+# (containers[0].image), so an ops deploy needs no Docker and deploys exactly the artefact tested here.
+#
+# Jobs
+#   image  (pull requests on sheet-metal-service/** or workers/cad/**, and every dispatch)
+#          build -> run with a random key per run -> wait for /health -> the service tests inside the image
+#          (tests/test_fixtures.py, tests/test_bend_detection.py, tests/test_p5_service.py; the pre-existing
+#          failures of tests/test_unfolder.py and tests/test_dxf_export.py are listed in workers/cad/README.md and
+#          stay outside this gate) -> the parity check of the 5 reference parts against workers/cad/parity/golden
+#          -> a second container with PROCESSING_TIMEOUT=0.05 must answer 504 -> the image is saved as an artefact
+#   push   (dispatch with push: true only; environment cad-release with a required reviewer)
+#          loads the tested image and runs `wrangler containers push`; the job summary prints the reference.
+#
+# Environment cad-release secrets (names only; Settings -> Environments -> cad-release):
+#   CLOUDFLARE_API_TOKEN    API token with Containers write on the account
+#   CLOUDFLARE_ACCOUNT_ID   Cloudflare account ID
+# Keep at most 3 tags in the registry (`npx wrangler containers images list` / `images delete`).
+
+on:
+  pull_request:
+    paths:
+      - "sheet-metal-service/**"
+      - "workers/cad/**"
+      - ".github/workflows/cad-image.yml"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the tested image to the Cloudflare registry (needs the cad-release approval)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cad-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  image:
+    name: Build and test the CAD image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Image tag
+        id: tag
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build (linux/amd64)
+        run: docker build --platform linux/amd64 -t "microns-cad:${{ steps.tag.outputs.tag }}" sheet-metal-service
+
+      - name: Run with a random key
+        run: |
+          key="$(openssl rand -hex 24)"
+          echo "::add-mask::$key"
+          echo "CAD_PARITY_KEY=$key" >> "$GITHUB_ENV"
+          docker run -d --name cad --network host -e API_KEY="$key" -e REQUIRE_API_KEY=1 "microns-cad:${{ steps.tag.outputs.tag }}"
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8000/health > /dev/null 2>&1; then echo "healthy after ${i} s"; exit 0; fi
+            sleep 1
+          done
+          docker logs cad | tail -50
+          exit 1
+
+      - name: Key required on every non-health route
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/v1/health)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{}' http://127.0.0.1:8000/flat-pattern)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/docs)" = 401
+
+      - name: Service tests inside the image
+        run: |
+          docker exec cad pip install --no-cache-dir pytest==9.1.1
+          docker exec -e PYTHONDONTWRITEBYTECODE=1 cad python -m pytest -q -p no:cacheprovider \
+            tests/test_fixtures.py tests/test_bend_detection.py tests/test_p5_service.py
+
+      - name: Parity of the 5 reference parts (masked byte comparison)
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 -d sheet-metal-service/tests/fixtures/unfold > /dev/null 2>&1 &
+          sleep 1
+          python3 workers/cad/parity/cad_parity.py self-test
+          python3 workers/cad/parity/cad_parity.py check --base http://127.0.0.1:8000 --files http://127.0.0.1:8765 --golden workers/cad/parity/golden
+
+      - name: Wall clock enforced (PROCESSING_TIMEOUT=0.05 -> 504)
+        run: |
+          docker run -d --name cad-timeout --network host -e API_KEY="$CAD_PARITY_KEY" -e REQUIRE_API_KEY=1 -e PROCESSING_TIMEOUT=0.05 \
+            "microns-cad:${{ steps.tag.outputs.tag }}" uvicorn main:app --host 127.0.0.1 --port 8001
+          for i in $(seq 1 120); do curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1 && break; sleep 1; done
+          code="$(curl -s -o /tmp/timeout.json -w '%{http_code}' -X POST -H "X-API-Key: $CAD_PARITY_KEY" -H 'content-type: application/json' \
+            -d '{"file_url":"http://127.0.0.1:8765/l_bend_90.step","file_name":"l_bend_90.step"}' http://127.0.0.1:8001/flat-pattern)"
+          cat /tmp/timeout.json; echo
+          test "$code" = 504
+
+      - name: Stop the containers
+        if: always()
+        run: docker rm -f cad cad-timeout > /dev/null 2>&1 || true
+
+      - name: Save the tested image
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        run: docker save "microns-cad:${{ steps.tag.outputs.tag }}" | gzip -1 > microns-cad.tar.gz
+
+      - name: Keep the tested image for the push job
+        if: github.event_name == 'workflow_dispatch' && inputs.push
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: microns-cad-image
+          path: microns-cad.tar.gz
+          retention-days: 1
+          compression-level: 0
+
+  push:
+    name: Push the tested image
+    needs: image
+    if: github.event_name == 'workflow_dispatch' && inputs.push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: cad-release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Guard - push secrets present
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=Missing environment secrets::Set these secrets in the cad-release environment:$missing. Nothing was pushed."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: microns-cad-image
+
+      - name: Load the tested image
+        run: gunzip -c microns-cad.tar.gz | docker load
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Push to the Cloudflare registry
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4.145.0 containers push "microns-cad:${{ needs.image.outputs.tag }}" | tee push.log
+          {
+            echo "### microns-cad image pushed"
+            echo
+            echo "Put the image reference printed below into workers/ops/wrangler.jsonc (containers[0].image):"
+            echo
+            echo '```'
+            cat push.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

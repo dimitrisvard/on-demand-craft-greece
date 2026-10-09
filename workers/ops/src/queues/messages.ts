@@ -1,5 +1,6 @@
 // Messages of the queue "scrapes" (long scans run by the consumer instead of the request) and, from Phase 4, of
-// the queues "cad-jobs" and "agent-events" and the directory-scan envelope on "scrapes".
+// the queues "cad-jobs" and "agent-events" and the directory-scan envelope on "scrapes"; from Phase 5, of the
+// queues "translations" and "outbound-mail" and the Phase 5 envelope on "scrapes".
 //
 // Rules
 //   - One message is one scan: {v: 1, kind, params, run_id, enqueued_at, requested_by}, sent as JSON.
@@ -123,4 +124,86 @@ export function isDirectoryScanMessage(body: unknown): body is DirectoryScanMess
   if (typeof body !== 'object' || body === null) return false;
   const message = body as { v?: unknown; kind?: unknown };
   return message.v === 1 && message.kind === 'directory-scan';
+}
+
+// ----- Phase 5: consolidated compute -----
+// Rules
+//   - Queue "translations": one message per (English article, language); the consumer reads the article itself.
+//   - Queue "outbound-mail": one message per campaign recipient (or follow-up); the consumer reads the campaign,
+//     subscriber and sender rows itself, so no address or body travels in a message.
+//   - ScrapeMessage above is not changed: the Phase 5 scheduled collectors use their own envelope P5ScrapeMessage on
+//     the queue "scrapes", routed in src/index.ts (by kind) to src/queues/scrapes-p5.ts before the Phase 4
+//     directory-scan branch and the Phase 2 consumer.
+
+/** Target languages in the order of the live translation job. */
+export type TargetLang = 'de' | 'fr' | 'es' | 'it' | 'nl' | 'pt' | 'sv' | 'da' | 'nb' | 'pl' | 'cs' | 'hu' | 'fi';
+
+/** Queue "translations": translate one English article into one language. */
+export interface TranslationMessageV1 {
+  v: 1;
+  translation_id: string;
+  en_article_id: string;
+  language: TargetLang;
+  origin: 'daily' | 'backfill' | 'manual';
+  /** content-daily date (YYYY-MM-DD) of the group this message belongs to. */
+  for_date: string;
+  parent_run_id: string;
+}
+
+/** Queue "outbound-mail": one campaign mail or follow-up to one subscriber. */
+export interface OutboundMailV1 {
+  v: 1;
+  kind: 'campaign' | 'followup';
+  campaign_id: string;
+  subscriber_id: string;
+  recipient_record_id: string | null;
+  sequence: number;
+  /** A/B choice made by the producer. */
+  subject: string;
+  /** Round-robin assignment; null = the default sender (campaign without sender accounts). */
+  preferred_account_id: string | null;
+  /** 'camp:<campaign_id>:<subscriber_id>:<sequence>' */
+  idem: string;
+  /** agent_runs id of marketing.send:<campaign_id> (or its re-queue run). */
+  run_id: string;
+  /** 0 when produced; +1 on every cap or spacing deferral copy; > 30 is a final failure; pause/stop holds do not count. */
+  deferrals: number;
+}
+
+/** Kinds of the Phase 5 envelope on the queue "scrapes". */
+export const P5_SCRAPE_KINDS = ['reddit-tier', 'hn-scan', 'tender-scheduled', 'xometry-scan'] as const;
+export type P5ScrapeKind = (typeof P5_SCRAPE_KINDS)[number];
+
+export interface RedditTierParams {
+  tier: 1 | 2 | 3;
+  max: 40;
+  slot: string;
+}
+export interface HnScanParams {
+  slot: string;
+}
+export interface TenderScheduledParams {
+  country_code: string;
+  date: string;
+}
+export interface XometryScanParams {
+  slot: string;
+}
+
+/** Queue "scrapes", Phase 5 envelope; run_id is the agent_runs id opened by the dispatcher (the parent run for
+ *  tender-scheduled). */
+export interface P5ScrapeMessage {
+  v: 1;
+  kind: P5ScrapeKind;
+  params: RedditTierParams | HnScanParams | TenderScheduledParams | XometryScanParams;
+  run_id: string;
+  enqueued_at: string;
+  requested_by: 'schedule' | 'manual';
+}
+
+/** v === 1 and kind is one of P5_SCRAPE_KINDS. */
+export function isP5ScrapeMessage(body: unknown): body is P5ScrapeMessage {
+  if (typeof body !== 'object' || body === null) return false;
+  const message = body as { v?: unknown; kind?: unknown };
+  return message.v === 1 && typeof message.kind === 'string' && (P5_SCRAPE_KINDS as readonly string[]).includes(message.kind);
 }

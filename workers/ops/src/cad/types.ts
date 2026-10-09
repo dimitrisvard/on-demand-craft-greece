@@ -7,7 +7,9 @@
 //   - STEP sheet-metal 'analyse' goes to the unfold service (POST /api/v1/unfold, multipart upload of the R2 object
 //     with a sanitised file name, X-API-Key); DXF, STL and CNC STEP run on the inline TypeScript backend with
 //     per-kind input caps (STEP 5 MB, DXF 3 MB, STL 0.75 MB) and one inline job per isolate.
-//   - Phase 5 adds the container backend behind the same interface (only the fetcher changes).
+//   - Phase 5 adds the container backend behind the same interface (only the fetcher changes), the lease of a job
+//     (CadLease, with the container slot) as an optional 4th argument of run(), slot priorities and the recycle
+//     outcome; every addition is optional, so Phase 4 callers and backends are unchanged.
 
 import type { CadJobMessageV1 } from '../queues/messages';
 
@@ -45,6 +47,9 @@ export interface CadArtefact {
   body: ArrayBuffer;
 }
 
+/** Operator alert of a failed outcome (Phase 5): the shared key was refused, or the service has none configured. */
+export type CadAlert = 'key_mismatch' | 'key_not_configured';
+
 export type CadOutcome =
   | { ok: true; result: CadResultV1; artefacts: CadArtefact[] }
   | {
@@ -53,7 +58,42 @@ export type CadOutcome =
       code: 'invalid_input' | 'unsupported' | 'timeout' | 'unavailable' | 'backend_error' | 'too_large';
       message: string;
       httpStatus?: number;
+      /** Phase 5: the container of the lease's slot is destroyed on release (a crashed or stale instance). */
+      recycle?: boolean;
+      /** Phase 5: a plain-text operator alert is due for this outcome. */
+      alert?: CadAlert;
     };
+
+// ----- Phase 5 (P5-6): leases with container slots and priorities (all optional, backward compatible) -----
+
+/** 'interactive' = the compat path of the CAD edge functions; 'batch' = agent jobs (cad-jobs). */
+export type CadPriority = 'batch' | 'interactive';
+
+export interface AcquireRequest {
+  job_id: string;
+  backend_candidates: BackendName[];
+  deadline_s: number;
+  /** Default 'batch'. */
+  priority?: CadPriority;
+}
+
+export type AcquireResult =
+  | { granted: true; lease_id: string; backend: BackendName; /** 'cad-0' … when backend = 'container' */ slot?: string }
+  | { granted: false; retry_after_s: number };
+
+export interface ReleaseOutcome {
+  ok: boolean;
+  retryable?: boolean;
+  backend_down?: boolean;
+  /** Destroy the container of the lease's slot (container leases only). */
+  recycle?: boolean;
+}
+
+/** What a backend run knows of its lease. */
+export interface CadLease {
+  lease_id: string;
+  slot?: string;
+}
 
 export interface CadBackend {
   readonly name: BackendName;
@@ -63,7 +103,8 @@ export interface CadBackend {
   readonly maxConcurrency: number;
   supports(jobType: CadJobMessageV1['job_type'], kind: CadKind, process: string): boolean;
   health(signal: AbortSignal): Promise<boolean>;
-  run(job: CadJobMessageV1, input: CadInput, signal: AbortSignal): Promise<CadOutcome>;
+  /** lease (Phase 5): the CadRouter lease the job runs under; the container backend needs its slot. */
+  run(job: CadJobMessageV1, input: CadInput, signal: AbortSignal, lease?: CadLease): Promise<CadOutcome>;
 }
 
 export interface CadBackendRegistry {
@@ -72,8 +113,12 @@ export interface CadBackendRegistry {
   candidates(job: CadJobMessageV1, kind: CadKind): BackendName[];
 }
 
-/** Sends one request to an unfold service (fetch for the VPS; the Container's fetch in Phase 5). */
-export type UnfoldFetcher = (req: Request) => Promise<Response>;
+/** Sends one request to an unfold service (fetch for the VPS, which ignores the lease; the Container's fetch of the
+ *  lease's slot in Phase 5). */
+export type UnfoldFetcher = (req: Request, lease: CadLease) => Promise<Response>;
+
+/** The lease a request outside any job carries (health probes). */
+export const NO_LEASE: CadLease = Object.freeze({ lease_id: '' });
 
 /** Final cad_jobs.status values. */
 export type CadFinalStatus = 'succeeded' | 'failed' | 'timed_out' | 'dead_letter' | 'cancelled';

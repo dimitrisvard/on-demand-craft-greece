@@ -21,6 +21,15 @@
 // (AgentSiteEnv, ./agent-hmac.ts): missing, they answer 500 for that request only; every other agent row works
 // without it. A refused relay request answers 401 {"error":"unauthorized"}; a refused link or file key 403
 // {"error":"forbidden"}, without detail. microns-ops checks the principal, the body and the key again.
+//
+// Phase 5 (action IDs MK-8 and CD-1 of ./policy.ts):
+//   MK-8  /api/marketing?action=send-campaign: any method but POST answers 405 {"error":"method_not_allowed"} with
+//         Allow: POST here (never dispatched); POST needs a STAFF or ADMIN session, rate key u:<uid>:send-campaign.
+//   CD-1  /api/cad/<token>/flat-pattern (access 'cad-token'): a path of any other shape answers 404
+//         {"error":"not_found"} and another method 405 {"error":"method_not_allowed"} with Allow: POST, here and
+//         before the token is looked at; the token must equal CAD_COMPAT_TOKEN (./cad-compat.ts; missing secret ->
+//         500 for that request only; a wrong token -> 401 {"error":"unauthorized"}, never reported); then the rate
+//         key m:cad-compat; the principal is MACHINE:cad-compat. Nothing here logs the path or the token.
 
 import {
   FLAG_EDIT_KEY_RE,
@@ -38,6 +47,8 @@ import type { ResolvedApi } from '../api/resolve';
 import type { Env } from '../env';
 import { machineAuth } from './access';
 import { hasRelayHeaders, staffFileKey, verifyFileLink, verifyRelayRequest, type AgentSiteEnv } from './agent-hmac';
+import { cadCompatTokenOf } from '../api/resolve';
+import { checkCadCompatToken, type CadCompatEnv } from './cad-compat';
 import { inventoryRequestRules, mailBodyRules } from './body';
 import {
   ANONYMOUS_FILE_CONSTRAINTS,
@@ -700,6 +711,35 @@ async function staffFileGate(c: Ctx): Promise<GateOutcome> {
   return allowWith(c, caller.principal);
 }
 
+// ----- Phase 5: marketing send-campaign (MK-8), CAD compat path (CD-1) -----
+
+const CAD_COMPAT: Principal = { class: 'MACHINE', machine: 'cad-compat' };
+
+/** 405 with Allow: POST (a new POST-only action; never dispatched). */
+function postOnly(c: Ctx): GateOutcome {
+  return denyWith(c, apiError(405, 'method_not_allowed', { Allow: 'POST' }));
+}
+
+/** MK-8: a staff session starting a campaign send. */
+async function sendCampaignGate(c: Ctx): Promise<GateOutcome> {
+  if (c.r.method !== 'POST') return postOnly(c);
+  return staffGate(c);
+}
+
+/** CD-1: the CAD compat token in the request path. */
+async function cadCompatGate(c: Ctx): Promise<GateOutcome> {
+  if (c.r.action === 'not-found') return denyWith(c, apiError(404, 'not_found'));
+  if (c.r.action !== 'flat-pattern' || c.r.method !== 'POST') return postOnly(c);
+  const token = cadCompatTokenOf(c.url.pathname);
+  if (token === null) return denyWith(c, apiError(404, 'not_found'));
+  const check = await checkCadCompatToken(c.env as CadCompatEnv, token);
+  if (check === 'not_configured') return configDeny(c, ['CAD_COMPAT_TOKEN']);
+  if (check !== 'ok') return denyWith(c, apiError(401, 'unauthorized'));
+  const limited = await rateCheck(c, rateKey('m', 'cad-compat'));
+  if (limited) return limited;
+  return allowWith(c, CAD_COMPAT);
+}
+
 // ----- entry point -----
 
 export async function applyGate(r: ResolvedApi, request: Request, env: Env, ctx: ExecutionContext): Promise<GateOutcome> {
@@ -792,5 +832,9 @@ export async function applyGate(r: ResolvedApi, request: Request, env: Env, ctx:
       return startGate(c);
     case 'AG-7':
       return staffFileGate(c);
+    case 'MK-8':
+      return sendCampaignGate(c);
+    case 'CD-1':
+      return cadCompatGate(c);
   }
 }

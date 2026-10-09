@@ -170,3 +170,55 @@ Nothing is deployed. Phase 4 exit gate as a whole: docs/migration/PLAN.md §5.4,
 | Dry run (`npm run build:dry`) | `index.js` 8,789.41 KiB (gzip 1,857.46 KiB), upload 9,657.36 KiB (gzip 2,307.86 KiB); one copy each of `pdf-lib`, `@supabase/supabase-js`, `zod`; Phase 2 and Phase 4 bundle rules pass |
 
 Dependency rule: `npm audit` output for the pinned packages is reviewed before each deploy; the pins of `agents`, its MCP peers and `@cloudflare/puppeteer` move only by owner decision and with the parity and T2 suites green (PLAN.md §5.4 DF-49). The bundle holds two copies of `postal-mime` 2.7.4 (one through `resend` for the Phase 2 handlers, one for the agent mail parser); the bundle check allows it.
+
+## Phase 5: consolidated compute
+
+Phase 5 moves the scheduled Supabase and GitHub jobs into this Worker: the daily article, its translations, the
+link fixes and the sitemap (`ContentDailyWorkflow`, `SitemapWorkflow`, queue `translations`), the Reddit, Hacker
+News and tender collectors and the Xometry scan (queue `scrapes`, Phase 5 envelope), the campaign mail (queue
+`outbound-mail`, Durable Object `SenderLimiter`, action `send-campaign` of `/api/marketing`), the weekly ops digest
+(`OpsDigestWorkflow`) and the unfold service as a Container (`CadContainer`, migration tag `v2`). No new Cron Trigger:
+a schedule table runs on the Phase 4 `* * * * *` tick. Every job stays off until its flag (or var) is switched on at
+its switch-over step, so merging and deploying change nothing on their own.
+
+### Rules
+
+| Rule | Where |
+|---|---|
+| Every Phase 5 binding, var and secret is optional in `OpsEnv` and checked where it is used (`need()`); `secrets.required` is unchanged | `src/env.ts` |
+| The schedule table: UTC 5-field expressions read by an own matcher (`*`, `*/n`, `a,b`, `a-b`; day of week 0 = Sunday); a slot `YYYY-MM-DDTHH:MMZ` is part of every run key and instance id; entries with an interval of at least 2 h also fire on a tick up to 60 min after a missed slot | `src/cron/schedule.ts` |
+| The dispatcher reads the gate first (flag, or the var string `"true"`): a closed gate writes nothing; then it opens the run (`openRun`, trigger `cron`) or creates the Workflow instance, and sends the queue message; an existing run or instance is skipped; a failed send closes the run `failed` with `enqueue_failed`; it never throws | `src/cron/run-schedule.ts` |
+| Scheduled collectors use their own envelope on `scrapes` (`P5ScrapeMessage`, kinds `reddit-tier`, `hn-scan`, `tender-scheduled`, `xometry-scan`), routed by kind in `src/index.ts` before the Phase 4 and Phase 2 consumers; `ScrapeMessage` and `src/queues/scrapes.ts` are unchanged | `src/queues/messages.ts`, `src/queues/scrapes-p5.ts` |
+| Every external effect the Phase 4 ports do not cover goes through `P5Ports` (text LLM calls to Anthropic and Gemini through the AI Gateway, the collector sources, the Storage upload, the Gmail send, the Container, plain Telegram text); T2 points them at the stub with the `*_API_BASE`, `AGENT_GEMINI_BASE_URL` and `CAD_CONTAINER_BASE_URL` vars, and `makeP5Ports` refuses those vars while `AI` is bound | `src/ports/p5.ts` |
+| T1 fakes of the Phase 5 ports and the test database with the Phase 5 tables and article-queue RPCs; nothing in the production code imports them | `src/ports/p5-stub/` |
+| Bundle: none of the Phase 5 T2-only vars in the production `vars`; `@cloudflare/containers` bundled from exactly one copy (`workers/ops/node_modules/@cloudflare/containers/`, `dist/lib/container.js` once) | `scripts/check-bundle.mjs` |
+
+### Run and test
+
+| Task | Command (in `workers/ops`) |
+|---|---|
+| Unit tests (T1) of the Phase 5 kernel | `npx vitest run test/p5/kernel test/config.test.ts`; one unit: `npm test -- test/p5/<area>` |
+| Integration tests, profile `jobs` (site primary and ops, the consumers `scrapes`, `translations`, `outbound-mail`, `cad-jobs`, every provider and source on the local stub, mini-PostgREST with the Phase 5 tables) | `npm run test:integration:jobs` (files `test/t2-jobs/p5-<area>.jobs.ts`) |
+| Run the harness for manual checks | `node ../site/test/integration/harness.mjs up --profile jobs`; crons: `POST <url>/cdn-cgi/local/explorer/api/local/scheduled?worker=microns-ops` with `{"cron": "* * * * *", "scheduled_time": <epoch ms>}` |
+| Bundle check with the Phase 2, 4 and 5 rules | `npm run build:dry` |
+
+### Owner order
+
+Before the first deploy with the Phase 5 configuration: the queues `translations`, `translations-dlq`,
+`outbound-mail` and `outbound-mail-dlq`; the `SEO_CACHE` namespace id of microns-site in place of
+`<KV_ID_SEO_CACHE>`; the Google AI Studio key stored in the AI Gateway; the Container image pushed and its reference
+in `containers[0].image`; the optional secrets `INDEXNOW_KEY` and `XOMETRY_TOKEN`; the `CAD_INPUT_HOSTS` placeholder.
+The switch-over runs one job at a time, at least 24 h apart, by flag values and the deactivation SQL; the full
+checklist and runbook are the owner sections of the Phase 5 build specification (docs/migration/specs/PHASE5_SPEC.md,
+§10).
+
+### Status (2026-10-08, local; kernel only, the job units are still being built)
+
+Nothing is deployed and no flag is set.
+
+| Check | Result |
+|---|---|
+| T1 kernel (`npx vitest run test/p5/kernel test/config.test.ts`) | 11 files, 187 tests green, including a simulated week of minute ticks through the dispatcher |
+| T2, profile `jobs`, kernel file (`npm run test:integration:jobs -- test/t2-jobs/p5-kernel.jobs.ts`) | 4 tests green: one run per due job from a fixed `scheduled_time`, the tender fan-out, the ops-digest instance, no second run for the same tick |
+| T2, profiles `api` and `agents` with the Phase 5 configuration | green (4 and 46 tests) |
+| Dry run (`npm run build:dry`) | builds with the `containers` stanza (no Docker needed); one copy of `@cloudflare/containers`; Phase 2, 4 and 5 bundle rules pass |

@@ -8,6 +8,7 @@ describe('OPS RPC contract', () => {
       | 'emails' | 's3' | 'marketing' | 'notifications' | 'gsc' | 'tenders' | 'tender-scan'
       | 'funded-startups' | 'scrape-website' | 'scrape-company-profile' | 'scan-directory'
       | 'agent'
+      | 'cad-compat'
     >();
   });
 
@@ -18,7 +19,7 @@ describe('OPS RPC contract', () => {
       uid?: string;
       email?: string;
       roles?: string[];
-      machine?: 'collector' | 'mcp' | 'telegram';
+      machine?: 'collector' | 'mcp' | 'telegram' | 'cad-compat';
     }>();
   });
 

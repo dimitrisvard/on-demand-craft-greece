@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   scan:
+    # Phase 5 (X-5): the scheduled run is skipped when the repository variable XOMETRY_SCAN_SCHEDULE is "off" (set at
+    # switch-over step S8, when microns-ops runs the scan); manual dispatch always runs. Rollback = delete the variable.
+    if: github.event_name != 'schedule' || vars.XOMETRY_SCAN_SCHEDULE != 'off'
     runs-on: ubuntu-latest
     defaults:
       run:

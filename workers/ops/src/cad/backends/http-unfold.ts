@@ -13,6 +13,14 @@
 //     -> 'backend_error' (not retryable: configuration); 408/429 -> 'unavailable' (retryable); 5xx ->
 //     'backend_error' (retryable), 502/503/504 also mark the backend down; network error -> 'unavailable'
 //     (retryable, backend down); the job signal firing -> 'timeout' (retryable).
+//   - Phase 5 refinements of the service's own answers (the first ANSWER_PREFIX_BYTES of the body are read to tell
+//     them apart; the text never reaches the outcome): 504 {"detail":"Processing timeout …"} -> 'timeout', not
+//     retryable (the service's wall clock stopped it; the service is up); 500 {"detail":"Processing crashed …"} ->
+//     'backend_error', retryable, recycle (the consumer retries it once); 401 -> 'backend_error', not retryable,
+//     alert 'key_mismatch' (container: also recycle, so a restarted instance takes the current key); 503
+//     {"error":"API key not configured"} -> 'unavailable', not retryable, alert 'key_not_configured', backend down.
+//   - The fetcher receives the job's lease (the container fetcher addresses the lease's slot); a health probe
+//     carries NO_LEASE.
 //   - Analysis metrics come from the X-Part-* headers plus the in-Worker DXF metrics of the returned flat.dxf
 //     (skipped with a warning when that DXF is above the inline DXF cap); the parse runs through quietly()
 //     (cad/quiet.ts), so the parser's own console output never reaches the Worker logs.
@@ -25,7 +33,7 @@ import { parseDXF } from '../inline/dxf-parser';
 import { multipartBody } from '../multipart';
 import { quietly } from '../quiet';
 import { parseUnfoldHeaders, resultFromUnfold } from '../result';
-import { INLINE_CAPS, MAX_INPUT_BYTES, type CadArtefact, type CadBackend, type CadInput, type CadKind, type CadOutcome, type UnfoldFetcher } from '../types';
+import { INLINE_CAPS, MAX_INPUT_BYTES, NO_LEASE, type CadArtefact, type CadBackend, type CadInput, type CadKind, type CadLease, type CadOutcome, type UnfoldFetcher } from '../types';
 
 export interface HttpUnfoldOptions {
   baseUrl: string;
@@ -83,8 +91,86 @@ export function outcomeOfStatus(status: number): CadOutcome {
 /** True when a failed outcome means the service itself is unreachable or down. */
 export function isBackendDown(o: CadOutcome): boolean {
   if (o.ok) return false;
+  // The service's own wall clock answered: the service is up.
+  if (o.code === 'timeout' && o.httpStatus === 504) return false;
   if (o.code === 'unavailable' && o.httpStatus === undefined) return true;
   return o.httpStatus === 502 || o.httpStatus === 503 || o.httpStatus === 504;
+}
+
+/** Bytes of a non-200 answer read to recognise the service's own answers. */
+export const ANSWER_PREFIX_BYTES = 4096;
+
+/** The service's answer texts (sheet-metal-service main.py) that the Phase 5 mapping recognises. */
+export const SERVICE_TIMEOUT_DETAIL = 'Processing timeout';
+export const SERVICE_CRASH_DETAIL = 'Processing crashed';
+export const SERVICE_NO_KEY_ERROR = 'API key not configured';
+
+type Failure = Extract<CadOutcome, { ok: false }>;
+
+/** The first `max` bytes of a body as text; the rest is cancelled. Never throws. */
+export async function readAnswerPrefix(res: Response, max = ANSWER_PREFIX_BYTES): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < max) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    // an interrupted answer is classified by what arrived
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const all = new Uint8Array(Math.min(total, max));
+  let at = 0;
+  for (const c of chunks) {
+    const part = c.subarray(0, Math.min(c.byteLength, all.byteLength - at));
+    all.set(part, at);
+    at += part.byteLength;
+    if (at >= all.byteLength) break;
+  }
+  return new TextDecoder().decode(all);
+}
+
+/** A string field of a JSON object answer (a truncated answer is matched by its text). */
+function answerField(text: string, field: 'detail' | 'error'): string | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const v = (parsed as Record<string, unknown>)[field];
+      return typeof v === 'string' ? v : null;
+    }
+    return null;
+  } catch {
+    const m = new RegExp(`^\\s*\\{\\s*"${field}"\\s*:\\s*"([^"\\\\]*)`).exec(text);
+    return m ? m[1] : null;
+  }
+}
+
+/** CadOutcome of a non-200 answer, given the start of its body (see the rules above). */
+export function serviceAnswerOutcome(status: number, text: string, backend: 'vps' | 'container'): Failure {
+  if (status === 504 && answerField(text, 'detail')?.startsWith(SERVICE_TIMEOUT_DETAIL)) {
+    return { ok: false, retryable: false, code: 'timeout', message: 'unfold 504 processing timeout', httpStatus: 504 };
+  }
+  if (status === 500 && answerField(text, 'detail')?.startsWith(SERVICE_CRASH_DETAIL)) {
+    return { ok: false, retryable: true, code: 'backend_error', message: 'unfold 500 processing crashed', httpStatus: 500, recycle: true };
+  }
+  if (status === 401) {
+    return { ok: false, retryable: false, code: 'backend_error', message: 'unfold 401 key refused', httpStatus: 401, alert: 'key_mismatch', ...(backend === 'container' ? { recycle: true } : {}) };
+  }
+  if (status === 503 && answerField(text, 'error') === SERVICE_NO_KEY_ERROR) {
+    return { ok: false, retryable: false, code: 'unavailable', message: 'unfold 503 key not configured', httpStatus: 503, alert: 'key_not_configured' };
+  }
+  return outcomeOfStatus(status) as Failure;
+}
+
+/** True when a failed outcome is the service's own crash answer (the consumer retries it once). */
+export function isCrashOutcome(o: CadOutcome): boolean {
+  return !o.ok && o.recycle === true && o.httpStatus === 500;
 }
 
 export class HttpUnfoldBackend implements CadBackend {
@@ -121,7 +207,7 @@ export class HttpUnfoldBackend implements CadBackend {
 
   async health(signal: AbortSignal): Promise<boolean> {
     try {
-      const res = await this.fetcher(new Request(`${this.base}/api/v1/health`, { method: 'GET', headers: this.headers(), signal }));
+      const res = await this.fetcher(new Request(`${this.base}/api/v1/health`, { method: 'GET', headers: this.headers(), signal }), NO_LEASE);
       if (res.status !== 200) {
         await res.body?.cancel();
         return false;
@@ -133,7 +219,7 @@ export class HttpUnfoldBackend implements CadBackend {
     }
   }
 
-  async run(job: CadJobMessageV1, input: CadInput, signal: AbortSignal): Promise<CadOutcome> {
+  async run(job: CadJobMessageV1, input: CadInput, signal: AbortSignal, lease: CadLease = NO_LEASE): Promise<CadOutcome> {
     if (input.sizeBytes > MAX_INPUT_BYTES) return fail('too_large', false, 'input above 50 MB');
     if (!this.supports(job.job_type, input.kind, job.params.process)) return fail('unsupported', false, `${job.job_type} of ${input.kind} is not supported here`);
     const started = this.clock();
@@ -154,15 +240,12 @@ export class HttpUnfoldBackend implements CadBackend {
         signal,
         duplex: 'half',
       };
-      response = await this.fetcher(new Request(`${this.base}/api/v1/unfold`, init as RequestInit));
+      response = await this.fetcher(new Request(`${this.base}/api/v1/unfold`, init as RequestInit), lease);
     } catch (error) {
       if (signal.aborted || isAbort(error)) return fail('timeout', true, 'unfold request timed out');
       return fail('unavailable', true, 'unfold service unreachable');
     }
-    if (response.status !== 200) {
-      await response.body?.cancel().catch(() => undefined);
-      return outcomeOfStatus(response.status);
-    }
+    if (response.status !== 200) return serviceAnswerOutcome(response.status, await readAnswerPrefix(response), this.name);
     let body: ArrayBuffer;
     try {
       body = await response.arrayBuffer();

@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 import CampaignProgress from './CampaignProgress';
 import CampaignImportDialog from './CampaignImportDialog';
+import { campaignSendMessage, startCampaignSend } from '@/utils/campaignSend';
 
 interface Campaign {
   id: string;
@@ -89,20 +90,14 @@ const CampaignsTable = () => {
 
   const sendMutation = useMutation({
     mutationFn: async (id: string) => {
-        // In a real app, this would call our Edge Function
-        // For now, we simulate the call or assuming we might implement the client-side trigger
-        
-        // Let's trigger the edge function
-        const { data, error } = await supabase.functions.invoke('send-campaign', {
-            body: { campaign_id: id }
-        });
-
-        if (error) throw error;
-        return data;
+        // The Worker route first; the edge function only as its fallback (src/utils/campaignSend.ts)
+        return startCampaignSend(id);
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
         queryClient.invalidateQueries({ queryKey: ['campaigns'] });
-        toast.success('Campaign sending started!');
+        const message = campaignSendMessage(result, 'table');
+        if (message.kind === 'success') toast.success(message.text);
+        else toast.error(message.text);
     },
     onError: (error) => {
         console.error("Send error:", error);

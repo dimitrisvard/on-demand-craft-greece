@@ -1,0 +1,177 @@
+{
+  "queries": {
+    "CNC machining": {
+      "hits": [
+        {
+          "objectID": "41000001",
+          "title": "Looking for manufacturer in Germany for CNC parts",
+          "story_text": null,
+          "author": "hn_alpha",
+          "url": "https://example.org/post-1",
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T08:59:00.000Z",
+          "created_at_i": 1791449940,
+          "_tags": [
+            "story",
+            "author_hn_alpha",
+            "story_41000001"
+          ]
+        },
+        {
+          "objectID": "41000002",
+          "title": "A history of punch cards",
+          "story_text": null,
+          "author": "hn_beta",
+          "url": null,
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T08:50:00.000Z",
+          "created_at_i": 1791449400,
+          "_tags": [
+            "story",
+            "author_hn_beta",
+            "story_41000002"
+          ]
+        }
+      ]
+    },
+    "manufacturing": {
+      "hits": [
+        {
+          "objectID": "41000001",
+          "title": "Looking for manufacturer in Germany for CNC parts",
+          "story_text": null,
+          "author": "hn_alpha",
+          "url": "https://example.org/post-1",
+          "points": 25,
+          "num_comments": 4,
+          "created_at": "2026-10-08T08:59:00.000Z",
+          "created_at_i": 1791449940,
+          "_tags": [
+            "story",
+            "author_hn_alpha",
+            "story_41000001"
+          ]
+        },
+        {
+          "objectID": "41000003",
+          "title": "Ask HN: who can machine titanium brackets?",
+          "story_text": "Small batch, <b>urgent</b>.",
+          "author": "hn_gamma",
+          "url": null,
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T09:30:00.000Z",
+          "created_at_i": 1791451800,
+          "_tags": [
+            "story",
+            "author_hn_gamma",
+            "story_41000003"
+          ]
+        }
+      ]
+    },
+    "Xometry": {
+      "hits": [
+        {
+          "objectID": "41000004",
+          "title": "Xometry pricing notes",
+          "story_text": null,
+          "author": "hn_delta",
+          "url": null,
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T09:45:00.000Z",
+          "created_at_i": 1791452700,
+          "_tags": [
+            "story",
+            "author_hn_delta",
+            "story_41000004"
+          ]
+        }
+      ]
+    },
+    "Protolabs": {
+      "status": 500
+    },
+    "custom parts": {
+      "hits": [
+        {
+          "objectID": "41000007",
+          "title": "Machining quote: who can machine this?",
+          "story_text": null,
+          "author": "hn_eta",
+          "url": null,
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T06:40:00.000Z",
+          "created_at_i": 1791441600,
+          "_tags": [
+            "story",
+            "author_hn_eta",
+            "story_41000007"
+          ]
+        }
+      ]
+    },
+    "rapid prototyping": {
+      "hits": [
+        {
+          "objectID": "41000008",
+          "title": "Aerospace and medical device brackets",
+          "story_text": null,
+          "author": "hn_theta",
+          "url": null,
+          "points": 10,
+          "num_comments": 4,
+          "created_at": "2026-10-08T08:30:00.000Z",
+          "created_at_i": 1791448200,
+          "_tags": [
+            "story",
+            "author_hn_theta",
+            "story_41000008"
+          ]
+        }
+      ]
+    }
+  },
+  "show_hn": {
+    "hits": [
+      {
+        "objectID": "41000005",
+        "title": "Show HN: a tool for machining quote comparison",
+        "story_text": "<p>We are <i>looking for manufacturer</i> partners for an enclosure run.</p><p>Requirements: aluminium 6061, tight tolerance, anodising, about 200 units per quarter, delivery to a warehouse in Germany. We would like a supplier who can also help with DFM feedback on the first article and keep a simple quality record per batch. Happy to pay for samples.</p>",
+        "author": "hn_eps",
+        "url": "https://example.org/show-5",
+        "points": 10,
+        "num_comments": 4,
+        "created_at": "2026-10-08T09:55:00.000Z",
+        "created_at_i": 1791453300,
+        "_tags": [
+          "story",
+          "show_hn",
+          "author_hn_eps",
+          "story_41000005"
+        ]
+      },
+      {
+        "objectID": "41000006",
+        "title": "Show HN: my weekend game",
+        "story_text": null,
+        "author": "hn_zeta",
+        "url": null,
+        "points": 10,
+        "num_comments": 4,
+        "created_at": "2026-10-08T09:50:00.000Z",
+        "created_at_i": 1791453000,
+        "_tags": [
+          "story",
+          "show_hn",
+          "author_hn_zeta",
+          "story_41000006"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "phase5-sql-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests for the Phase 5 switch-over SQL (supabase/migrations/*_ported_crons.sql) and the owner scripts (scripts/phase5/parity.sql, flag-values.sql) on PGlite (Postgres 18 and 16)",
+  "scripts": {
+    "test": "node cron-switch.test.mjs && node scripts.test.mjs",
+    "test:pg18": "node cron-switch.test.mjs --engine=pglite && node scripts.test.mjs --engine=pglite",
+    "test:pg16": "node cron-switch.test.mjs --engine=pglite16 && node scripts.test.mjs --engine=pglite16"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "pglite-pg16": "npm:@electric-sql/pglite@0.2.17"
+  }
+}

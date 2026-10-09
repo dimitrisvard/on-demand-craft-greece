@@ -12,6 +12,8 @@ S3_REGION = os.getenv("S3_REGION", "us-east-1")
 
 # Optional API key for authenticating external callers
 API_KEY = os.getenv("API_KEY", "")
+# P5-6: "1" = refuse every non-health route while API_KEY is empty (set in the Container)
+REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "") == "1"
 
 # ── Sheet metal defaults ───────────────────────────────────────────────────
 MIN_THICKNESS_MM = 0.3
@@ -34,7 +36,7 @@ K_FACTORS_BY_THICKNESS = {
 }
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-PROCESSING_TIMEOUT = 120  # seconds
+PROCESSING_TIMEOUT = float(os.getenv("PROCESSING_TIMEOUT", "120"))  # seconds, enforced per request (main.py)
 
 # ── PDF drawing colours (hex) ──────────────────────────────────────────────
 COLOR_HEADER_BG = "#1B2A4A"

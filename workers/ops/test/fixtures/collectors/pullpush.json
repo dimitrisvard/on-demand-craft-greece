@@ -1,0 +1,124 @@
+{
+  "machining": {
+    "posts": [
+      {
+        "id": "t1a",
+        "title": "Looking for manufacturer in Germany",
+        "selftext": "We are a small robotics team and we are looking for manufacturer support for a batch of brackets.\nParts are aluminium 6061, about 40 pieces, tolerance +/- 0.05 mm on the bores.\n\nIdeally somebody close to us so that shipping stays simple; drawings and STEP files are ready, and we can share them once there is an NDA. Delivery within four weeks would be great, anodising optional. Thanks for any pointers!",
+        "author": "user_alpha",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791449940,
+        "subreddit": "machining",
+        "url": "https://www.reddit.com/r/machining/comments/t1a/",
+        "permalink": "/r/machining/comments/t1a/looking_for_manufacturer_in_ge/"
+      },
+      {
+        "id": "t1b",
+        "title": "Who can machine titanium parts?",
+        "selftext": "",
+        "author": "user_beta",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791453300,
+        "subreddit": "machining",
+        "url": "https://www.reddit.com/r/machining/comments/t1b/",
+        "permalink": "/r/machining/comments/t1b/who_can_machine_titanium_parts/"
+      },
+      {
+        "id": "t1c",
+        "title": "Weekend shop photos",
+        "selftext": "Just sharing the new lathe.",
+        "author": "user_gamma",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791451800,
+        "subreddit": "machining",
+        "url": "https://www.reddit.com/r/machining/comments/t1c/",
+        "permalink": "/r/machining/comments/t1c/weekend_shop_photos/"
+      },
+      {
+        "id": "t1d",
+        "title": "Thoughts on xometry for one-offs",
+        "selftext": "Curious what people think.",
+        "author": "user_delta",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791452400,
+        "subreddit": "machining",
+        "url": "https://www.reddit.com/r/machining/comments/t1d/",
+        "permalink": "/r/machining/comments/t1d/thoughts_on_xometry_for_one-of/"
+      },
+      {
+        "id": "t1e",
+        "title": "xometry is slow again",
+        "selftext": "Third week waiting.",
+        "author": "user_eps",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791444600,
+        "subreddit": "machining",
+        "url": "https://www.reddit.com/r/machining/comments/t1e/"
+      }
+    ]
+  },
+  "cnc": {
+    "posts": [
+      {
+        "id": "t2a",
+        "title": "Machining quote for formula student uprights",
+        "selftext": "Our machining quote request: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "author": "user_zeta",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791450060,
+        "subreddit": "cnc",
+        "url": "https://www.reddit.com/r/cnc/comments/t2a/",
+        "permalink": "/r/cnc/comments/t2a/machining_quote_for_formula_st/"
+      },
+      {
+        "id": "t2b",
+        "title": "Aerospace and medical device brackets",
+        "selftext": "Two small batches.\nNo rush.",
+        "author": "user_eta",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791442800,
+        "subreddit": "cnc",
+        "url": "https://www.reddit.com/r/cnc/comments/t2b/",
+        "permalink": "/r/cnc/comments/t2b/aerospace_and_medical_device_b/"
+      }
+    ]
+  },
+  "engineering": {
+    "status": 503
+  },
+  "hardware": {
+    "posts": [
+      {
+        "id": "t3a",
+        "title": "Looking for manufacturer, EU supplier preferred",
+        "selftext": "Short note.",
+        "author": "user_theta",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791447900,
+        "subreddit": "hardware",
+        "url": "https://www.reddit.com/r/hardware/comments/t3a/",
+        "permalink": "/r/hardware/comments/t3a/looking_for_manufacturer,_eu_s/"
+      },
+      {
+        "id": "t3b",
+        "title": "Rapid prototyping and sheet metal in Germany",
+        "selftext": "Line one\nline two",
+        "author": "user_iota",
+        "score": 3,
+        "num_comments": 2,
+        "created_utc": 1791363600,
+        "subreddit": "hardware",
+        "url": "https://www.reddit.com/r/hardware/comments/t3b/",
+        "permalink": "/r/hardware/comments/t3b/rapid_prototyping_and_sheet_me/"
+      }
+    ]
+  }
+}

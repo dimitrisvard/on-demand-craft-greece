@@ -14,7 +14,8 @@
 // A missing key, a malformed value or a KV error falls back to the var API_FORWARD_TO_VERCEL: "true" forwards
 // everything; "false", empty or absent forwards nothing; any other value forwards nothing and is logged.
 // Paths that Vercel has no handler for are never forwarded, whatever the flag or the var says
-// (NEVER_FORWARDED_PREFIXES, matched on the canonical spelling of the path): /api/agent/* (Phase 4).
+// (NEVER_FORWARDED_PREFIXES, matched on the canonical spelling of the path): /api/agent/* (Phase 4) and /api/cad/*
+// (Phase 5, the CAD compat path, whose path carries a credential).
 //
 // forwardToVercel keeps method, path, query, body and end-to-end headers. Stripped: hop-by-hop headers (RFC 9110
 // §7.6.1), headers named in Connection, Host, Content-Length and every cf-* header (Cloudflare metadata, and the
@@ -26,7 +27,7 @@ import type { Env } from '../env';
 import { LOG_PREFIX } from '../env';
 import { getFlagValue } from '../flags';
 import { isPreviewHost } from '../preview';
-import { AGENT_PATH_PREFIX, canonicalApiPath } from './resolve';
+import { AGENT_PATH_PREFIX, CAD_PATH_PREFIX, canonicalApiPath } from './resolve';
 import { routeApi } from './router';
 
 const UPSTREAM_TIMEOUT_MS = 30_000;
@@ -36,10 +37,13 @@ export const FORWARD_FLAG_KEY = 'api.forward_to_vercel';
 /** Path prefixes that are never forwarded to Vercel (one list; a prefix ends with '/'). */
 export const NEVER_FORWARDED_PREFIXES: readonly string[] = [AGENT_PATH_PREFIX];
 
+/** Phase 5 prefixes that are never forwarded (kept apart from the Phase 4 list, which its tests pin). */
+export const NEVER_FORWARDED_P5_PREFIXES: readonly string[] = [CAD_PATH_PREFIX];
+
 /** True when the canonical spelling of the path is a never-forwarded prefix or lies under one. */
 export function neverForwarded(pathname: string): boolean {
   const canonical = `${canonicalApiPath(pathname)}/`;
-  return NEVER_FORWARDED_PREFIXES.some((prefix) => canonical.startsWith(prefix));
+  return [...NEVER_FORWARDED_PREFIXES, ...NEVER_FORWARDED_P5_PREFIXES].some((prefix) => canonical.startsWith(prefix));
 }
 
 export const HOP_BY_HOP: ReadonlySet<string> = new Set([

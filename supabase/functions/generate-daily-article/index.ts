@@ -5,6 +5,9 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const anthropicApiKey = Deno.env.get("ANTHROPIC_API_KEY");
 const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
+// Model is overridable via the ANTHROPIC_MODEL secret so future model changes
+// do not require a redeploy of this function.
+const anthropicModel = Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5";
 
 // Brand name - NEVER translate or alter this
 const BRAND_NAME = "Microns Hub";
@@ -169,8 +172,8 @@ async function fetchWithTimeout(
 }
 
 /**
- * Generate article using Claude Sonnet 4
- * Claude Sonnet 4 provides excellent writing quality with fast response times
+ * Generate article using Claude Sonnet 5
+ * Claude Sonnet 5 provides excellent writing quality with fast response times
  */
 async function generateWithClaude(
   prompt: string,
@@ -180,7 +183,7 @@ async function generateWithClaude(
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
-  const model = "claude-sonnet-4-20250514";
+  const model = anthropicModel;
   const url = "https://api.anthropic.com/v1/messages";
 
   const requestBody = {
@@ -194,6 +197,7 @@ async function generateWithClaude(
     ],
   };
 
+  console.log(`[generateWithClaude] Using model: ${model}`);
   console.log(`[generateWithClaude] Starting Claude API request at ${new Date().toISOString()}`);
   const startTime = Date.now();
 
@@ -277,6 +281,53 @@ async function getRotationIndex(): Promise<{ serviceIndex: number; quoteIndex: n
 }
 
 /**
+ * Recover the "content" field from a JSON response that failed JSON.parse.
+ *
+ * The model occasionally emits a raw, unescaped double quote inside the HTML it puts
+ * in the "content" string, which invalidates the whole JSON document. The previous
+ * recovery scanned forward from the start of the content string to the FIRST
+ * unescaped double quote and treated that as the end of the field - so a stray quote
+ * one third of the way through the article silently cut the rest off, publishing
+ * 880-1449 word stubs of what were complete 2500-word responses.
+ *
+ * Instead, anchor the END of the content on the next top-level JSON key that always
+ * follows it ("excerpt", or one of the other known keys). Everything between is the
+ * article, stray quotes included.
+ */
+function recoverContentField(jsonText: string, contentStart: number): { content: string; recoveredBy: string } {
+  const tailPattern = /"\s*,\s*"(excerpt|metaTitle|metaDescription|faqSchema)"\s*:/g;
+  let match: RegExpExecArray | null;
+  while ((match = tailPattern.exec(jsonText)) !== null) {
+    if (match.index > contentStart) {
+      return { content: jsonText.substring(contentStart, match.index), recoveredBy: `key:${match[1]}` };
+    }
+  }
+
+  // No following key found (response really is cut off). Fall back to scanning for the
+  // first unescaped quote; the caller's length guard will reject it if it is too short.
+  let i = contentStart;
+  let inEscape = false;
+  while (i < jsonText.length) {
+    if (inEscape) {
+      inEscape = false;
+    } else if (jsonText[i] === '\\') {
+      inEscape = true;
+    } else if (jsonText[i] === '"') {
+      break;
+    }
+    i++;
+  }
+  return { content: jsonText.substring(contentStart, i), recoveredBy: 'first-unescaped-quote' };
+}
+
+function unescapeJsonString(s: string): string {
+  return s
+    .replace(/\\n/g, '\n')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+/**
  * Generate master article with high thinking level - "Master Engineer" Prompt
  * Creates ONLY the English version in PUBLISHED mode
  */
@@ -321,6 +372,7 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 2.  **No "AI Fluff":** Do NOT start with "In the ever-evolving landscape of manufacturing..." or "In today's fast-paced world...". Start immediately with technical value or a defining engineering problem.
 3.  **Accuracy:** Use exact ISO standards (e.g., ISO 2768, ISO 9001) and material grades (e.g., Al 6061-T6, not just "Aluminum").
 4.  **Formatting:** Return ONLY valid, complete JSON. No markdown fencing (\`\`\`json) around the response. CRITICAL: The JSON must be complete and properly closed with all closing braces. Do not truncate the JSON response.
+5.  **JSON STRING ESCAPING (CRITICAL - read carefully):** The HTML you write goes inside a JSON string value. EVERY double quote character inside that HTML MUST be escaped as \\" - for example write <table class=\\"editor-table\\"> and <a href=\\"/en/quote\\">, NOT <table class="editor-table">. A single unescaped double quote anywhere in the content invalidates the entire response and the article is discarded. If you are unsure, prefer single quotes for HTML attributes (e.g. <table class='editor-table'>), which need no escaping at all.
 
 ---
 ### EUROPEAN LOCALIZATION (MANDATORY)
@@ -335,12 +387,12 @@ Task: Write a definitive, comprehensive technical guide on: "${title}"
 You must insert 4 specific types of links naturally into the flow of the text:
 1.  **Silo Context Link:** Choose ONLY 1-2 relevant articles from this list (use the SAME number each time, do NOT accumulate):
 ${relatedArticles}
-    Link to them using natural anchor text where the concept is mentioned. Use format: <a href="/en/blog/slug-here">anchor text</a> (no extra spaces inside the link tag - spaces will be added automatically)
+    Link to them using natural anchor text where the concept is mentioned. Use format: <a href='/en/blog/slug-here'>anchor text</a> (no extra spaces inside the link tag - spaces will be added automatically)
     CRITICAL: If there are 2 articles in the list, use exactly 1-2 links. Do NOT add more links than articles in the list. Do NOT accumulate links across articles.
-2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link: <a href="${selectedService.url}">${selectedService.anchor}</a> (no extra spaces inside the link tag - spaces will be added automatically).
-3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href="/en/services">our manufacturing services</a> (no extra spaces inside the link tag - spaces will be added automatically)
+2.  **Specific Service Page Link (ROTATION - MANDATORY):** You MUST include ONE link to the ${selectedService.name} service page. Find a natural place in the content where ${selectedService.name.toLowerCase()} or related manufacturing processes are discussed, and insert a natural link: <a href='${selectedService.url}'>${selectedService.anchor}</a> (no extra spaces inside the link tag - spaces will be added automatically).
+3.  **General Service Page Link:** When mentioning manufacturing processes, link to the general service path using: <a href='/en/services'>our manufacturing services</a> (no extra spaces inside the link tag - spaces will be added automatically)
 4.  **Commercial Intent (Quote - ROTATING TEXT):** Near the 60% mark of the article, insert a distinct, persuasive single-sentence paragraph with rotating text:
-    * Use this exact format: "For high-precision results, <a href="/en/quote">${selectedQuoteText}</a> from ${BRAND_NAME}." (no extra spaces inside the link tag - spaces will be added automatically)
+    * Use this exact format: "For high-precision results, <a href='/en/quote'>${selectedQuoteText}</a> from ${BRAND_NAME}." (no extra spaces inside the link tag - spaces will be added automatically)
     * CRITICAL: NEVER use the word "instant" or "immediately" in quote sentences. Use phrases like "within 24 hours", "in 24 hours", or "delivered in 24 hours" instead.
 
 ---
@@ -360,7 +412,7 @@ ${relatedArticles}
     * **Comparison Tables (MANDATORY):** 
       - ALWAYS create HTML tables (<table>) when comparing materials, processes, properties, specifications, or any data that benefits from side-by-side comparison.
       - Use tables for: material properties (tensile strength, hardness, cost), process comparisons (CNC vs 3D printing), tolerance ranges, pricing tiers, material grades, surface finish options, etc.
-      - Format tables with proper HTML structure: <table class="editor-table"><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>
+      - Format tables with proper HTML structure: <table class='editor-table'><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>
       - CRITICAL: Tables MUST be properly closed with </table> tag. Each <tr> must be closed with </tr>, each <td> with </td>, each <th> with </th>, <thead> with </thead>, <tbody> with </tbody>.
       - Include inline styles for borders and spacing if needed, but primary styling is via CSS classes.
       - Use <th> for header cells in <thead> section.
@@ -417,31 +469,8 @@ ${relatedArticles}
       throw new Error("Could not find JSON start boundary");
     }
     
-    // If no closing brace found, try to find the last valid position and attempt to close the JSON
     if (jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
-      console.warn("[generateMasterArticle] No valid closing brace found, attempting to fix truncated JSON");
-      // Try to find where the content field ends and close the JSON manually
-      const contentMatch = jsonText.match(/"content"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/);
-      if (contentMatch) {
-        // Find the position after the content string
-        const contentEndPos = jsonText.indexOf('"', contentMatch.index + contentMatch[0].length - 1);
-        if (contentEndPos > 0) {
-          // Try to close the JSON structure
-          jsonText = jsonText.substring(jsonStartIndex, contentEndPos + 1);
-          // Add closing braces for any missing structure
-          let openBraces = (jsonText.match(/{/g) || []).length;
-          let closeBraces = (jsonText.match(/}/g) || []).length;
-          while (openBraces > closeBraces) {
-            jsonText += '}';
-            closeBraces++;
-          }
-          jsonEndIndex = jsonText.length - 1;
-        }
-      }
-      
-      if (jsonEndIndex === -1 || jsonEndIndex <= jsonStartIndex) {
-        throw new Error("Could not find or fix JSON boundaries");
-      }
+      jsonEndIndex = jsonText.length - 1;
     }
     
     jsonText = jsonText.substring(jsonStartIndex, jsonEndIndex + 1);
@@ -452,57 +481,27 @@ ${relatedArticles}
       parsed = JSON.parse(jsonText);
     } catch (parseError: any) {
       console.error("[generateMasterArticle] JSON parse error:", parseError.message);
-      console.error("[generateMasterArticle] JSON text preview (first 1000 chars):", jsonText.substring(0, 1000));
       console.error("[generateMasterArticle] JSON text preview (last 500 chars):", jsonText.substring(Math.max(0, jsonText.length - 500)));
       
-      // Try to extract content using a more robust method for truncated JSON
-      // Look for "content": " and try to extract until we find a closing quote (handling escaped quotes)
-      const contentStartPattern = /"content"\s*:\s*"/;
-      const contentStartMatch = jsonText.match(contentStartPattern);
+      const contentStartMatch = jsonText.match(/"content"\s*:\s*"/);
       
       if (contentStartMatch && contentStartMatch.index !== undefined) {
-        console.warn("[generateMasterArticle] Attempting to extract partial content from malformed JSON");
-        let contentStart = contentStartMatch.index + contentStartMatch[0].length;
-        let contentEnd = contentStart;
-        let inEscape = false;
+        console.warn("[generateMasterArticle] Recovering content from malformed JSON");
+        const contentStart = contentStartMatch.index + contentStartMatch[0].length;
+        const { content: rawContent, recoveredBy } = recoverContentField(jsonText, contentStart);
+        console.warn(`[generateMasterArticle] Content recovered by ${recoveredBy}, ${rawContent.length} raw chars`);
         
-        // Find the end of the content string, handling escaped characters
-        while (contentEnd < jsonText.length) {
-          if (inEscape) {
-            inEscape = false;
-          } else if (jsonText[contentEnd] === '\\') {
-            inEscape = true;
-          } else if (jsonText[contentEnd] === '"') {
-            // Found the end of the content string
-            break;
-          }
-          contentEnd++;
-        }
+        const excerptMatch = jsonText.match(/"excerpt"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        const metaTitleMatch = jsonText.match(/"metaTitle"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+        const metaDescMatch = jsonText.match(/"metaDescription"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
         
-        if (contentEnd < jsonText.length) {
-          const extractedContent = jsonText.substring(contentStart, contentEnd);
-          // Unescape the content
-          const unescapedContent = extractedContent
-            .replace(/\\n/g, '\n')
-            .replace(/\\"/g, '"')
-            .replace(/\\\\/g, '\\');
-          
-          // Try to extract other fields similarly
-          const excerptMatch = jsonText.match(/"excerpt"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-          const metaTitleMatch = jsonText.match(/"metaTitle"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-          const metaDescMatch = jsonText.match(/"metaDescription"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
-          
-          parsed = {
-            content: unescapedContent,
-            excerpt: excerptMatch ? excerptMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : "",
-            metaTitle: metaTitleMatch ? metaTitleMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') : `${title} | ${BRAND_NAME}`,
-            metaDescription: metaDescMatch ? metaDescMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\') : "",
-            faqSchema: null
-          };
-          console.warn("[generateMasterArticle] Successfully extracted partial content from malformed JSON");
-        } else {
-          throw new Error(`Failed to parse article JSON: ${parseError.message}. Content extraction also failed.`);
-        }
+        parsed = {
+          content: unescapeJsonString(rawContent),
+          excerpt: excerptMatch ? unescapeJsonString(excerptMatch[1]) : "",
+          metaTitle: metaTitleMatch ? unescapeJsonString(metaTitleMatch[1]) : `${title} | ${BRAND_NAME}`,
+          metaDescription: metaDescMatch ? unescapeJsonString(metaDescMatch[1]) : "",
+          faqSchema: null
+        };
       } else {
         throw new Error(`Failed to parse article JSON: ${parseError.message}`);
       }
@@ -528,29 +527,30 @@ ${relatedArticles}
     const targetWords = 2500;
 
     if (wordCount < minWords) {
-      console.error(`[generateMasterArticle] WARNING: Content is shorter than expected!`);
+      // FAIL HARD on any under-length article.
+      //
+      // Previously this only threw when the content ended mid-HTML-tag and otherwise
+      // published with a warning. Real truncations frequently land mid-SENTENCE but
+      // just after a closed tag, which slipped through and published a stub article.
+      // Publishing an incomplete page is worse than skipping a day: the queue job is
+      // marked failed and retried instead, and the title stays unprocessed.
+      const endsMidTag = !!content.match(/<[^>]*$/);
+      console.error(`[generateMasterArticle] ERROR: Article is under the minimum length - refusing to publish.`);
       console.error(`[generateMasterArticle] Word count: ${wordCount} (minimum: ${minWords}, target: ${targetWords})`);
       console.error(`[generateMasterArticle] Content length: ${content.length} characters`);
-      console.error(`[generateMasterArticle] Content ends with: ${content.substring(Math.max(0, content.length - 100))}`);
-      
-      // Check if content ends mid-tag (indicates truncation)
-      const endsMidTag = content.match(/<[^>]*$/);
-      if (endsMidTag) {
-        console.error(`[generateMasterArticle] ERROR: Content ends mid-HTML tag - truncation detected!`);
-        throw new Error(`Article content truncated: Only ${wordCount} words generated (target: ${targetWords}). Content ends mid-HTML tag. This indicates the Claude API response was incomplete.`);
-      }
-      
-      // If content is too short but appears complete, log warning but don't fail
-      // This allows monitoring and manual review
-      console.warn(`[generateMasterArticle] Content is ${((1 - wordCount/targetWords) * 100).toFixed(1)}% shorter than target but appears complete`);
-    } else {
-      console.log(`[generateMasterArticle] Content validation passed: ${wordCount} words (target: ${targetWords})`);
+      console.error(`[generateMasterArticle] Ends mid-HTML-tag: ${endsMidTag}`);
+      console.error(`[generateMasterArticle] Content ends with: ${content.substring(Math.max(0, content.length - 160))}`);
+      throw new Error(
+        `Article too short: ${wordCount} words (minimum ${minWords}, target ${targetWords}). ` +
+        (endsMidTag ? 'Content ends mid-HTML tag. ' : 'Content appears cut short. ') +
+        `Refusing to publish an incomplete article.`
+      );
     }
+
+    console.log(`[generateMasterArticle] Content validation passed: ${wordCount} words (target: ${targetWords})`);
     
     // Remove any H1 title tags from content (title is already stored separately)
-    // Remove H1 tags at the start, middle, or end of content
     content = content.replace(/<h1[^>]*>.*?<\/h1>/gi, '');
-    // Also remove any H1 that might match the article title specifically
     const titleH1Pattern = new RegExp(`<h1[^>]*>\\s*${title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*</h1>\\s*`, 'gi');
     content = content.replace(titleH1Pattern, '');
     // Clean up any double spaces or newlines left after H1 removal
@@ -576,10 +576,9 @@ ${relatedArticles}
       faqSchema: parsed.faqSchema || null,
     };
   } catch (error: any) {
-    console.error("[generateMasterArticle] Failed to parse Claude response as JSON:", error);
-    console.error("[generateMasterArticle] Raw response preview (first 1000 chars):", response.substring(0, 1000));
-    console.error("[generateMasterArticle] Raw response preview (last 500 chars):", response.substring(Math.max(0, response.length - 500)));
-    throw new Error(`Failed to parse article JSON: ${error.message}`);
+    console.error("[generateMasterArticle] Failed to produce a valid article:", error.message);
+    console.error("[generateMasterArticle] Raw response preview (first 600 chars):", response.substring(0, 600));
+    throw error;
   }
 }
 
@@ -736,6 +735,7 @@ serve(async (req) => {
   console.log(`[generate-daily-article] SUPABASE_URL: ${supabaseUrl ? 'SET' : 'MISSING'}`);
   console.log(`[generate-daily-article] SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceKey ? 'SET' : 'MISSING'}`);
   console.log(`[generate-daily-article] ANTHROPIC_API_KEY: ${anthropicApiKey ? 'SET' : 'MISSING'}`);
+  console.log(`[generate-daily-article] ANTHROPIC_MODEL: ${anthropicModel}`);
   
   if (!supabaseUrl || !supabaseServiceKey) {
     console.error("[generate-daily-article] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
@@ -1017,6 +1017,7 @@ serve(async (req) => {
         status: "published",
         translation_id: translationId,
         silo_neighbors_used: siloNeighbors.length,
+        model: anthropicModel,
         execution_time_ms: totalFunctionTime,
       }),
       {
@@ -1027,12 +1028,7 @@ serve(async (req) => {
   } catch (error: any) {
     const totalFunctionTime = Date.now() - functionStartTime;
     console.error(`[generate-daily-article] Error after ${totalFunctionTime}ms:`, error);
-    console.error("[generate-daily-article] Error stack:", error.stack);
     console.error("[generate-daily-article] Error message:", error.message);
-    console.error("[generate-daily-article] Error name:", error.name);
-    
-    // If called from queue, mark queue job as failed
-    // Note: The worker function will handle marking as failed since it has the queue_job_id
     
     // Check if it's a timeout error
     const isTimeout = error.message?.includes('timeout') || error.message?.includes('AbortError') || totalFunctionTime > 140000;
@@ -1043,7 +1039,6 @@ serve(async (req) => {
         errorType: error.name || "Error",
         isTimeout: isTimeout,
         execution_time_ms: totalFunctionTime,
-        stack: error.stack,
         queue_job_id: requestBody.queue_job_id || null // Include for worker to handle
       }),
       {

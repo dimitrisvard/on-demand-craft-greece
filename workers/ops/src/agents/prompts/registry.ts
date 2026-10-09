@@ -45,6 +45,8 @@ export const PROMPTS: Readonly<Record<PromptId, PromptEntry>> = Object.freeze({
   'quote.classify_reply@v1': { file: 'quote/classify_reply.v1.md', schema: 'quote/classify_reply.v1.schema.json', route: 'classify', max_tokens: 256, effort: null },
   'post_order.traveller_notes@v1': { file: 'post_order/traveller_notes.v1.md', schema: 'post_order/traveller_notes.v1.schema.json', route: 'extract', max_tokens: 1024, effort: 'low' },
   'post_order.reorder_draft@v1': { file: 'post_order/reorder_draft.v1.md', schema: 'post_order/reorder_draft.v1.schema.json', route: 'extract', max_tokens: 1024, effort: 'low' },
+  // Phase 5: the weekly ops digest narrative (input = the metrics JSON only).
+  'ops_digest.narrative@v1': { file: 'ops_digest/narrative.v1.md', schema: 'ops_digest/narrative.v1.schema.json', route: 'extract', max_tokens: 800, effort: 'low' },
 });
 
 export interface LoadedPrompt {

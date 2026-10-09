@@ -36,11 +36,21 @@
 //     https://developers.cloudflare.com/queues/platform/limits/, delaySeconds); the last-delivery wait stays far
 //     below the 15-minute wall time of a consumer invocation (same page).
 //   - Log lines carry ids, codes and sizes only (never file names or service answers).
+// Phase 5 (P5-6)
+//   - The lease is acquired with priority 'batch' (CadRouter keeps one container slot for the compat path), and
+//     its slot travels to backend.run as the 4th argument (the container backend runs the job on that slot).
+//   - An outcome with recycle (the service crashed, or the container refused the key) releases the lease with
+//     {recycle: true}, so CadRouter destroys that slot's container. A crash answer is retried once: when the job's
+//     previous delivery already ended in a crash, the second crash is final.
+//   - An outcome with an alert sends one plain-text Telegram line through P5Ports.telegramText (at most one per
+//     alert kind and backend per isolate and hour): CAD key mismatch, or no key configured.
+//   - With CAD_BACKEND_DEFAULT = 'container', a STEP sheet-metal analysis without a usable backend fails
+//     'config_missing' with the container's missing names (missingContainerConfig).
 
 import { formatLogLine } from '../../../shared/src/http/log';
 import { EMPTY_USAGE, closeRun, openRun } from '../agents/runs';
-import { isBackendDown } from '../cad/backends/http-unfold';
-import { invalidCadConfig, missingCadConfig } from '../cad/registry';
+import { isBackendDown, isCrashOutcome } from '../cad/backends/http-unfold';
+import { invalidCadConfig, missingCadConfig, missingContainerConfig } from '../cad/registry';
 import { cadRouter, notifyCadJobFinal, type CadRouterClient } from '../cad/router-client';
 import {
   INLINE_CAPS,
@@ -55,11 +65,15 @@ import {
   type CadInput,
   type CadKind,
   type CadOutcome,
+  type ReleaseOutcome,
 } from '../cad/types';
 import { claimCadJob, findReusable, getCadJob, patchCadJob, type CadJobRow } from '../db/repos/cad-jobs';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import { makePorts, type Ports } from '../ports/index';
+import { makeP5Ports, type TelegramTextPort } from '../ports/p5';
+import { sendCadAlert } from '../cad-container/alerts';
 import { LEASE_GRACE_S } from '../do/cad-router';
+import type { AcquireRequest } from '../cad/types';
 import type { CadJobMessageV1 } from './messages';
 
 /** Deliveries of one message: the queue's max_retries (2, wrangler.jsonc) + 1. */
@@ -80,11 +94,18 @@ export function busyRetryDelayS(remainingMs: number): number {
 /** log.txt and the stored error stay short. */
 export const LOG_MAX_CHARS = 4000;
 
+/** The error text a crash outcome leaves on the job row (a later delivery reads it). */
+function isCrashError(error: string | null | undefined): boolean {
+  return typeof error === 'string' && error.startsWith('backend_error: unfold 500 processing crashed');
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export interface CadConsumerDeps {
   ports?: Ports;
   router?: CadRouterClient;
+  /** Phase 5: the plain-text Telegram port of the CAD alerts (default makeP5Ports(env).telegramText). */
+  telegramText?: TelegramTextPort;
   /** Waits ms (default setTimeout); tests pass a virtual clock. */
   sleep?: (ms: number) => Promise<void>;
   leaseWaitMs?: number;
@@ -139,13 +160,13 @@ interface Finish {
 }
 
 class Job {
-  private lease: { id: string; backend: BackendName } | null = null;
+  private lease: { id: string; backend: BackendName; slot?: string } | null = null;
   private runId: string | null = null;
 
   constructor(
     private readonly env: OpsEnv,
     private readonly ports: Ports,
-    private readonly deps: Required<Pick<CadConsumerDeps, 'sleep' | 'leaseWaitMs' | 'notifyFinal'>> & { router: () => CadRouterClient },
+    private readonly deps: Required<Pick<CadConsumerDeps, 'sleep' | 'leaseWaitMs' | 'notifyFinal'>> & { router: () => CadRouterClient; telegramText: () => TelegramTextPort },
     private readonly message: Message<CadJobMessageV1>,
   ) {}
 
@@ -233,7 +254,8 @@ class Job {
     }
     if (candidates.length === 0) {
       const needsVps = kind === 'step' && job.job_type === 'analyse' && ['sheet_metal', 'mixed'].includes(job.params.process);
-      const missing = needsVps ? missingCadConfig(this.env) : [];
+      const wantsContainer = job.backend === 'container' || (job.backend === 'auto' && this.env.CAD_BACKEND_DEFAULT === 'container');
+      const missing = needsVps ? (wantsContainer ? missingContainerConfig(this.env) : missingCadConfig(this.env)) : [];
       if (missing.length > 0) return this.failFinal(row, job, 'config_missing', missing.join(', '), null);
       const invalid = needsVps ? invalidCadConfig(this.env) : [];
       if (invalid.length > 0) return this.failFinal(row, job, 'config_invalid', invalid.join(', '), null);
@@ -242,11 +264,12 @@ class Job {
 
     // 5 Lease
     const router = this.deps.router();
+    const request: AcquireRequest = { job_id: row.id, backend_candidates: candidates, deadline_s: job.deadline_s, priority: 'batch' };
     let waited = 0;
     for (;;) {
-      const granted = await router.acquire({ job_id: row.id, backend_candidates: candidates, deadline_s: job.deadline_s });
+      const granted = await router.acquire(request);
       if (granted.granted) {
-        this.lease = { id: granted.lease_id, backend: granted.backend };
+        this.lease = granted.slot ? { id: granted.lease_id, backend: granted.backend, slot: granted.slot } : { id: granted.lease_id, backend: granted.backend };
         break;
       }
       if (waited >= this.deps.leaseWaitMs) {
@@ -289,8 +312,9 @@ class Job {
       },
     };
     let outcome: CadOutcome;
+    const lease = this.lease.slot ? { lease_id: this.lease.id, slot: this.lease.slot } : { lease_id: this.lease.id };
     try {
-      outcome = await backend.run(job, input, AbortSignal.timeout(job.deadline_s * 1000));
+      outcome = await backend.run(job, input, AbortSignal.timeout(job.deadline_s * 1000), lease);
     } catch {
       outcome = { ok: false, retryable: true, code: 'backend_error', message: 'backend threw' };
     }
@@ -321,7 +345,10 @@ class Job {
     }
 
     await blob.put(cadOutputKey(row.id, 'log.txt'), new TextEncoder().encode(errorText(outcome)).buffer as ArrayBuffer, { contentType: 'text/plain; charset=utf-8' });
-    await this.releaseLease({ ok: false, retryable: outcome.retryable, backend_down: isBackendDown(outcome) });
+    await this.releaseLease({ ok: false, retryable: outcome.retryable, backend_down: isBackendDown(outcome), ...(outcome.recycle ? { recycle: true } : {}) });
+    if (outcome.alert) await sendCadAlert(this.deps.telegramText, outcome.alert, backendName, this.now().getTime());
+    // A crash is retried once: the second crash of the same job is final.
+    if (isCrashOutcome(outcome) && isCrashError(row.error)) outcome = { ...outcome, retryable: false };
     if (outcome.retryable && this.message.attempts < MAX_DELIVERIES) {
       await patchCadJob(this.ports.db, row.id, { status: 'queued', error: errorText(outcome), duration_ms });
       this.ports.events.point({ event: 'cad_job', run_id: this.runId ?? row.id, agent: 'cad', step: job.job_type, route: backendName, outcome: `retry_${outcome.code}`, tenant_id: row.tenant_id, latency_ms: duration_ms, attempt: this.message.attempts, bytes: head.size });
@@ -333,7 +360,7 @@ class Job {
     await this.finish(row, job, { status, backend: backendName, outcome: outcome.code, error: errorText(outcome), duration_ms });
   }
 
-  private async releaseLease(outcome: { ok: boolean; retryable?: boolean; backend_down?: boolean }): Promise<void> {
+  private async releaseLease(outcome: ReleaseOutcome): Promise<void> {
     const lease = this.lease;
     if (!lease) return;
     this.lease = null;
@@ -422,11 +449,13 @@ export async function cadJobsConsumer(batch: MessageBatch<CadJobMessageV1>, env:
   void ctx;
   const ports = deps.ports ?? makePorts(env);
   let router: CadRouterClient | undefined = deps.router;
+  let telegramText: TelegramTextPort | undefined = deps.telegramText;
   const resolved = {
     sleep: deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
     leaseWaitMs: deps.leaseWaitMs ?? LEASE_WAIT_MS,
     notifyFinal: deps.notifyFinal ?? ((rfqId: string, jobId: string, status: CadFinalStatus) => notifyCadJobFinal(env, rfqId, jobId, status)),
     router: () => (router ??= cadRouter(env)),
+    telegramText: () => (telegramText ??= makeP5Ports(env).telegramText),
   };
   for (const message of batch.messages) {
     const job = new Job(env, ports, resolved, message);

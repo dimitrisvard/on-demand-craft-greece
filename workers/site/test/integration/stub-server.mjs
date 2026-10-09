@@ -23,6 +23,8 @@
 // first module whose prefix matches and that answers -> the defaults below. Control paths under /__stub/ that are not
 // built in go to the modules too, and POST /__stub/reset also resets every module. Profile 'api' mounts no module,
 // so its answers stay as above. agentStubModules() builds one fresh instance of every module file present.
+// Profile 'jobs' (Phase 5): the 'agents' modules plus JOBS_STUB_MODULES (jobsStubModules(): PullPush, Algolia,
+// Xometry, IndexNow, Google AI Studio, Storage, CAD container), with the same module contract.
 
 import { existsSync } from 'node:fs';
 import http from 'node:http';
@@ -32,6 +34,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STUBS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'stubs');
 /** Stub module files of the profile 'agents' (each optional: a file another unit has not written yet is skipped). */
 export const AGENT_STUB_MODULES = ['anthropic', 'resend', 'telegram', 'gmail', 'google-token', 'unfold', 'postgrest'];
+/** Stub module files the profile 'jobs' (Phase 5) mounts after the profile 'agents' modules. */
+export const JOBS_STUB_MODULES = ['pullpush', 'hn', 'xometry', 'indexnow', 'google-ai-studio', 'storage', 'cad-container'];
 
 const RECORDED_HEADERS = ['content-type', 'accept', 'prefer', 'x-forwarded-host', 'range', 'content-profile', 'accept-profile'];
 const PRESENCE_HEADERS = ['authorization', 'apikey', 'cf-access-jwt-assertion', 'cookie'];
@@ -80,6 +84,11 @@ export async function agentStubModules(names = AGENT_STUB_MODULES) {
     modules.push({ name, prefixes, handle: instance.handle, reset: instance.reset ?? (() => {}), instance });
   }
   return modules;
+}
+
+/** One fresh instance of every Phase 5 stub module (profile 'jobs'). */
+export async function jobsStubModules() {
+  return agentStubModules(JOBS_STUB_MODULES);
 }
 
 async function moduleAnswer(state, req, res, url, body) {

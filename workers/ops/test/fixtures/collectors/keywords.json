@@ -1,0 +1,116 @@
+[
+  {
+    "keyword": "looking for manufacturer",
+    "category": "sourcing_intent",
+    "weight": 3,
+    "is_active": true
+  },
+  {
+    "keyword": "machining quote",
+    "category": "sourcing_intent",
+    "weight": 3,
+    "is_active": true
+  },
+  {
+    "keyword": "who can machine",
+    "category": "sourcing_intent",
+    "weight": 2,
+    "is_active": true
+  },
+  {
+    "keyword": "Germany",
+    "category": "geographic_europe",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "EU supplier",
+    "category": "geographic_europe",
+    "weight": 2,
+    "is_active": true
+  },
+  {
+    "keyword": "xometry is slow",
+    "category": "competitor_complaints",
+    "weight": 3,
+    "is_active": true
+  },
+  {
+    "keyword": "xometry",
+    "category": "competitor_mentions",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "protolabs",
+    "category": "competitor_mentions",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "aluminium 6061",
+    "category": "material_specific",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "titanium",
+    "category": "material_specific",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "aerospace",
+    "category": "industry_specific",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "medical device",
+    "category": "industry_specific",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "formula student",
+    "category": "competition_teams",
+    "weight": 2,
+    "is_active": true
+  },
+  {
+    "keyword": "cnc",
+    "category": "process",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "sheet metal",
+    "category": "process",
+    "weight": 1,
+    "is_active": true
+  },
+  {
+    "keyword": "tolerance",
+    "category": "technical",
+    "weight": 0,
+    "is_active": true
+  },
+  {
+    "keyword": "anodising",
+    "category": "finishing",
+    "weight": null,
+    "is_active": true
+  },
+  {
+    "keyword": "rapid prototyping",
+    "category": "process",
+    "weight": 2,
+    "is_active": true
+  },
+  {
+    "keyword": "weekend",
+    "category": "sourcing_intent",
+    "weight": 3,
+    "is_active": false
+  }
+]

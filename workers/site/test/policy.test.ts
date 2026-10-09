@@ -6,9 +6,9 @@ import { bindingFor, rateKey } from '../../shared/src/auth/rate-limit';
 import { ACTION_RULES, ALL_ACTION_IDS, machinesFor, parseGateModes, userScopeOf, type ActionId } from '../src/auth/policy';
 
 describe('ACTION_RULES', () => {
-  it('has a rule for each of the 41 action IDs (34 of Phase 2, AG-1…AG-7 of Phase 4)', () => {
-    expect(ALL_ACTION_IDS).toHaveLength(41);
-    expect(new Set(ALL_ACTION_IDS).size).toBe(41);
+  it('has a rule for each of the 43 action IDs (34 of Phase 2, AG-1…AG-7 of Phase 4, MK-8 and CD-1 of Phase 5)', () => {
+    expect(ALL_ACTION_IDS).toHaveLength(43);
+    expect(new Set(ALL_ACTION_IDS).size).toBe(43);
   });
 
   it('allows machine callers exactly as listed', () => {

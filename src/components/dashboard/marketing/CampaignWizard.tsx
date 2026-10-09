@@ -25,6 +25,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import CampaignTemplatesDialog from './CampaignTemplatesDialog';
+import { campaignSendMessage, EdgeSendError, startCampaignSend } from '@/utils/campaignSend';
 
 // Validation Schema
 const followUpSchema = z.object({
@@ -227,21 +228,21 @@ const CampaignWizard = () => {
         .select()
         .single();
 
-      // 2. Trigger Sending Function (if not scheduled)
+      // 2. Start sending (if not scheduled): the Worker route first, the edge function only as its fallback
       if (!data.scheduled_at) {
           try {
-              const { error: fnError } = await supabase.functions.invoke('send-campaign', {
-                  body: { campaign_id: campaign.id }
-              });
-              if (fnError) {
-                  console.error("Function error:", fnError);
+              const result = await startCampaignSend(campaign.id);
+              const message = campaignSendMessage(result, 'wizard');
+              if (message.kind === 'success') toast.success(message.text);
+              else toast.error(message.text);
+          } catch (sendError) {
+              if (sendError instanceof EdgeSendError) {
+                  console.error("Function error:", sendError.edgeError);
                   toast.error("Campaign created but failed to start sending.");
               } else {
-                  toast.success("Campaign sent successfully!");
+                  console.error("Invoke error:", sendError);
+                  toast.error("Failed to trigger send function.");
               }
-          } catch (invokeError) {
-              console.error("Invoke error:", invokeError);
-              toast.error("Failed to trigger send function.");
           }
       } else {
           toast.success('Campaign scheduled successfully!');

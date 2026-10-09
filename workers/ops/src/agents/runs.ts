@@ -46,7 +46,19 @@ export type AgentKey =
   | 'eval'
   | 'mcp'
   | 'flags'
-  | 'growth.scrapers';
+  | 'growth.scrapers'
+  // ----- Phase 5: consolidated compute (scheduled jobs, queue consumers and Workflows) -----
+  | 'content_daily'
+  | 'content_daily.translate'
+  | 'content_daily.sitemap'
+  | 'growth.reddit'
+  | 'growth.hn'
+  | 'growth.tenders'
+  | 'growth.xometry'
+  | 'marketing.send'
+  | 'marketing.followups'
+  | 'marketing.warmup'
+  | 'ops_digest';
 
 /** = agent_runs_trigger_check. */
 export type RunTrigger = 'email' | 'cron' | 'queue' | 'workflow' | 'dashboard' | 'telegram' | 'mcp' | 'manual';

@@ -10,6 +10,11 @@
 //   POST /__stub/gmail/script   {historyId?, added?: [ids], staleHistory?, messages?: {<id>: {headers: {name: value},
 //                               raw: <text>}}}
 //   GET  /__stub/gmail/calls    recorded paths (no Authorization value)
+// Phase 5 (profile 'jobs'): the send endpoint of the campaign mail.
+//   POST /gmail/users/me/messages/send       (and /gmail/v1/users/me/messages/send) {raw: base64url MIME} -> the
+//                                            next answer of script.send ([{status, body}]), else 200 {id, threadId,
+//                                            labelIds: ['SENT']}; a body without raw answers 400
+//   GET  /__stub/gmail/sent                  recorded sends: the decoded MIME text and the id answered
 // Every request needs an Authorization header (401 otherwise).
 // Module contract of stub-server.mjs: prefixes, createStubModule() -> {handle(req, res, url, body), reset()}.
 
@@ -27,6 +32,7 @@ function base64url(text) {
 export function createStubModule() {
   let script = {};
   const calls = [];
+  const sent = [];
 
   async function handle(req, res, url, body) {
     if (url.pathname === '/__stub/gmail/script' && req.method === 'POST') {
@@ -37,6 +43,37 @@ export function createStubModule() {
     }
     if (url.pathname === '/__stub/gmail/calls' && req.method === 'GET') {
       send(res, 200, calls);
+      return true;
+    }
+    if (url.pathname === '/__stub/gmail/sent' && req.method === 'GET') {
+      send(res, 200, sent);
+      return true;
+    }
+    if ((url.pathname === '/gmail/users/me/messages/send' || url.pathname === '/gmail/v1/users/me/messages/send') && req.method === 'POST') {
+      calls.push({ method: req.method, path: url.pathname + url.search });
+      if (!req.headers.authorization) {
+        send(res, 401, { error: { code: 401, message: 'Request is missing required authentication credential.' } });
+        return true;
+      }
+      let raw = null;
+      try {
+        raw = JSON.parse(body.toString('utf8') || '{}').raw ?? null;
+      } catch {
+        raw = null;
+      }
+      if (typeof raw !== 'string' || raw === '') {
+        send(res, 400, { error: { code: 400, message: "'raw' RFC822 payload message string or uploading message via /upload/* URL required" } });
+        return true;
+      }
+      const scripted = Array.isArray(script.send) ? script.send.shift() : undefined;
+      if (scripted && (scripted.status ?? 200) !== 200) {
+        sent.push({ mime: Buffer.from(raw, 'base64url').toString('utf8'), id: null, status: scripted.status });
+        send(res, scripted.status, scripted.body ?? { error: { code: scripted.status, message: 'scripted' } });
+        return true;
+      }
+      const id = `gmail-sent-${sent.length + 1}`;
+      sent.push({ mime: Buffer.from(raw, 'base64url').toString('utf8'), id, status: 200 });
+      send(res, 200, scripted?.body ?? { id, threadId: `thread-${sent.length}`, labelIds: ['SENT'] });
       return true;
     }
     if (!url.pathname.startsWith('/gmail/users/me/')) return false;
@@ -77,7 +114,8 @@ export function createStubModule() {
   function reset() {
     script = {};
     calls.length = 0;
+    sent.length = 0;
   }
 
-  return { prefixes, handle, reset, calls };
+  return { prefixes, handle, reset, calls, sent };
 }

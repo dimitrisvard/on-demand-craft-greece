@@ -1,5 +1,5 @@
 // CAD backend registry: HttpUnfoldBackend('vps') for STEP sheet metal, InlineBackend for DXF, STL and CNC STEP,
-// the container slot (Phase 5) and, with AGENT_STUBS containing 'cad', the fake backend of the T2 profile.
+// the container backend (Phase 5) and, with AGENT_STUBS containing 'cad', the fake backend of the T2 profile.
 //
 // Rules
 //   - 'vps' is registered only when CAD_UNFOLD_URL and CAD_SHARED_SECRET are configured (checked per use, so a
@@ -8,12 +8,19 @@
 //     test configs (AGENT_STUBS set, never in production, ports/index.ts) may point it at the local http: stub.
 //     invalidCadConfig() names a configured value that may not be used, and CAD jobs that need it fail
 //     'config_invalid'.
+//   - 'container' (Phase 5) is configured only with the CAD_CONTAINER binding (or, in generated T2 configs, the
+//     CAD_CONTAINER_BASE_URL override) and CAD_SHARED_SECRET; it reaches the container through P5Ports.container
+//     (makeP5Ports(env).container unless a port is passed) with maxConcurrency = the slot count. Without that
+//     configuration the unconfigured container backend is registered, which supports nothing;
+//     missingContainerConfig() names what is missing.
 //   - candidates(job, kind): an explicit backend in the message is honoured when it is registered and supports the
 //     job; 'auto' = CAD_BACKEND_DEFAULT (default 'vps'), then 'inline', each kept only when registered and
 //     supporting (job_type, kind, process). Health and free slots are CadRouter's decision.
 
 import { stubTokens } from '../agents/gateway';
+import { slotCount } from '../cad-container/slots';
 import type { OpsEnv } from '../env';
+import { makeP5Ports, type ContainerPort } from '../ports/p5';
 import type { CadJobMessageV1 } from '../queues/messages';
 import { ContainerBackend } from './backends/container';
 import { FakeCadBackend } from './backends/fake';
@@ -44,6 +51,14 @@ export function unfoldUrlAllowed(url: string, env: Pick<OpsEnv, 'AGENT_STUBS'>):
   return parsed.protocol === 'http:' && Boolean(env.AGENT_STUBS?.trim());
 }
 
+/** Names of what the container backend needs that is not configured (empty when it can be built). */
+export function missingContainerConfig(env: Pick<OpsEnv, 'CAD_CONTAINER' | 'CAD_CONTAINER_BASE_URL' | 'CAD_SHARED_SECRET'>): string[] {
+  const missing: string[] = [];
+  if (!env.CAD_CONTAINER && !env.CAD_CONTAINER_BASE_URL) missing.push('CAD_CONTAINER');
+  if (!env.CAD_SHARED_SECRET) missing.push('CAD_SHARED_SECRET');
+  return missing;
+}
+
 /** Names of configured CAD values that may not be used (empty when every configured value is usable). */
 export function invalidCadConfig(env: Pick<OpsEnv, 'CAD_UNFOLD_URL' | 'AGENT_STUBS'>): string[] {
   return env.CAD_UNFOLD_URL && !unfoldUrlAllowed(env.CAD_UNFOLD_URL, env) ? ['CAD_UNFOLD_URL'] : [];
@@ -72,9 +87,13 @@ export class MapCadRegistry implements CadBackendRegistry {
   }
 }
 
-export function makeCadRegistry(env: OpsEnv, o?: { fetcher?: UnfoldFetcher }): CadBackendRegistry {
+export function makeCadRegistry(env: OpsEnv, o?: { fetcher?: UnfoldFetcher; container?: ContainerPort }): CadBackendRegistry {
   if (stubTokens(env).has('cad')) return new MapCadRegistry([new FakeCadBackend('vps'), new InlineBackend()], 'vps');
-  const backends: CadBackend[] = [new InlineBackend(), new ContainerBackend()];
+  const container =
+    missingContainerConfig(env).length === 0
+      ? new ContainerBackend({ port: o?.container ?? makeP5Ports(env).container, apiKey: env.CAD_SHARED_SECRET as string, maxConcurrency: slotCount(env) })
+      : new ContainerBackend();
+  const backends: CadBackend[] = [new InlineBackend(), container];
   if (missingCadConfig(env).length === 0 && invalidCadConfig(env).length === 0) {
     const fetcher: UnfoldFetcher = o?.fetcher ?? ((req) => fetch(req));
     backends.push(

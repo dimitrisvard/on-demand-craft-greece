@@ -10,6 +10,7 @@
     "check-bundle": "node scripts/check-bundle.mjs",
     "test:integration": "vitest run -c vitest.t2.config.ts",
     "test:integration:agents": "T2_PROFILE=agents vitest run -c vitest.t2.agents.config.ts",
+    "test:integration:jobs": "T2_PROFILE=jobs vitest run -c vitest.t2.jobs.config.ts",
     "eval:synthetic": "vitest run -c eval/vitest.eval.config.ts",
     "eval:live": "EVAL_MODE=live vitest run -c eval/vitest.eval.config.ts",
     "pdf:samples": "PDF_SAMPLES=1 vitest run test/pdf/samples.test.ts",
@@ -17,6 +18,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
+    "@cloudflare/containers": "0.3.7",
     "@cloudflare/puppeteer": "1.4.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",

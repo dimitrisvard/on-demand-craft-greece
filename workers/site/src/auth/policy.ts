@@ -22,6 +22,12 @@
 //   AG-6  start                     STAFF or ADMIN session ('test_card': ADMIN)               rate u:<uid>:agent
 //   AG-7  file, staff preview       STAFF or ADMIN session, fixed key patterns                rate u:<uid>:agent
 // actionIdOf() gives AG-1 for every decision; the gate takes AG-2 when the request carries a relay header.
+//
+// Phase 5:
+//   MK-8  marketing send-campaign       STAFF or ADMIN session; POST only (405 otherwise)   rate u:<uid>:send-campaign
+//   CD-1  CAD compat path               path token equals CAD_COMPAT_TOKEN (access           rate m:cad-compat
+//         (/api/cad/<token>/...)        'cad-token', ./cad-compat.ts); POST only (405), any
+//                                       other /api/cad/* path 404; principal MACHINE:cad-compat
 
 import type { ResolvedApi } from '../api/resolve';
 
@@ -29,11 +35,15 @@ export type ActionId = 'EM-1' | 'EM-2' | 'EM-3' | 'EM-4' | 'S3-1' | 'S3-2' | 'S3
   | 'MK-1' | 'MK-2' | 'MK-3' | 'MK-4' | 'MK-5' | 'MK-6' | 'MK-7' | 'NT-1' | 'NT-2' | 'NT-3' | 'NT-4' | 'NT-5' | 'NT-6' | 'NT-7'
   | 'GS-1' | 'TD-1' | 'TD-2' | 'TS-1' | 'FS-1' | 'FS-2' | 'FS-3' | 'SC-1' | 'SC-2' | 'SC-3'
   // Phase 4: /api/agent/*
-  | 'AG-1' | 'AG-2' | 'AG-3' | 'AG-4' | 'AG-5' | 'AG-6' | 'AG-7';
+  | 'AG-1' | 'AG-2' | 'AG-3' | 'AG-4' | 'AG-5' | 'AG-6' | 'AG-7'
+  // Phase 5: marketing send-campaign, CAD compat path
+  | 'MK-8' | 'CD-1';
 
 export type MachineName = 'collector' | 'mcp';
 
-export type Access = 'public' | 'turnstile' | 'turnstile-or-staff' | 'files' | 'staff' | 'admin' | 'admin-json' | 'relay' | 'signed-link';
+export type Access = 'public' | 'turnstile' | 'turnstile-or-staff' | 'files' | 'staff' | 'admin' | 'admin-json' | 'relay' | 'signed-link'
+  // Phase 5: the CAD compat token in the request path (./cad-compat.ts)
+  | 'cad-token';
 
 export interface ActionRule {
   access: Access;
@@ -86,6 +96,8 @@ export const ACTION_RULES: Readonly<Record<ActionId, ActionRule>> = {
   'AG-5': { access: 'staff', userScope: 'agent' },
   'AG-6': { access: 'staff', userScope: 'agent' },
   'AG-7': { access: 'staff', userScope: 'agent' },
+  'MK-8': { access: 'staff', userScope: 'send-campaign' },
+  'CD-1': { access: 'cad-token' },
 };
 
 export const ALL_ACTION_IDS = Object.keys(ACTION_RULES) as ActionId[];
@@ -140,6 +152,7 @@ export function actionIdOf(r: ResolvedApi): ActionId | null {
       if (action === 'webhook') return 'MK-2';
       if (action === 'apollo-enrich') return 'MK-7';
       if (action === 'google-auth') return lookup(OAUTH_STEP_IDS, r.step);
+      if (action === 'send-campaign') return 'MK-8';
       return null;
     case 'notifications':
       return lookup(NOTIFICATION_IDS, action) ?? (action.startsWith('inv-') ? 'NT-4' : null);
@@ -162,6 +175,8 @@ export function actionIdOf(r: ResolvedApi): ActionId | null {
       return 'SC-3';
     case 'agent':
       return action === 'file' ? agentFileId(r) : lookup(AGENT_IDS, action);
+    case 'cad-compat':
+      return 'CD-1';
     default:
       return null;
   }

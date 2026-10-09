@@ -1,6 +1,8 @@
 // Prices used for agent_runs.cost_cents and the Analytics Engine cost_usd double (list prices, USD).
 // Sources: claude-api skill model table (cached 2026-09-25, read 2026-10-03 and 2026-10-05) for the Anthropic rows;
-// https://developers.cloudflare.com/workers-ai/models/bge-m3/ (fetched 2026-10-03) for bge-m3.
+// https://developers.cloudflare.com/workers-ai/models/bge-m3/ (fetched 2026-10-03) for bge-m3; the Gemini rows of
+// Phase 5 name their own source below. Rows added for a new model leave every earlier price, and so
+// PRICES_VERSION, unchanged.
 // A price change is a code change with a new PRICES_VERSION, recorded in agent_runs.output.prices_version.
 //
 // Rules
@@ -26,8 +28,17 @@ export const LLM_PRICES: Readonly<Record<string, ModelPrice>> = Object.freeze({
   'claude-haiku-4-5': { input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25 },
   // Dated id of the same model, as a response may name it.
   'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25 },
-  // Server-side refusal fallback target of extract calls (same list price as Sonnet 5.5).
+  // Server-side refusal fallback target of extract calls (same list price as Sonnet 5.5); Phase 5 also uses it as the
+  // content-daily article model (value.model default).
   'claude-sonnet-5': { input: 2.0, output: 10.0, cache_read: 0.2, cache_write: 2.5 },
+  // ----- Phase 5: translation chain (Gemini through the AI Gateway route google-ai-studio) -----
+  // Source: https://ai.google.dev/gemini-api/docs/pricing, paid tier, standard, text input and output (thinking
+  // included), context caching (fetched 2026-10-08, page "last updated 2026-10-07"). Gemini bills no separate cache
+  // write, so cache_write = input. gemini-2.0-flash, gemini-2.0-flash-lite and the alias gemini-flash-latest have
+  // no row on that page: a call answered by them is recorded with its tokens and no price (price_missing when the
+  // run spent nothing priced); an alias call is priced by the answer's modelVersion when that has a row.
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4, cache_read: 0.01, cache_write: 0.1 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5, cache_read: 0.03, cache_write: 0.3 },
 });
 
 /** USD per million input tokens. */

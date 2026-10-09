@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import io
 import os
+import hmac
 import json
+import asyncio
+import multiprocessing
 import math
 import shutil
 import logging
@@ -23,7 +26,7 @@ from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import MAX_FILE_SIZE, API_KEY, get_k_factor
+from config import MAX_FILE_SIZE, API_KEY, REQUIRE_API_KEY, PROCESSING_TIMEOUT, get_k_factor
 from storage.s3_client import download_file, validate_step_file
 
 logging.basicConfig(
@@ -46,14 +49,115 @@ app.add_middleware(
 )
 
 
-# ── Middleware: optional API key check ──────────────────────────────────────
+# ── Middleware: enforced wall clock (P5-6) ─────────────────────────────────
+# Each processing request runs the unchanged handler in a forked child process;
+# the child is killed after PROCESSING_TIMEOUT seconds or when the client goes
+# away. Responses are replayed message by message, so their bytes are unchanged.
+
+_BOUNDED = ("/api/v1/unfold", "/flat-pattern")
+# Heavy modules load once in the parent; forked children inherit them (P5-6).
+import core.step_parser, core.unfolder, core.kfactor, export.dxf_exporter, export.svg_exporter, drawing.pdf_generator  # noqa: E401,F401,E402
+_job_slot = asyncio.Semaphore(1)  # one job at a time, as with the single blocking worker before
+
+
+def _child(app, scope, body, tx):
+    sent: list = []
+
+    async def receive():
+        nonlocal body
+        if body is None:
+            await asyncio.Future()  # no disconnect inside the child
+        chunk, body = body, None
+        return {"type": "http.request", "body": chunk, "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    try:
+        asyncio.run(app(scope, receive, send))
+        tx.send(("ok", sent))
+    except BaseException as exc:  # noqa: BLE001 - reported to the parent
+        tx.send(("err", repr(exc)))
+
+
+def _spawn(app, scope, body):
+    ctx = multiprocessing.get_context("fork")
+    rx, tx = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_child, args=(app, scope, body, tx), daemon=True)
+    proc.start()  # forked from a worker thread: the child has no running event loop
+    tx.close()
+    return proc, rx
+
+
+class WallClockMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] != "POST" or not scope["path"].startswith(_BOUNDED):
+            return await self.app(scope, receive, send)
+        body = b""
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body += message.get("body", b"")
+            if not message.get("more_body"):
+                break
+        async with _job_slot:
+            proc, rx = await asyncio.to_thread(_spawn, self.app, dict(scope), body)
+            done = asyncio.ensure_future(asyncio.to_thread(rx.poll, PROCESSING_TIMEOUT))
+            gone = asyncio.ensure_future(receive())
+            await asyncio.wait({done, gone}, return_when=asyncio.FIRST_COMPLETED)
+            disconnected = gone.done()
+            ready = done.done() and done.result()
+            result = None
+            if ready:
+                try:
+                    result = await asyncio.to_thread(rx.recv)
+                except EOFError:
+                    pass
+            if proc.is_alive():
+                proc.kill()
+            gone.cancel()
+            await done  # returns at once: the child has exited or was killed
+            await asyncio.to_thread(proc.join, 10)
+            rx.close()
+        if result is None:
+            if disconnected:
+                detail, status = "Client disconnected; processing stopped", 499
+            elif not ready:
+                logger.warning("Processing timeout after %ss on %s", PROCESSING_TIMEOUT, scope["path"])
+                detail, status = f"Processing timeout after {PROCESSING_TIMEOUT:g} s", 504
+            else:
+                detail, status = f"Processing crashed (exit {proc.exitcode})", 500
+            await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
+            return
+        kind, payload = result
+        if kind != "ok":
+            raise RuntimeError(payload)
+        for message in payload:
+            await send(message)
+
+
+app.add_middleware(WallClockMiddleware)
+
+
+# ── Middleware: API key check ────────────────────────────────────────────────
+# P5-6: every route except the health checks; constant-time compare.
+
+_OPEN_PATHS = ("/health", "/api/v1/health")
+
 
 @app.middleware("http")
 async def check_api_key(request: Request, call_next):
-    if API_KEY and request.url.path.startswith("/api/"):
-        key = request.headers.get("X-API-Key", "")
-        if key != API_KEY:
-            return JSONResponse({"error": "Invalid API key"}, status_code=401)
+    if request.url.path not in _OPEN_PATHS:
+        if API_KEY:
+            key = request.headers.get("X-API-Key", "")
+            if not hmac.compare_digest(key.encode(), API_KEY.encode()):
+                return JSONResponse({"error": "Invalid API key"}, status_code=401)
+        elif REQUIRE_API_KEY:
+            return JSONResponse({"error": "API key not configured"}, status_code=503)
     return await call_next(request)
 
 

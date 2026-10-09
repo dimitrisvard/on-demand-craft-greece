@@ -19,6 +19,12 @@
 //   gives each code (PostgREST docs (fetched 2026-10-03) https://docs.postgrest.org/en/stable/references/errors.html).
 //   Tables: the tables of the agent layer and the business tables its agents read and write (TABLES below); any
 //   other table answers 404 PGRST205 until a seed creates it.
+//   Phase 5 (PHASE5_SPEC §5.10): the business tables of the consolidated jobs (P5_TABLES) are served too; inserts and
+//   upserts into them keep their unique keys (articles (slug, language), leads source_url and (source, external_id),
+//   gsc_monitored_urls url, xometry_offers code, tenders (country_code, tender_reference): 23505, ignore- and
+//   merge-duplicates on those keys, 42P10 for another conflict target) and fill the live time defaults; the
+//   article-queue RPCs (enqueue_next_article, get_next_queue_job, mark_queue_job_completed, mark_queue_job_failed)
+//   answer from workers/ops/src/ports/p5-stub/memory-rpc-p5.ts, the code T1's P5MemoryDb uses. Nothing else changes.
 //
 // Control API
 //   POST /__stub/seed            {tables?: {<table>: [rows]}, replace?: boolean, flags?: 'migration'}: rows as
@@ -51,6 +57,7 @@ import {
   updateRow,
   upsertRow,
 } from '../../../../ops/test/helpers/memory-rpc.ts';
+import { isP5Table, P5_MEMORY_RPCS, P5_UNIQUE_KEYS, p5WriteRow } from '../../../../ops/src/ports/p5-stub/memory-rpc-p5.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = path.resolve(HERE, '../../../../../supabase/migrations');
@@ -62,6 +69,9 @@ export const TABLES = [
   'stock_reservations', 'marketing_sender_accounts', 'company_leads', 'scan_logs', 'saved_searches', 'user_roles',
   'stock_transactions', 'nesting_sessions',
 ];
+
+/** Business tables of the Phase 5 jobs (PHASE5_SPEC §5.10), served before any seed as well. */
+export const P5_TABLES = Object.keys(P5_UNIQUE_KEYS);
 
 export const prefixes = ['/rest/v1/', '/__stub/seed', '/__stub/rows/', '/__stub/postgrest/'];
 
@@ -278,7 +288,7 @@ const errorReply = (e) => reply(e.status ?? 500, { code: e.code ?? null, message
 export function createPostgrest(options = {}) {
   const tables = {};
   const clock = options.clock ?? (() => new Date());
-  const known = new Set(TABLES);
+  const known = new Set([...TABLES, ...P5_TABLES]);
 
   function migrationFlags() {
     const hits = fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith('_agent_layer.sql'));
@@ -336,6 +346,15 @@ export function createPostgrest(options = {}) {
       const target = params.get('on_conflict')?.split(',').map((s) => s.trim())
         ?? (resolution ? (UNIQUE_KEYS[table]?.[0] ?? ['id']) : null);
       const written = atomically(tables, () => items.flatMap((r) => {
+        if (isP5Table(table)) {
+          try {
+            const row = p5WriteRow(tables, table, r, now, resolution && target ? { onConflict: target, merge: resolution === 'merge-duplicates' } : {});
+            return row ? [row] : [];
+          } catch (e) {
+            if (e && typeof e.status === 'number' && typeof e.code === 'string') throw new RestError(e.status, e.code, e.message, e.details ?? null);
+            throw e;
+          }
+        }
         if (resolution && target) {
           const res = upsertRow(tables, table, r, now, { onConflict: target, merge: resolution === 'merge-duplicates' });
           return res.inserted || res.updated ? [res.row] : [];
@@ -371,7 +390,8 @@ export function createPostgrest(options = {}) {
     else if (method === 'GET' || method === 'HEAD') args = Object.fromEntries([...params].filter(([k]) => !RESERVED.has(k)));
     else throw new RestError(405, 'PGRST117', `Unsupported HTTP method: ${method}`);
     if (!isObject(args)) throw new RestError(400, 'PGRST102', 'Invalid body: expected an object of named arguments');
-    const result = callRpc(tables, name, args, clock());
+    const p5 = Object.prototype.hasOwnProperty.call(P5_MEMORY_RPCS, name) ? P5_MEMORY_RPCS[name] : null;
+    const result = p5 ? atomically(tables, () => p5(tables, args, clock())) : callRpc(tables, name, args, clock());
     if (Array.isArray(result) && String(headers.accept ?? '').includes('application/vnd.pgrst.object+json')) {
       if (result.length !== 1) throw new RestError(406, 'PGRST116', 'JSON object requested, multiple (or no) rows returned');
       return reply(200, result[0]);
@@ -422,7 +442,7 @@ export function createPostgrest(options = {}) {
     for (const k of Object.keys(tables)) delete tables[k];
     resetSequences(tables);
     known.clear();
-    for (const t of TABLES) known.add(t);
+    for (const t of [...TABLES, ...P5_TABLES]) known.add(t);
   }
 
   /** Node adapter: answers and resolves true when the request is this module's. */

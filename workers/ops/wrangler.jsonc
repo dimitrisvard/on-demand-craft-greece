@@ -14,6 +14,14 @@
 // microns-site) and the mcp.micronshub.eu zone. Phase 4 secrets are optional and checked where they are used, so
 // they are not in secrets.required.
 //
+// Phase 5 (consolidated compute) needs before its first deploy: queues translations, translations-dlq,
+// outbound-mail and outbound-mail-dlq; the SEO_CACHE KV namespace id (same namespace as microns-site); the CAD
+// image pushed to the Cloudflare registry and its reference in containers[0].image (the image is pushed before the
+// deploy that adds migration tag v2). The schedule of the Phase 5 jobs is a table in src/cron/schedule.ts read by the
+// existing every-minute trigger, so triggers.crons does not change. Phase 5 secrets (INDEXNOW_KEY, XOMETRY_TOKEN,
+// XOMETRY_COOKIE) are optional and checked where they are used. CAD_BACKEND_DEFAULT stays "vps" until the CAD
+// switch-over step.
+//
 // Secrets: NAMES ONLY. Set values with `npx wrangler secret put <NAME>` in this folder; for local runs put them in
 // workers/ops/.dev.vars (gitignored; template .dev.vars.example). The repository is public: never write a value here.
 {
@@ -57,12 +65,30 @@
     "MCP_ACCESS_AUD": "<ACCESS_AUD_MCP>",
     "SCRAPER_USER_AGENT": "MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)",
     // JSON object host -> permission reference recorded by the owner; empty = no host is permitted.
-    "SCRAPER_PERMITTED_HOSTS": "{}"
+    "SCRAPER_PERMITTED_HOSTS": "{}",
+    // Phase 5 (consolidated compute). No T2-only override (PULLPUSH_API_BASE, HN_API_BASE, XOMETRY_API_BASE,
+    // INDEXNOW_API_BASE, AGENT_GEMINI_BASE_URL, CAD_CONTAINER_BASE_URL) ever appears here.
+    "TRACKING_DOMAIN": "https://micronshub.eu",
+    "DIGEST_FROM": "MicronsHub Ops <info@micronshub.eu>",
+    // Marketing switches: anything but "true" is off. PAUSED = rollback to the edge path; STOPPED = no campaign
+    // mail at all (queued mail is held).
+    "MARKETING_FOLLOWUPS_ENABLED": "false",
+    "MARKETING_WARMUP_ENABLED": "false",
+    "OUTBOUND_MAIL_PAUSED": "false",
+    "OUTBOUND_MAIL_STOPPED": "false",
+    // CAD Container: CAD_SLOTS must equal containers[0].max_instances; CAD_INPUT_HOSTS = the exact presign hosts of
+    // the RFQ storage (comma list), set at deploy time.
+    "CAD_SLOTS": "3",
+    "CAD_INPUT_HOSTS": "<CAD_INPUT_HOSTS>",
+    "CAD_PROCESSING_TIMEOUT_S": "120",
+    "CAD_KEEP_WARM": "off"
   },
   // ----- Phase 4: agent layer -----
   // Agent flags are read from the KV mirror of public.feature_flags (same namespace as microns-site).
   "kv_namespaces": [
-    { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" }
+    { "binding": "FLAGS", "id": "<KV_ID_FLAGS>" },
+    // Phase 5: the SEO cache of microns-site (same namespace), purged after publishing.
+    { "binding": "SEO_CACHE", "id": "<KV_ID_SEO_CACHE>" }
   ],
   // Raw mail, attachments, RFQ files, CAD outputs, quote and traveller PDFs (bucket created in Phase 2).
   "r2_buckets": [
@@ -71,18 +97,39 @@
   "workflows": [
     { "name": "rfq-intake", "binding": "RFQ_INTAKE", "class_name": "RfqIntakeWorkflow" },
     { "name": "quote", "binding": "QUOTE", "class_name": "QuoteWorkflow" },
-    { "name": "post-order", "binding": "POST_ORDER", "class_name": "PostOrderWorkflow" }
+    { "name": "post-order", "binding": "POST_ORDER", "class_name": "PostOrderWorkflow" },
+    // Phase 5
+    { "name": "content-daily", "binding": "CONTENT_DAILY", "class_name": "ContentDailyWorkflow" },
+    { "name": "sitemap", "binding": "SITEMAP", "class_name": "SitemapWorkflow" },
+    { "name": "ops-digest", "binding": "OPS_DIGEST", "class_name": "OpsDigestWorkflow" }
   ],
   "durable_objects": {
     "bindings": [
       { "name": "RFQ_THREAD", "class_name": "RfqThread" },
       { "name": "MATERIAL_STOCK", "class_name": "MaterialStock" },
-      { "name": "CAD_ROUTER", "class_name": "CadRouter" }
+      { "name": "CAD_ROUTER", "class_name": "CadRouter" },
+      // Phase 5
+      { "name": "SENDER_LIMITER", "class_name": "SenderLimiter" },
+      { "name": "CAD_CONTAINER", "class_name": "CadContainer" }
     ]
   },
   // A migration tag is never edited after it was deployed; a later class gets a new tag.
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter"] }
+    { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter"] },
+    // Phase 5: both classes in one deploy, after the CAD image was pushed.
+    { "tag": "v2", "new_sqlite_classes": ["SenderLimiter", "CadContainer"] }
+  ],
+  // Phase 5: the CAD unfold service as a Container (class CadContainer, binding CAD_CONTAINER). The image is prebuilt
+  // by .github/workflows/cad-image.yml and referenced by its registry tag, exactly as `wrangler containers push`
+  // prints it.
+  "containers": [
+    {
+      "name": "microns-cad",
+      "class_name": "CadContainer",
+      "image": "registry.cloudflare.com/<CF_ACCOUNT_ID>/microns-cad:<IMAGE_TAG>",
+      "instance_type": "standard-1",
+      "max_instances": 3
+    }
   ],
   "vectorize": [
     { "binding": "QUOTES_INDEX", "index_name": "quotes-v1" }
@@ -104,7 +151,8 @@
     { "type": "Data", "globs": ["**/*.ttf", "**/*.png"], "fallthrough": true },
     { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
   ],
-  // UTC. Every minute: flag mirror sync; every 10 minutes: dispatcher (Gmail poller, orphans, parked runs).
+  // UTC. Every minute: flag mirror sync and (Phase 5) the schedule table of src/cron/schedule.ts; every 10 minutes:
+  // dispatcher (Gmail poller, orphans, parked runs).
   "triggers": {
     "crons": ["* * * * *", "*/10 * * * *"]
   },
@@ -112,7 +160,10 @@
     "producers": [
       { "binding": "SCRAPES", "queue": "scrapes" },
       { "binding": "CAD_JOBS", "queue": "cad-jobs" },
-      { "binding": "AGENT_EVENTS", "queue": "agent-events" }
+      { "binding": "AGENT_EVENTS", "queue": "agent-events" },
+      // Phase 5
+      { "binding": "TRANSLATIONS", "queue": "translations" },
+      { "binding": "OUTBOUND_MAIL", "queue": "outbound-mail" }
     ],
     // One scan per invocation, at most two at once; a failed scan is retried after 5 minutes, three times, then
     // kept in scrapes-dlq (created automatically when missing). max_retries must equal MAX_RETRIES in
@@ -141,6 +192,26 @@
         "max_batch_timeout": 10,
         "max_retries": 3,
         "dead_letter_queue": "agent-events-dlq"
+      },
+      // Phase 5: one translation per invocation, up to three at once; retried 5 times (2 min apart, longer when the
+      // models are overloaded), then kept in translations-dlq.
+      {
+        "queue": "translations",
+        "max_batch_size": 1,
+        "max_retries": 5,
+        "retry_delay": 120,
+        "max_concurrency": 3,
+        "dead_letter_queue": "translations-dlq"
+      },
+      // Phase 5: campaign mail; messages of a batch are sent one after another, paced per sender by SenderLimiter
+      // (waiting is a delayed re-send, never a retry).
+      {
+        "queue": "outbound-mail",
+        "max_batch_size": 10,
+        "max_retries": 3,
+        "retry_delay": 60,
+        "max_concurrency": 2,
+        "dead_letter_queue": "outbound-mail-dlq"
       }
     ]
   },

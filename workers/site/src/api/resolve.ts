@@ -16,6 +16,18 @@
 // forwarded. The action is the one path segment after /api/agent/ when it is one of AGENT_ACTIONS, else #unknown
 // (the site answers 404 {"error":"not_found"}); a known action with another method is #method (the site answers 405
 // with Allow). Neither sentinel is dispatched. The function URL is /api/agent/<action> with the query as sent.
+//
+// Phase 5:
+//   - /api/marketing (and /api/track) action send-campaign: resolved as 'send-campaign' for every method; the gate
+//     (action MK-8) answers 405 {"error":"method_not_allowed"} with Allow: POST itself for any method but POST, so
+//     such a request is never dispatched (a new action, no Vercel answer to keep).
+//   - Endpoint 'cad-compat' (/api/cad/*, served by microns-ops): a request whose canonical path is /api/cad or lies
+//     under /api/cad/ is this endpoint (tested before the catalogue, as /api/agent/); it has no Vercel handler and is
+//     never forwarded. The raw path must be exactly /api/cad/<token>/flat-pattern with a token of 32-128 characters
+//     [A-Za-z0-9_-]: POST resolves to 'flat-pattern', any other method to 'method-not-allowed'; every other path
+//     under /api/cad/ resolves to 'not-found'. The gate (action CD-1) answers 404 and 405 itself, so neither is
+//     dispatched. The function URL is always /api/cad/flat-pattern: the token segment and the query never reach
+//     microns-ops.
 
 import { AGENT_ACTIONS, type AgentAction } from '../../../shared/src/agent-api';
 import { parseQuery, parseVercelBody, type BodyView } from '../../../shared/src/compat/vercel-node';
@@ -131,10 +143,34 @@ export function agentActionOfPath(pathname: string): AgentAction | null {
   return (AGENT_ACTIONS as readonly string[]).includes(segment) ? (segment as AgentAction) : null;
 }
 
+/** Prefix of the CAD compat endpoint (Phase 5). */
+export const CAD_PATH_PREFIX = '/api/cad/';
+
+/** Function URL of the CAD compat endpoint (the token segment never reaches microns-ops). */
+export const CAD_COMPAT_FUNCTION_URL = '/api/cad/flat-pattern';
+
+/** The one public path shape of the CAD compat endpoint: the token is the only capture. */
+export const CAD_COMPAT_PATH_RE = /^\/api\/cad\/([A-Za-z0-9_-]{32,128})\/flat-pattern$/;
+
+/** Actions of the CAD compat endpoint. */
+export type CadCompatAction = 'flat-pattern' | 'method-not-allowed' | 'not-found';
+
+/** True when the canonical spelling of the path is /api/cad or lies under /api/cad/. */
+export function isCadPath(pathname: string): boolean {
+  return `${canonicalApiPath(pathname)}/`.startsWith(CAD_PATH_PREFIX);
+}
+
+/** The compat token of a raw request path, or null when the path is not exactly /api/cad/<token>/flat-pattern. */
+export function cadCompatTokenOf(pathname: string): string | null {
+  const match = CAD_COMPAT_PATH_RE.exec(pathname);
+  return match ? (match[1] as string) : null;
+}
+
 /** Catalogue lookup by path only (incl. /api/track and /api/connector-status and every spelling of a catalogue
- *  path); null: forward with the body unread. Paths of the agent endpoint are tested first. */
+ *  path); null: forward with the body unread. Paths of the agent and CAD compat endpoints are tested first. */
 export function endpointOfPath(pathname: string): EndpointId | null {
   if (isAgentPath(pathname)) return 'agent';
+  if (isCadPath(pathname)) return 'cad-compat';
   const path = cataloguePathOf(pathname);
   return path === null ? null : (CATALOGUE.get(path) ?? null);
 }
@@ -245,6 +281,9 @@ function resolveMarketing(i: Input): Resolution {
       if (i.method === 'OPTIONS') return { action: '#options', rawAction: raw };
       if (i.method !== 'POST') return { action: '#method', rawAction: raw };
       return { action: raw, rawAction: raw };
+    // Phase 5: every method resolves to the action; the gate (MK-8) answers 405 for any method but POST.
+    case 'send-campaign':
+      return { action: raw, rawAction: raw };
     default:
       return { action: '#unknown', rawAction: raw };
   }
@@ -344,7 +383,8 @@ function resolveAction(endpoint: EndpointId, i: Input): Resolution {
     case 'scan-directory':
       return resolvePostOnly(i, 'post');
     case 'agent':
-      // Resolved by resolveAgent() before this switch is reached.
+    case 'cad-compat':
+      // Resolved by resolveAgent() / resolveCadCompat() before this switch is reached.
       return { action: '#unknown', rawAction: undefined };
   }
 }
@@ -376,10 +416,32 @@ function resolveAgent(request: Request, url: URL, bodyBytes: Uint8Array): Resolv
   };
 }
 
+/** Resolution of an /api/cad/* request (rules in the header); the token is never part of the result's function URL. */
+function resolveCadCompat(request: Request, url: URL, bodyBytes: Uint8Array): ResolvedApi {
+  const method = request.method.toUpperCase();
+  const bytes = method === 'GET' || method === 'HEAD' ? EMPTY : bodyBytes;
+  let action: CadCompatAction;
+  if (cadCompatTokenOf(url.pathname) === null) action = 'not-found';
+  else if (method !== 'POST') action = 'method-not-allowed';
+  else action = 'flat-pattern';
+  return {
+    endpoint: 'cad-compat',
+    publicPath: url.pathname,
+    functionUrl: CAD_COMPAT_FUNCTION_URL,
+    method,
+    query: {},
+    body: parseVercelBody(request.headers.get('content-type'), bytes),
+    bodyBytes: bytes,
+    action,
+    rawAction: action,
+  };
+}
+
 /** Called only when endpointOfPath() is not null. */
 export function resolveApi(request: Request, bodyBytes: Uint8Array): ResolvedApi {
   const url = new URL(request.url);
   if (isAgentPath(url.pathname)) return resolveAgent(request, url, bodyBytes);
+  if (isCadPath(url.pathname)) return resolveCadCompat(request, url, bodyBytes);
   const path = cataloguePathOf(url.pathname);
   const endpoint = path === null ? undefined : CATALOGUE.get(path);
   if (path === null || endpoint === undefined) throw new Error(`resolveApi: ${url.pathname} is not an /api endpoint of the catalogue`);

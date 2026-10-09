@@ -7,7 +7,9 @@ export type EndpointId =
   | 'emails' | 's3' | 'marketing' | 'notifications' | 'gsc' | 'tenders' | 'tender-scan'
   | 'funded-startups' | 'scrape-website' | 'scrape-company-profile' | 'scan-directory'
   // Phase 4: /api/agent/* (decision, status, flag, start, file), served by microns-ops.
-  | 'agent';
+  | 'agent'
+  // Phase 5: /api/cad/<token>/flat-pattern (CAD compat path of the untouched edge functions), served by microns-ops.
+  | 'cad-compat';
 
 export type PrincipalClass = 'ANON' | 'CUSTOMER' | 'PARTNER' | 'STAFF' | 'ADMIN' | 'MACHINE';
 
@@ -20,8 +22,9 @@ export interface Principal {
   email?: string;
   /** user_roles.role values as read (array). */
   roles?: string[];
-  /** MACHINE only: the machine caller's name ('telegram' = the approval relay, Phase 4). */
-  machine?: 'collector' | 'mcp' | 'telegram';
+  /** MACHINE only: the machine caller's name ('telegram' = the approval relay, Phase 4; 'cad-compat' = the CAD
+   *  compat path, Phase 5). */
+  machine?: 'collector' | 'mcp' | 'telegram' | 'cad-compat';
 }
 
 export interface OpsCall {

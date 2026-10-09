@@ -1,0 +1,3 @@
+# The frozen prompts are byte copies of the live templates (LOCK.json pins their SHA-256): LF on every checkout.
+*.md text eol=lf
+LOCK.json text eol=lf

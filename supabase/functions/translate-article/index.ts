@@ -8,7 +8,7 @@ const siteUrl = Deno.env.get("SITE_URL") || "https://www.micronshub.eu";
 const indexNowKey = Deno.env.get("INDEXNOW_KEY") || "";
 
 const BRAND_NAME = "Microns Hub";
-const VERSION = "2026-04-16-no-429-wait";
+const VERSION = "2026-04-16-freetier-25flashlite-chain";
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -59,21 +59,24 @@ interface GeminiResponse {
   error?: { message: string };
 }
 
-// Model-fallback chain prioritising free-tier quota headroom.
-// gemini-2.5-flash has only 5 RPM / 20 RPD on the free plan, which is far too
-// low for 13 languages × 2+ calls each. The models below all have 15-30 RPM
-// and 1 500 RPD on the free tier, so a full article translation fits easily.
+// Model-fallback chain for Gemini free tier (verified via ListModels on 2026-04-16).
+// gemini-1.5-* is fully retired by Google on both v1 and v1beta (returns 404).
+// Published free-tier limits at time of writing:
 //
-//   gemini-2.0-flash        — 15 RPM, 1 500 RPD, best quality (v1beta)
-//   gemini-2.0-flash-lite   — 30 RPM, 1 500 RPD, fastest (v1beta)
-//   gemini-1.5-flash-latest — 15 RPM, 1 500 RPD, stable fallback (v1)
+//   gemini-2.5-flash-lite   — 15 RPM, 1 000 RPD (v1beta)  ← highest daily capacity
+//   gemini-2.5-flash        — 10 RPM,   250 RPD (v1beta)  ← better quality backup
+//   gemini-2.0-flash        — 15 RPM,   200 RPD (v1beta)  ← legacy fallback
+//   gemini-2.0-flash-lite   — 30 RPM,   200 RPD (v1beta)  ← legacy fallback
+//   gemini-flash-latest     — alias to newest flash       ← final safety net
 //
-// NOTE: gemini-1.5-flash (without -latest) returns 404 on v1beta.
-// gemini-1.5-* requires the v1 endpoint.
+// Order = cheapest-quota-first, then quality, then last-ditch aliases so a
+// 404 / 429 on one model simply rolls forward to the next.
 const GEMINI_MODELS: Array<{ model: string; apiVersion: string }> = [
-  { model: "gemini-2.0-flash",        apiVersion: "v1beta" },
-  { model: "gemini-2.0-flash-lite",   apiVersion: "v1beta" },
-  { model: "gemini-1.5-flash-latest", apiVersion: "v1"     },
+  { model: "gemini-2.5-flash-lite", apiVersion: "v1beta" },
+  { model: "gemini-2.5-flash",      apiVersion: "v1beta" },
+  { model: "gemini-2.0-flash",      apiVersion: "v1beta" },
+  { model: "gemini-2.0-flash-lite", apiVersion: "v1beta" },
+  { model: "gemini-flash-latest",   apiVersion: "v1beta" },
 ];
 
 // Sentinel error thrown by callGeminiSingle when all in-process retries for a
@@ -162,6 +165,18 @@ async function callGeminiSingle(
       await new Promise((resolve) => setTimeout(resolve, waitTime));
 
       return callGeminiSingle(contents, model, apiVersion, timeoutMs, retryCount + 1);
+    }
+
+    // 404: model not found. Treat like overload so fallback chain tries the
+    // next model instead of killing the entire chain.
+    if (response.status === 404) {
+      const body = await response.text().catch(() => "");
+      console.warn(`[GEMINI 404] model=${model} not found on ${apiVersion} — falling back. body=${body.substring(0, 300)}`);
+      throw new GeminiOverloadedError(
+        model,
+        404,
+        `Gemini 404 on ${model}: model not found on ${apiVersion}`,
+      );
     }
 
     if (!response.ok) {
@@ -1462,14 +1477,14 @@ serve(async (req) => {
         details: results,
         gemini_overloaded: anyGeminiOverloaded,
       }),
-      { status: successful > 0 ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (err: any) {
     console.error("Error:", err);
     return new Response(
       JSON.stringify({ error: err.message || "Unknown error", execution_time_ms: Date.now() - startTime }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });

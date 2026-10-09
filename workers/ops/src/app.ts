@@ -20,6 +20,7 @@ import { formatLogLine, logLine } from '../../shared/src/http/log';
 import { describeError } from '../../shared/src/compat/vercel-node';
 import { LOG_PREFIX, type OpsHono } from './env';
 import { register as registerAgent } from './routes/agent';
+import { register as registerCadCompat } from './routes/cad-compat';
 import { register as registerFundedStartups } from './routes/funded-startups';
 import { register as registerGsc } from './routes/gsc';
 import { register as registerMarketing } from './routes/marketing';
@@ -74,6 +75,7 @@ registerFundedStartups(app);
 registerScrape(app);
 registerScanDirectory(app);
 registerAgent(app);
+registerCadCompat(app);
 
 app.notFound(() => textResponse(404, 'Not Found'));
 

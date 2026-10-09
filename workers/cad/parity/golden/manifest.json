@@ -1,0 +1,300 @@
+{
+  "captures": {
+    "l_bend_135.flat-pattern": {
+      "bytes": 29525,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "flat-pattern",
+      "normalised_sha256": "ee3cb96677342ebccddb047588d0d0cadac3cf70fbf2f9babd3121061015f00c",
+      "status": 200
+    },
+    "l_bend_135.info": {
+      "bytes": 300,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "json",
+      "normalised_sha256": "7b356bc24a9362f89a71b1611c978f35d885e3be037136b4bb324e17506be2ce",
+      "status": 200
+    },
+    "l_bend_135.unfold-dxf": {
+      "bytes": 19009,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_135_flat.dxf\"",
+        "content-type": "application/dxf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "156.79",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "dxf",
+      "normalised_sha256": "29943955288a542c0b76e2b581c8f2f11a579d02f671baa3228a75518140ef95",
+      "status": 200
+    },
+    "l_bend_135.unfold-pdf": {
+      "bytes": 4109,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_135_bending_drawing.pdf\"",
+        "content-type": "application/pdf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "156.79",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "pdf",
+      "normalised_sha256": "c75bc31141a9fdd2415ab64ce5507724d7618510c619151b869efc890e50b513",
+      "status": 200
+    },
+    "l_bend_135.unfold-svg": {
+      "bytes": 2164,
+      "headers": {
+        "content-type": "image/svg+xml",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "156.79",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "svg",
+      "normalised_sha256": "bcd2d5a9276e9d7aee885f4a94ebf7551b38a730bf747922d8bd2e77c5c7d3dd",
+      "status": 200
+    },
+    "l_bend_45.flat-pattern": {
+      "bytes": 29399,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "flat-pattern",
+      "normalised_sha256": "ca880ceb832fdbab27b6ef90010f9864b6b707e72789a8a20394a0d7260ceeeb",
+      "status": 200
+    },
+    "l_bend_45.info": {
+      "bytes": 300,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "json",
+      "normalised_sha256": "ed91b616b3c435c46acee54beed4431d2dfaece04f71cbf720615d50966ae8b5",
+      "status": 200
+    },
+    "l_bend_45.unfold-dxf": {
+      "bytes": 18995,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_45_flat.dxf\"",
+        "content-type": "application/dxf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "152.26",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "dxf",
+      "normalised_sha256": "93c5cf8e483549eb2c850f2d0d5403e69d1604e1cf478282a620ae3ac0f2aeb1",
+      "status": 200
+    },
+    "l_bend_45.unfold-pdf": {
+      "bytes": 4105,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_45_bending_drawing.pdf\"",
+        "content-type": "application/pdf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "152.26",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "pdf",
+      "normalised_sha256": "8cfbb6908d976875b64516f1151549ea71d481d05606a3a50541c6dff5943ec6",
+      "status": 200
+    },
+    "l_bend_45.unfold-svg": {
+      "bytes": 2090,
+      "headers": {
+        "content-type": "image/svg+xml",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "152.26",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "svg",
+      "normalised_sha256": "5f571d3c703f5219d59cfc57bc5db6ff5ffe99455faebfb7e34f456d21e2f68a",
+      "status": 200
+    },
+    "l_bend_90.flat-pattern": {
+      "bytes": 29393,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "flat-pattern",
+      "normalised_sha256": "5f15a7c9e214abe7eb93a86606eb6a134248f82f55d930150c9bb79f5c675782",
+      "status": 200
+    },
+    "l_bend_90.info": {
+      "bytes": 298,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "json",
+      "normalised_sha256": "2f59554a2147f3038c935806309c05462ce43351f8bad71771238d3fc63a7fce",
+      "status": 200
+    },
+    "l_bend_90.unfold-dxf": {
+      "bytes": 18995,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_90_flat.dxf\"",
+        "content-type": "application/dxf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "154.52",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "dxf",
+      "normalised_sha256": "95bbbcb164f0b8d0c7a12d4573c805a73d970bd98ffc21e72b59dc017e4ae041",
+      "status": 200
+    },
+    "l_bend_90.unfold-pdf": {
+      "bytes": 4102,
+      "headers": {
+        "content-disposition": "attachment; filename=\"l_bend_90_bending_drawing.pdf\"",
+        "content-type": "application/pdf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "154.52",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "pdf",
+      "normalised_sha256": "5c92f39342c0e4108e578bb6916b7bcf77a8369a8eead115e3b6d8887718a541",
+      "status": 200
+    },
+    "l_bend_90.unfold-svg": {
+      "bytes": 2088,
+      "headers": {
+        "content-type": "image/svg+xml",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "154.52",
+        "x-part-num-bends": "1",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "svg",
+      "normalised_sha256": "43353a290dc68b7472af6af2cb546abb2917c595c21ac2517ed6d7eaee1140a9",
+      "status": 200
+    },
+    "u_channel.flat-pattern": {
+      "bytes": 33018,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "flat-pattern",
+      "normalised_sha256": "ff7cb9b53301bcf5ca644059d9918c84bc38858c756ee777f8a0b534670a913a",
+      "status": 200
+    },
+    "u_channel.info": {
+      "bytes": 395,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "json",
+      "normalised_sha256": "60a3d68c7d5ac7987a323c32534af98173cda01b1fc07a37c45681e9d24bfedb",
+      "status": 200
+    },
+    "u_channel.unfold-dxf": {
+      "bytes": 19600,
+      "headers": {
+        "content-disposition": "attachment; filename=\"u_channel_flat.dxf\"",
+        "content-type": "application/dxf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "159.05",
+        "x-part-num-bends": "2",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "dxf",
+      "normalised_sha256": "098cce02025810896156f0a888bc28596cc2f0ac3341bf70149702b4c8828f63",
+      "status": 200
+    },
+    "u_channel.unfold-pdf": {
+      "bytes": 4380,
+      "headers": {
+        "content-disposition": "attachment; filename=\"u_channel_bending_drawing.pdf\"",
+        "content-type": "application/pdf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "159.05",
+        "x-part-num-bends": "2",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "pdf",
+      "normalised_sha256": "a9214e7b1b7695f4e214fe1bb1d3861fe76b96c0708879fbd6faebb196da8a4c",
+      "status": 200
+    },
+    "u_channel.unfold-svg": {
+      "bytes": 3659,
+      "headers": {
+        "content-type": "image/svg+xml",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "159.05",
+        "x-part-num-bends": "2",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "svg",
+      "normalised_sha256": "380257d8cec78a096aae68a29a621214911e108cb4cf37dffc2166c00d3bc91a",
+      "status": 200
+    },
+    "z_fold.flat-pattern": {
+      "bytes": 33500,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "flat-pattern",
+      "normalised_sha256": "292935565c030c80db3ebd9a668f2423f7dffa78df6b29331b4ce302c0086ff6",
+      "status": 200
+    },
+    "z_fold.info": {
+      "bytes": 498,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "kind": "json",
+      "normalised_sha256": "c7fc1ac2c1aa26e1d8124fed5525c09cf6cb26458266f08b53f007be22a3d71d",
+      "status": 200
+    },
+    "z_fold.unfold-dxf": {
+      "bytes": 19969,
+      "headers": {
+        "content-disposition": "attachment; filename=\"z_fold_flat.dxf\"",
+        "content-type": "application/dxf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "216.71",
+        "x-part-num-bends": "3",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "dxf",
+      "normalised_sha256": "a3dfdb9b4cbb6122696219ce30375035eef3cbdd1ee6d2860e15fa04c0c862ba",
+      "status": 200
+    },
+    "z_fold.unfold-pdf": {
+      "bytes": 4414,
+      "headers": {
+        "content-disposition": "attachment; filename=\"z_fold_bending_drawing.pdf\"",
+        "content-type": "application/pdf",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "216.71",
+        "x-part-num-bends": "3",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "pdf",
+      "normalised_sha256": "b98d7c93e7646918953d0c553ac445c911d4c14f733f40b603fcac53090e5185",
+      "status": 200
+    },
+    "z_fold.unfold-svg": {
+      "bytes": 3395,
+      "headers": {
+        "content-type": "image/svg+xml",
+        "x-part-flat-height": "60.0",
+        "x-part-flat-width": "216.71",
+        "x-part-num-bends": "3",
+        "x-part-thickness": "2.0"
+      },
+      "kind": "svg",
+      "normalised_sha256": "97e82115f63f98dbe23801bbee3074e38c857438946b4bfaffdef20c22c78442",
+      "status": 200
+    }
+  },
+  "v": 1
+}

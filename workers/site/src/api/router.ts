@@ -80,6 +80,8 @@ export const ENDPOINT_TARGETS: TargetTable = {
   'scrape-company-profile': 'ops',
   'scan-directory': 'ops',
   agent: 'ops',
+  // Phase 5: /api/cad/<token>/flat-pattern (CAD compat path), served by microns-ops, never forwarded.
+  'cad-compat': 'ops',
 };
 
 /** Dispatch key: the concrete module behind a target. */

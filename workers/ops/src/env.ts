@@ -2,10 +2,12 @@
 // live in `wrangler secret` or the gitignored .dev.vars.
 
 import type { OpsCall } from '../../shared/src/http/rpc';
+import type { CadContainer } from './cad-container/cad-container';
 import type { CadRouter } from './do/cad-router';
 import type { MaterialStock } from './do/material-stock';
 import type { RfqThread } from './do/rfq-thread';
-import type { AgentEventV1, CadJobMessageV1, ScrapeMessage } from './queues/messages';
+import type { SenderLimiter } from './do/sender-limiter';
+import type { AgentEventV1, CadJobMessageV1, OutboundMailV1, ScrapeMessage, TranslationMessageV1 } from './queues/messages';
 import type { PostOrderParams } from './workflows/post-order';
 import type { QuoteParams } from './workflows/quote';
 import type { RfqIntakeParams } from './workflows/rfq-intake';
@@ -71,6 +73,61 @@ export interface OpsEnv {
   AGENT_APPROVAL_SECRET?: string;                        // signed file links (shared with the site and the relay)
   CAD_ACCESS_CLIENT_ID?: string;                         // optional Access service token of the CAD backend host
   CAD_ACCESS_CLIENT_SECRET?: string;
+
+  // ----- Phase 5: consolidated compute (all optional, checked per use with need(), src/agents/config.ts) -----
+  // A job whose configuration is missing closes its run 'failed' with error 'config_missing' and the names (never
+  // the values); an unrelated deploy never depends on these.
+  // bindings
+  TRANSLATIONS?: Queue<TranslationMessageV1>;            // queue producer "translations"
+  OUTBOUND_MAIL?: Queue<OutboundMailV1>;                 // queue producer "outbound-mail"
+  CONTENT_DAILY?: Workflow<ContentDailyParams>;          // workflow "content-daily"
+  SITEMAP?: Workflow<SitemapParams>;                     // workflow "sitemap"
+  OPS_DIGEST?: Workflow<OpsDigestParams>;                // workflow "ops-digest"
+  SENDER_LIMITER?: DurableObjectNamespace<SenderLimiter>;
+  CAD_CONTAINER?: DurableObjectNamespace<CadContainer>;
+  SEO_CACHE?: KVNamespace;                               // same namespace as microns-site (SEO cache purge)
+  // vars
+  TRACKING_DOMAIN?: string;                              // "https://micronshub.eu"
+  DIGEST_FROM?: string;                                  // "MicronsHub Ops <info@micronshub.eu>"
+  MARKETING_FOLLOWUPS_ENABLED?: string;                  // "false" (anything but "true" = off)
+  MARKETING_WARMUP_ENABLED?: string;                     // "false"
+  OUTBOUND_MAIL_PAUSED?: string;                         // "false"; "true" = rollback to the edge path (route 503)
+  OUTBOUND_MAIL_STOPPED?: string;                        // "false"; "true" = no campaign mail at all (route 423, mail held)
+  CAD_SLOTS?: string;                                    // "3" (must equal containers[0].max_instances)
+  CAD_INPUT_HOSTS?: string;                              // comma list of exact hosts the compat path may fetch
+  CAD_PROCESSING_TIMEOUT_S?: string;                     // "120"
+  CAD_KEEP_WARM?: string;                                // "off"
+  // T2 only (generated configs); never in the production wrangler.jsonc
+  PULLPUSH_API_BASE?: string;
+  HN_API_BASE?: string;
+  XOMETRY_API_BASE?: string;
+  INDEXNOW_API_BASE?: string;
+  AGENT_GEMINI_BASE_URL?: string;
+  CAD_CONTAINER_BASE_URL?: string;
+  // secrets (optional at deploy, checked per use)
+  INDEXNOW_KEY?: string;                                 // same value as the public /indexnow_key.txt
+  XOMETRY_TOKEN?: string;
+  XOMETRY_COOKIE?: string;
+}
+
+/** Parameters of the Workflow "content-daily" (instance content-daily-<date>). */
+export interface ContentDailyParams {
+  /** YYYY-MM-DD */
+  date: string;
+  trigger: 'cron' | 'manual';
+}
+
+/** Parameters of the Workflow "sitemap" (instance sitemap-<date>). */
+export interface SitemapParams {
+  date: string;
+  parent_run_id?: string;
+}
+
+/** Parameters of the Workflow "ops-digest" (instance ops-digest-<YYYY>-W<ww>). */
+export interface OpsDigestParams {
+  /** YYYY-Www */
+  iso_week: string;
+  trigger: 'cron' | 'manual';
 }
 
 /** Hono environment of the ops app: the call registered by OpsApi.handle is in c.var.call. */

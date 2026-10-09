@@ -41,6 +41,28 @@
 //     secrets.required as a hidden value
 //   - published: urls.agents.json (profile 'api' keeps urls.json) and T2_SITE_URL / T2_OPS_URL, T2_STUB_URL, T2_TMP,
 //     T2_EXPLORER_URL, T2_APPROVAL_SECRET, T2_PROFILE
+// Phase 5 (consolidated compute): the `containers` stanza is removed from every generated ops config
+// (OPS_P5_STRIPPED_KEYS; a local container needs Docker and an image), and the profile 'agents' keeps only the
+// Phase 4 consumers (AGENT_PROFILE_CONSUMERS, plus scrapes with keepScrapesConsumer), so the Phase 5 queues never
+// run under it.
+//
+// Profile 'jobs' (Phase 5; T2_PROFILE=jobs, `harness.mjs up --profile jobs`, or startHarness({profile: 'jobs'})):
+//   - two Workers: `wrangler dev -c site -c ops` (site primary: the marketing and CAD compat routes enter through
+//     the site, as in production); crons, queues and Workflows go through the Local Explorer
+//     (<url>/cdn-cgi/local/explorer/api, worker=microns-ops)
+//   - generated ops config: every Phase 5 binding kept; the Phase 4 stub vars of profile 'agents' plus the Phase 5
+//     T2-only vars pointing at the stub (JOBS_STUB_VARS: PULLPUSH_API_BASE, HN_API_BASE, XOMETRY_API_BASE,
+//     INDEXNOW_API_BASE, AGENT_GEMINI_BASE_URL, CAD_CONTAINER_BASE_URL) and CAD_INPUT_HOSTS = the stub host; ai,
+//     vectorize, browser, routes, analytics_engine_datasets (EVENTS) and containers removed; the consumers of
+//     scrapes, translations, outbound-mail and cad-jobs kept (JOBS_PROFILE_CONSUMERS: every source they reach is the
+//     stub, so no real scan runs); secrets.required = the production list + AGENT_SECRET_NAMES + JOBS_SECRET_NAMES
+//     (INDEXNOW_KEY and XOMETRY_TOKEN with a random value of this run), CAD_UNFOLD_URL = the stub origin
+//   - generated site config: the profile 'api' config, secrets.required + AGENT_APPROVAL_SECRET and CAD_COMPAT_TOKEN
+//     (random values of this run)
+//   - the stub mounts every module of AGENT_STUB_MODULES and JOBS_STUB_MODULES (pullpush, hn, xometry, indexnow,
+//     google-ai-studio, storage, cad-container); start-up fails unless wrangler lists every generated secret name
+//   - published: urls.jobs.json and T2_SITE_URL, T2_STUB_URL, T2_TMP, T2_EXPLORER_URL, T2_APPROVAL_SECRET,
+//     T2_PROFILE, T2_INDEXNOW_KEY, T2_XOMETRY_TOKEN, T2_CAD_COMPAT_TOKEN (random test values, never real ones)
 // The production wrangler.jsonc files are never changed.
 
 import { spawn } from 'node:child_process';
@@ -50,7 +72,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { agentStubModules, startStub } from './stub-server.mjs';
+import { agentStubModules, jobsStubModules, startStub } from './stub-server.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SITE_DIR = path.resolve(HERE, '..', '..');
@@ -72,10 +94,32 @@ export const T2_COLLECTOR_CLIENT_ID = 't2-collector';
 export const T2_MCP_CLIENT_ID = 't2-mcp';
 // Top-level keys of workers/ops/wrangler.jsonc that are removed from every generated ops config (Phase 4).
 export const OPS_REMOTE_ONLY_KEYS = ['ai', 'vectorize', 'browser', 'routes'];
-export const PROFILES = ['api', 'agents'];
+export const PROFILES = ['api', 'agents', 'jobs'];
+// Top-level keys of workers/ops/wrangler.jsonc that are removed from every generated ops config (Phase 5).
+export const OPS_P5_STRIPPED_KEYS = ['containers'];
+// Consumers the profile 'agents' keeps (Phase 4 queues; scrapes only with keepScrapesConsumer).
+export const AGENT_PROFILE_CONSUMERS = ['cad-jobs', 'agent-events'];
 /** Phase 4 secret names the profile 'agents' appends to the generated ops secrets.required. */
 export const AGENT_SECRET_NAMES = ['AI_GATEWAY_TOKEN', 'CAD_UNFOLD_URL', 'CAD_SHARED_SECRET', 'AGENT_APPROVAL_SECRET'];
 export const AGENT_STUBS_DEFAULT = 'llm,embed,vector,browser';
+// Profile 'jobs' (Phase 5).
+/** Consumers the profile 'jobs' keeps. */
+export const JOBS_PROFILE_CONSUMERS = ['scrapes', 'translations', 'outbound-mail', 'cad-jobs'];
+/** Top-level keys removed from the generated ops config of the profile 'jobs' (besides the Phase 4 and Phase 5 sets). */
+export const JOBS_STRIPPED_KEYS = ['analytics_engine_datasets'];
+/** Phase 5 secret names the profile 'jobs' appends to the generated ops secrets.required (random values per run). */
+export const JOBS_SECRET_NAMES = ['INDEXNOW_KEY', 'XOMETRY_TOKEN'];
+/** Site secret names of the profile 'jobs' (random values per run). */
+export const JOBS_SITE_SECRET_NAMES = ['AGENT_APPROVAL_SECRET', 'CAD_COMPAT_TOKEN'];
+/** Phase 5 T2-only vars of the profile 'jobs' and their stub path (src/ports/p5.ts P5_T2_ONLY_VARS). */
+export const JOBS_STUB_VARS = {
+  PULLPUSH_API_BASE: '/pullpush',
+  HN_API_BASE: '/hn',
+  XOMETRY_API_BASE: '/xometry',
+  INDEXNOW_API_BASE: '/indexnow',
+  AGENT_GEMINI_BASE_URL: '/google-ai-studio',
+  CAD_CONTAINER_BASE_URL: '/cad-container',
+};
 
 /** JSONC -> object: drops comments outside strings, then trailing commas. */
 export function parseJsonc(text) {
@@ -127,6 +171,7 @@ export function generateConfigs({
   opsVars = {},
   keepScrapesConsumer = false,
   mailSecrets = {},
+  jobsSecrets = {},
 }) {
   if (!PROFILES.includes(profile)) throw new Error(`unknown T2 profile ${profile}`);
   const site = parseJsonc(readFileSync(path.join(SITE_DIR, 'wrangler.jsonc'), 'utf8'));
@@ -162,6 +207,7 @@ export function generateConfigs({
   const productionConsumers = ops.queues?.consumers ?? [];
   if (ops.queues) ops.queues = { ...ops.queues, consumers: undefined };
   for (const key of OPS_REMOTE_ONLY_KEYS) delete ops[key];
+  for (const key of OPS_P5_STRIPPED_KEYS) delete ops[key];
   const opsSecrets = {};
   for (const name of ops.secrets?.required ?? []) opsSecrets[name] = DUMMY;
 
@@ -172,6 +218,8 @@ export function generateConfigs({
       ops: { dir: path.join(tmp, 'ops'), config: ops, devVars: opsSecrets },
     };
   }
+
+  if (profile === 'jobs') return jobsConfigs({ stubUrl, tmp, site, siteSecrets, ops, opsSecrets, productionConsumers, approvalSecret, opsVars, jobsSecrets });
 
   // ----- profile 'agents' -----
   ops.vars = {
@@ -186,7 +234,7 @@ export function generateConfigs({
     MCP_ACCESS_AUD: 't2-aud-mcp',
     ...opsVars,
   };
-  const consumers = productionConsumers.filter((c) => c.queue !== 'scrapes' || keepScrapesConsumer);
+  const consumers = productionConsumers.filter((c) => AGENT_PROFILE_CONSUMERS.includes(c.queue) || (c.queue === 'scrapes' && keepScrapesConsumer));
   if (ops.queues) ops.queues = { ...ops.queues, consumers };
   ops.secrets = { ...ops.secrets, required: [...(ops.secrets?.required ?? []), ...AGENT_SECRET_NAMES.filter((n) => !(ops.secrets?.required ?? []).includes(n))] };
   for (const name of AGENT_SECRET_NAMES) opsSecrets[name] = DUMMY;
@@ -211,6 +259,53 @@ export function generateConfigs({
     site: { dir: path.join(tmp, 'site'), config: site, devVars: siteSecrets },
     ops: { dir: path.join(tmp, 'ops'), config: ops, devVars: opsSecrets },
     mail: { dir: path.join(tmp, 'mail'), config: mail, devVars: mailDevVars },
+  };
+}
+
+/** The generated configs of the profile 'jobs' (from the profile 'api' configs; see the header). */
+function jobsConfigs({ stubUrl, tmp, site, siteSecrets, ops, opsSecrets, productionConsumers, approvalSecret, opsVars, jobsSecrets }) {
+  const stubHost = new URL(stubUrl);
+  for (const key of JOBS_STRIPPED_KEYS) delete ops[key];
+  ops.vars = {
+    ...ops.vars,
+    AGENT_STUBS: AGENT_STUBS_DEFAULT,
+    AGENT_LLM_BASE_URL: `${stubUrl}/anthropic`,
+    RESEND_API_BASE: `${stubUrl}/resend`,
+    TELEGRAM_API_BASE: `${stubUrl}/telegram`,
+    GMAIL_API_BASE: `${stubUrl}/gmail`,
+    GOOGLE_TOKEN_URL: `${stubUrl}/oauth2/token`,
+    ACCESS_TEAM_DOMAIN: stubUrl,
+    MCP_ACCESS_AUD: 't2-aud-mcp',
+    ...Object.fromEntries(Object.entries(JOBS_STUB_VARS).map(([name, suffix]) => [name, `${stubUrl}${suffix}`])),
+    CAD_INPUT_HOSTS: [stubHost.hostname, stubHost.host].join(','),
+    ...opsVars,
+  };
+  const consumers = productionConsumers.filter((c) => JOBS_PROFILE_CONSUMERS.includes(c.queue));
+  if (ops.queues) ops.queues = { ...ops.queues, consumers };
+  const required = ops.secrets?.required ?? [];
+  const extra = [...AGENT_SECRET_NAMES, ...JOBS_SECRET_NAMES].filter((n) => !required.includes(n));
+  ops.secrets = { ...ops.secrets, required: [...required, ...extra] };
+  for (const name of AGENT_SECRET_NAMES) opsSecrets[name] = DUMMY;
+  opsSecrets.CAD_UNFOLD_URL = stubUrl;
+  opsSecrets.AGENT_APPROVAL_SECRET = approvalSecret;
+  for (const name of JOBS_SECRET_NAMES) opsSecrets[name] = jobsSecrets[name] ?? DUMMY;
+  const siteRequired = site.secrets?.required ?? [];
+  site.secrets = { ...site.secrets, required: [...siteRequired, ...JOBS_SITE_SECRET_NAMES.filter((n) => !siteRequired.includes(n))] };
+  siteSecrets.AGENT_APPROVAL_SECRET = approvalSecret;
+  siteSecrets.CAD_COMPAT_TOKEN = jobsSecrets.CAD_COMPAT_TOKEN ?? DUMMY;
+  return {
+    profile: 'jobs',
+    site: { dir: path.join(tmp, 'site'), config: site, devVars: siteSecrets },
+    ops: { dir: path.join(tmp, 'ops'), config: ops, devVars: opsSecrets },
+  };
+}
+
+/** Random test values of the profile 'jobs' secrets (hex, URL-safe; never real values). */
+export function jobsSecretValues() {
+  return {
+    INDEXNOW_KEY: randomBytes(16).toString('hex'),
+    XOMETRY_TOKEN: `t2-xometry-${randomBytes(12).toString('hex')}`,
+    CAD_COMPAT_TOKEN: randomBytes(24).toString('hex'),
   };
 }
 
@@ -321,9 +416,11 @@ export async function startHarness({
   if (primary !== 'site' && primary !== 'ops') throw new Error(`primary must be 'site' or 'ops'`);
   if (primary === 'ops' && profile !== 'agents') throw new Error("primary 'ops' needs the profile 'agents'");
   const tmp = mkdtempSync(path.join(os.tmpdir(), 'microns-t2-'));
-  const stub = await startStub({ modules: profile === 'agents' ? await agentStubModules() : [] });
-  const approvalSecret = profile === 'agents' ? randomBytes(32).toString('hex') : undefined;
-  const generated = generateConfigs({ stubUrl: stub.url, tmp, assetsDir: assetsDirectory(tmp), omitSiteSecrets, siteVars, profile, approvalSecret, opsVars, keepScrapesConsumer, mailSecrets });
+  const modules = profile === 'agents' ? await agentStubModules() : profile === 'jobs' ? [...(await agentStubModules()), ...(await jobsStubModules())] : [];
+  const stub = await startStub({ modules });
+  const approvalSecret = profile === 'agents' || profile === 'jobs' ? randomBytes(32).toString('hex') : undefined;
+  const jobsSecrets = profile === 'jobs' ? jobsSecretValues() : {};
+  const generated = generateConfigs({ stubUrl: stub.url, tmp, assetsDir: assetsDirectory(tmp), omitSiteSecrets, siteVars, profile, approvalSecret, opsVars, keepScrapesConsumer, mailSecrets, jobsSecrets });
   writeConfigs(generated);
   const order = primary === 'ops' ? [generated.ops, generated.site, generated.mail] : [generated.site, generated.ops, generated.mail];
 
@@ -390,7 +487,7 @@ export async function startHarness({
 
   try {
     await waitUntilReady(siteUrl, child, logFile, primary);
-    if (profile === 'agents') {
+    if (profile === 'agents' || profile === 'jobs') {
       const missing = missingSecretBindings(generated, readFileSync(logFile, 'utf8'));
       if (missing.length) throw new Error(`secrets not loaded by wrangler: ${missing.join(', ')}`);
     }
@@ -412,8 +509,9 @@ export async function startHarness({
       tmp,
       explorer: `${siteUrl}/cdn-cgi/local/explorer/api`,
       approvalSecret,
-      configs: Object.fromEntries(['site', 'ops', 'mail'].map((k) => [k, path.join(generated[k].dir, 'wrangler.jsonc')])),
+      configs: Object.fromEntries(['site', 'ops', 'mail'].filter((k) => generated[k]).map((k) => [k, path.join(generated[k].dir, 'wrangler.jsonc')])),
       state: path.join(tmp, 'state'),
+      ...(profile === 'jobs' ? { indexnowKey: jobsSecrets.INDEXNOW_KEY, xometryToken: jobsSecrets.XOMETRY_TOKEN, cadCompatToken: jobsSecrets.CAD_COMPAT_TOKEN } : {}),
     };
   if (publish) {
     const file = urlsFile(profile);
@@ -424,10 +522,15 @@ export async function startHarness({
     process.env.T2_STUB_URL = stub.url;
     process.env.T2_TMP = tmp;
     process.env.T2_COLLECTOR_CLIENT_ID = T2_COLLECTOR_CLIENT_ID;
-    if (profile === 'agents') {
+    if (profile === 'agents' || profile === 'jobs') {
       process.env.T2_PROFILE = profile;
       process.env.T2_EXPLORER_URL = urls.explorer;
       process.env.T2_APPROVAL_SECRET = approvalSecret;
+    }
+    if (profile === 'jobs') {
+      process.env.T2_INDEXNOW_KEY = jobsSecrets.INDEXNOW_KEY;
+      process.env.T2_XOMETRY_TOKEN = jobsSecrets.XOMETRY_TOKEN;
+      process.env.T2_CAD_COMPAT_TOKEN = jobsSecrets.CAD_COMPAT_TOKEN;
     }
   }
   if (!quiet) console.log(`[t2] ${profile} ${primary} ${siteUrl}  stub ${stub.url}  tmp ${tmp}`);
@@ -472,7 +575,7 @@ async function cli(command, rest = []) {
     console.log('[t2] running; Ctrl-C stops the harness');
     return;
   }
-  console.error('usage: node test/integration/harness.mjs up|wait [--profile api|agents]');
+  console.error('usage: node test/integration/harness.mjs up|wait [--profile api|agents|jobs]');
   process.exit(2);
 }
 

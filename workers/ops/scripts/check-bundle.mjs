@@ -14,6 +14,13 @@
 //       the production wrangler.jsonc `vars` hold none of the T2-only names (T2_ONLY_VARS, or any name ending in
 //       _API_BASE): those exist only in generated test configs;
 //       the bundle stays below the Workers limit of 64 MiB uncompressed.
+//   - Phase 5 (consolidated compute):
+//       the production `vars` hold none of the Phase 5 T2-only names either (P5_T2_ONLY_VARS: the *_API_BASE
+//       overrides, AGENT_GEMINI_BASE_URL, CAD_CONTAINER_BASE_URL; the same list as src/ports/p5.ts);
+//       @cloudflare/containers is bundled from exactly one copy: every input under node_modules/@cloudflare/containers/
+//       resolves to workers/ops/node_modules/@cloudflare/containers/ (the only declarer), and dist/lib/container.js
+//       appears exactly once (the package keeps its outbound-handler registries in module-level maps that
+//       ContainerProxy reads by class name, so a second copy breaks interception).
 //   - The bundle and its gzip size are printed for the size report.
 //
 //   node scripts/check-bundle.mjs [path/to/meta.json]   exit 0 = pass, 1 = fail
@@ -32,6 +39,11 @@ const QRCODE_BROWSER = /(^|\/)node_modules\/qrcode\/lib\/browser\.js$/;
 
 /** Var names that only generated T2 configs may set (Phase 5 appends its own). */
 export const T2_ONLY_VARS = ['AGENT_STUBS', 'AGENT_LLM_BASE_URL', 'RESEND_API_BASE', 'TELEGRAM_API_BASE', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL'];
+/** Var names that only generated Phase 5 T2 configs may set (src/ports/p5.ts P5_T2_ONLY_VARS). */
+export const P5_T2_ONLY_VARS = ['PULLPUSH_API_BASE', 'HN_API_BASE', 'XOMETRY_API_BASE', 'INDEXNOW_API_BASE', 'AGENT_GEMINI_BASE_URL', 'CAD_CONTAINER_BASE_URL'];
+/** Package root of the single @cloudflare/containers copy, relative to the repository root. */
+export const CONTAINERS_ROOT = 'workers/ops/node_modules/@cloudflare/containers/';
+const CONTAINERS_MARKER = '/node_modules/@cloudflare/containers/';
 /** Packages that must appear exactly once in the bundle (by package root). */
 export const SINGLE_COPY_PACKAGES = ['pdf-lib', '@supabase/supabase-js', 'zod'];
 /** Packages the Phase 4 bundle must contain. */
@@ -83,6 +95,36 @@ export function packageRoots(meta) {
 /** Var names of a wrangler config object that are T2-only. */
 export function forbiddenVars(config) {
   return Object.keys(config?.vars ?? {}).filter((name) => T2_ONLY_VARS.includes(name) || /_API_BASE$/.test(name));
+}
+
+/** Phase 5 T2-only var names set in a wrangler config object. */
+export function forbiddenP5Vars(config) {
+  return Object.keys(config?.vars ?? {}).filter((name) => P5_T2_ONLY_VARS.includes(name));
+}
+
+/**
+ * Repository-relative form of a metafile input path. Inputs are relative to the folder of the wrangler config
+ * (workers/ops), so '../../x' is the repository root's x and 'node_modules/x' is workers/ops/node_modules/x; an
+ * absolute path is kept with its leading '/'.
+ */
+export function repoRelative(input) {
+  const p = input.replace(/\\/g, '/');
+  if (p.startsWith('/')) return p;
+  return path.posix.normalize(`workers/ops/${p}`);
+}
+
+/** Phase 5 problems of a metafile and the production wrangler config; an empty array passes. */
+export function phase5Problems(meta, config) {
+  const problems = [];
+  const inputs = Object.keys(meta.inputs ?? {}).map((input) => ({ input, rel: repoRelative(input) }));
+  const containerInputs = inputs.filter(({ rel }) => `/${rel}`.includes(CONTAINERS_MARKER));
+  for (const { input, rel } of containerInputs) {
+    if (!rel.startsWith(CONTAINERS_ROOT)) problems.push(`@cloudflare/containers input outside ${CONTAINERS_ROOT}: ${input}`);
+  }
+  const containerJs = containerInputs.filter(({ rel }) => rel.endsWith('/dist/lib/container.js'));
+  if (containerJs.length !== 1) problems.push(`@cloudflare/containers dist/lib/container.js is bundled ${containerJs.length} times (expected exactly once)`);
+  for (const name of forbiddenP5Vars(config)) problems.push(`production wrangler.jsonc sets the Phase 5 T2-only var ${name}`);
+  return problems;
 }
 
 /** Phase 4 problems of a metafile and the production wrangler config; an empty array passes. */
@@ -144,6 +186,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (phase4) {
     const config = parseJsonc(readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
     problems.push(...phase4Problems(meta, config));
+    problems.push(...phase5Problems(meta, config));
   }
   let largest = 0;
   for (const [output] of Object.entries(meta.outputs ?? {})) {
@@ -163,11 +206,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   console.log(`check-bundle: ${Object.keys(meta.inputs ?? {}).length} inputs`);
   if (phase4) {
     const roots = packageRoots(meta);
-    console.log(`check-bundle: packages ${[...SINGLE_COPY_PACKAGES, ...REQUIRED_PACKAGES].map((n) => `${n}=${roots.get(n)?.size ?? 0}`).join(' ')}`);
+    console.log(`check-bundle: packages ${[...SINGLE_COPY_PACKAGES, ...REQUIRED_PACKAGES, '@cloudflare/containers'].map((n) => `${n}=${roots.get(n)?.size ?? 0}`).join(' ')}`);
   }
   if (problems.length) {
     for (const problem of problems) console.error(`check-bundle: FAIL ${problem}`);
     process.exit(1);
   }
-  console.log(`check-bundle: ok ('qrcode' resolves to lib/server.js${phase4 ? '; Phase 4 rules pass' : ''})`);
+  console.log(`check-bundle: ok ('qrcode' resolves to lib/server.js${phase4 ? '; Phase 4 and Phase 5 rules pass' : ''})`);
 }
