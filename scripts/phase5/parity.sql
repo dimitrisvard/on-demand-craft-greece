@@ -27,7 +27,9 @@
 --
 -- Differences from the analysis text (jobs.md §10): Q8 is the per-agent version of PHASE5_SPEC.md §6.8; Q11 counts
 -- output.indexnow = true as text, because the consumer records 'not_configured' when INDEXNOW_KEY is missing and a
--- boolean cast of that value would stop the query; Q12b and Q13 are added.
+-- boolean cast of that value would stop the query; Q12b and Q13 are added. Q12b counts as queue final failures the
+-- failed runs that a queue consumer finishes: trigger 'queue', and the growth.hn, growth.reddit and growth.xometry
+-- runs (opened by the dispatcher with trigger 'cron', closed by the scrapes consumer).
 
 -- Q1 published articles per language per day: baseline (7 days before) vs window (7 days from the switch)
 WITH params AS (SELECT '<S_SWITCH_UTC>'::timestamptz AS s),
@@ -221,8 +223,10 @@ UNION ALL
 SELECT 'marketing', 'events ' || event_type, count(*)::text
   FROM marketing_events, win WHERE created_at >= win.s AND created_at < win.e GROUP BY event_type
 UNION ALL
-SELECT 'stuck', 'queue final failures ' || agent, count(*)::text
-  FROM agent_runs, win WHERE status = 'failed' AND trigger = 'queue' AND started_at >= win.s AND started_at < win.e GROUP BY agent
+SELECT 'stuck', 'queue final failures ' || agent, count(*)::text   -- runs a queue consumer finishes (the scrapes runs open as 'cron')
+  FROM agent_runs, win
+  WHERE status = 'failed' AND (trigger = 'queue' OR agent IN ('growth.hn', 'growth.reddit', 'growth.xometry'))
+    AND started_at >= win.s AND started_at < win.e GROUP BY agent
 UNION ALL
 SELECT 'stuck', 'cad jobs failed, timed out or dead-lettered', count(*)::text
   FROM cad_jobs, win WHERE status IN ('failed', 'timed_out', 'dead_letter') AND enqueued_at >= win.s AND enqueued_at < win.e

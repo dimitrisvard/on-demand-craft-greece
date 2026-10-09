@@ -8,7 +8,21 @@ import type { Row } from '../../../src/db/postgrest';
 import { makeTestP5Ports, P5MemoryDb, type TestP5Ports } from '../../../src/ports/p5-stub/index';
 import type { TranslationMessageV1 } from '../../../src/queues/messages';
 import { agentBindings, agentPorts, FakeClock, FakeKV, FakeQueue, FakeWorkflow, type AgentTestPorts } from '../../helpers/agent-env';
+import { FakeStep } from '../../helpers/fake-step';
 import { opsEnv } from '../../helpers/ops';
+
+/** FakeStep that runs a test hook once before the named step starts (e.g. to switch the flag between two steps). */
+export class HookedStep extends FakeStep {
+  readonly before = new Map<string, () => void>();
+  override do<T>(name: string, ...args: unknown[]): Promise<T> {
+    const hook = this.before.get(name);
+    if (hook) {
+      this.before.delete(name);
+      hook();
+    }
+    return super.do<T>(name, ...args);
+  }
+}
 
 export const DATE = '2026-10-08';
 export const T0 = Date.UTC(2026, 9, 8, 7, 0, 0);

@@ -2,6 +2,9 @@
 // Status: Phase 0 planning deliverable · 2026-09-30 · nothing here is deployed.
 // Phase 4 build (2026-10-07): the Phase 4 entries of microns-ops and the microns-mail object below match the built
 // workers/ops/wrangler.jsonc and workers/mail/wrangler.jsonc (PLAN.md §5.4, deviations DC-1, DC-2).
+// Phase 5 build (2026-10-09): the Phase 5 entries of microns-ops below match the built workers/ops/wrangler.jsonc
+// (PLAN.md §5.5, deviations DV5-2, DV5-14, DV5-15, DV5-21): no new Cron Trigger, the image by registry tag, no
+// Hyperdrive, the CadContainer class in microns-ops.
 // Related: README.md · PLAN.md · ARCHITECTURE.md · INVENTORY.md · inventory.csv · SEO_PARITY.md · AGENTS.md ·
 //          RISKS.md · COSTS.md (all in docs/migration/)
 //
@@ -14,19 +17,21 @@
 //
 //   Future file                   Worker         Created in       Grows in
 //   workers/site/wrangler.jsonc   microns-site   Phase 1 (P1-1)   Phase 2 (OPS, R2, rate limits, /api vars), Phase 3 (routes)
-//   workers/ops/wrangler.jsonc    microns-ops    Phase 2 (P2-1)   Phase 4 (agent layer), Phase 5 (crons, Container)
+//   workers/ops/wrangler.jsonc    microns-ops    Phase 2 (P2-1)   Phase 4 (agent layer), Phase 5 (queues, Workflows, Container)
 //   workers/mail/wrangler.jsonc   microns-mail   Phase 4 (P4-4)   -
 //   (no file of its own)          microns-cad    Phase 5 (P5-6)   Container stanza in microns-ops, which exports
-//                                                                 the CadContainer class (source in workers/cad)
+//                                                                 the CadContainer class (source in
+//                                                                 workers/ops/src/cad-container; workers/cad holds
+//                                                                 the README and the parity tool)
 //
 // Conventions
 // - "Phase N" next to an entry = the phase in which the entry is added to the real file. When a file is
 //   first created, copy only the entries of the current and earlier phases: a binding to a Worker, queue,
 //   index, Hyperdrive config or container image that does not exist yet makes the deploy fail.
 // - Kept as comments on purpose, because enabling them changes production behaviour instead of adding an
-//   idle binding: the Phase 3 routes (they take production traffic; PLAN.md §6 runbook S11-S14), the
-//   Phase 5 crons (each replaces a live pg_cron job or the GitHub Action; enabled one at a time at P5-8) and the
-//   optional Phase 7 D1 entries. The Phase 4 mcp.micronshub.eu Custom Domain is active in the built ops file:
+//   idle binding: the Phase 3 routes (they take production traffic; PLAN.md §6 runbook S11-S14) and the
+//   optional Phase 7 D1 entries. The Phase 5 jobs need no cron entry: they are rows of a schedule table read by
+//   the every-minute trigger, each switched on by its flag at P5-8 (PLAN.md §5.5 DV5-2). The Phase 4 mcp.micronshub.eu Custom Domain is active in the built ops file:
 //   it serves only the remote MCP host, which offers a status tool alone until the flag mcp.remote is on.
 // - IDs are placeholders in angle brackets, for example "<KV_ID_SEO_CACHE>". Replace them with the IDs that
 //   `wrangler kv namespace create`, `wrangler hyperdrive create` and the dashboard print. A placeholder is
@@ -50,6 +55,7 @@
 //                          R2_SECRET_ACCESS_KEY, LEGACY_AWS_ACCESS_KEY_ID, LEGACY_AWS_SECRET_ACCESS_KEY,
 //                          ACCESS_MACHINE_CLIENT_IDS
 //                 Phase 4 (optional, not in secrets.required): AGENT_APPROVAL_SECRET (relay signature check)
+//                 Phase 5 (optional, not in secrets.required): CAD_COMPAT_TOKEN (path token of the CAD compat route)
 //   microns-ops   Phase 2: SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY, RESEND_API_KEY, RESEND_WEBHOOK_SECRET,
 //                          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
 //                          GOOGLE_REDIRECT_URI, APOLLO_API_KEY, GSC_SERVICE_ACCOUNT_JSON (reserved; note in the ops secrets block)
@@ -57,8 +63,8 @@
 //                          CAD_SHARED_SECRET, AGENT_APPROVAL_SECRET, CAD_ACCESS_CLIENT_ID and CAD_ACCESS_CLIENT_SECRET
 //                          (only with the CAD network path chosen at OW-11). ANTHROPIC_API_KEY is not set (AI Gateway
 //                          BYOK) and no MCP_OAUTH_* secret exists (stateless MCP handler + Access Managed OAuth, DC-1)
-//                 Phase 5 (optional, not in secrets.required): GEMINI_API_KEY (not needed with BYOK), XOMETRY_TOKEN,
-//                          INDEXNOW_KEY
+//                 Phase 5 (optional, not in secrets.required, checked where used): INDEXNOW_KEY, XOMETRY_TOKEN,
+//                          XOMETRY_COOKIE. No GEMINI_API_KEY: the Google AI Studio key is stored in AI Gateway
 //   microns-mail  Phase 4: SUPABASE_SERVICE_ROLE_KEY; optional MAIL_COPY_TO, MAIL_FALLBACK_TO (verified destination
 //                          addresses, secrets so that no address sits in the repository)
 //
@@ -236,6 +242,8 @@
         "ACCESS_MACHINE_CLIENT_IDS"
         // Phase 4. AGENT_APPROVAL_SECRET (relay signature check on /api/agent/decision) is optional and checked per
         // request, so it is not listed: a site deploy never fails for agent configuration (PLAN.md §5.4 DF-72).
+        // Phase 5. CAD_COMPAT_TOKEN (gate CD-1 of /api/cad/<token>/flat-pattern) is optional for the same reason;
+        // without it the route answers 500 (PLAN.md §5.5).
       ]
     },
 
@@ -314,7 +322,7 @@
       // run_id, tenant_id, step, prompt) and payload logging off (ARCHITECTURE.md §13; P4-3).
       "AI_GATEWAY_ID": "microns",
       // Phase 4. Default tenant of agent rows; quote sender identity and our Message-ID domain; default CAD backend
-      // (container from Phase 5); remote MCP host and route; Access identifiers of the MCP application (not
+      // (stays "vps" in the merged file; the owner sets "container" at switch-over step S9); remote MCP host and route; Access identifiers of the MCP application (not
       // secrets; placeholders replaced at OW-5 and OW-15); crawler identity and the owner-recorded host permissions
       // of the scrapers (JSON host -> permission reference; empty = no host permitted). Local-test overrides
       // (AGENT_STUBS, AGENT_LLM_BASE_URL, *_API_BASE, GOOGLE_TOKEN_URL) never appear here: the bundle check refuses them.
@@ -328,7 +336,24 @@
       "ACCESS_TEAM_DOMAIN": "<ACCESS_TEAM_DOMAIN>",
       "MCP_ACCESS_AUD": "<ACCESS_AUD_MCP>",
       "SCRAPER_USER_AGENT": "MicronsHubBot/1.0 (+https://www.micronshub.eu/en/contact)",
-      "SCRAPER_PERMITTED_HOSTS": "{}"
+      "SCRAPER_PERMITTED_HOSTS": "{}",
+      // Phase 5 (P5-2, P5-4, P5-6, P5-7). Tracking links keep the apex host of the repo send-campaign function; the
+      // digest sender identity. Marketing switches: anything but "true" is off; PAUSED = rollback to the edge path
+      // (route 503, the dashboard falls back), STOPPED = no campaign mail at all (route 423, queued mail held).
+      // CAD_SLOTS must equal containers[0].max_instances; CAD_INPUT_HOSTS = the exact presign hosts of the RFQ
+      // storage (comma list, set at deploy time); keep-warm off. The T2-only overrides (PULLPUSH_API_BASE,
+      // HN_API_BASE, XOMETRY_API_BASE, INDEXNOW_API_BASE, AGENT_GEMINI_BASE_URL, CAD_CONTAINER_BASE_URL,
+      // CONTENT_WAIT_TIMEOUT_S) never appear here: the bundle check refuses them.
+      "TRACKING_DOMAIN": "https://micronshub.eu",
+      "DIGEST_FROM": "MicronsHub Ops <info@micronshub.eu>",
+      "MARKETING_FOLLOWUPS_ENABLED": "false",
+      "MARKETING_WARMUP_ENABLED": "false",
+      "OUTBOUND_MAIL_PAUSED": "false",
+      "OUTBOUND_MAIL_STOPPED": "false",
+      "CAD_SLOTS": "3",
+      "CAD_INPUT_HOSTS": "<CAD_INPUT_HOSTS>",
+      "CAD_PROCESSING_TIMEOUT_S": "120",
+      "CAD_KEEP_WARM": "off"
     },
 
     "kv_namespaces": [
@@ -343,12 +368,14 @@
 
     "r2_buckets": [
       // Phase 4. Prefixes email/<message_id_sha256>/..., rfq/<rfq_id>/<file_id>-<name>, cad/<job_id>/output/...,
-      // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf, eval/golden/...; Phase 5 adds sitemaps/...
-      // (served by microns-site at the identical sitemap URLs). Same jurisdiction as the site binding.
-      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" },
-      // Phase 5. Public objects behind the R2 custom domain files.micronshub.eu (connected in P3-6):
-      // articles/<yyyy>/<mm>/<slug>.<ext>, tenants/<slug>/... Customer files never go here.
-      { "binding": "PUBLIC_FILES", "bucket_name": "microns-public" }
+      // quotes/<rfq_id>/v<version>/quote.pdf, orders/<order_id>/traveler.pdf, eval/golden/...; Phase 5 adds
+      // sitemaps/sitemap-complete.xml (a shadow copy: Supabase Storage stays the served source, DV5-1) and
+      // phase5-shadow/... (outputs of runs in shadow mode). Same jurisdiction as the site binding.
+      { "binding": "PRIVATE_FILES", "bucket_name": "microns-private", "jurisdiction": "eu" }
+      // Later (not added in Phase 5: no consumer yet, PLAN.md §5.5 M-3). Public objects behind the R2 custom domain
+      // files.micronshub.eu (connected in P3-6): articles/<yyyy>/<mm>/<slug>.<ext>, tenants/<slug>/... Customer
+      // files never go here.
+      // { "binding": "PUBLIC_FILES", "bucket_name": "microns-public" }
     ],
 
     // Queue binding names are this draft's choice (the queue names are canonical). Dead-letter queues
@@ -358,8 +385,10 @@
       "producers": [
         // Phase 2. Tender scans started by a machine caller (/api/tender-scan POST; answered 200 with queued and
         // run_id). Staff scans, the funded-startups scan and GSC bulk actions stay synchronous in Phase 2 (P2-6,
-        // PLAN.md §5.2 DV-3); GSC kinds come in Phase 5. Phase 4 adds directory scans in their own envelope
-        // (kind directory-scan); the Phase 2 message and consumer stay unchanged.
+        // PLAN.md §5.2 DV-3). Phase 4 adds directory scans in their own envelope (kind directory-scan); Phase 5 adds
+        // the scheduled collectors and the Xometry scan in theirs (P5ScrapeMessage: reddit-tier, hn-scan,
+        // tender-scheduled, xometry-scan); the Phase 2 message and consumer stay unchanged. The GSC and funded-scan
+        // queue kinds were not built in Phase 5 (PLAN.md §5.5 BA5-10).
         { "binding": "SCRAPES", "queue": "scrapes" },
         // Phase 4. CAD analysis jobs from rfq-intake and quote (P4-6).
         { "binding": "CAD_JOBS", "queue": "cad-jobs" },
@@ -403,8 +432,8 @@
           "dead_letter_queue": "agent-events-dlq"
         },
         {
-          // Phase 5. One language per message; concurrency and retry delay (seconds) tuned to the Gemini
-          // rate limits at P5-2.
+          // Phase 5. One language per message, up to three at once; retried 5 times, 120 s apart (120 s x attempts
+          // when every model of the chain is overloaded), then kept in translations-dlq.
           "queue": "translations",
           "max_batch_size": 1,
           "max_retries": 5,
@@ -413,7 +442,8 @@
           "dead_letter_queue": "translations-dlq"
         },
         {
-          // Phase 5. The SenderLimiter Durable Object enforces per-sender pacing; the queue only buffers.
+          // Phase 5. The SenderLimiter Durable Object enforces per-sender pacing; the queue only buffers. Messages of a
+          // batch are sent one after another; a cap or spacing wait is a delayed re-send, never a retry.
           "queue": "outbound-mail",
           "max_batch_size": 10,
           "max_retries": 3,
@@ -435,9 +465,10 @@
       { "name": "quote", "binding": "QUOTE", "class_name": "QuoteWorkflow" },
       // Phase 4 (P4-9).
       { "name": "post-order", "binding": "POST_ORDER", "class_name": "PostOrderWorkflow" },
-      // Phase 5 (P5-2). Generate, translate (queue translations), fix links, sitemap, IndexNow.
+      // Phase 5 (P5-2). Generate, translate (queue translations; IndexNow per translation in the consumer), fix
+      // links, sitemap.
       { "name": "content-daily", "binding": "CONTENT_DAILY", "class_name": "ContentDailyWorkflow" },
-      // Phase 5 (P5-2).
+      // Phase 5 (P5-2). Writes the Supabase Storage object the site serves plus an R2 shadow copy (DV5-1).
       { "name": "sitemap", "binding": "SITEMAP", "class_name": "SitemapWorkflow" },
       // Phase 5 (P5-7).
       { "name": "ops-digest", "binding": "OPS_DIGEST", "class_name": "OpsDigestWorkflow" }
@@ -457,7 +488,8 @@
         // fetch (McpAgent is deprecated and feature-frozen, CF docs fetched 2026-10-03; DC-1).
         // Phase 5. One per sender account (P5-4).
         { "name": "SENDER_LIMITER", "class_name": "SenderLimiter" },
-        // Phase 5. Container-enabled Durable Object class of microns-cad (P5-6).
+        // Phase 5. Container-enabled Durable Object class of microns-cad (P5-6), exported by microns-ops from
+        // src/cad-container/ together with ContainerProxy (one copy of @cloudflare/containers 0.3.7).
         { "name": "CAD_CONTAINER", "class_name": "CadContainer" }
       ]
     },
@@ -470,24 +502,24 @@
     "migrations": [
       // Phase 4 (deployed once, then never edited).
       { "tag": "v1", "new_sqlite_classes": ["RfqThread", "MaterialStock", "CadRouter"] },
-      // Phase 5.
+      // Phase 5: both classes in one deploy, after the CAD image was pushed.
       { "tag": "v2", "new_sqlite_classes": ["SenderLimiter", "CadContainer"] }
     ],
 
     "containers": [
       {
-        // Phase 5 (P5-6). Component microns-cad: sheet-metal-service built from its existing Dockerfile
-        // (uvicorn on port 8000, sheet-metal-service/Dockerfile:34, :40). The build context defaults to the
-        // Dockerfile's folder (CF docs, verified 2026-09-30), which its COPY lines need. The port,
-        // sleepAfter (about 10 min) and the CAD_SHARED_SECRET handed to the container are set in the
-        // CadContainer class, not here.
+        // Phase 5 (P5-6). Component microns-cad: sheet-metal-service (uvicorn on port 8000). As built the image is
+        // built from sheet-metal-service/Dockerfile (linux/amd64), tested and pushed by .github/workflows/cad-image.yml
+        // and referenced by its registry tag exactly as `wrangler containers push` prints it, so an ops deploy needs
+        // no Docker (PLAN.md §5.5 DV5-14). The port, sleepAfter (10 min), no internet, the ping path and the
+        // CAD_SHARED_SECRET handed to the container are set in the CadContainer class, not here.
         "name": "microns-cad",
         "class_name": "CadContainer",
-        "image": "../../sheet-metal-service/Dockerfile",
+        "image": "registry.cloudflare.com/<CF_ACCOUNT_ID>/microns-cad:<IMAGE_TAG>",
         // standard-1 = 1/2 vCPU, 4 GiB memory, 8 GB disk; standard-2 = 1 vCPU, 6 GiB, 12 GB if unfold times
         // need it (CF docs, verified 2026-09-30).
         "instance_type": "standard-1",
-        // Equals max_concurrency of the cad-jobs consumer (README.md §7 item 3: 2-3 instances).
+        // Equals max_concurrency of the cad-jobs consumer (README.md §7 item 3: 2-3 instances) and the var CAD_SLOTS.
         "max_instances": 3
       }
     ],
@@ -517,15 +549,15 @@
       { "type": "Text", "globs": ["**/*.md"], "fallthrough": true }
     ],
 
-    "hyperdrive": [
-      // Phase 5, optional (P5-5): only for bulk upserts such as xometry_offers. The database connection
-      // string lives in the Hyperdrive config created with `wrangler hyperdrive create`, never in this file;
-      // localConnectionString is not used here either.
-      { "binding": "SUPABASE_DB", "id": "<HYPERDRIVE_ID_SUPABASE_DB>" }
-    ],
+    // Phase 5, optional (P5-5), not created (PLAN.md §5.5 DV5-15): the Xometry scan writes xometry_offers through
+    // PostgREST with the service role, so no database password leaves Supabase. Kept as a comment for reference.
+    // "hyperdrive": [
+    //   { "binding": "SUPABASE_DB", "id": "<HYPERDRIVE_ID_SUPABASE_DB>" }
+    // ],
 
     "analytics_engine_datasets": [
-      // Phase 4 (P4-13). Data points llm_call, embed_call, step, run_end, cad_job, mail_in, send (index run_id).
+      // Phase 4 (P4-13). Data points llm_call, embed_call, step, run_end, cad_job, mail_in, send (index run_id);
+      // Phase 5 adds cad_compat and xometry_tick.
       { "binding": "EVENTS", "dataset": "microns_events" }
     ],
 
@@ -561,7 +593,7 @@
         // Not listed on purpose: a listed secret that does not exist on the Worker makes every deploy fail, so the
         // Phase 4 and Phase 5 secrets are optional and checked where they are used (PLAN.md §5.2 DV-9, §5.4 DF-72):
         // Phase 4 AI_GATEWAY_TOKEN, CAD_UNFOLD_URL, CAD_SHARED_SECRET, AGENT_APPROVAL_SECRET, CAD_ACCESS_CLIENT_ID,
-        // CAD_ACCESS_CLIENT_SECRET; Phase 5 GEMINI_API_KEY (only without BYOK), XOMETRY_TOKEN, INDEXNOW_KEY.
+        // CAD_ACCESS_CLIENT_SECRET; Phase 5 INDEXNOW_KEY, XOMETRY_TOKEN, XOMETRY_COOKIE (no GEMINI_API_KEY: BYOK).
         // ANTHROPIC_API_KEY is not set (BYOK) and no MCP_OAUTH_* secret exists (DC-1).
       ]
     },
@@ -569,32 +601,17 @@
     "triggers": {
       // UTC: "Cron Triggers execute on UTC time" (CF docs, verified 2026-09-30). One scheduled() handler
       // dispatches on controller.cron; every job checks its flag in KV FLAGS and writes an agent_runs row
-      // (H-29). Identical schedules share one entry: reddit tier2 and hn both run on "*/30 * * * *".
-      // Weekday names are used because Cloudflare counts 1 = Sunday (CF docs, verified 2026-09-30).
-      // 9 expressions in all; Workers Paid allows 250 Cron Triggers per account (CF docs, verified 2026-09-30).
+      // (H-29). 2 expressions in all; Workers Paid allows 250 Cron Triggers per account (CF docs, verified
+      // 2026-09-30), while the Durable Objects alarms page speaks of up to three, so as built Phase 5 adds none (D-3).
       "crons": [
-        // Phase 5. Uncomment one at a time at P5-8; the matching pg_cron job (or the GitHub Action schedule)
-        // is deactivated in the same step, so a job never runs on both schedulers. Replaced schedules are the
-        // live cron.job rows of 2026-09-30.
-        //
-        // content-daily Workflow, 07:00 (flag agent.content_daily). Replaces enqueue-daily-article 07:00,
-        // process-article-queue every 5 min, auto-translate-daily-articles 08:00, auto-fix-article-links 08:30
-        // and auto-update-sitemap 09:00; the Workflow runs those steps in order.
-        // "0 7 * * *",
-        // reddit tier1, every 15 min (pg_cron reddit-tier1; flag agent.growth.reddit).
-        // "*/15 * * * *",
-        // reddit tier2 and hn, every 30 min (reddit-tier2, hn-collector; flags agent.growth.reddit, agent.growth.hn).
-        // "*/30 * * * *",
-        // reddit tier3, hourly (reddit-tier3; flag agent.growth.reddit).
-        // "0 * * * *",
-        // tenders, 06:00 (tender-scan-daily; flag agent.growth.tenders).
-        // "0 6 * * *",
-        // Xometry scan 7x/day, same hours as .github/workflows/xometry-scan.yml:21 (flag agent.growth.xometry).
-        // "0 6,8,10,12,14,16,18 * * *",
-        // ops-digest Workflow, Mondays 06:30 (flag agent.ops_digest).
-        // "30 6 * * mon",
-        //
         // Phase 4 (P4-2). Mirror table feature_flags to KV FLAGS every minute; drift report at minute 0.
+        // Phase 5 (as built, PLAN.md §5.5 DV5-2): the same tick evaluates the schedule table of
+        // workers/ops/src/cron/schedule.ts (UTC, own matcher, day of week 0 = Sunday) and only opens runs, creates
+        // Workflow instances and sends queue messages: reddit tier1 */15, tier2 */30, tier3 hourly; hn */30;
+        // tenders 06:00; Xometry 0 6,8,10,12,14,16,18; content-daily 07:00; sitemap 09:00 (stage S4 only);
+        // ops-digest Monday 06:30; marketing follow-ups :05 hourly and warm-up 00:05 (vars). Each job is gated by
+        // its flag (or var) and runs once per slot, so switch-over and rollback are flag flips, and the matching
+        // pg_cron job (or the GitHub Action schedule) is deactivated in the same step (P5-8).
         "* * * * *",
         // Phase 4. Dispatcher: Gmail reply poller for the 2 Workspace sender accounts (P4-8, live 2026-09-30),
         // inbound rows left received, portal orders without a post-order run, parked runs, old failure cards,

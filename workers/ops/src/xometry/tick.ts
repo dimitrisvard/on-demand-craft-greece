@@ -3,14 +3,21 @@
 // runXometryTick for it and acks afterwards. Replaces the scheduled GitHub Action (python -m xometry_bot.pipeline).
 //
 // Steps
-//   0. run      the run must exist and still be 'running' (a redelivery of a closed run does nothing)
+//   0. run      the run must exist, still be 'running', belong to growth.xometry and carry the key
+//               'growth.xometry:<slot>' of the message's slot; anything else does nothing. The tick then claims the
+//               run with one conditional PATCH (output {slot, claimed_at} while the status is 'running' and the
+//               output is empty), so of two deliveries of one message only the first scans and alerts.
 //   1. flag     readFlag('agent.growth.xometry'); off -> close 'skipped' {reason: 'flag_off'}
 //   2. overlap  another 'running' growth.xometry run that started earlier and less than 15 min ago -> 'skipped'
-//               {reason: 'overlap'}
+//               {reason: 'overlap'}. An earlier run still 'running' whose claim is 15 min old or older (a consumer
+//               invocation never lasts that long) is closed 'failed' {reason: 'interrupted'}; the next slot is its
+//               retry.
 //   3. token    neither XOMETRY_TOKEN nor XOMETRY_COOKIE -> 'skipped' {reason: 'not_configured'}. Fingerprint = first
 //               12 hex of SHA-256(token ‖ '\n' ‖ cookie); when the latest earlier run that reached the partner API
 //               (output.auth 'ok' or 'rejected') was rejected with this fingerprint -> 'skipped'
-//               {reason: 'token_rejected'} without any call, plus the reminder at the 06:00 slot
+//               {reason: 'token_rejected'} without any call. Alert: the rejection text when no earlier run of this
+//               fingerprint sent the rejection or a reminder (a rejection seen in shadow mode sent nothing), else the
+//               reminder at the 06:00 slot
 //   4. expiry   a token that decodes as a JWT whose exp is within value.token_reminder_hours (default 24) -> one
 //               hint per fingerprint (local decode only, no verification)
 //   5. scan     PartnerClient over P5Ports.sources ('xometry'); store = PostgrestOfferStore over the Phase 4 Db
@@ -47,6 +54,8 @@ import { XometrySchemaError } from './types';
 export const XOMETRY_AGENT = 'growth.xometry';
 export const XOMETRY_FLAG = 'agent.growth.xometry';
 export const OVERLAP_WINDOW_MS = 15 * 60_000;
+/** Age of a claim after which its tick has ended (the queue consumer's wall-time limit is 15 min). */
+export const CLAIM_STALE_MS = 15 * 60_000;
 /** Counted subrequests after which the scan stops writing (the platform default allows 10,000 per invocation). */
 export const SUBREQUEST_STOP = 9_000;
 export const WALL_STOP_MS = 10 * 60_000;
@@ -221,6 +230,26 @@ export async function runXometryTick(env: OpsEnv, ports: Ports, p5: P5Ports, inp
     logLine(LOG_PREFIX, 'xometry tick ignored', { run_id, slot, run: run ? run.status : 'missing' });
     return { status: 'none', reason: run ? 'not_running' : 'run_missing', alerts: [] };
   }
+  if (run.agent !== XOMETRY_AGENT || run.idempotency_key !== `${XOMETRY_AGENT}:${slot}`) {
+    logLine(LOG_PREFIX, 'xometry tick ignored', { run_id, slot, run: 'not_this_slot' });
+    return { status: 'none', reason: 'not_this_slot', alerts: [] };
+  }
+  const claimed = await db.update<{ id: string }>(
+    'agent_runs',
+    { output: { slot, claimed_at: startedAt.toISOString() } },
+    {
+      filters: [
+        ['id', 'eq', run_id],
+        ['status', 'eq', 'running'],
+        ['output', 'is', null],
+      ],
+      returning: 'id',
+    },
+  );
+  if (claimed.length === 0) {
+    logLine(LOG_PREFIX, 'xometry tick ignored', { run_id, slot, run: 'claimed' });
+    return { status: 'none', reason: 'claimed', alerts: [] };
+  }
 
   let outcome: Outcome;
   let shadow = false;
@@ -306,6 +335,16 @@ async function tick(env: OpsEnv, ports: Ports, p5: P5Ports, t: TickContext): Pro
     return started < own || (started === own && String(r.id) < run_id);
   });
   if (overlap) return { status: 'skipped', output: { ...base, reason: 'overlap' }, alerts: [] };
+  for (const r of history) {
+    const claimedAt = r.status === 'running' && typeof r.output?.claimed_at === 'string' ? Date.parse(r.output.claimed_at) : NaN;
+    if (!(now.getTime() - claimedAt >= CLAIM_STALE_MS)) continue;
+    try {
+      await closeRun(db, String(r.id), { status: 'failed', error: 'interrupted', output: { ...r.output, reason: 'interrupted' } }, { ...EMPTY_USAGE, by_step: {} });
+      r.status = 'failed';
+    } catch (e) {
+      console.error(formatLogLine(LOG_PREFIX, 'xometry interrupted run not closed', { run_id: String(r.id), error: errorName(e) }));
+    }
+  }
 
   // 3. token gate
   const token = env.XOMETRY_TOKEN || undefined;
@@ -319,7 +358,12 @@ async function tick(env: OpsEnv, ports: Ports, p5: P5Ports, t: TickContext): Pro
   if (decided?.output?.auth === 'rejected' && decided.output.token_fp === fp) {
     const status = typeof decided.output.http_status === 'number' ? decided.output.http_status : 401;
     const rejectedAt = typeof decided.output.rejected_at === 'string' ? decided.output.rejected_at : String(decided.started_at);
-    const alerts = slot.slice(11, 16) === REMINDER_SLOT_TIME ? [xometryAlerts.tokenReminder(status, new Date(rejectedAt))] : [];
+    const alerted = history.some((r) => r.output?.token_fp === fp && sentAlertKinds(r.output).some((k) => k === 'token_rejected' || k === 'token_reminder'));
+    const alerts = !alerted
+      ? [xometryAlerts.tokenRejected(status, new Date(rejectedAt))]
+      : slot.slice(11, 16) === REMINDER_SLOT_TIME
+        ? [xometryAlerts.tokenReminder(status, new Date(rejectedAt))]
+        : [];
     return { status: 'skipped', output: { ...base, reason: 'token_rejected', auth: 'rejected', token_fp: fp, http_status: status, rejected_at: rejectedAt }, alerts };
   }
 

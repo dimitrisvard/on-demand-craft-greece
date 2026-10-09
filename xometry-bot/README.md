@@ -55,6 +55,21 @@ server:
 The box path (`python -m xometry_bot.pipeline` on a cron + `review_api`) is still
 valid — see "Box alternative" below — but you do not need it.
 
+### Cloudflare Worker port (migration Phase 5)
+
+Phase 5 of the Cloudflare migration ports the scan (Phase 1 above, no browser) to TypeScript in
+`workers/ops/src/xometry/` (docs/migration/PLAN.md §5.5). The code in this folder is unchanged and stays the
+reference and the rollback path:
+
+| Item | Rule |
+| --- | --- |
+| Schedule | The same UTC hours on the `microns-ops` schedule table, behind the flag `agent.growth.xometry` (off until switch-over step S8, which starts with one shadow day) |
+| Action | `.github/workflows/xometry-scan.yml` keeps `workflow_dispatch`; its scheduled run is skipped while the repository variable `XOMETRY_SCAN_SCHEDULE` is `off` (set at S8). Rollback: delete the variable. The file is deleted in P6-6 |
+| Token | The Worker reads the same partner token as optional secret `XOMETRY_TOKEN` (and `XOMETRY_COOKIE`). A 401 or 403 sends one Telegram alert, pauses the scans until the token changes and repeats a reminder at 06:00 UTC; a JWT-shaped token about to expire gets one hint. The run stores only a 12-character fingerprint |
+| Storage | `xometry_offers` through PostgREST with the service role (no database connection string on the Worker); the GitHub secrets stay until the Phase 5 gate is signed, then they are deleted |
+| Parity | 72 of the Python test functions are ported (23 recorded as not applicable); `workers/ops/scripts/xometry-golden/gen_golden.py` imports this package to write 388 golden assertion units, and a Worker test fails when a module here changes until the vectors are regenerated |
+| Not ported | Playwright buyer pricing, file downloads, the partner form and the review API (they stay here and in `xometry-review`) |
+
 ## Operator setup (do these to make it work)
 
 ### A. Scanner → GitHub Actions (fills the queue)

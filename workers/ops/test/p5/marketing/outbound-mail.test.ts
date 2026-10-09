@@ -339,8 +339,9 @@ describe('campaign close', () => {
     expect(run).toMatchObject({ status: 'succeeded', output: { expected: 3, queued: 3, sent: 3, bounced: 0, waiting: 0, mode: 'tags' } });
     const closedAt = run?.finished_at;
     const updates = h.db.calls.filter((c) => c.method === 'update' && c.target === 'marketing_campaigns').length;
+    // a redelivery after the close: the batch reads the campaign as sent, so no close pass and no campaign write
     await h.consume([message(bodies[2]!, 2)]);
-    expect(h.db.calls.filter((c) => c.method === 'update' && c.target === 'marketing_campaigns').length).toBe(updates + 1);
+    expect(h.db.calls.filter((c) => c.method === 'update' && c.target === 'marketing_campaigns').length).toBe(updates);
     expect(h.rows('agent_runs').find((r) => r.agent === 'marketing.send')?.finished_at).toBe(closedAt);
   });
 

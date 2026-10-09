@@ -4,7 +4,9 @@
 // AI Studio stub (gateway headers, no provider key), IndexNow goes to its stub, the 13th daily translation sends
 // translations-done, the Workflow continues with fix-links and starts the sitemap Workflow, which uploads to the
 // Storage stub and keeps the R2 copy. A second part runs the sitemap alone in shadow (switch-over stage S4).
-// The 6 h timeout of wait-translations is covered by T1 (FakeStep), as real time cannot be skipped here.
+// A third part runs the timeout path of wait-translations in its own harness instance, whose generated ops config sets
+// the T2-only var CONTENT_WAIT_TIMEOUT_S (5 s instead of 6 h; the shared harness keeps the 6 h wait): every Gemini
+// model answers 404, so no translation lands, the wait times out and the run still closes 'succeeded'.
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -13,6 +15,15 @@ import { formatSiloArticlesForPrompt, generatePromptValues } from '../../src/con
 import { TARGET_LANGS } from '../../src/content/languages';
 import { renderTemplate } from '../../src/content/template';
 import { call, flagValue, globalUrls, json, JSON_HEADERS, r2Get, restoreFlag, rows, seed, setFlag, startInstance, until, type Row, type Urls } from '../quote/t2-helpers';
+
+interface OwnHarness {
+  url: string;
+  stub: { url: string };
+  explorer: string;
+  tmp: string;
+  approvalSecret: string;
+  stop: () => Promise<void>;
+}
 
 const PROFILE = process.env.T2_PROFILE ?? '';
 const ENABLED = Boolean(process.env.T2_STUB_URL) && PROFILE === 'jobs';
@@ -50,6 +61,24 @@ async function expectedPrompt(u: Urls): Promise<string> {
   return renderTemplate(TEMPLATE, generatePromptValues({ title: TITLE, siloCategory: silo, relatedArticles: formatSiloArticlesForPrompt(neighbours), serviceIndex: articles.length % 3, quoteIndex: articles.length % 5 }));
 }
 
+/** The Anthropic stub fixture for the article prompt the Workflow sends over the rows of `u`. */
+async function articleFixture(u: Urls): Promise<void> {
+  const prompt = await expectedPrompt(u);
+  const sha = createHash('sha256').update(JSON.stringify([{ text: prompt, type: 'text' }])).digest('hex');
+  const response = {
+    id: 'msg_t2_content',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-sonnet-5',
+    content: [{ type: 'text', text: JSON.stringify({ content: ARTICLE, excerpt: 'Laser cutting tolerances for European buyers.', metaTitle: 'Laser Cutting Tolerances | Microns Hub', metaDescription: 'Kerf, focus and edge quality.', faqSchema: null }) }],
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: { input_tokens: 2500, output_tokens: 5000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+  };
+  const res = await call(`${u.stub}/__stub/anthropic/fixtures`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ prompt: 'content_daily.generate_en@v1', request_sha256: sha, response }) });
+  expect(res.status).toBe(204);
+}
+
 function translationAnswer(n: number): { text: string } {
   return {
     text: [
@@ -78,20 +107,7 @@ describe.skipIf(!ENABLED)('content day in workerd (T2, profile jobs)', () => {
         tr('de', GROUP_B, 2),
       ],
     });
-    const prompt = await expectedPrompt(u);
-    const sha = createHash('sha256').update(JSON.stringify([{ text: prompt, type: 'text' }])).digest('hex');
-    const response = {
-      id: 'msg_t2_content',
-      type: 'message',
-      role: 'assistant',
-      model: 'claude-sonnet-5',
-      content: [{ type: 'text', text: JSON.stringify({ content: ARTICLE, excerpt: 'Laser cutting tolerances for European buyers.', metaTitle: 'Laser Cutting Tolerances | Microns Hub', metaDescription: 'Kerf, focus and edge quality.', faqSchema: null }) }],
-      stop_reason: 'end_turn',
-      stop_sequence: null,
-      usage: { input_tokens: 2500, output_tokens: 5000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
-    };
-    const res = await call(`${u.stub}/__stub/anthropic/fixtures`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ prompt: 'content_daily.generate_en@v1', request_sha256: sha, response }) });
-    expect(res.status).toBe(204);
+    await articleFixture(u);
     // distinct answers for every translation call (the first model of the chain), so no two rows share a slug
     const answers = Array.from({ length: 60 }, (_, i) => translationAnswer(i + 1));
     await call(`${u.stub}/__stub/google-ai-studio/script`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ models: { 'gemini-2.5-flash-lite': { answers } } }) });
@@ -188,4 +204,46 @@ describe.skipIf(!ENABLED)('content day in workerd (T2, profile jobs)', () => {
     expect(xml && new TextDecoder().decode(xml).startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect((await stub<unknown[]>('/__stub/storage/objects')).length).toBe(before);
   }, 200_000);
+});
+
+describe.skipIf(!ENABLED)('content day: the translations-done wait times out (T2, own harness with CONTENT_WAIT_TIMEOUT_S)', () => {
+  const TIMEOUT_DAY = '2031-03-07';
+  const WAIT_S = 5;
+  let own: (Urls & { stop: () => Promise<void> }) | null = null;
+
+  beforeAll(async () => {
+    const harness = (await import(/* @vite-ignore */ new URL('../../../site/test/integration/harness.mjs', import.meta.url).href)) as {
+      startHarness(o: Record<string, unknown>): Promise<OwnHarness>;
+    };
+    const h = await harness.startHarness({ profile: 'jobs', publish: false, quiet: true, opsVars: { CONTENT_WAIT_TIMEOUT_S: String(WAIT_S) } });
+    own = { site: h.url, stub: h.stub.url, explorer: h.explorer, tmp: h.tmp, approvalSecret: h.approvalSecret, stop: h.stop };
+    const u: Urls = own;
+    await seed(u, { article_titles: [{ id: TITLE_ID, title: TITLE, silo_category: 'Sheet Metal & Fabrication', processed: false, created_at: '2031-01-01T00:00:00Z' }] });
+    await articleFixture(u);
+    // no Gemini script: every model answers 404, so every translation message goes back to the queue (overloaded)
+    await setFlag(u, 'agent.content_daily', { enabled: true, mode: 'assist', value: { mode: 'assist', steps: ['generate', 'translate'], model: 'claude-sonnet-5', backfill_per_language_per_day: 1 }, rev: 601 });
+  }, 180_000);
+
+  afterAll(async () => {
+    await own?.stop();
+  });
+
+  it('no translation lands: the wait times out after CONTENT_WAIT_TIMEOUT_S and the run closes succeeded', async () => {
+    const u = own as Urls;
+    const started = Date.now();
+    await startInstance(u, 'content-daily', `content-daily-${TIMEOUT_DAY}`, { date: TIMEOUT_DAY, trigger: 'manual' });
+    const run = await until('the content_daily run closed after the wait', async () => {
+      const r = (await rows(u, 'agent_runs')).find((x) => x.agent === 'content_daily' && x.idempotency_key === `content_daily:${TIMEOUT_DAY}`);
+      return r && r.status !== 'running' ? r : null;
+    }, 150_000);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(WAIT_S * 1000);
+    expect(run).toMatchObject({ status: 'succeeded', trigger: 'manual', workflow_instance_id: `content-daily-${TIMEOUT_DAY}`, llm_calls: 1 });
+    const out = run.output as Row;
+    expect(out).toMatchObject({ generate: 'published', daily_queued: 13, translations_wait: 'timeout' });
+    expect(Object.values(out.translations as Row).every((state) => state === 'missing' || state === 'failed')).toBe(true);
+    const en = (await rows(u, 'articles')).find((a) => a.title === TITLE)!;
+    expect((await rows(u, 'articles')).filter((a) => a.translation_id === en.translation_id).map((a) => a.language)).toEqual(['en']);
+    const gemini = await json<Array<{ model: string }>>(await call(`${u.stub}/__stub/google-ai-studio/calls`));
+    expect(gemini.length).toBeGreaterThan(0);
+  }, 240_000);
 });

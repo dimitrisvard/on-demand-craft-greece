@@ -20,7 +20,7 @@ import {
   type DigestWindow,
 } from '../../../src/digest/collect';
 import { figureRows } from '../../../src/digest/render';
-import { collectStuck } from '../../../src/digest/stuck';
+import { collectStuck, isQueueFinalFailure, QUEUE_FINISHED_AGENTS } from '../../../src/digest/stuck';
 import { MemoryDb } from '../../helpers/memory-db';
 import { digestHarness, VECTORS } from './helpers';
 
@@ -53,6 +53,24 @@ describe('digest window', () => {
     expect(isFirstMondayOfMonth('2026-W45')).toBe(true); // Monday 2026-11-02
     expect(isFirstMondayOfMonth('2026-W44')).toBe(false); // Monday 2026-10-26
     expect(isFirstMondayOfMonth('2026-W99')).toBe(false);
+    // boundaries: a month whose first Monday is the 7th, and the second Monday of a month that starts on a Monday
+    expect(isFirstMondayOfMonth('2026-W37')).toBe(true); // Monday 2026-09-07
+    expect(isFirstMondayOfMonth('2026-W23')).toBe(true); // Monday 2026-06-01
+    expect(isFirstMondayOfMonth('2026-W24')).toBe(false); // Monday 2026-06-08
+  });
+
+  it('exactly one purge week per calendar month (2025-2028)', () => {
+    const perMonth = new Map<string, string[]>();
+    for (let t = Date.UTC(2024, 11, 30); t < Date.UTC(2029, 0, 1); t += 7 * 86_400_000) {
+      const monday = new Date(t);
+      const month = monday.toISOString().slice(0, 7);
+      if (month < '2025-01') continue;
+      if (!perMonth.has(month)) perMonth.set(month, []);
+      const week = isoWeekOf(monday);
+      if (isFirstMondayOfMonth(week)) perMonth.get(month)!.push(week);
+    }
+    expect(perMonth.size).toBe(48);
+    for (const [month, weeks] of perMonth) expect(weeks, month).toHaveLength(1);
   });
 });
 
@@ -97,7 +115,7 @@ describe('collectMetrics + collectStuck (shared vectors)', () => {
     expect(m.pipeline).toEqual({ rfqs: 3, by_source: { email: 2, web: 1 } });
     expect(m.collectors.leads).toBe(4);
     expect(m.collectors.tenders).toBe(3);
-    expect(m.agents.runs).toBe(7);
+    expect(m.agents.runs).toBe(11);
     expect(m.quotes.outcomes).toEqual({ won: 1, lost: 1, expired: 1, counter_offer: 1 });
   });
 
@@ -128,8 +146,39 @@ describe('collectMetrics + collectStuck (shared vectors)', () => {
     expect(s.stale_runs.items).toHaveLength(20);
     expect(s.stale_runs.items[0].started_at).toBe('2026-09-01T00:00:00.000Z');
     expect(s.quotes_awaiting_approval.count).toBe(1);
-    expect(s.queue_failures).toEqual({ 'content_daily.translate': 1 });
+    expect(s.queue_failures).toEqual({ 'content_daily.translate': 1, 'growth.hn': 1, 'growth.reddit': 1, 'growth.xometry': 1 });
     expect(s.cad_failed).toBe(2);
+  });
+
+  it('queue final failures: failed runs a queue consumer finishes (trigger queue, or a scrapes run opened as cron)', async () => {
+    expect([...QUEUE_FINISHED_AGENTS].sort()).toEqual(['growth.hn', 'growth.reddit', 'growth.xometry']);
+    const db = new MemoryDb();
+    const w = reportWindow(VECTORS.iso_week)!;
+    const at = (h: number) => new Date(Date.parse(w.start) + h * 3_600_000).toISOString();
+    let n = 0;
+    const run = (agent: string, trigger: string, status: string, started: string) => ({ agent, trigger, idempotency_key: `${agent}:q-${++n}`, status, started_at: started });
+    db.seed('agent_runs', [
+      // a week in which every HN tick failed (dispatcher opens 'cron', the scrapes consumer closes 'failed')
+      ...Array.from({ length: 5 }, (_, i) => run('growth.hn', 'cron', 'failed', at(i + 1))),
+      run('growth.reddit', 'cron', 'failed', at(10)),
+      run('growth.xometry', 'cron', 'failed', at(11)),
+      run('growth.tenders', 'queue', 'failed', at(12)), // a tender child
+      run('quote.reply_poller', 'queue', 'failed', at(13)),
+      // not counted: a tenders parent and other agents closed outside a consumer, other outcomes, outside the week
+      run('growth.tenders', 'cron', 'failed', at(14)),
+      run('rfq_intake', 'email', 'failed', at(15)),
+      run('content_daily', 'cron', 'failed', at(16)),
+      run('growth.hn', 'cron', 'succeeded', at(17)),
+      run('growth.reddit', 'cron', 'skipped', at(18)),
+      run('growth.xometry', 'queue', 'running', at(19)),
+      run('growth.hn', 'cron', 'failed', w.end),
+      run('growth.reddit', 'cron', 'failed', new Date(Date.parse(w.start) - 1000).toISOString()),
+    ]);
+    const s = await collectStuck(db, w, new Date(VECTORS.now));
+    expect(s.queue_failures).toEqual({ 'growth.hn': 5, 'growth.reddit': 1, 'growth.tenders': 1, 'growth.xometry': 1, 'quote.reply_poller': 1 });
+    expect(isQueueFinalFailure({ agent: 'growth.hn', trigger: 'cron', status: 'failed' })).toBe(true);
+    expect(isQueueFinalFailure({ agent: 'growth.hn', trigger: 'cron', status: 'succeeded' })).toBe(false);
+    expect(isQueueFinalFailure({ agent: 'quote', trigger: 'workflow', status: 'failed' })).toBe(false);
   });
 });
 

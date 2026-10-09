@@ -22,7 +22,11 @@
 //     of the price is the answer's modelVersion when present (an alias such as gemini-flash-latest names its
 //     target there), else the requested model.
 //   - Usage: tokens of the answer priced with src/agents/prices.ts; a model without a price row costs 0 here
-//     (closeRun then records price_missing when the run spent nothing priced).
+//     (closeRun then records price_missing when the run spent nothing priced). input_tokens is uncached input only:
+//     for Gemini it is promptTokenCount minus cachedContentTokenCount (the prompt count includes the cached part),
+//     and the cached part is cache_read_input_tokens. A failure of an answered call (Anthropic max_tokens, refusal
+//     or no text; a Gemini 200 without text or with an error, when it carries usageMetadata) keeps that usage, so
+//     the caller can add the billed tokens to its run; a failure without an answer has no usage.
 //   - sources: global fetch with the production bases below; T2 points them at the stub through the *_API_BASE
 //     vars.
 //   - storage: POST {SUPABASE_URL}/storage/v1/object/sitemaps/<name> with the service role (authorization and
@@ -68,6 +72,9 @@ export type TextLlmResult =
       code: 'not_found' | 'rate_limited' | 'server' | 'timeout' | 'blocked' | 'empty' | 'other';
       retryable: boolean;
       message: string;
+      /** Tokens of an answered call that still failed (stop reason, refusal, no text): billed by the provider, so
+       *  the caller adds them to the run like a successful call. Absent when nothing was answered. */
+      usage?: LlmUsage;
     };
 
 export interface TextLlmPort {
@@ -129,6 +136,8 @@ export const P5_T2_ONLY_VARS = [
   'INDEXNOW_API_BASE',
   'AGENT_GEMINI_BASE_URL',
   'CAD_CONTAINER_BASE_URL',
+  // not a base URL: the translations-done wait of content-daily in seconds, so T2 can run the 6 h timeout path
+  'CONTENT_WAIT_TIMEOUT_S',
 ] as const satisfies ReadonlyArray<keyof OpsEnv>;
 
 /** Default production endpoints of the HTTP adapters. */
@@ -162,8 +171,8 @@ function priced(model: string, counts: Omit<LlmUsage, 'cost_usd' | 'model'>): Ll
 
 type TextLlmFailure = Extract<TextLlmResult, { ok: false }>;
 
-function failure(code: TextLlmFailure['code'], status: number | null, retryable: boolean, message: string): TextLlmFailure {
-  return { ok: false, status, code, retryable, message };
+function failure(code: TextLlmFailure['code'], status: number | null, retryable: boolean, message: string, usage?: LlmUsage): TextLlmFailure {
+  return usage ? { ok: false, status, code, retryable, message, usage } : { ok: false, status, code, retryable, message };
 }
 
 /** TextLlmResult of an HTTP status that is not 2xx. */
@@ -214,10 +223,10 @@ class GatewayTextLlm implements TextLlmPort {
       cache_creation_input_tokens: count(u.cache_creation_input_tokens),
     });
     const stop = String(message.stop_reason ?? '');
-    if (stop === 'max_tokens') return failure('other', 200, false, 'anthropic: stopped at max_tokens');
-    if (stop === 'refusal') return failure('blocked', 200, false, 'anthropic: refusal');
+    if (stop === 'max_tokens') return failure('other', 200, false, 'anthropic: stopped at max_tokens', usage);
+    if (stop === 'refusal') return failure('blocked', 200, false, 'anthropic: refusal', usage);
     const block = message.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
-    if (stop !== 'end_turn' || !block) return failure('empty', 200, false, `anthropic: no text (stop ${stop || 'none'})`);
+    if (stop !== 'end_turn' || !block) return failure('empty', 200, false, `anthropic: no text (stop ${stop || 'none'})`, usage);
     return { ok: true, text: block.text, stop, model, usage };
   }
 
@@ -251,22 +260,26 @@ class GatewayTextLlm implements TextLlmPort {
       return failure('server', null, true, 'gemini: network error');
     }
     const model = typeof data.modelVersion === 'string' && data.modelVersion !== '' ? data.modelVersion : c.model;
-    const meta = (data.usageMetadata ?? {}) as Record<string, unknown>;
+    const hasUsage = typeof data.usageMetadata === 'object' && data.usageMetadata !== null;
+    const meta = (hasUsage ? data.usageMetadata : {}) as Record<string, unknown>;
+    // promptTokenCount is the whole effective prompt including the cached part; input_tokens holds uncached input only.
+    const cached = count(meta.cachedContentTokenCount);
     const usage = priced(model, {
-      input_tokens: count(meta.promptTokenCount),
+      input_tokens: Math.max(0, count(meta.promptTokenCount) - cached),
       // Thinking tokens are billed as output.
       output_tokens: count(meta.candidatesTokenCount) + count(meta.thoughtsTokenCount),
-      cache_read_input_tokens: count(meta.cachedContentTokenCount),
+      cache_read_input_tokens: cached,
       cache_creation_input_tokens: 0,
     });
-    if (data.error) return failure('other', 200, false, 'gemini: error in answer');
+    const answered = hasUsage ? usage : undefined;
+    if (data.error) return failure('other', 200, false, 'gemini: error in answer', answered);
     const candidates = Array.isArray(data.candidates) ? (data.candidates as Array<Record<string, unknown>>) : [];
     const first = candidates[0];
     const parts = ((first?.content as { parts?: unknown } | undefined)?.parts ?? []) as Array<{ text?: unknown }>;
     const text = parts[0]?.text;
     if (typeof text !== 'string' || text === '') {
       const blocked = (data.promptFeedback as { blockReason?: unknown } | undefined)?.blockReason || GEMINI_BLOCK_REASONS.has(String(first?.finishReason ?? ''));
-      return blocked ? failure('blocked', 200, false, 'gemini: blocked') : failure('empty', 200, false, 'gemini: empty answer');
+      return blocked ? failure('blocked', 200, false, 'gemini: blocked', answered) : failure('empty', 200, false, 'gemini: empty answer', answered);
     }
     const stop = typeof first?.finishReason === 'string' && first.finishReason !== '' ? first.finishReason : 'UNKNOWN';
     return { ok: true, text, stop, model, usage };

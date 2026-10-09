@@ -177,9 +177,15 @@ function daysFromCivil(y: number, m: number, d: number): number {
   return Math.round(t.getTime() / 86_400_000);
 }
 
+/** Calendar parts of a day count; NaN parts beyond the Date range (±8.64e15 ms), which no year check accepts. */
 function civilFromDays(days: number): [number, number, number] {
   const t = new Date(days * 86_400_000);
   return [t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate()];
+}
+
+/** True for a year CPython's date accepts (1-9999); false for NaN. */
+function inYearRange(y: number): boolean {
+  return y >= 1 && y <= 9999;
 }
 
 /** ISO weeks of a year: 53 when 1 January is a Thursday, or a Wednesday in a leap year. */
@@ -205,7 +211,7 @@ export function pyDateFromIso(text: string): string {
     const jan4 = daysFromCivil(y, 1, 4);
     const jan4Weekday = (jan4 % 7 + 7 + 3) % 7; // 0 = Monday
     const [yy, mm, dd] = civilFromDays(jan4 - jan4Weekday + (week - 1) * 7 + (day - 1));
-    if (yy < 1 || yy > 9999) throw new RangeError(`Invalid isoformat string: ${JSON.stringify(text)}`);
+    if (!inYearRange(yy)) throw new RangeError(`Invalid isoformat string: ${JSON.stringify(text)}`);
     return ymd(yy, mm, dd);
   }
   throw new RangeError(`Invalid isoformat string: ${JSON.stringify(text)}`);
@@ -219,7 +225,8 @@ interface Instant {
   micros: number;
 }
 
-/** Epoch seconds (with fraction) as UTC calendar parts; microseconds rounded half to even, as CPython does. */
+/** Epoch seconds (with fraction) as UTC calendar parts; microseconds rounded half to even, as CPython does. null
+ *  outside years 1-9999, values beyond the JavaScript Date range included (CPython refuses them too). */
 function instantOf(seconds: number): Instant | null {
   if (!Number.isFinite(seconds)) return null;
   let whole = Math.floor(seconds);
@@ -230,7 +237,7 @@ function instantOf(seconds: number): Instant | null {
   }
   const days = Math.floor(whole / 86_400);
   const [y] = civilFromDays(days);
-  if (y < 1 || y > 9999) return null;
+  if (!inYearRange(y)) return null;
   return { days, seconds: whole - days * 86_400, micros };
 }
 

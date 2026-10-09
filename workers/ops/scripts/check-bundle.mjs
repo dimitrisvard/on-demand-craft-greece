@@ -40,7 +40,7 @@ const QRCODE_BROWSER = /(^|\/)node_modules\/qrcode\/lib\/browser\.js$/;
 /** Var names that only generated T2 configs may set (Phase 5 appends its own). */
 export const T2_ONLY_VARS = ['AGENT_STUBS', 'AGENT_LLM_BASE_URL', 'RESEND_API_BASE', 'TELEGRAM_API_BASE', 'GMAIL_API_BASE', 'GOOGLE_TOKEN_URL'];
 /** Var names that only generated Phase 5 T2 configs may set (src/ports/p5.ts P5_T2_ONLY_VARS). */
-export const P5_T2_ONLY_VARS = ['PULLPUSH_API_BASE', 'HN_API_BASE', 'XOMETRY_API_BASE', 'INDEXNOW_API_BASE', 'AGENT_GEMINI_BASE_URL', 'CAD_CONTAINER_BASE_URL'];
+export const P5_T2_ONLY_VARS = ['PULLPUSH_API_BASE', 'HN_API_BASE', 'XOMETRY_API_BASE', 'INDEXNOW_API_BASE', 'AGENT_GEMINI_BASE_URL', 'CAD_CONTAINER_BASE_URL', 'CONTENT_WAIT_TIMEOUT_S'];
 /** Package root of the single @cloudflare/containers copy, relative to the repository root. */
 export const CONTAINERS_ROOT = 'workers/ops/node_modules/@cloudflare/containers/';
 const CONTAINERS_MARKER = '/node_modules/@cloudflare/containers/';

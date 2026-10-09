@@ -151,6 +151,20 @@ describe('scrape jobs', () => {
     expect(w.scrapes.sent[0]?.options).toEqual({ contentType: 'json' });
   });
 
+  it('xometry: the run is opened running with no output and nothing else is written before the message (the tick claims it while output is null)', async () => {
+    const w = world();
+    setFlag(w, 'agent.growth.xometry', true);
+    const result = await tick(w, t(10, 0));
+    expect(result.fired.find((f) => f.job === 'xometry')).toEqual({ job: 'xometry', slot: '2026-10-05T10:00Z', outcome: 'enqueued' });
+    const run = runs(w).find((r) => r.agent === 'growth.xometry')!;
+    expect(run).toMatchObject({ idempotency_key: 'growth.xometry:2026-10-05T10:00Z', trigger: 'cron', status: 'running' });
+    expect(run.output ?? null).toBeNull();
+    // one rpc agent_run_begin opens the row; no PATCH or INSERT on agent_runs follows before the queue message
+    expect(w.ports.db.calls.filter((c) => c.method === 'rpc').map((c) => c.target)).toEqual(['agent_run_begin']);
+    expect(w.ports.db.calls.filter((c) => c.target === 'agent_runs' && (c.method === 'update' || c.method === 'insert'))).toEqual([]);
+    expect(w.scrapes.sent.map((s) => s.body)).toEqual([expect.objectContaining({ kind: 'xometry-scan', params: { slot: '2026-10-05T10:00Z' }, run_id: run.id })]);
+  });
+
   it('a second tick for the same slot (new isolate, empty memo) finds the run and sends nothing: outcome exists', async () => {
     const w = world();
     setFlag(w, 'agent.growth.hn', true);
@@ -269,6 +283,29 @@ describe('catch-up (D-5)', () => {
     expect(w.scrapes.sent).toHaveLength(1);
   });
 
+  it('memo entries older than 3 h (by slot) and unreadable entries are pruned on each tick; newer ones are kept', async () => {
+    const w = world();
+    const memo = new Set([
+      'hn@2026-10-05T09:59Z', // 3 h 1 min before the tick: dropped
+      'hn@2026-10-05T10:00Z', // exactly 3 h: kept
+      'xometry@2026-10-05T12:00Z', // 1 h: kept
+      'not-a-slot', // unreadable: dropped
+    ]);
+    await tick(w, t(13, 0), { memo });
+    expect([...memo].sort()).toEqual(['hn@2026-10-05T10:00Z', 'xometry@2026-10-05T12:00Z']);
+  });
+
+  it('a pruned slot is evaluated again but never fires twice: the run exists', async () => {
+    const w = world();
+    setFlag(w, 'agent.growth.xometry', true);
+    await tick(w, t(6, 0));
+    // Same isolate, the memo entry of 06:00 aged out by a later tick, then the 06:00 slot is offered again.
+    await tick(w, t(9, 1));
+    expect(w.memo.has('xometry@2026-10-05T06:00Z')).toBe(false);
+    expect((await tick(w, t(6, 59))).fired.find((f) => f.job === 'xometry')?.outcome).toBe('exists');
+    expect(w.scrapes.sent).toHaveLength(1);
+  });
+
   it('a flag switched on inside the window fires the slot then (catch-up), switched on after it never', async () => {
     const w = world();
     expect((await tick(w, t(6, 10))).fired.find((f) => f.job === 'tenders')?.outcome).toBe('flag_off');
@@ -336,6 +373,31 @@ describe('tenders', () => {
     expect(runs(w).find((r) => r.agent === 'growth.tenders')).toMatchObject({ status: 'failed', error: 'enqueue_failed', output: { due: 3, enqueued: 1, countries: null } });
   });
 
+  it('the connectors read failing: the parent closes failed with connectors_read_failed and zero counts, nothing is sent, and a later tick of the window answers exists', async () => {
+    const w = world();
+    setFlag(w, 'agent.growth.tenders', true, { countries: ['NL'] });
+    w.ports.db.seed('tender_connectors', CONNECTORS);
+    const { DbError } = await import('../../../src/db/postgrest');
+    const select = w.ports.db.select.bind(w.ports.db);
+    vi.spyOn(w.ports.db, 'select').mockImplementation(async (table: string, q?: Parameters<typeof select>[1]) => {
+      if (table === 'tender_connectors') throw new DbError(503, null, 'upstream unavailable');
+      return select(table, q);
+    });
+    const result = await tick(w, t(6, 0));
+    expect(result.fired.find((f) => f.job === 'tenders')).toEqual({ job: 'tenders', slot: '2026-10-05T06:00Z', outcome: 'error' });
+    const parent = runs(w).find((r) => r.agent === 'growth.tenders');
+    expect(parent).toMatchObject({ idempotency_key: 'growth.tenders:2026-10-05', status: 'failed', error: 'connectors_read_failed', output: { due: 0, enqueued: 0, countries: ['NL'] } });
+    expect(w.scrapes.sent).toEqual([]);
+    // The log line names the database status only, never the message.
+    expect(errors).toContain('[microns-ops] schedule tenders 2026-10-05T06:00Z error db_error_503');
+    expect(errors.join('\n')).not.toContain('upstream unavailable');
+    // The parent is closed, so the slot is done: the next tick of the window (same isolate) finds the run.
+    const later = await tick(w, t(6, 1));
+    expect(later.fired.find((f) => f.job === 'tenders')?.outcome).toBe('exists');
+    expect(runs(w).filter((r) => r.agent === 'growth.tenders')).toHaveLength(1);
+    expect(w.scrapes.sent).toEqual([]);
+  });
+
   it('no due connector: the parent still closes succeeded with zero counts', async () => {
     const w = world();
     setFlag(w, 'agent.growth.tenders', true);
@@ -363,7 +425,9 @@ describe('inline marketing jobs', () => {
     expect(errors).toContain('[microns-ops] schedule marketing-warmup 2026-10-05T00:05Z error config_missing');
   });
 
-  it('errorName never returns a message', () => {
+  it('errorName never returns a message', async () => {
+    const { DbError } = await import('../../../src/db/postgrest');
+    expect(errorName(new DbError(409, '23505', 'duplicate key value violates unique constraint'))).toBe('db_error_409');
     expect(errorName(new Error('secret value inside'))).toBe('Error');
     expect(errorName({ toString: () => 'x' })).toBe('error');
     const odd = new Error('m');

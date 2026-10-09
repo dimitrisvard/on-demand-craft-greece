@@ -2,16 +2,20 @@
 // answers (caller, body, campaign, sent, stop 423, existing run, pause 503 / 409, run, enqueue), the recipient
 // selection (CSV vs tags, A/B with a seeded source, pages of 1,000), the messages (one per recipient, round-robin
 // sender, idem, run id, ≤ 100 per sendBatch), a failed enqueue closing the run 'failed' and a second click
-// re-queuing only the recipients without a final event under ':r2', concurrent clicks, an empty campaign closing at
-// once, and the dispatch from routes/marketing.ts.
+// re-queuing only the recipients without a final event under ':r2' (a message in flight is left alone, one whose
+// unfinished event is older than 15 min is queued again), `expected` while it is unknown (a run that failed before
+// its selection was read records null, a re-queue takes the newest known value or counts again), concurrent clicks,
+// an empty campaign closing at once, and the dispatch from routes/marketing.ts.
 
 import { describe, expect, it, vi } from 'vitest';
 import { closeRun, EMPTY_USAGE } from '../../../src/agents/runs';
+import { DbError } from '../../../src/db/postgrest';
+import { eventIdFor } from '../../../src/marketing/events';
 import { OpsApi } from '../../../src/index';
 import type { OutboundMailV1 } from '../../../src/queues/messages';
 import { campaignIdOf, MAX_BODY_BYTES } from '../../../src/routes/marketing-send';
 import { invoke, jsonPost, opsCall, opsEnv } from '../../helpers/ops';
-import { ACC_G, ACC_OFF, ACC_R, CAMPAIGN, marketingHarness, rec, seedCampaign, sub, type MarketingHarness } from './harness';
+import { ACC_G, ACC_OFF, ACC_R, CAMPAIGN, marketingHarness, message, rec, seedCampaign, sub, type MarketingHarness } from './harness';
 
 async function answer(res: Response): Promise<[number, unknown]> {
   return [res.status, await res.json()];
@@ -284,6 +288,99 @@ describe('failed enqueue and re-queue', () => {
     expect(out).toMatchObject({ queued: 0 });
     expect(h.queue.sent).toEqual([]);
     expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r2'))?.output).toMatchObject({ expected: 2, mode: 'csv' });
+  });
+});
+
+describe('expected while it is not known', () => {
+  /** Makes the next n reads of a table throw a PostgREST 503. */
+  function failReads(h: MarketingHarness, table: string, n = 1): void {
+    const select = h.db.select.bind(h.db);
+    let left = n;
+    vi.spyOn(h.db, 'select').mockImplementation(async (t: string, o?: Parameters<typeof select>[1]) => {
+      if (t === table && left > 0) {
+        left -= 1;
+        throw new DbError(503, 'PGRST000', 'upstream unavailable (test)');
+      }
+      return select(t, o);
+    });
+  }
+
+  it('a first run that fails while reading its recipients records expected null; the re-queue counts the selection; the campaign closes only after every mail', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { subscribers: 4 });
+    failReads(h, 'marketing_subscribers');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await answer(await h.route({ campaign_id: CAMPAIGN }))).toEqual([500, { error: 'enqueue_failed', queued: 0 }]);
+    errors.mockRestore();
+    expect(runsOf(h)[0]).toMatchObject({ status: 'failed', error: 'enqueue_partial', output: { expected: null, queued: 0 } });
+    const [status, out] = await answer(await h.route({ campaign_id: CAMPAIGN }));
+    expect([status, out]).toEqual([202, { queued: 4, run_id: expect.any(String) }]);
+    expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r2'))?.output).toMatchObject({ expected: 4, queued: 4 });
+    const bodies = h.queue.bodies();
+    h.queue.clear();
+    await h.consume([message(bodies[0]!)]);
+    expect(h.rows('marketing_campaigns')[0]).toMatchObject({ status: 'sending' });
+    await h.consume(bodies.slice(1).map((b) => message(b)));
+    expect(h.rows('marketing_campaigns')[0]).toMatchObject({ status: 'sent', sent_count: 4 });
+    expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r2'))).toMatchObject({ status: 'succeeded', output: { expected: 4, sent: 4 } });
+  });
+
+  it('a re-queue after such a run takes the newest known expected of an earlier run', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { subscribers: 150, settings: { delay_between_emails_seconds: 0 } });
+    h.queue.failOnBatch = 2;
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await h.route({ campaign_id: CAMPAIGN });
+    h.queue.failOnBatch = null;
+    await h.drain();
+    // the next click fails in its selection; then a subscriber joins (the selection grows to 151)
+    failReads(h, 'marketing_subscribers');
+    expect((await h.route({ campaign_id: CAMPAIGN })).status).toBe(500);
+    errors.mockRestore();
+    expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r2'))?.output).toMatchObject({ expected: null });
+    h.db.seed('marketing_subscribers', [{ id: sub(151), email: 'person151@example.test', name: null, status: 'active', tags: ['cnc'], replied_at: null }]);
+    const [, out] = await answer(await h.route({ campaign_id: CAMPAIGN }));
+    expect(out).toMatchObject({ queued: 51 });
+    // expected is r1's 150 (copied past the failed r2), not a new count
+    expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r3'))?.output).toMatchObject({ expected: 150, queued: 51 });
+  });
+
+  it('without any known expected, a re-queue counts the selection plus the subscribers outside it that already have an outcome', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { subscribers: 3, settings: { delay_between_emails_seconds: 0 } });
+    failReads(h, 'marketing_subscribers');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await h.route({ campaign_id: CAMPAIGN });
+    errors.mockRestore();
+    // subscriber 1 got the mail through an earlier path, then left the list
+    await h.db.insert('marketing_events', { id: await eventIdFor(`camp:${CAMPAIGN}:${sub(1)}:1`), campaign_id: CAMPAIGN, subscriber_id: sub(1), event_type: 'sent', metadata: {}, resend_email_id: 'r-0' });
+    (h.rows('marketing_subscribers')[0] as Record<string, unknown>).status = 'unsubscribed';
+    const [, out] = await answer(await h.route({ campaign_id: CAMPAIGN }));
+    expect(out).toMatchObject({ queued: 2 });
+    expect(runsOf(h).find((r) => String(r.idempotency_key).endsWith(':r2'))?.output).toMatchObject({ expected: 3, queued: 2 });
+    await h.drain();
+    expect(h.rows('marketing_campaigns')[0]).toMatchObject({ status: 'sent', sent_count: 3 });
+  });
+});
+
+describe('re-queue and messages in flight', () => {
+  it('a recipient whose unfinished event is younger than 15 min is left out; one whose unfinished event is older is queued again and sent once', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { subscribers: 3, settings: { delay_between_emails_seconds: 0 } });
+    h.queue.failOnBatch = 1;
+    await h.route({ campaign_id: CAMPAIGN });
+    h.queue.failOnBatch = null;
+    // subscriber 1: event written 20 min ago and never finished (its message was lost); subscriber 2: 5 min ago
+    h.db.seed('marketing_events', [
+      { id: await eventIdFor(`camp:${CAMPAIGN}:${sub(1)}:1`), campaign_id: CAMPAIGN, subscriber_id: sub(1), event_type: 'sent', metadata: {}, created_at: new Date(h.clock.now().getTime() - 20 * 60_000).toISOString() },
+      { id: await eventIdFor(`camp:${CAMPAIGN}:${sub(2)}:1`), campaign_id: CAMPAIGN, subscriber_id: sub(2), event_type: 'sent', metadata: {}, created_at: new Date(h.clock.now().getTime() - 5 * 60_000).toISOString() },
+    ]);
+    const [, out] = await answer(await h.route({ campaign_id: CAMPAIGN }));
+    expect(out).toMatchObject({ queued: 2 });
+    expect(h.queue.bodies().map((b) => b.subscriber_id)).toEqual([sub(1), sub(3)]);
+    await h.drain();
+    expect(h.resend.map((r) => r.body.to[0])).toEqual(['person1@example.test', 'person3@example.test']);
+    expect(h.rows('marketing_events').filter((e) => e.subscriber_id === sub(1))).toEqual([expect.objectContaining({ event_type: 'sent', resend_email_id: 'resend-1' })]);
   });
 });
 

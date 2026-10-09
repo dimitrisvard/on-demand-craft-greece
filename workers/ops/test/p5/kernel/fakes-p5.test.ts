@@ -51,6 +51,19 @@ describe('FakeTextLlm', () => {
     expect(await ask('a')).toMatchObject({ ok: true, text: 'fixture wins' });
   });
 
+  it('failText builds a failure with the usage of an answered call when given, and none otherwise', () => {
+    const usage = { input_tokens: 10, output_tokens: 16_384, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.16386, model: 'claude-sonnet-5' };
+    expect(failText('other', { status: 200, retryable: false, message: 'anthropic: stopped at max_tokens', usage })).toEqual({
+      ok: false,
+      status: 200,
+      code: 'other',
+      retryable: false,
+      message: 'anthropic: stopped at max_tokens',
+      usage,
+    });
+    expect(failText('rate_limited', { status: 429 })).not.toHaveProperty('usage');
+  });
+
   it('a fixture result is returned as a copy', async () => {
     const llm = new FakeTextLlm();
     await llm.add(META.prompt, 'x', okText('one'));

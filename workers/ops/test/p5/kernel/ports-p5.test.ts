@@ -68,8 +68,13 @@ describe('makeP5Ports: fail closed', () => {
     expect(setOverrideVars(opsEnv({ HN_API_BASE: '', CAD_CONTAINER_BASE_URL: 'http://x' }))).toEqual(['CAD_CONTAINER_BASE_URL']);
   });
 
-  it('the override list is exactly the six names of §5.4', () => {
-    expect([...P5_T2_ONLY_VARS]).toEqual(['PULLPUSH_API_BASE', 'HN_API_BASE', 'XOMETRY_API_BASE', 'INDEXNOW_API_BASE', 'AGENT_GEMINI_BASE_URL', 'CAD_CONTAINER_BASE_URL']);
+  it('the override list is exactly the six base-URL names of §5.4 plus the content wait override', () => {
+    expect([...P5_T2_ONLY_VARS]).toEqual(['PULLPUSH_API_BASE', 'HN_API_BASE', 'XOMETRY_API_BASE', 'INDEXNOW_API_BASE', 'AGENT_GEMINI_BASE_URL', 'CAD_CONTAINER_BASE_URL', 'CONTENT_WAIT_TIMEOUT_S']);
+  });
+
+  it('the content wait override is refused while AI is bound, like the base URLs', () => {
+    expect(() => makeP5Ports(prodEnv({ CONTENT_WAIT_TIMEOUT_S: '5' } as Partial<OpsEnv>))).toThrow(/CONTENT_WAIT_TIMEOUT_S/);
+    expect(() => makeP5Ports(opsEnv({ CONTENT_WAIT_TIMEOUT_S: '5' }))).not.toThrow();
   });
 });
 
@@ -115,6 +120,27 @@ describe('textLlm.anthropic (production path through the gateway client)', () =>
       const result = await makeP5Ports(prodEnv(), { fetch: rec.fetch }).textLlm.anthropic({ model: 'claude-sonnet-5', maxTokens: 10, userText: 'x', timeoutMs: 5_000, meta: META });
       expect(result, JSON.stringify(answer.stop_reason)).toMatchObject(expected);
     }
+  });
+
+  it('an answer that stops at max_tokens, refuses or has no text keeps its billed token usage on the failure', async () => {
+    const usage = { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: (1000 * 2 + 2000 * 10) / 1_000_000, model: 'claude-sonnet-5' };
+    const ask = async (answer: ReturnType<typeof anthropicMessage>) =>
+      makeP5Ports(prodEnv(), { fetch: recorder(() => json(answer)).fetch }).textLlm.anthropic({ model: 'claude-sonnet-5', maxTokens: 16384, userText: 'x', timeoutMs: 5_000, meta: META });
+    expect(await ask(anthropicMessage({ stop_reason: 'max_tokens' }))).toEqual({ ok: false, status: 200, code: 'other', retryable: false, message: 'anthropic: stopped at max_tokens', usage });
+    expect(await ask(anthropicMessage({ stop_reason: 'refusal' }))).toMatchObject({ ok: false, code: 'blocked', usage });
+    expect(await ask(anthropicMessage({ content: [] }))).toMatchObject({ ok: false, code: 'empty', usage });
+    expect(await ask(anthropicMessage({ stop_reason: 'pause_turn' }))).toMatchObject({ ok: false, code: 'empty', usage });
+    // The answer's model names the price row, as for a successful call.
+    expect(await ask(anthropicMessage({ stop_reason: 'max_tokens', model: 'claude-haiku-4-5-20251001' }))).toMatchObject({
+      usage: { model: 'claude-haiku-4-5-20251001', cost_usd: (1000 * 1 + 2000 * 5) / 1_000_000 },
+    });
+  });
+
+  it('a provider error carries no usage (nothing was answered)', async () => {
+    const rec = recorder(() => json({ type: 'error', error: { type: 'x', message: 'no' } }, 500));
+    const result = await makeP5Ports(prodEnv(), { fetch: rec.fetch }).textLlm.anthropic({ model: 'claude-sonnet-5', maxTokens: 10, userText: 'x', timeoutMs: 5_000, meta: META });
+    expect(result).toMatchObject({ ok: false, code: 'server' });
+    expect(result).not.toHaveProperty('usage');
   });
 
   it('provider errors: 404 not_found, 429 rate_limited, 500 and 529 server (retryable), 400 other; no retry by the client', async () => {
@@ -180,6 +206,44 @@ describe('textLlm.gemini', () => {
     expect(await p(geminiAnswer({ candidates: [{ content: { parts: [{ text: 'half' }] }, finishReason: 'MAX_TOKENS' }], modelVersion: 'gemini-2.5-flash' }))).toMatchObject({ ok: true, stop: 'MAX_TOKENS', model: 'gemini-2.5-flash', usage: { cost_usd: (1000 * 0.3 + 3500 * 2.5) / 1_000_000 } });
     expect(await p(geminiAnswer({ modelVersion: undefined }))).toMatchObject({ ok: true, model: 'gemini-flash-latest', usage: { cost_usd: 0, input_tokens: 1000 } });
     expect(await p(geminiAnswer({ candidates: [{ content: { parts: [{ text: 'x' }] } }] }))).toMatchObject({ ok: true, stop: 'UNKNOWN' });
+  });
+
+  it('cached prompt tokens are counted once: input = promptTokenCount - cachedContentTokenCount, cache read = cachedContentTokenCount', async () => {
+    // promptTokenCount is the whole effective prompt and already includes the cached part (generateContent
+    // UsageMetadata), while the Phase 4 LlmUsage keeps uncached input and cache reads apart.
+    const rec = recorder(() =>
+      json(geminiAnswer({ usageMetadata: { promptTokenCount: 10_000, cachedContentTokenCount: 8_000, candidatesTokenCount: 1_000 } })),
+    );
+    const result = await makeP5Ports(prodEnv(), { fetch: rec.fetch }).textLlm.gemini({ model: 'gemini-2.5-flash-lite', prompt: 'p', temperature: 0.3, maxOutputTokens: 8192, timeoutMs: 90_000, meta: META });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.usage).toEqual({
+      input_tokens: 2_000,
+      output_tokens: 1_000,
+      cache_read_input_tokens: 8_000,
+      cache_creation_input_tokens: 0,
+      cost_usd: (2_000 * 0.1 + 1_000 * 0.4 + 8_000 * 0.01) / 1_000_000,
+      model: 'gemini-2.5-flash-lite',
+    });
+    // A cached count above the prompt count (malformed answer) never yields negative input.
+    const odd = await makeP5Ports(prodEnv(), { fetch: recorder(() => json(geminiAnswer({ usageMetadata: { promptTokenCount: 100, cachedContentTokenCount: 300, candidatesTokenCount: 1 } }))).fetch })
+      .textLlm.gemini({ model: 'gemini-2.5-flash-lite', prompt: 'p', temperature: 0.3, maxOutputTokens: 8192, timeoutMs: 90_000, meta: META });
+    expect(odd).toMatchObject({ ok: true, usage: { input_tokens: 0, cache_read_input_tokens: 300 } });
+  });
+
+  it('a 200 answer without text keeps its token usage on the failure (empty, blocked, error in answer); non-2xx and network failures carry none', async () => {
+    const env = prodEnv();
+    const usageMetadata = { promptTokenCount: 1000, candidatesTokenCount: 40, thoughtsTokenCount: 10 };
+    const expectedUsage = { input_tokens: 1000, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: (1000 * 0.3 + 50 * 2.5) / 1_000_000, model: 'gemini-2.5-flash' };
+    const run = async (answer: () => Response | Promise<Response>) =>
+      makeP5Ports(env, { fetch: recorder(answer).fetch }).textLlm.gemini({ model: 'gemini-2.5-flash', prompt: 'p', temperature: 0.3, maxOutputTokens: 8192, timeoutMs: 90_000, meta: META });
+    expect(await run(() => json({ candidates: [], usageMetadata }))).toEqual({ ok: false, status: 200, code: 'empty', retryable: false, message: 'gemini: empty answer', usage: expectedUsage });
+    expect(await run(() => json({ candidates: [{ finishReason: 'SAFETY' }], usageMetadata }))).toMatchObject({ ok: false, code: 'blocked', usage: expectedUsage });
+    expect(await run(() => json({ error: { message: 'bad' }, usageMetadata }))).toMatchObject({ ok: false, code: 'other', usage: expectedUsage });
+    // An answer without usageMetadata spent nothing that can be recorded: no usage field.
+    expect(await run(() => json({ candidates: [] }))).not.toHaveProperty('usage');
+    expect(await run(() => json({}, 503))).not.toHaveProperty('usage');
+    expect(await run(() => Promise.reject(new TypeError('fetch failed')))).not.toHaveProperty('usage');
   });
 
   it('error mapping: 404 not_found, 429 rate_limited, 500/503 server with status, 403 other; empty, blocked, timeout, network', async () => {

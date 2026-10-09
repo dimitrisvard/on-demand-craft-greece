@@ -8,12 +8,19 @@
 //     (no fallback to another sender). The day is the UTC day of `now`; the count starts at 0 on every new day, and
 //     days only move forward. The object is addressed by name (idFromName); without a name it refuses to allot.
 //   - Slot = max(now, last slot + spacing), spacing = marketing_settings.delay_between_emails_seconds or 30 s
-//     (cached 60 s). A slot is allotted and counted once per key.
+//     (cached 60 s). A slot is allotted and counted once per key, and always on the UTC day it is counted on: a slot
+//     that would fall on a later UTC day is not allotted (answer exhausted with the next 00:00 UTC, nothing counted),
+//     so a day's cap only ever covers that day's sends and the next day starts with its own queue.
 //   - A key that is 'sent' answers already_sent (before any cap check). A key that is 'reserved' on the same UTC day
 //     answers its stored slot again while that slot lies at most 10 min in the past (the deferred copy or the retry of
 //     the same message); once its slot is more than 10 min old the reservation is re-used with a new slot and is not
-//     counted twice. A reservation of an earlier day is dropped and the key reserves anew.
+//     counted twice (a new slot that would fall on a later UTC day gives the reservation back and answers exhausted).
+//     A reservation of an earlier day is dropped and the key reserves anew.
 //   - A cap reached answers exhausted with the next 00:00 UTC.
+//   - Hand-over of a message whose 'sent' event already exists (src/queues/outbound-mail.ts): handOff records that the
+//     delivery holding the message stopped and sent a delayed copy; takeHandoff answers true once for that record
+//     (and removes it). Records live on the object of the message's preferred account (or 'default'), so every copy
+//     of one message finds them; they are pruned with the sent keys.
 //   - commit marks a key 'sent' with the provider id (kept 30 days, pruned by an alarm); release removes a 'reserved'
 //     key and gives its count back (a 'sent' key is never released).
 //   - reserve reads its configuration first and then reads and writes the object's SQLite rows without an await in
@@ -84,6 +91,7 @@ export class SenderLimiter extends DurableObject<OpsEnv> {
       'CREATE TABLE IF NOT EXISTS keys (idem TEXT PRIMARY KEY, status TEXT NOT NULL, slot INTEGER NOT NULL, day TEXT NOT NULL, reserved_at INTEGER NOT NULL, provider_id TEXT, sent_at INTEGER)',
     );
     this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK (id = 1), day TEXT NOT NULL, sent_today INTEGER NOT NULL, last_slot INTEGER NOT NULL, last_sent_at INTEGER)');
+    this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS handoffs (idem TEXT PRIMARY KEY, at INTEGER NOT NULL)');
   }
 
   private db(): Db {
@@ -147,6 +155,13 @@ export class SenderLimiter extends DurableObject<OpsEnv> {
     if (existing && existing.day === state.day) {
       if (now - existing.slot <= STALE_SLOT_MS) return { status: 'ok', not_before: existing.slot };
       const slot = Math.max(now, state.last_slot + config.spacingMs);
+      if (utcDay(slot) > state.day) {
+        // No slot left today: the reservation is given back and the message waits for the next day.
+        this.ctx.storage.sql.exec('DELETE FROM keys WHERE idem = ?', i.idem);
+        if (state.sent_today > 0) state.sent_today -= 1;
+        this.saveState(state);
+        return { status: 'exhausted', resets_at: nextUtcMidnight(now) };
+      }
       state.last_slot = slot;
       this.saveState(state);
       this.ctx.storage.sql.exec('UPDATE keys SET slot = ?, reserved_at = ? WHERE idem = ?', slot, now, i.idem);
@@ -155,6 +170,7 @@ export class SenderLimiter extends DurableObject<OpsEnv> {
     if (existing) this.ctx.storage.sql.exec('DELETE FROM keys WHERE idem = ?', i.idem);
     if (state.sent_today >= config.cap) return { status: 'exhausted', resets_at: nextUtcMidnight(now) };
     const slot = Math.max(now, state.last_slot + config.spacingMs);
+    if (utcDay(slot) > state.day) return { status: 'exhausted', resets_at: nextUtcMidnight(now) };
     state.sent_today += 1;
     state.last_slot = slot;
     this.saveState(state);
@@ -198,12 +214,33 @@ export class SenderLimiter extends DurableObject<OpsEnv> {
     return { day: state.day, sent_today: state.sent_today, cap: config.cap, last_sent_at: state.last_sent_at === null ? null : new Date(state.last_sent_at).toISOString() };
   }
 
-  /** Prunes sent keys older than 30 days and reservations of days before that; re-arms while keys remain. */
+  /** Records the hand-over of a message whose event exists to its delayed copy (rules above). */
+  async handOff(i: { idem: string; now: number }): Promise<void> {
+    if (typeof i?.idem !== 'string' || i.idem === '' || !Number.isFinite(i.now)) throw new Error('SenderLimiter.handOff: idem and now are required');
+    this.sender();
+    this.ctx.storage.sql.exec('INSERT INTO handoffs (idem, at) VALUES (?, ?) ON CONFLICT (idem) DO UPDATE SET at = excluded.at', i.idem, i.now);
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(this.clock() + PRUNE_EVERY_MS);
+  }
+
+  /** True once for a recorded hand-over of the message (the record is removed). */
+  async takeHandoff(i: { idem: string }): Promise<boolean> {
+    if (typeof i?.idem !== 'string' || i.idem === '') throw new Error('SenderLimiter.takeHandoff: idem is required');
+    this.sender();
+    const row = this.ctx.storage.sql.exec<SqlRow>('SELECT idem FROM handoffs WHERE idem = ?', i.idem).toArray()[0];
+    if (!row) return false;
+    this.ctx.storage.sql.exec('DELETE FROM handoffs WHERE idem = ?', i.idem);
+    return true;
+  }
+
+  /** Prunes sent keys older than 30 days, reservations and hand-over records of days before that; re-arms while rows
+   *  remain. */
   async alarm(): Promise<void> {
     const now = this.clock();
     const cutoff = now - KEEP_SENT_MS;
     this.ctx.storage.sql.exec('DELETE FROM keys WHERE (status = ? AND sent_at < ?) OR (status = ? AND reserved_at < ?)', 'sent', cutoff, 'reserved', cutoff);
-    const left = Number(this.ctx.storage.sql.exec<SqlRow>('SELECT COUNT(*) AS n FROM keys').toArray()[0]?.n ?? 0);
-    if (left > 0) await this.ctx.storage.setAlarm(now + PRUNE_EVERY_MS);
+    this.ctx.storage.sql.exec('DELETE FROM handoffs WHERE at < ?', cutoff);
+    const keys = Number(this.ctx.storage.sql.exec<SqlRow>('SELECT COUNT(*) AS n FROM keys').toArray()[0]?.n ?? 0);
+    const handoffs = Number(this.ctx.storage.sql.exec<SqlRow>('SELECT COUNT(*) AS n FROM handoffs').toArray()[0]?.n ?? 0);
+    if (keys + handoffs > 0) await this.ctx.storage.setAlarm(now + PRUNE_EVERY_MS);
   }
 }

@@ -268,26 +268,63 @@ describe('the call to the container', () => {
     expect(input.router.releases[0].o).toEqual({ ok: false, retryable: false, backend_down: false });
   });
 
+  it('the contract values: wait at most 20 s for a slot, retry every 2 s, 110 s end to end', () => {
+    expect(ACQUIRE_WAIT_MS).toBe(20_000);
+    expect(ACQUIRE_RETRY_MS).toBe(2_000);
+    expect(COMPAT_DEADLINE_MS).toBe(110_000);
+  });
+
   it('no free slot for 20 s answers 503 CAD busy (retry every 2 s), never calls the container', async () => {
     const h = harness(undefined, { acquire: async () => ({ granted: false, retry_after_s: 30 }) });
     const res = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), h.deps);
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ detail: 'CAD busy' });
-    expect(h.sleeps.every((ms) => ms === ACQUIRE_RETRY_MS)).toBe(true);
-    expect(h.sleeps.reduce((a, b) => a + b, 0)).toBe(ACQUIRE_WAIT_MS);
-    expect(h.router.acquires).toHaveLength(ACQUIRE_WAIT_MS / ACQUIRE_RETRY_MS + 1);
+    expect(h.sleeps).toEqual(Array.from({ length: 10 }, () => 2_000));
+    expect(h.clock.t - T0).toBe(20_000);
+    expect(h.router.acquires).toHaveLength(11);
     expect(h.container.requests).toEqual([]);
     expect(h.router.releases).toEqual([]);
     expect(h.points.map((p) => p.outcome)).toEqual(['busy']);
   });
 
-  it('a slot that frees within the 20 s is used', async () => {
+  it('a slot that frees within the 20 s is used, up to the attempt at exactly 20 s', async () => {
     let n = 0;
     const h = harness(undefined, { acquire: async () => (++n < 4 ? { granted: false, retry_after_s: 30 } : { granted: true, lease_id: 'l-4', backend: 'container', slot: 'cad-2' }) });
     const res = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), h.deps);
     expect(res.status).toBe(200);
     expect(h.sleeps).toEqual([2000, 2000, 2000]);
     expect(h.container.requests[0].slot).toBe('cad-2');
+
+    let m = 0;
+    const last = harness(undefined, { acquire: async () => (++m < 11 ? { granted: false, retry_after_s: 30 } : { granted: true, lease_id: 'l-11', backend: 'container', slot: 'cad-1' }) });
+    const late = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), last.deps);
+    expect(late.status).toBe(200);
+    expect(last.clock.t - T0).toBe(20_000);
+    expect(last.container.requests[0].slot).toBe('cad-1');
+  });
+
+  /** A clock that reads T0 at the start of the request and T0 + offsetMs on every later read. */
+  function clockAfterStart(offsetMs: number): () => number {
+    let first = true;
+    return () => {
+      if (first) {
+        first = false;
+        return T0;
+      }
+      return T0 + offsetMs;
+    };
+  }
+
+  it('the container call gets the rest of the 110 s budget, counted from the start of the request', async () => {
+    const timeouts = vi.spyOn(AbortSignal, 'timeout');
+    const fresh = harness();
+    expect((await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), fresh.deps)).status).toBe(200);
+    expect(timeouts).toHaveBeenLastCalledWith(110_000);
+
+    let n = 0;
+    const waited = harness(undefined, { acquire: async () => (++n < 4 ? { granted: false, retry_after_s: 30 } : { granted: true, lease_id: 'l-4', backend: 'container', slot: 'cad-0' }) });
+    expect((await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), waited.deps)).status).toBe(200);
+    expect(timeouts).toHaveBeenLastCalledWith(104_000);
   });
 
   it('the 110 s deadline counts from the start of the request: no answer in time -> 502, lease released as down', async () => {
@@ -296,16 +333,7 @@ describe('the call to the container', () => {
       return serviceJson(200, {});
     });
     // the lease came after the clock had already moved to 50 ms before the deadline
-    const deps: CadCompatDeps = { ...h.deps, now: (() => {
-      let first = true;
-      return () => {
-        if (first) {
-          first = false;
-          return T0;
-        }
-        return T0 + COMPAT_DEADLINE_MS - 50;
-      };
-    })() };
+    const deps: CadCompatDeps = { ...h.deps, now: clockAfterStart(109_950) };
     const started = Date.now();
     const res = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), deps);
     expect(Date.now() - started).toBeLessThan(5_000);
@@ -313,6 +341,21 @@ describe('the call to the container', () => {
     expect(await res.json()).toEqual({ detail: 'CAD unavailable' });
     expect(h.router.releases[0].o).toEqual({ ok: false, retryable: true, backend_down: true });
     expect(logs.join('\n')).toContain('reason=timeout');
+  });
+
+  it('a lease granted at 110 s or later answers 502 without calling the container; one second before still calls it', async () => {
+    const late = harness();
+    const res = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), { ...late.deps, now: clockAfterStart(110_000) });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ detail: 'CAD unavailable' });
+    expect(late.container.requests).toEqual([]);
+    expect(late.router.releases[0].o).toEqual({ ok: false, retryable: true });
+    expect(late.points.map((p) => p.outcome)).toEqual(['timeout']);
+
+    const inTime = harness();
+    const ok = await handleCadCompat(post({ file_url: FILE_URL }), env(), call(), { ...inTime.deps, now: clockAfterStart(109_000) });
+    expect(ok.status).toBe(200);
+    expect(inTime.container.requests).toHaveLength(1);
   });
 
   it('a network error of the container answers 502; an unexpected throw too, and the lease is released', async () => {

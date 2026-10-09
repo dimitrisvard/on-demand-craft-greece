@@ -5,7 +5,8 @@
 // Rules
 //   - The runs of a campaign are its agent_runs rows of agent 'marketing.send' with subject marketing_campaign/<id>
 //     and an idempotency key 'marketing.send:<id>' or 'marketing.send:<id>:r<n>', newest first.
-//   - closeCampaignIfDone runs after each final outcome of a campaign message: when the campaign's recipients with a
+//   - closeCampaignIfDone runs after the final outcomes of campaign messages (once per consumer batch and campaign,
+//     src/queues/outbound-mail.ts; reading only the columns it counts with): when the campaign's recipients with a
 //     final outcome (src/marketing/events.ts finalCounts) reach `expected` of its newest run, one PATCH
 //     marketing_campaigns?id=eq.<id>&status not 'sent' {status 'sent', sent_count, updated_at} with
 //     return=representation; only the call that gets the row back closes that newest run 'succeeded' with
@@ -16,7 +17,7 @@
 
 import { closeRun, EMPTY_USAGE } from '../agents/runs';
 import type { Db, Row } from '../db/postgrest';
-import { campaignOutcomeEvents, finalCounts } from './events';
+import { campaignOutcomeEvents, CLOSE_COLUMNS, finalCounts } from './events';
 
 export const SEND_AGENT = 'marketing.send';
 export const CAMPAIGN_SUBJECT = 'marketing_campaign';
@@ -79,7 +80,7 @@ export async function closeCampaignIfDone(db: Db, campaignId: string, now: Date)
   if (!newest) return { closed: false, reason: 'no_run' };
   const expected = num(newest.output?.expected);
   if (expected === null) return { closed: false, reason: 'no_expected' };
-  const { sent, bounced } = finalCounts(await campaignOutcomeEvents(db, campaignId));
+  const { sent, bounced } = finalCounts(await campaignOutcomeEvents(db, campaignId, CLOSE_COLUMNS));
   if (sent + bounced < expected) return { closed: false, reason: 'not_done', sent, bounced, expected };
   const rows = await db.update(
     'marketing_campaigns',

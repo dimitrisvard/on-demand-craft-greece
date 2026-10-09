@@ -84,13 +84,44 @@ describe('handleXometryScan', () => {
       insert: (t, r, o) => memory.insert(t, r, o),
       rpc: (n, a) => memory.rpc(n, a),
       update: async (t, p, o) => {
-        if (t === 'agent_runs') throw new Error('database down');
+        if (t === 'agent_runs' && 'status' in p) throw new Error('database down');
         return memory.update(t, p, o);
       },
     };
     const m = message(bodyOf(run.run_id));
     await expect(handleXometryScan(m, s.env, testContext(), { ports: s.ports, p5: s.p5 })).rejects.toThrow('database down');
     expect(m.ack).toHaveBeenCalledTimes(1);
+    expect(s.sources.requests).toHaveLength(1);
+  });
+
+  it('a valid message that carries the run of another agent or another slot: acked, nothing fetched, the run left as it is', async () => {
+    const s = setup();
+    const other = await openRun(s.db, { agent: 'growth.hn', trigger: 'cron', idempotency_key: `growth.hn:${SLOT}` });
+    const earlier = await openRun(s.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: 'growth.xometry:2026-10-08T06:00Z' });
+    for (const runId of [other.run_id, earlier.run_id]) {
+      const m = message(bodyOf(runId));
+      await handleXometryScan(m, s.env, testContext(), { ports: s.ports, p5: s.p5 });
+      expect(m.ack).toHaveBeenCalledTimes(1);
+      expect(s.db.rows('agent_runs', ['id', 'eq', runId])[0]).toMatchObject({ status: 'running', output: null });
+    }
+    expect(s.sources.requests).toHaveLength(0);
+    expect(s.db.rows('xometry_offers')).toHaveLength(0);
+  });
+
+  it('a second delivery of a message whose run is claimed by the first is acked without a scan', async () => {
+    const s = setup();
+    const run = await openRun(s.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: `growth.xometry:${SLOT}` });
+    const first = message(bodyOf(run.run_id));
+    const second = message(bodyOf(run.run_id), 2);
+    await Promise.all([
+      handleXometryScan(first, s.env, testContext(), { ports: s.ports, p5: s.p5 }),
+      handleXometryScan(second, s.env, testContext(), { ports: s.ports, p5: s.p5 }),
+    ]);
+    expect(first.ack).toHaveBeenCalledTimes(1);
+    expect(second.ack).toHaveBeenCalledTimes(1);
+    expect(s.sources.requests).toHaveLength(1);
+    expect(s.db.rows('agent_runs', ['id', 'eq', run.run_id])[0].status).toBe('succeeded');
+    expect(s.ports.events.points).toHaveLength(1);
   });
 
   it('the scrapes-p5 consumer routes xometry-scan to this handler (the fixed kind table)', async () => {

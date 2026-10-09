@@ -309,12 +309,14 @@ describe('modes and run states', () => {
   });
 
   it('invalid params: run failed invalid_params, acked', async () => {
-    const h = portHarness();
-    const { msg, run } = await runPort(h, 1, { params: { tier: 4, max: 40, slot: SLOT } });
-    expect(msg.acked).toBe(1);
-    expect(run.status).toBe('failed');
-    expect(run.error).toBe('invalid_params');
-    expect(h.sources.requests).toHaveLength(0);
+    for (const params of [{ tier: 4, max: 40, slot: SLOT }, { tier: 1, max: 41, slot: SLOT }, { tier: 1, max: 40, slot: '2026-10-08' }]) {
+      const h = portHarness();
+      const { msg, run } = await runPort(h, 1, { params });
+      expect(msg.acked).toBe(1);
+      expect(run.status).toBe('failed');
+      expect(run.error).toBe('invalid_params');
+      expect(h.sources.requests).toHaveLength(0);
+    }
   });
 });
 
@@ -365,6 +367,67 @@ describe('errors', () => {
     const { run } = await runPort(h, 1);
     expect(run.output).toMatchObject({ scanned: 1, errors: 1 });
     expect(h.db.rows('monitored_subreddits', ['subreddit', 'eq', 'cnc'])[0].last_scanned_at).toBe(new Date(T0 - 45 * 60_000).toISOString());
+  });
+});
+
+describe('wall-time budget (10 min from the start of the message)', () => {
+  /** PullPush answers after `ms` of (fake) clock time with the given posts. */
+  const slowPullpush = (h: CollectorHarness, ms: number, posts: (sub: string) => unknown[] = () => []) =>
+    h.sources.route({
+      method: 'GET',
+      match: `${PULLPUSH_BASE}/reddit/search/submission?`,
+      respond: (req) => {
+        h.clock.advance(ms);
+        const sub = new URL(req.url).searchParams.get('subreddit') ?? '';
+        return new Response(JSON.stringify({ data: posts(sub) }), { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+
+  it('no subreddit starts once 10 min have passed: succeeded with partial: true and the counts so far; the rest stay due', async () => {
+    const h = portHarness();
+    slowPullpush(h, 5 * 60_000);
+    const { msg, run } = await runPort(h, 3);
+    // machining 0 -> 5 min, cnc 5 -> 10 min; at 10 min engineering does not start
+    expect(h.sources.requests.map((r) => new URL(r.url).searchParams.get('subreddit'))).toEqual(['machining', 'cnc']);
+    expect(msg.acked).toBe(1);
+    expect(msg.retried).toEqual([]);
+    expect(run.status).toBe('succeeded');
+    expect(run.output).toEqual({ tier: 3, due: 4, scanned: 2, fetched: 0, matched: 0, leads_new: 0, high: 0, errors: 0, pullpush_status: { 200: 2 }, partial: true });
+    expect(h.db.rows('monitored_subreddits', ['subreddit', 'eq', 'engineering'])[0].last_scanned_at).toBeNull();
+    expect(h.db.rows('monitored_subreddits', ['subreddit', 'eq', 'hardware'])[0].last_scanned_at).toBe(new Date(T0 - 95 * 60_000).toISOString());
+  });
+
+  it('an answer that arrives after the budget is not processed: no lead, no alert, its last_scanned_at kept', async () => {
+    const data = fixture<PullpushFixture>('pullpush.json');
+    const h = portHarness();
+    slowPullpush(h, 11 * 60_000, (sub) => data[sub]?.posts ?? []);
+    const { msg, run } = await runPort(h, 1);
+    expect(h.sources.requests.map((r) => new URL(r.url).searchParams.get('subreddit'))).toEqual(['machining']);
+    expect(leadRows(h.db)).toEqual([]);
+    expect(h.telegram).toEqual([]);
+    expect(h.db.rows('monitored_subreddits', ['subreddit', 'eq', 'machining'])[0].last_scanned_at).toBeNull();
+    expect(msg.acked).toBe(1);
+    expect(run.status).toBe('succeeded');
+    expect(run.output).toEqual({ tier: 1, due: 2, scanned: 0, fetched: 0, matched: 0, leads_new: 0, high: 0, errors: 0, pullpush_status: { 200: 1 }, partial: true });
+  });
+
+  it('within the budget nothing changes: no partial flag', async () => {
+    const h = portHarness();
+    slowPullpush(h, 2 * 60_000);
+    const { run } = await runPort(h, 3);
+    expect(run.output).toMatchObject({ due: 4, scanned: 4 });
+    expect(run.output).not.toHaveProperty('partial');
+  });
+
+  it('shadow: the budget ends the scan as well (the answer in hand is still scored)', async () => {
+    const data = fixture<PullpushFixture>('pullpush.json');
+    const h = portHarness();
+    h.setFlag('agent.growth.reddit', { mode: 'shadow' });
+    slowPullpush(h, 11 * 60_000, (sub) => data[sub]?.posts ?? []);
+    const { run } = await runPort(h, 1);
+    expect(h.sources.requests).toHaveLength(1);
+    expect(run.output).toMatchObject({ due: 2, scanned: 1, fetched: data.machining.posts!.length, partial: true, shadow: true });
+    expect(leadRows(h.db)).toEqual([]);
   });
 });
 

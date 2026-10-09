@@ -14,13 +14,17 @@
 //   7 open     run 'marketing.send:<id>' (no run yet) or 'marketing.send:<id>:r<n>' (n = runs + 1), trigger
 //              'dashboard', subject marketing_campaign/<id>; created: false -> 202 with that run, queued 0
 //   8 enqueue  inside one try: recipients (src/marketing/recipients.ts; a re-queue keeps the first run's mode),
-//              `expected` (first run: the selection's size; re-queue: the newest earlier run's) written to the run
-//              output before the first sendBatch; a re-queue drops recipients that have a 'sent' or 'bounced' event
-//              of the campaign; sendBatch of at most 100 messages; marketing_campaigns.status = 'sending'; 202
-//              {queued, run_id}. Nothing to queue -> the campaign close runs at once.
+//              `expected` written to the run output before the first sendBatch: first run = the selection's size;
+//              re-queue = the newest earlier run's known `expected`, or, when no earlier run knows it (every earlier
+//              run failed before its selection was read), the selection's size plus the subscribers outside it that
+//              already have a 'sent' or 'bounced' event of the campaign mail. A re-queue leaves out the recipients
+//              with a final event and those whose unfinished 'sent' event is younger than 15 min (a message in
+//              flight; src/marketing/events.ts); sendBatch of at most 100 messages; marketing_campaigns.status =
+//              'sending'; 202 {queued, run_id}. Nothing to queue -> the campaign close runs at once.
 //   9 failure  any error inside that try -> run closed 'failed', error 'enqueue_partial', output {expected, queued,
-//              mode}; 500 {"error":"enqueue_failed","queued":n}. Queued messages stay valid (their limiter keys
-//              make a later duplicate a no-op); a later click re-queues through step 7.
+//              mode} with expected null while it is not known yet; 500 {"error":"enqueue_failed","queued":n}.
+//              Queued messages stay valid (their limiter keys make a later duplicate a no-op); a later click
+//              re-queues through step 7.
 // Missing configuration (OUTBOUND_MAIL) answers 500 before a run is opened, naming the binding in the log only.
 // Log lines carry ids and counts, never an address, a subject or a body.
 
@@ -31,7 +35,7 @@ import { isConfigMissing, need } from '../agents/config';
 import { checkpointRun, closeRun, EMPTY_USAGE, openRun } from '../agents/runs';
 import { LOG_PREFIX, type OpsEnv, type OpsHono } from '../env';
 import { closeCampaignIfDone, campaignRuns, CAMPAIGN_SUBJECT, SEND_AGENT, sendRunKey, type CampaignRun } from '../marketing/campaign-close';
-import { campaignOutcomeEvents, subscribersWithEvent } from '../marketing/events';
+import { campaignOutcomeEvents, subscribersSettledOrInFlight, subscribersWithEvent } from '../marketing/events';
 import type { RandomSource } from '../marketing/personalise';
 import { loadCampaign, selectRecipients, type RecipientMode } from '../marketing/recipients';
 import { activeSenders } from '../marketing/sender-rows';
@@ -74,9 +78,13 @@ function modeOf(runs: readonly CampaignRun[]): RecipientMode | undefined {
   return undefined;
 }
 
-function expectedOf(run: CampaignRun | undefined): number | null {
-  const v = run?.output?.expected;
-  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+/** `expected` of the newest run that knows it (runs newest first), or null. */
+function knownExpected(runs: readonly CampaignRun[]): number | null {
+  for (const run of runs) {
+    const v = run.output?.expected;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  }
+  return null;
 }
 
 function log(event: string, fields: Record<string, string | number | undefined>): void {
@@ -121,15 +129,21 @@ export function createSendCampaignHandler(deps: SendCampaignDeps = {}): (c: Cont
     const run = await openRun(db, { agent: SEND_AGENT, trigger: 'dashboard', idempotency_key: sendRunKey(campaignId, n), subject_type: CAMPAIGN_SUBJECT, subject_id: campaignId });
     if (!run.created) return jsonResponse(202, { queued: 0, run_id: run.run_id });
     // 8. Enqueue.
-    let expected = 0;
+    let expected: number | null = null;
     let queued = 0;
     let mode: RecipientMode | undefined = modeOf(runs);
     try {
       const selection = await selectRecipients(db, campaign, { random: deps.random, mode });
       mode = selection.mode;
-      expected = runs.length === 0 ? selection.recipients.length : (expectedOf(newest) ?? selection.recipients.length);
+      const events = runs.length === 0 ? [] : await campaignOutcomeEvents(db, campaignId);
+      if (runs.length === 0) expected = selection.recipients.length;
+      else {
+        const selected = new Set(selection.recipients.map((r) => r.subscriber_id.toLowerCase()));
+        const outside = [...subscribersWithEvent(events)].filter((id) => !selected.has(id)).length;
+        expected = knownExpected(runs) ?? selected.size + outside;
+      }
       await checkpointRun(db, run.run_id, { ...EMPTY_USAGE, by_step: {} }, { output: { expected, queued: 0, mode } });
-      const done = runs.length === 0 ? new Set<string>() : subscribersWithEvent(await campaignOutcomeEvents(db, campaignId));
+      const done = subscribersSettledOrInFlight(events, ports.clock.now().getTime());
       const rest = selection.recipients.filter((r) => !done.has(r.subscriber_id.toLowerCase()));
       const senders = await activeSenders(db, campaign.sender_account_ids ?? []);
       const messages: OutboundMailV1[] = rest.map((r, i) => ({

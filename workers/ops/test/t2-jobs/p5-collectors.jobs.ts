@@ -79,7 +79,8 @@ describe.skipIf(!ENABLED)('scheduled collectors in workerd (T2, profile jobs)', 
       ],
       tender_connectors: [
         { country_code: 'XX', is_active: true, last_scan_at: null },
-        { country_code: 'NL', is_active: true, last_scan_at: '2032-02-10T05:00:00.000Z' },
+        // a code the handler refuses before any I/O (no real connector code in a T2 file: its portals have no stub)
+        { country_code: 'YY', is_active: true, last_scan_at: '2032-02-10T05:00:00.000Z' },
       ],
     });
     await call(`${u.stub}/__stub/pullpush/script`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(script.pullpush) });
@@ -194,9 +195,9 @@ describe.skipIf(!ENABLED)('scheduled collectors in workerd (T2, profile jobs)', 
     for (const r of list.filter((x) => String(x.agent) === 'growth.reddit')) expect(r).toMatchObject({ status: 'succeeded', output: { shadow: true, leads_new: 0, high: 0 } });
     const reddit = list.filter((x) => String(x.agent) === 'growth.reddit').map((r) => r.output as Row);
     expect(reddit.reduce((n, o) => n + Number(o.matched ?? 0), 0)).toBeGreaterThanOrEqual(5);
-    // XX (never scanned) and NL (last scan more than 6 h before this tick) are due; shadow never runs the handler
+    // XX (never scanned) and YY (last scan more than 6 h before this tick) are due; shadow never runs the handler
     expect(list.find((r) => r.idempotency_key === 'growth.tenders:2032-02-11')).toMatchObject({ status: 'succeeded', output: { due: 2, enqueued: 2, countries: null } });
-    for (const cc of ['XX', 'NL']) {
+    for (const cc of ['XX', 'YY']) {
       expect(list.find((r) => r.idempotency_key === `growth.tenders:2032-02-11:${cc}`), cc).toMatchObject({ status: 'skipped', output: { reason: 'shadow', country_code: cc } });
     }
     expect(await runs(`growth.hn:${SLOT2}`)).toEqual([]);

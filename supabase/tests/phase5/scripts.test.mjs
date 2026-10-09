@@ -1,14 +1,17 @@
 // Tests for the owner's read-only and template SQL of Phase 5 (PHASE5_SPEC.md §6.8, §10.2, §10.3):
-//   scripts/phase5/parity.sql      every statement runs on the Phase 4 schema plus stand-ins of the live tables;
-//                                  Q12b equals the hand-computed digest figures of vectors/digest.json (the same
-//                                  vectors the Worker's digest code is tested with), Q8 limits per agent, Q11 with
+//   scripts/phase5/parity.sql      the blocks the spec gives verbatim equal its text (normalised SHA-256 pins); every
+//                                  statement runs on the Phase 4 schema plus stand-ins of the live tables; Q12b
+//                                  equals the hand-computed digest figures of vectors/digest.json (the same vectors
+//                                  the Worker's digest code is tested with), Q8 limits per agent, Q11 with
 //                                  'not_configured', Q13 slots
 //   scripts/phase5/flag-values.sql every template UPDATE applies to the migration's feature_flags rows and the mode
-//                                  check, and the digest template never returns the recipient
+//                                  check, each step leaves the value its runbook step needs (shadow days S4 (a) and
+//                                  S8 (a) stay shadow), and the digest template never returns the recipient
 // Schema: supabase/tests/agent_layer/live_min.sql + supabase/migrations/*_agent_layer.sql + mock_cron.sql +
 // parity_schema.sql, on PGlite 0.5.8 (Postgres 18) and 0.2.17 (Postgres 16). "now()" in parity.sql is replaced by a
 // fixed instant so every figure is deterministic.
 //   node scripts.test.mjs [--engine=pglite|pglite16]
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +35,8 @@ const MOCK_CRON = fs.readFileSync(path.join(HERE, 'mock_cron.sql'), 'utf8');
 const STANDINS = fs.readFileSync(path.join(HERE, 'parity_schema.sql'), 'utf8');
 const PARITY = fs.readFileSync(path.join(ROOT, 'scripts/phase5/parity.sql'), 'utf8');
 const FLAG_VALUES = fs.readFileSync(path.join(ROOT, 'scripts/phase5/flag-values.sql'), 'utf8');
+const CONTENT_FLAG_SOURCE = fs.readFileSync(path.join(ROOT, 'workers/ops/src/content/flag.ts'), 'utf8');
+const SITEMAP_WORKFLOW_SOURCE = fs.readFileSync(path.join(ROOT, 'workers/ops/src/workflows/sitemap.ts'), 'utf8');
 const VECTORS = JSON.parse(fs.readFileSync(path.join(HERE, 'vectors/digest.json'), 'utf8'));
 
 const ENGINES = ['pglite', 'pglite16'];
@@ -63,6 +68,34 @@ function eq(actual, expected, name) {
 }
 const day = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
 const text = (row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v === null ? null : String(v)]));
+
+/** A block's SQL text with comments removed and whitespace collapsed (placeholders kept). */
+export function normalisedBlocks(text) {
+  const out = {};
+  for (const block of text.split(/^(?=-- Q\d+[a-z]?\b)/m).filter((b) => /^-- Q\d/.test(b))) {
+    out[/^-- (Q\d+[a-z]?)\b/.exec(block)[1]] = block.replace(/--[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+  }
+  return out;
+}
+
+// SHA-256 of the normalised text of each parity block that the spec gives verbatim (PHASE5_SPEC.md §6.8: jobs.md §10
+// Q1-Q10 and Q12 unchanged, Q8 and Q13 as written in §6.8). The pass rules live in this text (source names, time
+// windows, job lists, limits per agent), so a change to any of these blocks must come with a spec change and a new
+// pin. Q11 (text compare of output.indexnow) and Q12b (the digest figures) are checked by value below instead.
+const SPEC_BLOCK_SHA256 = {
+  Q1: '1fba871572efa2ee5396ca3abbeb905aceb92c949de66043f756534e5af7a111',
+  Q2: 'ac9e1651ed254aea905cb840ebaaa375dffc86239d074c0993f4cbf9bcdc6546',
+  Q2b: '6350f7caee606dff7e406c0b78e02a29328fd9c7b79cd955415bf4d2f42f3639',
+  Q3: 'ca71c8e08e9dd44d63ef374f415f50701fc733c915fcf1714f26fb79c11cd1bf',
+  Q4: '79be36d39e4637e1d89446826a5bdc2c51efbce101ee7bc9c26523cd868f273a',
+  Q5: '8be8f8c8356ab291705b0e35b7bc5404c23acbc15e956a8832f0e249d758fc39',
+  Q6: '771839efae85ee48fd534eaffddf0e9c247731e8f95f70b6429aac2dd2f25513',
+  Q8: 'df35fe95f1e307521c71d86e8e3a6468aaa7ab4a0dd2fa567d50b17662bb9e46',
+  Q9: 'fb3c67cf3897780def99509683d6b4f3bd8b7688a59051168df8a4bada8efa72',
+  Q10: '3534ad4efd53435dff7a051f88667851802b283faac43684e4852c0295094c62',
+  Q12: '5348dc983d1cab9b4df03efa9993b468a91d9f1f69dd5127942ab40a190f8e3e',
+  Q13: 'eab875798d75b146789c9347a2a024578e66202a243a2408f6ed06e5a7b27465',
+};
 
 /** parity.sql as labelled statements: {label: 'Q12b', sql} with comments removed and placeholders filled in. */
 export function parityStatements(text, o = {}) {
@@ -198,6 +231,23 @@ async function scenario(engine) {
       }
     }
     eq(updates.length, 11, tag('flag-values.sql: 10 template UPDATEs and one check query'));
+    // each template, applied in runbook order, leaves the value the runbook step needs (shadow days stay shadow)
+    const steps = [
+      ['S1', 'agent.growth.hn', { mode: 'assist' }],
+      ['S2', 'agent.growth.reddit', { mode: 'assist' }],
+      ['S3 (a)', 'agent.growth.tenders', { mode: 'assist', llm_cap: 20, countries: ['NL', 'DE'], relevance: false }],
+      ['S3 (b)', 'agent.growth.tenders', { mode: 'assist', llm_cap: 20, relevance: false }],
+      ['S4 (a)', 'agent.content_daily', { mode: 'shadow', steps: ['sitemap'] }],
+      ['S4 (b)', 'agent.content_daily', { mode: 'assist', steps: ['sitemap'] }],
+      ['S5', 'agent.content_daily', { mode: 'assist', model: 'claude-sonnet-5', steps: ['generate', 'translate', 'fix_links', 'sitemap'], shadow_generate: false, backfill_per_language_per_day: 5 }],
+      ['S7', 'agent.ops_digest', { mode: 'assist', purge: true, ads_upload: false }],
+      ['S8 (a)', 'agent.growth.xometry', { mode: 'shadow', notify_new: false, borderline_exclude: [], token_reminder_hours: 24 }],
+      ['S8 (b)', 'agent.growth.xometry', { mode: 'assist', notify_new: false, borderline_exclude: [], token_reminder_hours: 24 }],
+    ];
+    steps.forEach(([step, key, value], i) => {
+      const row = returned[i]?.[0] ?? {};
+      eq([row.key, row.enabled, row.value], [key, false, value], tag(`flag-values.sql ${step}: ${key} value after the template`));
+    });
     ok(updates.slice(0, 10).every((u) => /^UPDATE feature_flags SET value = /.test(u) && /tenant_id = '00000000-0000-0000-0000-000000000001'/.test(u)), tag('every template merges into value of the default tenant'));
     ok(returned.slice(0, 10).every((rows) => rows.length === 1), tag('every template updates exactly one row'));
     const digestRow = returned[7]?.[0] ?? {};
@@ -208,6 +258,14 @@ async function scenario(engine) {
     eq(flags['agent.ops_digest'].value, { mode: 'assist', purge: true, recipient: '<RECIPIENT>', ads_upload: false }, tag('S7 value (placeholder recipient)'));
     eq(flags['agent.growth.xometry'].value, { mode: 'assist', notify_new: false, borderline_exclude: [], token_reminder_hours: 24 }, tag('S8 value'));
     ok(Object.values(flags).every((f) => f.enabled === false), tag('templates never switch a flag on (the dashboard or the enable line does)'));
+    // the commented drop-acceptance template: the key the content unit reads, merged into the S5 value only
+    const dropLines = FLAG_VALUES.split('\n').filter((l) => /^--\s+UPDATE .*sitemap_accept_drop_on/.test(l));
+    eq(dropLines.length, 1, tag('flag-values.sql: one commented sitemap_accept_drop_on template'));
+    ok(CONTENT_FLAG_SOURCE.includes('f.value.sitemap_accept_drop_on') && SITEMAP_WORKFLOW_SOURCE.includes('set sitemap_accept_drop_on to'), tag('the template key is the one the content unit reads and its alert names'));
+    const dropSql = (dropLines[0] ?? '').replace(/^--\s+/, '').replace(/;\s*$/, '').replace('<YYYY-MM-DD>', '2026-10-20');
+    const dropRows = dropLines.length === 1 ? (await db.query(dropSql + ' RETURNING key, enabled, value')).rows : [];
+    eq(dropRows.map((r) => [r.key, r.enabled, r.value]), [['agent.content_daily', false, { mode: 'assist', model: 'claude-sonnet-5', steps: ['generate', 'translate', 'fix_links', 'sitemap'], shadow_generate: false, backfill_per_language_per_day: 5, sitemap_accept_drop_on: '2026-10-20' }]], tag('sitemap_accept_drop_on template: one row, the day added, the S5 value kept'));
+    passed++;
     let modeRefused = false;
     try {
       await db.query(`UPDATE feature_flags SET value = value || '{"mode":"on"}'::jsonb WHERE key = 'agent.growth.hn'`);
@@ -220,6 +278,15 @@ async function scenario(engine) {
     failures.push(tag(`scenario threw: ${e && e.message}`));
   } finally {
     await db.close();
+  }
+}
+
+// parity.sql: the blocks the spec gives verbatim are unchanged (independent of the engine)
+{
+  const blocks = normalisedBlocks(PARITY);
+  for (const [label, expected] of Object.entries(SPEC_BLOCK_SHA256)) {
+    const actual = blocks[label] === undefined ? null : crypto.createHash('sha256').update(blocks[label]).digest('hex');
+    ok(actual === expected, `parity.sql ${label} equals the spec text (normalised SHA-256)`, actual);
   }
 }
 

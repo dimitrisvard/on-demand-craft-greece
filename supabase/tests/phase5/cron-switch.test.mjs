@@ -39,13 +39,13 @@ if (!selected.every((e) => ENGINES.includes(e))) {
 // ---- runtime-built token shapes (never a literal in this file) ------------------------
 const b64u = (s) => Buffer.from(s).toString('base64url');
 const TOKEN_HEAD = 'e' + 'y' + 'J';
-const SERVICE_TOKEN = TOKEN_HEAD + b64u('{"alg":"HS256","typ":"JWT"}').slice(3) + '.' + b64u('{"role":"service_role","ref":"example-ref"}') + '.' + b64u('signature-not-real-0123456789');
+const EXAMPLE_TOKEN = TOKEN_HEAD + b64u('{"alg":"HS256","typ":"JWT"}').slice(3) + '.' + b64u('{"role":"example","ref":"example-ref"}') + '.' + b64u('signature-not-real-0123456789');
 const HOST = 'https://example-ref.supabase.co';
 
-// The ten ported jobs with the ids, names and schedules of the live cron.job (PHASE5_SPEC F5-1) and commands of
-// the same shape as live (HTTP jobs call /functions/v1/<target> with a bearer token; job 17 calls the SQL function).
+// The ten ported jobs with the ids, names and schedules of the live cron.job (PHASE5_SPEC F5-1). HTTP jobs call
+// /functions/v1/<target>; job 17 calls the SQL function. The token value is synthetic and assembled at runtime.
 function http(target, body = '{}') {
-  return `SELECT net.http_post(url := '${HOST}/functions/v1/${target}', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ${SERVICE_TOKEN}'), body := '${body}'::jsonb) AS request_id;`;
+  return `SELECT net.http_post(url := '${HOST}/functions/v1/${target}', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ${EXAMPLE_TOKEN}'), body := '${body}'::jsonb) AS request_id;`;
 }
 const PORTED = [
   [15, 'process-article-queue', '*/5 * * * *', http('process-article-queue')],
@@ -139,7 +139,7 @@ function expectedActive(inactiveIds) {
 }
 function noSecretInNotices(notices, name) {
   const text = notices.map((n) => n.message).join('\n');
-  ok(!text.includes(SERVICE_TOKEN) && !text.includes(TOKEN_HEAD) && !text.includes('net.http_post') && !text.includes('Bearer'), name + ': notices never print a command or token');
+  ok(!text.includes(EXAMPLE_TOKEN) && !text.includes(TOKEN_HEAD) && !text.includes('net.http_post') && !text.includes('Bearer'), name + ': notices never print a command or token');
 }
 function lastRows(results) {
   return results[results.length - 1]?.rows ?? [];
@@ -157,7 +157,7 @@ function staticChecks() {
     new RegExp('[0-9]{8,10}:AA[0-9A-Za-z_-]{30,}'),
     new RegExp('-----BEG' + 'IN'),
   ];
-  ok(patterns[0].test(SERVICE_TOKEN), 'scan self-test: the runtime token matches the token pattern');
+  ok(patterns[0].test(EXAMPLE_TOKEN), 'scan self-test: the runtime token matches the token pattern');
   for (const [label, text] of [['deactivate', DEACTIVATE], ['unschedule', UNSCHEDULE], ['test', fs.readFileSync(fileURLToPath(import.meta.url), 'utf8')], ['mock', MOCK]]) {
     ok(patterns.every((p) => !p.test(text)), `${label} file holds no credential-shaped literal`);
   }

@@ -130,6 +130,18 @@ describe('pydantic lax mode as measured (beyond the golden vectors)', () => {
     for (const bad of [{ a: 1 }, '2026-7-1', '']) expect(locsOf(() => offer({ leadtime: bad })), JSON.stringify(bad)).toEqual([['leadtime']]);
   });
 
+  it('epoch values outside years 1-9999 are refused at the field, values beyond the JavaScript Date range included', () => {
+    // Measured with xometry_bot.models under pydantic 2: each refusal is a value_error at the field.
+    for (const bad of [9007199254740992, 9.5e15, -9e15, 8.64e15, 2.534023008e14]) {
+      expect(locsOf(() => offer({ leadtime: bad })), String(bad)).toEqual([['leadtime']]);
+    }
+    for (const bad of [1e16, 9.5e15, 9e15, 8.64e15, 253402300800000, -62135596800001]) {
+      expect(locsOf(() => offer({ publicationEnd: bad })), String(bad)).toEqual([['publicationEnd']]);
+    }
+    expect(offer({ publicationEnd: 253402300799999 }).publication_end).toBe('9999-12-31T23:59:59.998993Z');
+    expect(offer({ leadtime: 253402300799 }).leadtime).toBe('1978-01-11');
+  });
+
   it('Python 3.11 date.fromisoformat', () => {
     expect(pyDateFromIso('2026-W53-7')).toBe('2027-01-03');
     expect(pyDateFromIso('2026W53')).toBe('2026-12-28');

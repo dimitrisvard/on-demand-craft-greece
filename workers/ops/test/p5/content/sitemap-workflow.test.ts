@@ -9,11 +9,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sortLikeLive } from '../../../src/content/sitemap-xml';
-import { runSitemap, SITEMAP_R2_KEY, sitemapAlerts } from '../../../src/workflows/sitemap';
+import { dropAccepted, runSitemap, SITEMAP_R2_KEY, sitemapAlerts } from '../../../src/workflows/sitemap';
 import * as oracle from '../../oracles/generate-sitemap.v19';
 import { FakeStep } from '../../helpers/fake-step';
 import { sitemapFixture } from './fixtures';
-import { contentHarness, runByKey, T0, uuid, type ContentHarness } from './helpers';
+import { contentHarness, HookedStep, runByKey, T0, uuid, type ContentHarness } from './helpers';
 
 beforeAll(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -110,6 +110,92 @@ describe('SitemapWorkflow', () => {
     expect(runByKey(h, `content_daily.sitemap:${DAY}`)).toMatchObject({ status: 'failed', error: 'sitemap_regression' });
   });
 
+  it('an intended drop: blocked once with the hint, accepted once by sitemap_accept_drop_on, then guarded against the new size', async () => {
+    const h = setup(300);
+    const day = (d: string, n: number) => {
+      h.clock.set(Date.UTC(2026, 9, n, 9, 0, 4));
+      return runSitemap({ date: d }, `sitemap-${d}`, { env: h.env, ports: h.ports, p5: h.p5, step: new FakeStep({ now: h.clock.now().getTime() }) });
+    };
+    const unpublish = (count: number) => {
+      let n = 0;
+      for (const a of h.db.tables.articles) if (a.status === 'published' && n < count) { a.status = 'draft'; n++; }
+    };
+    expect((await day('2026-10-08', 8)).outcome).toBe('succeeded');
+    unpublish(60);
+    expect((await day('2026-10-09', 9)).outcome).toBe('regression');
+    const blocked = runByKey(h, 'content_daily.sitemap:2026-10-09')!.output as Record<string, number>;
+    expect(blocked.articles).toBe(240);
+    expect(h.p5.telegramText.texts()).toEqual([sitemapAlerts.regression('2026-10-09', blocked.urls, Math.ceil(252 + 0.95 * 300))]);
+    expect(sitemapAlerts.regression('2026-10-09', 1, 2)).toContain('sitemap_accept_drop_on to "2026-10-09"');
+    // the owner accepts the new size as the alert says
+    h.setFlag({ value: { steps: ['sitemap'], sitemap_accept_drop_on: '2026-10-09' } });
+    expect((await day('2026-10-10', 10)).outcome).toBe('succeeded');
+    expect(runByKey(h, 'content_daily.sitemap:2026-10-10')!.output).toMatchObject({ articles: 240, uploaded: true, drop_accepted: { min_urls: Math.ceil(252 + 0.95 * 300) } });
+    // the day after uploads again (reference = the accepted run), with the value still set
+    expect((await day('2026-10-11', 11)).outcome).toBe('succeeded');
+    expect(runByKey(h, 'content_daily.sitemap:2026-10-11')!.output).not.toHaveProperty('drop_accepted');
+    // the value does not accept a second drop
+    unpublish(60);
+    expect((await day('2026-10-12', 12)).outcome).toBe('regression');
+    expect(h.p5.storage.uploads).toHaveLength(3);
+    expect(h.p5.telegramText.messages).toHaveLength(2);
+  });
+
+  it('dropAccepted: only for the first run on or after the day, never before it, never without a readable reference', () => {
+    expect(dropAccepted(null, '2026-10-10', 'content_daily.sitemap:2026-10-08')).toBe(false);
+    expect(dropAccepted('2026-10-11', '2026-10-10', 'content_daily.sitemap:2026-10-08')).toBe(false);
+    expect(dropAccepted('2026-10-09', '2026-10-10', 'content_daily.sitemap:2026-10-08')).toBe(true);
+    expect(dropAccepted('2026-10-10', '2026-10-10', 'content_daily.sitemap:2026-10-08')).toBe(true);
+    expect(dropAccepted('2026-10-09', '2026-10-11', 'content_daily.sitemap:2026-10-10')).toBe(false);
+    expect(dropAccepted('2026-10-09', '2026-10-11', 'content_daily.sitemap:2026-10-09')).toBe(false);
+    expect(dropAccepted('2026-10-09', '2026-10-11', null)).toBe(false);
+    expect(dropAccepted('2026-10-09', '2026-10-11', 'other:2026-10-01')).toBe(false);
+  });
+
+  it('flag switched off (or to shadow during an assist run) before build-upload: skipped, nothing written', async () => {
+    for (const flip of [{ enabled: false }, { mode: 'shadow' as const, value: { steps: ['sitemap'] } }]) {
+      const h = setup(20);
+      const step = new HookedStep({ now: NOW });
+      step.before.set('build-upload', () => h.setFlag(flip));
+      const r = await runSitemap({ date: DAY }, `sitemap-${DAY}`, { env: h.env, ports: h.ports, p5: h.p5, step });
+      expect(r.outcome).toBe('flag_off');
+      expect(runByKey(h, `content_daily.sitemap:${DAY}`)).toMatchObject({ status: 'skipped', output: { reason: 'flag_off', halted_at: 'build-upload' } });
+      expect(h.p5.storage.uploads).toEqual([]);
+      expect(h.ports.bucket.objects.size).toBe(0);
+      expect(h.db.rows('gsc_monitored_urls')).toEqual([]);
+    }
+  });
+
+  it('flag switched off before sync-monitored-urls: skipped after the upload, no monitored URL written', async () => {
+    const h = setup(20);
+    const step = new HookedStep({ now: NOW });
+    step.before.set('sync-monitored-urls', () => h.setFlag({ enabled: false }));
+    const r = await runSitemap({ date: DAY }, `sitemap-${DAY}`, { env: h.env, ports: h.ports, p5: h.p5, step });
+    expect(r.outcome).toBe('flag_off');
+    expect(h.p5.storage.uploads).toHaveLength(1);
+    expect(h.db.rows('gsc_monitored_urls')).toEqual([]);
+    expect(runByKey(h, `content_daily.sitemap:${DAY}`)).toMatchObject({ status: 'skipped', output: { reason: 'flag_off', halted_at: 'sync-monitored-urls', uploaded: true } });
+  });
+
+  it('shadow regression: run failed, nothing written, no Telegram text', async () => {
+    const h = setup(100);
+    h.setFlag({ mode: 'shadow', value: { steps: ['sitemap'] } });
+    h.db.seed('agent_runs', [{ agent: 'content_daily.sitemap', trigger: 'cron', idempotency_key: 'content_daily.sitemap:2026-10-07', status: 'succeeded', started_at: '2026-10-07T09:00:00Z', output: { urls: 2616, articles: 2364 } }]);
+    const { r } = await go(h);
+    expect(r.outcome).toBe('regression');
+    expect(h.p5.telegramText.messages).toEqual([]);
+    expect(h.ports.bucket.objects.size).toBe(0);
+    expect(runByKey(h, `content_daily.sitemap:${DAY}`)).toMatchObject({ status: 'failed', error: 'sitemap_regression', output: { shadow: true } });
+  });
+
+  it('static lastmod is the generation day (as live), also for a run of an earlier date', async () => {
+    const h = setup(5);
+    await go(h, { date: '2026-10-07' });
+    const xml = h.p5.storage.uploads[0].xml;
+    expect(xml).toContain('<lastmod>2026-10-08</lastmod>');
+    expect(xml).not.toContain('<lastmod>2026-10-07</lastmod>');
+  });
+
   it('within the guard: uploads', async () => {
     const h = setup(300);
     h.db.seed('agent_runs', [{ agent: 'content_daily.sitemap', trigger: 'cron', idempotency_key: 'content_daily.sitemap:2026-10-07', status: 'succeeded', started_at: '2026-10-07T09:00:00Z', output: { urls: 552, articles: 300 } }]);
@@ -140,26 +226,35 @@ describe('SitemapWorkflow', () => {
     const rows = sortLikeLive(sitemapFixture().filter((r) => r.status === 'published'));
     const nextDay: string = await oracle.generateSitemap(rows as never);
     const missing: string = await oracle.generateSitemap(rows.slice(1) as never);
+    // one article with another updated_at day (its <lastmod> differs; nothing else does)
+    const shifted = rows.map((r, i) => (i === 0 ? { ...r, updated_at: '2026-08-30T10:00:00+00:00' } : r));
+    const otherLastmod: string = await oracle.generateSitemap(shifted as never);
     vi.useRealTimers();
     const dir = mkdtempSync(join(tmpdir(), 'c5-compare-'));
     const script = new URL('../../../../../scripts/phase5/compare-sitemap.mjs', import.meta.url).pathname;
+    const different = (b: string): string => {
+      try {
+        execFileSync('node', [script, join(dir, 'a.xml'), join(dir, b)], { encoding: 'utf8' });
+      } catch (e) {
+        expect((e as { status: number }).status).toBe(1);
+        return String((e as { stdout: string }).stdout);
+      }
+      throw new Error(`${b}: expected exit 1`);
+    };
     try {
       writeFileSync(join(dir, 'a.xml'), shadow);
       writeFileSync(join(dir, 'b.xml'), nextDay);
       writeFileSync(join(dir, 'c.xml'), missing);
+      writeFileSync(join(dir, 'd.xml'), otherLastmod);
       const ok = execFileSync('node', [script, join(dir, 'a.xml'), join(dir, 'b.xml')], { encoding: 'utf8' });
       expect(ok).toContain('bytes: different');
       expect(ok).toContain('entries differing in lastmod only: 252');
+      expect(ok).toContain('generation day (static lastmod): a=2026-10-08 b=2026-10-09');
       expect(ok).toContain('RESULT: EQUIVALENT');
-      let status = 0;
-      let report = '';
-      try {
-        execFileSync('node', [script, join(dir, 'a.xml'), join(dir, 'c.xml')], { encoding: 'utf8' });
-      } catch (e) {
-        status = (e as { status: number }).status;
-        report = String((e as { stdout: string }).stdout);
-      }
-      expect(status).toBe(1);
+      expect(different('c.xml')).toContain('RESULT: DIFFERENT');
+      const report = different('d.xml');
+      expect(report).toContain('entries differing apart from lastmod: 0');
+      expect(report).toContain('lastmod differences other than the generation day of static pages: 1');
       expect(report).toContain('RESULT: DIFFERENT');
     } finally {
       rmSync(dir, { recursive: true, force: true });

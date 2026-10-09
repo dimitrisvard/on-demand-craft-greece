@@ -8,6 +8,8 @@
 //     then the next model; any other 5xx and a timeout -> next model.
 //   - Every model failed in one of those ways -> GeminiOverloadedError (the consumer retries the message later).
 //   - Any other failure (empty answer, blocked, a 4xx other than 404/429) stops the chain with GeminiCallError.
+//     An answered call that failed (a 200 without text, blocked or with an error) is billed: its usage travels on
+//     the GeminiCallError, so the caller adds it to the run like the usage of a successful call.
 //   - The answer text is returned whatever the finish reason (a truncated answer is caught by the parser guards).
 
 import type { LlmUsage } from '../ports/index';
@@ -40,11 +42,21 @@ export class GeminiOverloadedError extends Error {
 /** A failure that a different model would not fix (stops the chain). */
 export class GeminiCallError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  /** Usage of the answered call that failed (empty when nothing was answered). */
+  readonly usage: LlmUsage[];
+  constructor(code: string, message: string, usage: LlmUsage[] = []) {
     super(message);
     this.name = 'GeminiCallError';
     this.code = code;
+    this.usage = usage;
   }
+}
+
+/** The billed usage a chain failure carries (GeminiCallError of an answered call; anything else carries none). */
+export function geminiFailureUsage(e: unknown): LlmUsage[] {
+  if (!(e instanceof Error) || e.name !== 'GeminiCallError') return [];
+  const usage = (e as { usage?: unknown }).usage;
+  return Array.isArray(usage) ? (usage as LlmUsage[]) : [];
 }
 
 export interface GeminiAnswer {
@@ -80,7 +92,7 @@ export async function callGemini(port: TextLlmPort, prompt: string, o: GeminiCha
         meta: o.meta,
       });
       if (result.ok) {
-        if (!result.text) throw new GeminiCallError('empty', `empty Gemini response (${model})`);
+        if (!result.text) throw new GeminiCallError('empty', `empty Gemini response (${model})`, [result.usage]);
         return { text: result.text, finishReason: result.stop || 'UNKNOWN', model, usage: [result.usage] };
       }
       lastStatus = result.status;
@@ -91,7 +103,7 @@ export async function callGemini(port: TextLlmPort, prompt: string, o: GeminiCha
         continue;
       }
       if (result.code === 'not_found' || result.code === 'rate_limited' || result.code === 'server' || result.code === 'timeout') break;
-      throw new GeminiCallError(result.code, `Gemini ${result.code}${result.status ? ` ${result.status}` : ''} on ${model}`);
+      throw new GeminiCallError(result.code, `Gemini ${result.code}${result.status ? ` ${result.status}` : ''} on ${model}`, result.usage ? [result.usage] : []);
     }
   }
   throw new GeminiOverloadedError(`all Gemini models failed (last: ${lastCode}${lastStatus ? ` ${lastStatus}` : ''})`, lastStatus);

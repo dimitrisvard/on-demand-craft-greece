@@ -54,9 +54,15 @@
 //     T2-only vars pointing at the stub (JOBS_STUB_VARS: PULLPUSH_API_BASE, HN_API_BASE, XOMETRY_API_BASE,
 //     INDEXNOW_API_BASE, AGENT_GEMINI_BASE_URL, CAD_CONTAINER_BASE_URL) and CAD_INPUT_HOSTS = the stub host; ai,
 //     vectorize, browser, routes, analytics_engine_datasets (EVENTS) and containers removed; the consumers of
-//     scrapes, translations, outbound-mail and cad-jobs kept (JOBS_PROFILE_CONSUMERS: every source they reach is the
-//     stub, so no real scan runs); secrets.required = the production list + AGENT_SECRET_NAMES + JOBS_SECRET_NAMES
-//     (INDEXNOW_KEY and XOMETRY_TOKEN with a random value of this run), CAD_UNFOLD_URL = the stub origin
+//     scrapes, translations, outbound-mail and cad-jobs kept (JOBS_PROFILE_CONSUMERS); secrets.required = the
+//     production list + AGENT_SECRET_NAMES + JOBS_SECRET_NAMES (INDEXNOW_KEY and XOMETRY_TOKEN with a random value of
+//     this run), CAD_UNFOLD_URL = the stub origin
+//   - sources: every source of the Phase 5 ports points at the stub. The tender scan does not: api/tender-scan.js
+//     (run in-process by the 'tender-scheduled' handler) reaches its portals and its alert host by country code,
+//     with no base URL to replace. Rule for every T2 file of this profile: seed tender_connectors only with codes the
+//     handler refuses before any I/O (such as XX), keep agent.growth.tenders in shadow whenever another code is
+//     due, and restore a flag only after the runs it gates are final (the consumers read flags when they handle a
+//     message)
 //   - generated site config: the profile 'api' config, secrets.required + AGENT_APPROVAL_SECRET and CAD_COMPAT_TOKEN
 //     (random values of this run)
 //   - the stub mounts every module of AGENT_STUB_MODULES and JOBS_STUB_MODULES (pullpush, hn, xometry, indexnow,

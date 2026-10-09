@@ -63,6 +63,12 @@ RETURNING key, enabled, rev, value;
 -- lower the backfill when Gemini answers 429 (R5-2):
 --   UPDATE feature_flags SET value = value || '{"backfill_per_language_per_day":2}'::jsonb WHERE key = 'agent.content_daily' AND tenant_id = '00000000-0000-0000-0000-000000000001';
 
+-- ---- S4 and later: accept an intended drop of published articles (sitemap regression guard) ---------------
+-- Only after more than 5 % of the articles were unpublished on purpose and that day's sitemap run was blocked (its
+-- text alert names this value): <YYYY-MM-DD> = the day of the blocked run. The next sitemap run on or after that
+-- day uploads once and becomes the guard's new reference; a later drop is blocked again while the value stays set.
+--   UPDATE feature_flags SET value = value || '{"sitemap_accept_drop_on":"<YYYY-MM-DD>"}'::jsonb WHERE key = 'agent.content_daily' AND tenant_id = '00000000-0000-0000-0000-000000000001';
+
 -- ---- S6 marketing route: no flag. Worker vars OUTBOUND_MAIL_PAUSED / OUTBOUND_MAIL_STOPPED (wrangler.jsonc) ----
 
 -- ---- S7 ops digest --------------------------------------------------------------------------------------

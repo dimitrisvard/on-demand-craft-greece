@@ -7,6 +7,9 @@
 //   - warm-up: the same account updates
 // Known, documented differences that the comparison masks: Gmail mails are compared on their decoded headers and
 // HTML (the Worker writes a proper single-part MIME message); Gmail event metadata uses gmail_id (PHASE5_SPEC §6.5).
+// The Worker draws each message's spintax from its own seeded source (so a retry repeats the same payload); these
+// comparisons give the consumer the repo's single stream instead (harness option spintaxStream), so equal draws
+// still mean equal mails.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eventIdFor } from '../../../src/marketing/events';
@@ -101,7 +104,7 @@ async function repoCampaign(h: MarketingHarness, seed: number): Promise<{ sb: Or
 /** Runs the Worker route and the consumer with one seeded stream (selection draws first, then spintax, as the repo). */
 async function workerCampaign(seed: number, setup: (h: MarketingHarness) => void): Promise<MarketingHarness> {
   const random = seeded(seed);
-  const h = marketingHarness({ random });
+  const h = marketingHarness({ random, spintaxStream: true });
   setup(h);
   const res = await h.route({ campaign_id: CAMPAIGN });
   expect(res.status).toBe(202);
@@ -163,7 +166,7 @@ describe('follow-ups equal the repo function', () => {
       ]);
     };
     // Worker: enqueue at the slot, then the consumer sends
-    const h = marketingHarness({ random: seeded(7) });
+    const h = marketingHarness({ random: seeded(7), spintaxStream: true });
     setup(h);
     const counts = await enqueueDueFollowups(h.env, '2026-10-08T10:05Z', { run_id: 'run-f', ports: h.ports });
     expect(counts).toEqual({ candidates: 5, enqueued: 2, skipped: 1, not_due: 2, in_flight: 0, held: 0 });

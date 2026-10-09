@@ -1,7 +1,8 @@
 // SenderLimiter (unit M5): daily cap per sender (warm-up limit or daily limit; 500 for 'default'; 0 for an unknown
-// account), spacing from marketing_settings (or 30 s when unset), UTC day roll-over, already_sent for committed keys,
-// stale reservations re-used without counting twice, release, stats, the prune alarm, concurrent reserves and a
-// nameless object refusing to allot. Real class on the fake Durable Object state (node:sqlite).
+// account), spacing from marketing_settings (or 30 s when unset), UTC day roll-over, slots that stay on the UTC day
+// they are counted on, already_sent for committed keys, stale reservations re-used without counting twice, release,
+// stats, hand-over records, the prune alarm, concurrent reserves and a nameless object refusing to allot. Real class
+// on the fake Durable Object state (node:sqlite).
 
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SENDER_DAILY_CAP, nextUtcMidnight, SenderLimiter, STALE_SLOT_MS, utcDay } from '../../../src/do/sender-limiter';
@@ -105,6 +106,64 @@ describe('UTC day roll-over', () => {
     expect(await l.reserve({ idem: K(1), now: next })).toEqual({ status: 'ok', not_before: next });
     h.clock.set(next);
     expect((await l.stats()).sent_today).toBe(1);
+  });
+});
+
+describe('slots stay on their UTC day', () => {
+  it('a slot that would fall after 00:00 UTC is not allotted: exhausted with the next midnight, nothing counted', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { settings: { delay_between_emails_seconds: 600 } });
+    const l = h.limiter('default');
+    const late = Date.UTC(2026, 9, 8, 23, 45, 0);
+    expect(await l.reserve({ idem: K(1), now: late })).toEqual({ status: 'ok', not_before: late });
+    expect(await l.reserve({ idem: K(2), now: late })).toEqual({ status: 'ok', not_before: Date.UTC(2026, 9, 8, 23, 55, 0) });
+    // 00:05 would be the next slot
+    expect(await l.reserve({ idem: K(3), now: late + 1000 })).toEqual({ status: 'exhausted', resets_at: '2026-10-09T00:00:00.000Z' });
+    h.clock.set(late);
+    expect((await l.stats()).sent_today).toBe(2);
+    // after midnight the key reserves on the new day (spacing still counts from the last slot, 23:55)
+    const next = Date.UTC(2026, 9, 9, 0, 3, 0);
+    expect(await l.reserve({ idem: K(3), now: next })).toEqual({ status: 'ok', not_before: Date.UTC(2026, 9, 9, 0, 5, 0) });
+    h.clock.set(next);
+    expect((await l.stats()).sent_today).toBe(1);
+  });
+
+  it('a stale reservation whose new slot would cross midnight gives its count back and answers exhausted', async () => {
+    const h = marketingHarness();
+    seedCampaign(h, { settings: { delay_between_emails_seconds: 600 } });
+    const l = h.limiter('default');
+    const t = Date.UTC(2026, 9, 8, 23, 20, 0);
+    await l.reserve({ idem: K(1), now: t });
+    await l.reserve({ idem: K(2), now: t });
+    await l.reserve({ idem: K(3), now: t });
+    // K(1)'s slot (23:20) is stale at 23:31; the next free slot is 23:50 -> re-used
+    expect(await l.reserve({ idem: K(1), now: t + 11 * 60_000 })).toEqual({ status: 'ok', not_before: Date.UTC(2026, 9, 8, 23, 50, 0) });
+    // K(2)'s slot (23:30) is stale at 23:41; the next slot would be 00:00 -> given back
+    expect(await l.reserve({ idem: K(2), now: t + 21 * 60_000 })).toEqual({ status: 'exhausted', resets_at: '2026-10-09T00:00:00.000Z' });
+    h.clock.set(t + 21 * 60_000);
+    expect((await l.stats()).sent_today).toBe(2);
+    await l.release({ idem: K(2) });
+    expect((await l.stats()).sent_today).toBe(2);
+  });
+});
+
+describe('hand-over records', () => {
+  it('takeHandoff answers true once per handOff; records are kept apart per key and pruned after 30 days', async () => {
+    const h = marketingHarness();
+    seedCampaign(h);
+    const l = h.limiter('default');
+    expect(await l.takeHandoff({ idem: K(1) })).toBe(false);
+    await l.handOff({ idem: K(1), now: T0 });
+    await l.handOff({ idem: K(1), now: T0 + 1 });
+    await l.handOff({ idem: K(2), now: T0 });
+    expect(await l.takeHandoff({ idem: K(1) })).toBe(true);
+    expect(await l.takeHandoff({ idem: K(1) })).toBe(false);
+    expect(await h.limiterState('default').storage.getAlarm()).toBe(T0 + 86_400_000);
+    h.clock.set(T0 + 31 * 86_400_000);
+    await h.limiterState('default').runAlarm();
+    expect(await l.takeHandoff({ idem: K(2) })).toBe(false);
+    await expect(l.handOff({ idem: '', now: T0 })).rejects.toThrow(/idem/);
+    await expect(l.takeHandoff({ idem: '' })).rejects.toThrow(/idem/);
   });
 });
 

@@ -8,6 +8,8 @@ This document expands brief §4 (and brief §7 item 6) into buildable designs: f
 
 Phase 4 build (2026-10-07): agents 1–3 and 7 and the scrapers of agent 4 are built and tested locally; nothing is deployed. Statements below that the build changed are corrected in place and marked "as built"; the list of changes is [PLAN.md](PLAN.md) §5.4 (DC-1…DC-19) and the binding contracts are [specs/PHASE4_SPEC.md](specs/PHASE4_SPEC.md). Agents 4 (other jobs), 5 and 6 are unchanged designs for Phase 5.
 
+Phase 5 build (2026-10-09): the other jobs of agent 4 (reddit, HN, tenders, Xometry), agent 5 and agent 6, the campaign mail and the CAD Container are built and tested locally; nothing is deployed, applied or switched. §1.1, §2.5, §3.4–§3.6, §5, §8 and §9 are corrected in place and marked "as built"; the list of changes is [PLAN.md](PLAN.md) §5.5 (DV5-1…DV5-22, BA5-1…BA5-10) and the binding contracts are [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md).
+
 ## 1. Scope, load and ground rules
 
 ### 1.1 The seven agents
@@ -17,9 +19,9 @@ Phase 4 build (2026-10-07): agents 1–3 and 7 and the scrapers of agent 4 are b
 | 1 | Inbound RFQ e-mail | `microns-mail` → Workflow `rfq-intake` (`RfqIntakeWorkflow`) + DO `RfqThread` | mail to `rfq@rfq.micronshub.eu` (and forwarded Techpilot notifications, PLAN.md Q3) | `agent.rfq_intake` | 4 (P4-4, P4-5) |
 | 2 | Quote | Workflow `quote` (`QuoteWorkflow`), Queue `cad-jobs`, DO `CadRouter`, Vectorize `quotes-v1` | end of `rfq-intake`, or "Start quote" on the dashboard | `agent.quote` | 4 (P4-6, P4-7, P4-8) |
 | 3 | Post-order handoff | Workflow `post-order` (`PostOrderWorkflow`) + DO `MaterialStock` | new `orders` row | `agent.post_order` | 4 (P4-9) |
-| 4 | Growth agents | Cron Triggers + Queue `scrapes`; Browser Rendering `BROWSER` | Cron schedules of wrangler.jsonc.draft (reddit, hn, tenders, xometry); scrapers on demand | `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders`, `agent.growth.scrapers`, `agent.growth.xometry` | 4 (scrapers, P4-10); 5 (P5-3, P5-5) |
-| 5 | Content pipeline | Workflows `content-daily` (`ContentDailyWorkflow`) and `sitemap` (`SitemapWorkflow`), Queue `translations` | Cron 07:00 UTC | `agent.content_daily` | 5 (P5-2) |
-| 6 | Ops digest | Workflow `ops-digest` (`OpsDigestWorkflow`) | Cron Monday 06:30 UTC | `agent.ops_digest` | 5 (P5-7) |
+| 4 | Growth agents | Schedule table on the every-minute tick + Queue `scrapes` (as built, Phase 5); Browser Rendering `BROWSER` | reddit, hn, tenders, xometry at their live UTC times; scrapers on demand | `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders`, `agent.growth.scrapers`, `agent.growth.xometry` | 4 (scrapers, P4-10); 5 (P5-3, P5-5) |
+| 5 | Content pipeline | Workflows `content-daily` (`ContentDailyWorkflow`) and `sitemap` (`SitemapWorkflow`), Queue `translations` | 07:00 UTC (schedule table, as built) | `agent.content_daily` | 5 (P5-2) |
+| 6 | Ops digest | Workflow `ops-digest` (`OpsDigestWorkflow`) | Monday 06:30 UTC (schedule table, as built) | `agent.ops_digest` | 5 (P5-7) |
 | 7 | Remote MCP | Stateless MCP handler (`createMcpHandler`, no Durable Object; as built) in `microns-ops` on `mcp.micronshub.eu` | MCP client (Claude on desktop or mobile) | `mcp.remote` | 4 (P4-11) |
 
 ### 1.2 Design load
@@ -67,9 +69,9 @@ All LLM calls go through AI Gateway `microns` (P4-3). Routes are roles, not mode
 
 | Route | Provider and model class | Used for |
 |---|---|---|
-| `extract` | Anthropic, current Sonnet-class model (`claude-sonnet-5-5` in the Phase 4 build, with server-side refusal fallback) | RFQ parsing, quote notes and cover e-mails, traveller summaries, article generation, digest narrative |
+| `extract` | Anthropic, current Sonnet-class model (`claude-sonnet-5-5` in the Phase 4 build, with server-side refusal fallback) | RFQ parsing, quote notes and cover e-mails, traveller summaries, article generation, digest narrative (as built, article generation calls `claude-sonnet-5` with the live request body and no fallback; PLAN.md §5.5 D-6) |
 | `classify` | Anthropic, current Haiku-class model (`claude-haiku-4-5` in the Phase 4 build) | spam and intent triage, CNC vs sheet-metal classification, reply classification, lead relevance |
-| `translate` | Google AI Studio, current Gemini Flash-class model | article translation (the repo's Gemini model IDs are retired, H-19); created in Phase 5 with its first caller (PLAN.md §5.4 DC-18) |
+| `translate` | Google AI Studio, current Gemini Flash-class model (as built the live chain `gemini-2.5-flash-lite` → `gemini-2.5-flash` → `gemini-2.0-flash` → `gemini-2.0-flash-lite` → `gemini-flash-latest`, key stored in the gateway) | article translation (the repo's Gemini model IDs are retired, H-19); created in Phase 5 with its first caller (PLAN.md §5.4 DC-18) |
 | `embed` | Workers AI `@cf/baai/bge-m3` (1,024 dimensions, index `quotes-v1`, cosine) | RAG over past quotes, tender relevance |
 
 Every call carries header `cf-aig-metadata` with at most five flat entries (AI Gateway allows up to five, values string, number or boolean; CF docs, verified 2026-09-30):
@@ -138,7 +140,7 @@ Human waits use a 7-day timeout (the default is 24 h, maximum 365 d; CF docs, ve
 |---|---|
 | Workflow step | Each `step.do` sets `retries` (limit, delay, backoff) and `timeout` explicitly (CF docs, re-check at execution): LLM steps 3 retries, 30 s exponential, timeout 3 min for `extract` (document input) and 1 min for `classify` (as built); Supabase and R2 steps 5 retries, 10 s exponential; send steps (Resend, Telegram) 3 retries with a provider idempotency key. Non-retryable errors (schema validation failure after one re-ask, 4xx from a provider) throw `NonRetryableError`. |
 | Workflow instance | As built: a failed run waits on a `failure` card (`waiting_human`, `parked_reason = 'failed'`): **Retry** restarts the instance from the failed step (earlier step results are reused, completed side effects are skipped by idempotency keys), **Dismiss** closes the run `failed`; an unanswered failure card is closed `failed` after 14 days. |
-| Queues | `max_retries` per consumer and DLQ `<name>-dlq` (wrangler.jsonc.draft: `cad-jobs` 2 retries, `translations` 5, `scrapes` 3, `agent-events` 3, `outbound-mail` 3). DLQs have no consumer; the ops digest lists their backlog and a manual task re-drives them. |
+| Queues | `max_retries` per consumer and DLQ `<name>-dlq` (wrangler.jsonc.draft: `cad-jobs` 2 retries, `translations` 5, `scrapes` 3, `agent-events` 3, `outbound-mail` 3). DLQs have no consumer; a manual task re-drives them. As built (Phase 5) every consumer records its final failure in `agent_runs` and the ops digest counts those; no Cloudflare API token reads DLQ depth (PLAN.md §5.5 DV5-7). |
 | Provider outage | AI Gateway returns the provider error; the step retries; after the last retry the run parks in `waiting_human` (`parked_reason = 'llm_unavailable'`, resumed by the dispatcher after 30 min). The business path (RFQ row, dashboard) never depends on the LLM being up. |
 | Budget exhausted | Gateway spend limit (PLAN.md Q20) answers 429 → the run parks (`parked_reason = 'budget'`); `max_runs_per_day` in the flag `value` (default 200) closes further runs of that agent as `skipped` (`daily_cap`) before any LLM call, and one Telegram notice per agent and day reports it. |
 
@@ -190,7 +192,7 @@ EU residency: Supabase runs in eu-central-1 (live 2026-09-30). R2 location hints
 |---|---|---|
 | `extract` (Sonnet-class) | $2.00 input / $10.00 output per million tokens; cached input $0.20 per million | list price — re-check at execution |
 | `classify` (Haiku-class) | $1.00 / $5.00 per million tokens | list price — re-check at execution |
-| `translate` (Gemini Flash-class) | assumed $0.30 / $2.50 per million tokens | assumption, not verified in this pass — re-check at execution |
+| `translate` (Gemini Flash-class) | assumed $0.30 / $2.50 per million tokens; as built the first model of the chain, `gemini-2.5-flash-lite`, at $0.10 / $0.40 | assumption, not verified in this pass — re-check at execution; the Phase 5 price table cites the Google pricing page fetched 2026-10-08 |
 | `embed` (`@cf/baai/bge-m3`) | treated as $0 at well under 1 M tokens per month | list price — re-check at execution |
 | Container `standard-1` (½ vCPU, 4 GiB) | ½ × $0.000020 per vCPU-s + 4 × $0.0000025 per GiB-s = $0.00002 per running second | CF docs (verified 2026-09-27); list price — re-check at execution |
 | Workflows, Queues, Durable Objects, KV, R2 operations, Vectorize, Email Routing, AI Gateway | inside the Workers Paid included usage at tens of runs per day | list price — re-check at execution; monthly totals in [COSTS.md](COSTS.md) |
@@ -398,26 +400,26 @@ Rollout and success metric: `assist` (every partner send approved). Success: zer
 
 ### 3.4 Agent 4: growth agents
 
-Five jobs, one pattern: a Cron Trigger (or an on-demand call) enqueues one `scrapes` message per unit of work; the consumer fetches, scores, upserts with the table's unique key and posts to Telegram as today. Each job checks its own flag and writes one `agent_runs` row per cron tick (H-29).
+Five jobs, one pattern: a Cron Trigger (or an on-demand call) enqueues one `scrapes` message per unit of work; the consumer fetches, scores, upserts with the table's unique key and posts to Telegram as today. Each job checks its own flag and writes one `agent_runs` row per cron tick (H-29). As built (Phase 5): the trigger is the schedule table evaluated on the every-minute tick (PLAN.md §5.5 DV5-2); the dispatcher opens the run and sends one message per live HTTP call: one per reddit tier tick (at most 40 due subreddits), one per HN tick, one per due tender connector, one per Xometry slot, in the Phase 5 envelope `P5ScrapeMessage`; Telegram texts are plain and byte-equal to the live ones.
 
 | Job | Trigger (UTC) | Inputs | Outputs | Idempotency key | Flag | Phase |
 |---|---|---|---|---|---|---|
-| Reddit | tier1 `*/15`, tier2 `*/30`, tier3 hourly (live `cron.job` 2026-09-30) | `monitored_subreddits` due by `scan_interval_minutes`, `lead_keywords`; pullpush API (supabase/functions/reddit-collector/index.ts:141-146, :260-271) | `leads` upserts, Telegram lead messages | `leads.source_url` unique (supabase/migrations/20260321_create_lead_monitor.sql:10); run key `growth.reddit:<cron>:<scheduledTime>` | `agent.growth.reddit` | 5 (P5-3) |
-| HN | `*/30` | `lead_keywords`; Algolia HN API | `leads` upserts, Telegram | same | `agent.growth.hn` | 5 (P5-3) |
-| Tenders | 06:00 | `tender_connectors` due (26 seeded, supabase/migrations/20260322_create_tender_monitor.sql:138); `lib/connectors/*` and `scoreTender` (api/tender-scan.js:14-21, :140) | `tenders` upserts with score, Telegram | `tenders` unique (`country_code`, `tender_reference`) (supabase/migrations/20260325_fix_table_schemas.sql:200) | `agent.growth.tenders` | 5 (P5-3) |
+| Reddit | tier1 `*/15`, tier2 `*/30`, tier3 hourly (live `cron.job` 2026-09-30; schedule table as built) | `monitored_subreddits` due by `scan_interval_minutes`, `lead_keywords`; pullpush API (supabase/functions/reddit-collector/index.ts:141-146, :260-271) | `leads` upserts, Telegram lead messages | `leads.source_url` unique (supabase/migrations/20260321_create_lead_monitor.sql:10); run key `growth.reddit:t<N>:<slot>` (as built) | `agent.growth.reddit` | 5 (P5-3) |
+| HN | `*/30` | `lead_keywords`; Algolia HN API (live v7 terms and Show HN) | `leads` upserts, Telegram for high and medium rows actually inserted | `leads` unique (`source`, `external_id`); run key `growth.hn:<slot>` (as built) | `agent.growth.hn` | 5 (P5-3) |
+| Tenders | 06:00 | `tender_connectors` due (26 seeded, supabase/migrations/20260322_create_tender_monitor.sql:138); `lib/connectors/*` and `scoreTender` (api/tender-scan.js:14-21, :140) | `tenders` upserts with score, Telegram | `tenders` unique (`country_code`, `tender_reference`) (supabase/migrations/20260325_fix_table_schemas.sql:200); run keys `growth.tenders:<date>` and one child `growth.tenders:<date>:<CC>` per connector (as built; `api/tender-scan.js` runs unchanged) | `agent.growth.tenders` | 5 (P5-3) |
 | Scrapers (Europages, wlw) | on demand from `/dashboard/company-scanner`, MCP `scan_directory`/`run_saved_search` | search URL; as built: plain fetch after a robots.txt check that fails closed, Browser Rendering only for client-rendered pages of hosts the owner has recorded permission for (`SCRAPER_PERMITTED_HOSTS`; DC-12); with the flag off the Phase 2 handlers answer unchanged | `company_leads` upserts, `scan_logs` | `company_leads` unique (`source`, `source_url`) (supabase/migrations/20260325_fix_table_schemas.sql:127) | `agent.growth.scrapers` | 4 (P4-10) |
-| Xometry | `0 6,8,10,12,14,16,18 * * *` (.github/workflows/xometry-scan.yml:21) | Xometry partner GraphQL (TypeScript port or Container, PLAN.md Q8) | `xometry_offers` upserts; alert on HTTP 401 | `xometry_offers.code` unique (xometry-bot/schema.sql:8) | `agent.growth.xometry` | 5 (P5-5) |
+| Xometry | `0 6,8,10,12,14,16,18 * * *` (.github/workflows/xometry-scan.yml:21) | Xometry partner GraphQL (as built: TypeScript port, PLAN.md Q8 default; no Playwright pricing) | `xometry_offers` upserts through PostgREST (three requests per offer, no Hyperdrive); alert on HTTP 401/403 | `xometry_offers.code` unique (xometry-bot/schema.sql:8); run key `growth.xometry:<slot>` (as built) | `agent.growth.xometry` | 5 (P5-5) |
 
 Consumer steps (Queue `scrapes`, one message per subreddit, search term set, connector, search page or scan):
 
 | # | Step | What | LLM route |
 |---|---|---|---|
-| 1 | `claim` | Insert/lookup `agent_runs` for the tick; skip if the unit was done in this tick. | — |
+| 1 | `claim` | Insert/lookup `agent_runs` for the tick; skip if the unit was done in this tick. As built the dispatcher opens the run before sending, and the handler re-reads the flag and skips a run that is already final. | — |
 | 2 | `fetch` | Source API or Browser Rendering (≤ 6 concurrent connections per invocation, CF docs verified 2026-09-27); existing delays kept. | — |
-| 3 | `score` | Existing keyword/CPV scoring unchanged (parity first). Tenders additionally: embed title + description and query `quotes-v1`; the similarity to past won quotes adds up to 15 points (proposal). | `embed` |
-| 4 | `relevance` (optional, off by default) | Candidates above the keyword threshold get a relevance check and a draft `suggested_response`; capped at 20 per run (`value.llm_cap`). | `classify` |
+| 3 | `score` | Existing keyword/CPV scoring unchanged (parity first). Tenders additionally: embed title + description and query `quotes-v1`; the similarity to past won quotes adds up to 15 points (proposal; not built in Phase 5, where `api/tender-scan.js` runs unchanged). | `embed` |
+| 4 | `relevance` (optional, off by default) | Candidates above the keyword threshold get a relevance check and a draft `suggested_response`; capped at 20 per run (`value.llm_cap`). Not built in Phase 5 (`value.relevance` stays `false`). | `classify` |
 | 5 | `upsert` | Upsert on the unique key above. | — |
-| 6 | `notify` | Telegram messages in today's format (existing `sendMessage` texts). | — |
+| 6 | `notify` | Telegram messages in today's format (existing `sendMessage` texts); as built only for rows the upsert actually inserted, so a re-read post never alerts twice (D-14). | — |
 
 LLM calls and cost per run:
 
@@ -428,63 +430,63 @@ LLM calls and cost per run:
 | Scrapers | none | — | browser time only, inside the allowance |
 | Xometry | none (rule pricing of xometry-bot/xometry_bot/pricing.py is ported as code) | — | $0 |
 
-Failure modes: source API down → message retried (3), then DLQ `scrapes-dlq`, reported in the digest; Xometry 401 → Telegram "token refresh needed" (the MFA-gated token is refreshed by hand today) and the job pauses until the secret changes; duplicate items → unique keys; a scraper page layout change → zero results for 3 consecutive runs raises a card.
+Failure modes: source API down → message retried (3), then DLQ `scrapes-dlq`, reported in the digest; Xometry 401 → Telegram "token refresh needed" (the MFA-gated token is refreshed by hand today) and the job pauses until the secret changes; duplicate items → unique keys; a scraper page layout change → zero results for 3 consecutive runs raises a card. As built (Phase 5): a failed reddit, HN or Xometry tick closes its run `failed` and acks, so the next slot is the retry (as pg_cron and the Action); a tender child retries after 300 s and ends in `scrapes-dlq` after 3 retries; sources time out after 30 s and a reddit tier message or Xometry tick stops after 10 min with `partial: true`; Xometry also answers 403 like 401, sends a daily reminder at 06:00 while the token is rejected and a hint when a JWT-shaped token is about to expire, and a redelivered message never scans twice (BA5-6).
 
 Human view: unchanged Telegram messages; dashboards `/dashboard/leads`, `/dashboard/tenders`, `/dashboard/company-scanner`, `/dashboard/xometry` (src/App.tsx:290-295). New: the digest shows per-job run counts and failures.
 
-Rollout and success metric: Phase 5 switch-over one job at a time (P5-8): pg_cron job deactivated, Cloudflare job enabled; 7-day output parity (P5-9): leads and tenders inserted per day within the prior 7-day range, Telegram deliveries equal, zero duplicate rows; scrapers in Phase 4 after 5 successful on-demand scans.
+Rollout and success metric: Phase 5 switch-over one job at a time (P5-8): pg_cron job deactivated, Cloudflare job enabled; 7-day output parity (P5-9): leads and tenders inserted per day within the prior 7-day range, Telegram deliveries equal, zero duplicate rows; scrapers in Phase 4 after 5 successful on-demand scans. As built: steps S1 (HN), S2 (reddit), S3 (tenders, with a 24 h canary on two connectors unless tenders already flow) and S8 (Xometry, one shadow day, then the repository variable `XOMETRY_SCAN_SCHEDULE = off`); the gate reads reddit 0 as accepted and Xometry as one run with an outcome per slot (DV5-12).
 
 ### 3.5 Agent 5: content pipeline
 
 | Aspect | Design |
 |---|---|
 | Purpose | One daily Workflow replaces the pg_cron chain (07:00 enqueue, `*/5` queue worker, 08:00 translate, 08:30 fix links, 09:00 sitemap; live `cron.job` 2026-09-30) and fixes the translation lag (H-19: cs/da/fi/hu/nb/pl/sv 19 days behind, pt 8 days; live 2026-09-30). |
-| Trigger | Cron `0 7 * * *`; manual "Run now" on `/dashboard/auto-blog` (src/App.tsx:284). |
-| Inputs | Next title (`enqueue_next_article()` today, live job 17); `articles`; `content_pages` for the sitemap. |
-| Outputs | 1 English article + 13 translations in `articles`; fixed links; sitemap blobs in `microns-private` `sitemaps/…` served by `microns-site` at the identical URLs; `gsc_monitored_urls` upserts; IndexNow submission (key file stays at `/indexnow_key.txt`, H-14); KV `SEO_CACHE` purge; `agent_runs`. |
-| Idempotency key | Instance `content-daily-<yyyy-mm-dd>`; articles unique (`slug`, `language`) (supabase/migrations/20241202_create_articles_table.sql:19); translation message key `<translation_id>:<language>` (consumer skips if the sibling exists). |
+| Trigger | Cron `0 7 * * *`; manual "Run now" on `/dashboard/auto-blog` (src/App.tsx:284). As built: the schedule table at 07:00 on the every-minute tick; the dashboard buttons keep calling the edge functions until Phase 6 (D-20). |
+| Inputs | Next title (`enqueue_next_article()` today, live job 17); `articles`; `content_pages` for the sitemap. As built the sitemap reproduces the deployed generator (published articles plus 18 static pages × 14 languages; D-2), not `content_pages`. |
+| Outputs | 1 English article + 13 translations in `articles`; fixed links; as built `sitemap-complete.xml` written to the Supabase Storage object the site serves, with an R2 shadow copy (DV5-1); `gsc_monitored_urls` upserts; one IndexNow submission per new translation (key file stays at `/indexnow_key.txt`, H-14; DV5-4); KV `SEO_CACHE` purge; `agent_runs`. |
+| Idempotency key | Instance `content-daily-<yyyy-mm-dd>`; articles unique (`slug`, `language`) (supabase/migrations/20241202_create_articles_table.sql:19); translation run key `content_daily.translate:<translation_id>:<lang>:<for_date>` as built (consumer skips if the sibling exists). |
 | Flag | `agent.content_daily`. |
 
 Steps (Workflow `content-daily`, `ContentDailyWorkflow`; child `sitemap`, `SitemapWorkflow`):
 
 | # | Step | What | LLM route |
 |---|---|---|---|
-| 1 | `pick-title` | Next `article_titles` row (same logic as `enqueue_next_article()`). | — |
-| 2 | `generate-en` | Port of `generate-daily-article` (today model ID `claude-sonnet-4-20250514`, `max_tokens` 16384, supabase/functions/generate-daily-article/index.ts:183-188); article inserted as published English master. | `extract` |
-| 3 | `fan-out` | 13 `translations` messages (languages of supabase/functions/auto-translate-articles/index.ts:18-33); backfill messages for missing languages of earlier articles are enqueued by a one-off job and by this step (≤ 5 per language per day). | — |
-| 4 | `wait-translations` | `waitForEvent('translations-done')` 6 h; timeout → continue with the languages present, missing ones listed. | — |
-| 5 | `fix-links` | Port of `fix-article-links` for this `translation_id` only (not `fix_all`). | — |
-| 6 | `sitemap` | Start `sitemap-<date>`: regenerate `sitemap-complete.xml` (and per-language files per SEO_PARITY.md), write to R2, upsert `gsc_monitored_urls`. | — |
-| 7 | `indexnow` | Submit the 14 new URLs. | — |
+| 1 | `pick-title` | Next `article_titles` row (same logic as `enqueue_next_article()`). As built: the RPCs `enqueue_next_article` and `get_next_queue_job` themselves (D-21); no title left → `no_titles`, one alert, translations and backfill still run. | — |
+| 2 | `generate-en` | Port of `generate-daily-article` (today model ID `claude-sonnet-4-20250514`, `max_tokens` 16384, supabase/functions/generate-daily-article/index.ts:183-188); article inserted as published English master. As built: port of the deployed v36 (model from `value.model`, default `claude-sonnet-5` as live; live prompt and parser with the 2,000-word guard; 3 attempts 5 min apart; usage of failed attempts counted, BA5-1). | `extract` (as built Anthropic through the gateway with the live request body, no fallback) |
+| 3 | `fan-out` | 13 `translations` messages (languages of supabase/functions/auto-translate-articles/index.ts:18-33); backfill messages for missing languages of earlier articles are enqueued by a one-off job and by this step (≤ 5 per language per day). As built by this step only, oldest English article first (BA5-4). | — |
+| 4 | `wait-translations` | `waitForEvent('translations-done')` 6 h; timeout → continue with the languages present, missing ones listed. As built only when daily messages went out. | — |
+| 5 | `fix-links` | Port of `fix-article-links` for this `translation_id` only (not `fix_all`). As built: a full pass over every non-English article, pages of 200, one step per language (the live job's `fix_all`, DV5-5). | — |
+| 6 | `sitemap` | Start `sitemap-<date>`: regenerate `sitemap-complete.xml` (and per-language files per SEO_PARITY.md), write to R2, upsert `gsc_monitored_urls`. As built: `sitemap-complete.xml` only (the other sitemap files are static since 2025-12-30), uploaded to Supabase Storage with an R2 shadow copy (DV5-1). | — |
+| 7 | `indexnow` | Submit the 14 new URLs. As built in the `translations` consumer: one submission per new translation (DV5-4). | — |
 | 8 | `purge-cache` | Delete affected `SEO_CACHE` keys. | — |
-| 9 | `close` | `agent_runs` with per-language outcome. | — |
+| 9 | `close` | `agent_runs` with per-language outcome and lag in days. | — |
 
-`translations` consumer: one language per message (`max_batch_size` 1, 5 retries, `retry_delay` 120 s, concurrency 3; wrangler.jsonc.draft), `translate` route, inserts the sibling, then checks whether all 13 exist and, if so, sends `translations-done`.
+`translations` consumer: one language per message (`max_batch_size` 1, 5 retries, `retry_delay` 120 s, concurrency 3; wrangler.jsonc.draft), `translate` route, inserts the sibling, then checks whether all 13 exist and, if so, sends `translations-done`. As built: the live Gemini model chain (90 s per call; 404, 429 and 5xx move to the next model; all overloaded → retry after 120 s × attempts), the live prompts frozen by a lock file, IndexNow when `INDEXNOW_KEY` is set (else `not_configured`), and a slug used by another article of the language closes the run `slug_conflict` with one alert (BA5-4).
 
 LLM calls:
 
 | Step | Route | Purpose | Tokens in / out | Cost |
 |---|---|---|---|---|
 | `generate-en` | `extract` | article generation | 3,000 / 6,000 | $0.066 |
-| translation (× 13) | `translate` | one language | 7,000 / 7,000 each | 13 × $0.020 = $0.255 |
+| translation (× 13) | `translate` | one language | 7,000 / 7,000 each | 13 × $0.020 = $0.255 at Flash-class prices; as built the chain starts with `gemini-2.5-flash-lite` ($0.10 / $0.40 per M, Google pricing page fetched 2026-10-08): 13 × $0.0035 = $0.046 |
 
-Failure modes: a language fails 5 times → `translations-dlq`, missing language listed on the failure card with **Retry failed**; generation fails → no fan-out, card; sitemap regression guard (the existing one throws on `content_pages` drift, supabase/functions/generate-sitemap/index.ts:349-355) → keep yesterday's blobs and alert; IndexNow error → logged, not retried beyond 3.
+Failure modes: a language fails 5 times → `translations-dlq`, missing language listed on the failure card with **Retry failed**; generation fails → no fan-out, card; sitemap regression guard (the existing one throws on `content_pages` drift, supabase/functions/generate-sitemap/index.ts:349-355) → keep yesterday's blobs and alert; IndexNow error → logged, not retried beyond 3. As built (DV5-6): the last delivery of a language closes its run `failed` with one plain-text alert and the next daily backfill queues it again; a failed generation marks the queue row failed, sends one alert and still runs the backfill, fix-links and the sitemap (run `failed`, `generate_failed`); the sitemap guard (fewer than 252 + 95 % of the articles of the last uploaded run) uploads nothing and alerts, and an intended drop is accepted once through `value.sitemap_accept_drop_on` (BA5-3); an IndexNow failure is recorded in the run output and the translation still succeeds.
 
-Cost per run: **≈ $0.32 per day** (≈ $10 per month); this spend exists today as direct Anthropic and Gemini calls from the edge functions.
+Cost per run: **≈ $0.32 per day** (≈ $10 per month); this spend exists today as direct Anthropic and Gemini calls from the edge functions. As built ≈ $0.11 per day (≈ $3.40 per month) while the chain's first model answers, plus ≈ $0.70 once for the 199 missing translations of 2026-10-03.
 
-Human view: Telegram only on failure or partial success ("content-daily <date>: 11/13 languages; failed: hu, pl" with **Retry failed**); `/dashboard/auto-blog` shows the run timeline; the digest shows lag per language.
+Human view: Telegram only on failure or partial success ("content-daily <date>: 11/13 languages; failed: hu, pl" with **Retry failed**); `/dashboard/auto-blog` shows the run timeline; the digest shows lag per language. As built: plain-text alerts without buttons (D-28); the dashboard page is unchanged in Phase 5.
 
-Rollout and success metric: Phase 5 switch-over with the pg_cron chain deactivated, not deleted (P5-8). Success (P5-9 gate): articles per language per day ≥ the pre-switch baseline for 7 days; lag for cs/da/fi/hu/nb/pl/sv/pt falls every day until 0; sitemap URL set equals the published rows.
+Rollout and success metric: Phase 5 switch-over with the pg_cron chain deactivated, not deleted (P5-8). Success (P5-9 gate): articles per language per day ≥ the pre-switch baseline for 7 days; lag for cs/da/fi/hu/nb/pl/sv/pt falls every day until 0; sitemap URL set equals the published rows. As built: S4 moves the sitemap alone after one shadow day compared with the served object; S5 moves the rest, never both chains on one day; the 7-day window starts with the first Worker run after S5.
 
 ### 3.6 Agent 6: ops digest
 
 | Aspect | Design |
 |---|---|
 | Purpose | Weekly e-mail to the owner: RFQs in, quotes out, win rate, margin, stuck workflows, agent cost; optional Google Ads offline conversions for closed orders. |
-| Trigger | Cron Monday 06:30 UTC (`30 6 * * mon`, wrangler.jsonc.draft); manual "Send now". |
-| Inputs | `rfqs` (by `source`), `quote_workflows`, `orders` (`total_amount`, `total_production_costs`, `material_costs`, `working_hours_costs`), `agent_runs`, `cad_jobs`, `inbound_emails`; queue backlog of the DLQs (Cloudflare API, §9). |
+| Trigger | Cron Monday 06:30 UTC (`30 6 * * mon`, wrangler.jsonc.draft); manual "Send now". As built: the schedule table `30 6 * * 1` on the every-minute tick; no manual button in Phase 5. |
+| Inputs | `rfqs` (by `source`), `quote_workflows`, `orders` (`total_amount`, `total_production_costs`, `material_costs`, `working_hours_costs`), `agent_runs`, `cad_jobs`, `inbound_emails`; queue backlog of the DLQs (Cloudflare API, §9). As built: also `articles`, `leads`, `tenders`, `marketing_events`; queue health from final failures in `agent_runs` instead of the Cloudflare API (DV5-7); counts read through PostgREST, no SQL function added. |
 | Outputs | Resend e-mail to the recipient stored in the flag `value`; short Telegram summary; optional Google Ads conversion uploads; monthly retention purge (§2.6); `agent_runs`. |
-| Idempotency key | Instance `ops-digest-<yyyy>-W<ww>`; mail `Idempotency-Key` `digest-<yyyy>-W<ww>`; conversion upload per order ID. |
+| Idempotency key | Instance `ops-digest-<yyyy>-W<ww>`; mail `Idempotency-Key` `digest-<yyyy>-W<ww>` (as built `digest/<yyyy>-W<ww>`); run key `ops_digest:<yyyy>-W<ww>`; conversion upload per order ID. |
 | Flag | `agent.ops_digest` (`value.ads_upload` off until PLAN.md Q21 is answered). |
 
 Steps (Workflow `ops-digest`, `OpsDigestWorkflow`):
@@ -493,9 +495,9 @@ Steps (Workflow `ops-digest`, `OpsDigestWorkflow`):
 |---|---|---|---|
 | 1 | `collect` | SQL aggregates for the ISO week: RFQs by source, quotes sent, won/lost/expired, win rate, margin = (`total_amount` − `total_production_costs`) / `total_amount` for won orders, median RFQ-to-sent time, cost per agent from `agent_runs.cost_cents`. | — |
 | 2 | `stuck` | `agent_runs` in `running`/`waiting_human` older than 48 h, `quote_workflows` in `awaiting_approval`, failed `cad_jobs`, DLQ backlog, translation lag per language. | — |
-| 3 | `narrative` | Five-line summary of the week with the notable changes. | `extract` |
+| 3 | `narrative` | Five-line summary of the week with the notable changes. As built: prompt `ops_digest.narrative@v1` (Phase 4 convention), input = the figures only; when it fails the digest goes out without it. | `extract` |
 | 4 | `send` | Resend e-mail (tables + narrative); Telegram one-liner. | — |
-| 5 | `ads-conversions` (optional) | Upload won orders as offline conversions. No click ID is captured today (no `gclid` in `src/`, `api/`, `supabase/functions/`; the Ads tag is `index.html:70-72`), so the option is enhanced conversions for leads with hashed e-mail, or adding click-ID capture first (PLAN.md Q21). | — |
+| 5 | `ads-conversions` (optional; not built in Phase 5, Q21 default) | Upload won orders as offline conversions. No click ID is captured today (no `gclid` in `src/`, `api/`, `supabase/functions/`; the Ads tag is `index.html:70-72`), so the option is enhanced conversions for leads with hashed e-mail, or adding click-ID capture first (PLAN.md Q21). | — |
 | 6 | `purge` | Monthly: retention purge of §2.6. | — |
 
 LLM calls: `narrative`, `extract`, 4,000 / 600 tokens, $0.014. Cost per run: **≈ $0.014 per week**.
@@ -504,7 +506,7 @@ Failure modes: SQL error → retry, then card; mail error → retry with the sam
 
 Human view: the e-mail (sections: Pipeline, Quotes, Orders and margin, Agents and cost, Stuck items with dashboard links, Content lag); Telegram "Digest W<ww> sent: <n> RFQs, <m> quotes, win rate <x> %".
 
-Rollout and success metric: on from Phase 5 (P5-7). Success: delivered every Monday before 07:00 UTC; figures match a manual SQL spot check for 3 consecutive weeks.
+Rollout and success metric: on from Phase 5 (P5-7). Success: delivered every Monday before 07:00 UTC; figures match a manual SQL spot check for 3 consecutive weeks. As built: switch-over step S7 sets the recipient in the flag value; the spot check is `scripts/phase5/parity.sql` Q12b, which reads the same week and is tested against the same hand-computed figures as the Worker code.
 
 ### 3.7 Agent 7: remote MCP server
 
@@ -632,7 +634,7 @@ Backend selection and limits:
 |---|---|---|---|---|
 | Inline TypeScript backend (`inline`, as built) | DXF, STL and CNC STEP within the input caps above | In the consumer's isolate, one job per isolate | 300 s | 1 |
 | Existing unfold service (`vps`) | Phase 4 (P4-6) for STEP sheet metal, until the Container ships | HTTPS to the current service URL (the one `UNFOLD_SERVICE_URL` points at), shared-secret header that sheet-metal-service/main.py:51-57 checks when its API key is configured | 300 s wall clock enforced by `CadRouter` | 1 (single uvicorn worker) |
-| `container` (`CadContainer`, `microns-cad`) | Phase 5 (P5-6) default | Container binding from `CadRouter`; `CAD_SHARED_SECRET` header; service-side wall clock enforced in P5-6 (`PROCESSING_TIMEOUT` = 120 s is declared, sheet-metal-service/config.py:37) | 300 s | 3 (`max_instances` 3 = `cad-jobs` `max_concurrency` 3, wrangler.jsonc.draft) |
+| `container` (`CadContainer`, `microns-cad`) | Phase 5 (P5-6) default; as built from S9 (`CAD_BACKEND_DEFAULT = "container"`) | Container binding (`getContainer` per slot `cad-0`…`cad-2`) under a `CadRouter` lease; `CAD_SHARED_SECRET` header, required by the service on every non-health route; service-side wall clock `PROCESSING_TIMEOUT` = 120 s (504), a crash → 500, retried once with the slot recycled | 300 s (compat path 110 s) | 3 (`max_instances` 3 = `cad-jobs` `max_concurrency` 3); `batch` leases at most 2, so one slot stays free for the compat path of the two edge functions |
 | `mac_mini` | `fusion_*` job types only (PLAN.md Q22) | Cloudflare Tunnel (`cloudflared` on the Mac mini) to a hostname behind an Access application with a service-token policy; hostname fixed when Q22 is answered (not yet in the hostname list of ARCHITECTURE.md) | async: `202` + signed callback to `microns-ops`, 60 min | 1 |
 
 `backend: auto` = job type decides (`fusion_*` → Mac mini, everything else → Container, or `vps` before Phase 5); if the chosen backend's `/health` (main.py:712) fails twice, a capable alternative is used, else the job waits (retry). Queue consumer wall time is 15 min (CF docs verified 2026-09-27), so any job that can exceed it must be async with a callback.
@@ -894,12 +896,12 @@ Per-run figures from §3 at the §2.10 prices (USD, list prices — re-check at 
 | 2 Quote | 150 | $0.06 | $9.00 |
 | 3 Post-order | 30 | $0.015 | $0.45 |
 | 4 Growth (tenders with optional relevance; reddit, HN, xometry without LLM) | 30 tender runs | $0.02 | $0.60 |
-| 5 Content pipeline | 30 | $0.32 | $9.60 |
+| 5 Content pipeline | 30 | $0.32 (as built ≈ $0.11, §3.5) | $9.60 |
 | 6 Ops digest | 4–5 | $0.014 | $0.07 |
 | 7 Remote MCP | — | ≈ $0 | $0 |
 | **Total** | | | **≈ $32 per month** |
 
-At today's volume (2 RFQs and 2 orders in the database, live 2026-09-30) the total is ≈ $10 per month, almost all of it the content pipeline, which runs today as direct provider calls. Both figures stay under the €50 cap proposed for PLAN.md Q20. Container minutes for CAD (Phase 5) add ≈ $0.01 per quote at most (§3.2).
+At today's volume (2 RFQs and 2 orders in the database, live 2026-09-30) the total is ≈ $10 per month, almost all of it the content pipeline, which runs today as direct provider calls. Both figures stay under the €50 cap proposed for PLAN.md Q20. Container minutes for CAD (Phase 5) add ≈ $0.01 per quote at most (§3.2). As built (Phase 5) the content pipeline costs ≈ $3.40 per month while the first model of the translation chain answers (§3.5), which lowers both totals by ≈ $6.
 
 ## 9. Open points for this design
 
@@ -907,12 +909,12 @@ At today's volume (2 RFQs and 2 orders in the database, live 2026-09-30) the tot
 |---|---|---|
 | 1 | Secret name for the signed Telegram → `microns-ops` call: proposed `AGENT_APPROVAL_SECRET` (not yet in the canonical secret lists of ARCHITECTURE.md and wrangler.jsonc.draft). Alternative: an Access service token only. | Built (P4-12): `AGENT_APPROVAL_SECRET`, one value in `microns-site`, `microns-ops` and the Supabase function |
 | 2 | No canonical flag covers the Gmail poller's campaign-reply path; this design uses `agent.quote` `value.campaign_replies`. | Built as proposed (P4-8; seeded `false`) |
-| 3 | DLQ backlog in the digest needs a read-only Cloudflare API token (Queues/analytics read); its secret name is not yet fixed. | P5-7 |
+| 3 | DLQ backlog in the digest needs a read-only Cloudflare API token (Queues/analytics read); its secret name is not yet fixed. | Built (P5-7): no token; final failures recorded in `agent_runs` are counted instead (PLAN.md §5.5 DV5-7) |
 | 4 | Supplier e-mail addresses: `materials.supplier` is a name only (supabase/migrations/20260401_create_inventory_system.sql:53); reorder stays a draft the owner sends, unless a column is added (not in the P4-1 column list). | Built (P4-9): a draft the owner sends; the live `materials` table has no supplier column at all, so the supplier comes from `catalog_materials` |
 | 5 | Two material models (`materials` for stock, `catalog_materials` with `price_per_kg` for pricing): a mapping is needed for pricing and reservation. | Built (P4-7, P4-9): pricing reads `catalog_materials`; a quote line maps to `materials` in code (normalised grade, thickness ± 0.05 mm, exactly one active row, else "not stocked") |
 | 6 | Order item → quote line mapping by `product_name` must be checked against the portal's Accept Quote flow. | P4-9 |
-| 7 | Google Ads offline conversions: no click ID is captured today; needs Ads API access and a capture method. | PLAN.md Q21 |
-| 8 | Mac mini hostname, Tunnel and job types. | PLAN.md Q22 |
+| 7 | Google Ads offline conversions: no click ID is captured today; needs Ads API access and a capture method. | PLAN.md Q21; not built in Phase 5 (`value.ads_upload` false) |
+| 8 | Mac mini hostname, Tunnel and job types. | PLAN.md Q22; Phase 5 built the Container only (`mac_mini` slot unbuilt) |
 | 9 | Techpilot channel and the current RFQ mailbox. | PLAN.md Q3 |
 | 10 | LLM budget cap and provider preferences. | PLAN.md Q20 |
 | 11 | `McpAgent` vs `createMcpHandler`. | Decided (P4-11): `createMcpHandler`, no Durable Object |

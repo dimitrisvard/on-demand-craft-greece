@@ -1,7 +1,9 @@
 // O5: OpsDigestWorkflow over FakeStep: the digest mail (idempotency key, sender, recipient, figures, summary), the
-// Telegram line, the run row and its output, the monthly purge (first Monday only), flag off / switched off mid-run,
-// shadow mode (R2 phase5-shadow/ only), missing configuration, a narrative that fails or is unavailable, a rejected
-// or failing mail provider, an existing final run, invalid params, and that the address never leaves the send step.
+// Telegram line, the run row and its output, the monthly purge (first Monday only), flag off, and the flag re-read
+// before each side-effecting step (send, telegram, purge: switched off, or moved to shadow during an assist run),
+// shadow mode (R2 phase5-shadow/ only; a failure there sends no alert), missing configuration, a narrative that fails
+// or is unavailable, a rejected or failing mail provider, an existing final run, invalid params, and that the address
+// never leaves the send step.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NonRetryableError } from 'cloudflare:workflows';
@@ -43,6 +45,20 @@ async function go(h: DigestHarness, iso_week = WEEK, trigger: 'cron' | 'manual' 
   const r = await runOpsDigest({ iso_week, trigger }, `ops-digest-${iso_week}`, { env: h.env, ports: h.ports, p5: h.p5, step });
   return { r, step };
 }
+
+/** Runs the digest and calls `before(name)` as each step starts (the flag can be changed mid-run there). */
+async function goWithHook(h: DigestHarness, before: (name: string) => void, iso_week = WEEK) {
+  const step = new FakeStep({ now: h.clock.now().getTime() });
+  const origDo = step.do.bind(step);
+  (step as unknown as { do: typeof step.do }).do = ((name: string, ...args: unknown[]) => {
+    before(name);
+    return (origDo as (n: string, ...a: unknown[]) => Promise<unknown>)(name, ...args);
+  }) as typeof step.do;
+  const r = await runOpsDigest({ iso_week, trigger: 'cron' }, `ops-digest-${iso_week}`, { env: h.env, ports: h.ports, p5: h.p5, step });
+  return { r, step };
+}
+
+const purgeCalls = (h: DigestHarness) => h.db.calls.filter((c) => c.method === 'rpc' && c.target === 'agent_retention_purge');
 
 function addressFree(value: unknown): boolean {
   return !(JSON.stringify(value) ?? '').includes(RECIPIENT);
@@ -192,17 +208,54 @@ describe('OpsDigestWorkflow: flag and configuration', () => {
 
   it('flag switched off before the send step: skipped, nothing sent', async () => {
     const h = digestHarness();
-    const step = new FakeStep({ now: h.clock.now().getTime() });
-    const origDo = step.do.bind(step);
-    (step as unknown as { do: typeof step.do }).do = ((name: string, ...args: unknown[]) => {
+    const { r } = await goWithHook(h, (name) => {
       if (name === 'send') h.setFlag({ enabled: false });
-      return (origDo as (n: string, ...a: unknown[]) => Promise<unknown>)(name, ...args);
-    }) as typeof step.do;
-    const r = await runOpsDigest({ iso_week: WEEK, trigger: 'cron' }, `ops-digest-${WEEK}`, { env: h.env, ports: h.ports, p5: h.p5, step });
+    });
     expect(r.outcome).toBe('flag_off');
     expect(h.ports.mailer.sent).toEqual([]);
     expect(h.p5.telegramText.texts()).toEqual([]);
     expect(runByKey(h, 'ops_digest:2026-W42')).toMatchObject({ status: 'skipped', output: { halted_at: 'send', sent: false } });
+  });
+
+  it('an assist run whose flag moves to shadow before the send step stops there: no mail, skipped', async () => {
+    const h = digestHarness();
+    const { r } = await goWithHook(h, (name) => {
+      if (name === 'send') h.setFlag({ mode: 'shadow' });
+    });
+    expect(r.outcome).toBe('flag_off');
+    expect(h.ports.mailer.sent).toEqual([]);
+    expect(h.p5.telegramText.texts()).toEqual([]);
+    expect(runByKey(h, 'ops_digest:2026-W42')).toMatchObject({ status: 'skipped', output: { reason: 'flag_off', halted_at: 'send', sent: false } });
+  });
+
+  it('flag switched off before the telegram step: the mail went out, no line, run succeeded with telegram false', async () => {
+    const h = digestHarness();
+    const { r } = await goWithHook(h, (name) => {
+      if (name === 'telegram') h.setFlag({ enabled: false });
+    });
+    expect(r.outcome).toBe('sent');
+    expect(h.ports.mailer.sent).toHaveLength(1);
+    expect(h.p5.telegramText.texts()).toEqual([]);
+    expect(runByKey(h, 'ops_digest:2026-W42')).toMatchObject({ status: 'succeeded', output: { sent: true, telegram: false } });
+  });
+
+  it('flag switched off before the purge step (first Monday): no purge call, recorded as flag_off', async () => {
+    const h = digestHarness({ now: '2026-10-05T06:30:00Z' });
+    const { r } = await goWithHook(h, (name) => {
+      if (name === 'purge') h.setFlag({ enabled: false });
+    }, FIRST_MONDAY_WEEK);
+    expect(r.outcome).toBe('sent');
+    expect(purgeCalls(h)).toEqual([]);
+    expect(runByKey(h, `ops_digest:${FIRST_MONDAY_WEEK}`)).toMatchObject({ status: 'succeeded', output: { purge: 'flag_off', sent: true } });
+  });
+
+  it('flag moved to shadow before the purge step (first Monday): no purge call', async () => {
+    const h = digestHarness({ now: '2026-10-05T06:30:00Z' });
+    await goWithHook(h, (name) => {
+      if (name === 'purge') h.setFlag({ mode: 'shadow' });
+    }, FIRST_MONDAY_WEEK);
+    expect(purgeCalls(h)).toEqual([]);
+    expect(runByKey(h, `ops_digest:${FIRST_MONDAY_WEEK}`)!.output).toMatchObject({ purge: 'flag_off' });
   });
 
   it('assist without a recipient: failed config_missing naming the field (never a value)', async () => {
@@ -248,6 +301,36 @@ describe('OpsDigestWorkflow: shadow', () => {
     const h = digestHarness({ env: { DIGEST_FROM: undefined } });
     h.setFlag({ mode: 'shadow', value: { recipient: null } });
     expect((await go(h)).r.outcome).toBe('shadow');
+  });
+
+  it('shadow without PRIVATE_FILES: failed config_missing naming the binding, nothing written or sent', async () => {
+    const h = digestHarness({ env: { PRIVATE_FILES: undefined } });
+    h.setFlag({ mode: 'shadow' });
+    const { r } = await go(h);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'flag' });
+    expect(runByKey(h, 'ops_digest:2026-W42')).toMatchObject({ status: 'failed', error: 'config_missing', output: { missing: ['PRIVATE_FILES'] } });
+    expect(h.ports.bucket.objects.size).toBe(0);
+    expect(h.ports.mailer.sent).toEqual([]);
+    expect(h.p5.telegramText.texts()).toEqual([]);
+    expect(h.ports.llm.calls).toEqual([]);
+  });
+
+  it('a failure in shadow closes the run failed and sends no alert line', async () => {
+    const h = digestHarness();
+    h.setFlag({ mode: 'shadow' });
+    const select = h.db.select.bind(h.db);
+    h.db.select = (async (table: string, o?: unknown) => {
+      if (table === 'orders') {
+        const { DbError } = await import('../../../src/db/postgrest');
+        throw new DbError(500, 'XX000', 'postgrest GET orders: 500');
+      }
+      return select(table, o as never);
+    }) as typeof h.db.select;
+    const { r } = await go(h);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'collect' });
+    expect(runByKey(h, 'ops_digest:2026-W42')).toMatchObject({ status: 'failed', error: 'collect: db_error 500 XX000', output: { shadow: true, report_week: '2026-W41' } });
+    expect(h.p5.telegramText.texts()).toEqual([]);
+    expect(h.ports.mailer.sent).toEqual([]);
   });
 });
 

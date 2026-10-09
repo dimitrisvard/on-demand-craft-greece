@@ -12,7 +12,7 @@ import { DbError, type Db } from '../../../src/db/postgrest';
 import type { OpsEnv } from '../../../src/env';
 import { makeTestP5Ports, P5MemoryDb, ScriptedSources, type TestP5Ports } from '../../../src/ports/p5-stub/index';
 import { SCAN_MAX_PAGES } from '../../../src/xometry/config';
-import { runXometryTick, SUBREQUEST_STOP, tokenFingerprint, WALL_STOP_MS, type XometryTickLimits } from '../../../src/xometry/tick';
+import { HISTORY_RUNS, runXometryTick, SUBREQUEST_STOP, tokenFingerprint, WALL_STOP_MS, type XometryTickLimits } from '../../../src/xometry/tick';
 import { agentBindings, agentPorts, FakeClock, FakeKV, type AgentTestPorts } from '../../helpers/agent-env';
 import { opsEnv } from '../../helpers/ops';
 import { RecordingLogger } from '../../helpers/recorders';
@@ -119,6 +119,88 @@ describe('gates before any partner call', () => {
     expect(again).toEqual({ status: 'none', reason: 'not_running', alerts: [] });
     expect(partnerCalls(w)).toHaveLength(1);
     expect(await runXometryTick(w.env, w.ports, w.p5, { slot: slotOf('06:00'), run_id: '00000000-0000-4000-8000-000000000000' })).toEqual({ status: 'none', reason: 'run_missing', alerts: [] });
+  });
+
+  it('a run of another agent, or of another slot, is left as it is: nothing fetched, written, closed or sent', async () => {
+    const w = world();
+    setFlag(w, true);
+    board(w, Response.json(gqlPage([makeOffer('HJO-1')])));
+    w.clock.set(at('06:00'));
+    const hn = await openRun(w.db, { agent: 'growth.hn', trigger: 'cron', idempotency_key: `growth.hn:${slotOf('06:00')}` });
+    const later = await openRun(w.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: `growth.xometry:${slotOf('08:00')}` });
+    for (const run_id of [hn.run_id, later.run_id]) {
+      expect(await runXometryTick(w.env, w.ports, w.p5, { slot: slotOf('06:00'), run_id })).toEqual({ status: 'none', reason: 'not_this_slot', alerts: [] });
+      expect(w.db.rows('agent_runs', ['id', 'eq', run_id])[0]).toMatchObject({ status: 'running', output: null });
+    }
+    expect(partnerCalls(w)).toHaveLength(0);
+    expect(offers(w)).toHaveLength(0);
+    expect(w.p5.telegramText.messages).toHaveLength(0);
+    expect(w.ports.events.points).toHaveLength(0);
+  });
+
+  it('two deliveries of one message at the same time: only the one that claims the run scans and alerts', async () => {
+    const w = world();
+    setFlag(w, true);
+    board(w, new Response(null, { status: 401 }));
+    w.clock.set(at('06:00'));
+    const slot = slotOf('06:00');
+    const run = await openRun(w.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: `growth.xometry:${slot}` });
+    const results = await Promise.all([
+      runXometryTick(w.env, w.ports, w.p5, { slot, run_id: run.run_id }),
+      runXometryTick(w.env, w.ports, w.p5, { slot, run_id: run.run_id }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual(['failed', 'none']);
+    expect(results.find((r) => r.status === 'none')).toEqual({ status: 'none', reason: 'claimed', alerts: [] });
+    expect(partnerCalls(w)).toHaveLength(1);
+    expect(w.p5.telegramText.messages).toHaveLength(1);
+    expect(w.db.rows('agent_runs', ['id', 'eq', run.run_id])[0]).toMatchObject({ status: 'failed', error: 'token_rejected' });
+  });
+
+  it('a claimed run that is still running is left to its claim; the next tick closes it failed {reason: interrupted} once the claim is 15 min old', async () => {
+    const w = world();
+    setFlag(w, true);
+    board(w, Response.json(gqlPage([])));
+    const claim = async (startedHhmm: string, claimedHhmm: string, key: string) => {
+      w.clock.set(at(startedHhmm));
+      const run = await openRun(w.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: key });
+      await w.db.update('agent_runs', { output: { slot: slotOf('06:00'), claimed_at: new Date(at(claimedHhmm)).toISOString() } }, { filters: [['id', 'eq', run.run_id]] });
+      return run.run_id;
+    };
+    // A delivery claimed the 06:00 run and ended without closing it; a redelivery finds the claim and does nothing.
+    const lost = await claim('06:00', '06:00', `growth.xometry:${slotOf('06:00')}`);
+    w.clock.set(at('06:05'));
+    expect(await runXometryTick(w.env, w.ports, w.p5, { slot: slotOf('06:00'), run_id: lost })).toEqual({ status: 'none', reason: 'claimed', alerts: [] });
+    expect(partnerCalls(w)).toHaveLength(0);
+    expect(w.db.rows('agent_runs', ['id', 'eq', lost])[0].status).toBe('running');
+    // Claimed exactly 15 min before the next tick: closed. Started 16 min before it but claimed 14 min before it:
+    // neither an overlap nor a stale claim, so it stays running.
+    const boundary = await claim('07:45', '07:45', 'growth.xometry:manual-boundary');
+    const recent = await claim('07:44', '07:46', 'growth.xometry:manual-recent');
+    const next = await tick(w, '08:00');
+    expect(next.row.status).toBe('succeeded');
+    for (const id of [lost, boundary]) {
+      expect(w.db.rows('agent_runs', ['id', 'eq', id])[0]).toMatchObject({ status: 'failed', error: 'interrupted', output: { slot: slotOf('06:00'), reason: 'interrupted' } });
+    }
+    expect(w.db.rows('agent_runs', ['id', 'eq', recent])[0].status).toBe('running');
+  });
+
+  it('overlap: a running run that started later does not hold back the earlier one; on equal start times the smaller id goes first', async () => {
+    for (const [otherId, otherStart, expected] of [
+      ['ffffffff-ffff-4fff-8fff-ffffffffffff', '06:01', 'succeeded'],
+      ['ffffffff-ffff-4fff-8fff-ffffffffffff', '06:00', 'succeeded'],
+      ['00000000-0000-4000-8000-000000000000', '06:00', 'skipped'],
+    ] as const) {
+      const w = world();
+      setFlag(w, true);
+      board(w, Response.json(gqlPage([])));
+      w.clock.set(at('06:00'));
+      const mine = await openRun(w.db, { agent: 'growth.xometry', trigger: 'cron', idempotency_key: `growth.xometry:${slotOf('06:00')}` });
+      w.db.seed('agent_runs', [{ id: otherId, agent: 'growth.xometry', trigger: 'manual', idempotency_key: `growth.xometry:manual-${otherStart}`, status: 'running', started_at: new Date(at(otherStart)).toISOString() }]);
+      w.clock.set(at('06:02'));
+      const result = await runXometryTick(w.env, w.ports, w.p5, { slot: slotOf('06:00'), run_id: mine.run_id });
+      expect(result.status, `${otherId} ${otherStart}`).toBe(expected);
+      expect(partnerCalls(w)).toHaveLength(expected === 'succeeded' ? 1 : 0);
+    }
   });
 
   it('overlap: another running run started 5 min earlier -> skipped {reason: overlap} without a call', async () => {
@@ -278,6 +360,56 @@ describe('token gate (X-2)', () => {
     expect(partnerCalls(w)[1].headers.authorization).toBe(`Bearer ${OTHER_TOKEN}`);
   });
 
+  it('a rejection seen in shadow mode is sent by the first tick after the switch to assist, once per fingerprint; the 06:00 reminder follows', async () => {
+    // An earlier token was rejected and alerted in assist mode; its alert does not stand for the next token.
+    const w = world({ token: OTHER_TOKEN });
+    setFlag(w, true, 'assist');
+    board(w, new Response(null, { status: 401 }));
+    const earlier = await tick(w, '08:00');
+    expect(earlier.row.output).toMatchObject({ auth: 'rejected', alerts: ['token_rejected'] });
+    w.env.XOMETRY_TOKEN = TOKEN;
+    setFlag(w, true, 'shadow');
+    const shadow = await tick(w, '10:00');
+    expect(shadow.row.output).toMatchObject({ auth: 'rejected', alerts_shadow: ['token_rejected'] });
+    const shadowNext = await tick(w, '12:00');
+    expect(shadowNext.row.output).toMatchObject({ reason: 'token_rejected', alerts_shadow: ['token_rejected'] });
+    expect(w.p5.telegramText.messages).toHaveLength(1);
+
+    setFlag(w, true, 'assist');
+    const first = await tick(w, '06:00', '2026-10-09');
+    expect(first.row.status).toBe('skipped');
+    expect(first.row.output).toMatchObject({ reason: 'token_rejected', auth: 'rejected', rejected_at: new Date(at('10:00')).toISOString(), alerts: ['token_rejected'] });
+    const second = await tick(w, '08:00', '2026-10-09');
+    expect(second.row.output).toMatchObject({ reason: 'token_rejected', alerts: [] });
+    const reminder = await tick(w, '06:00', '2026-10-10');
+    expect(reminder.row.output).toMatchObject({ reason: 'token_rejected', alerts: ['token_reminder'] });
+    const rejectedText = (hhmm: string) =>
+      `Xometry partner API rejected the token (HTTP 401) at ${hhmm} UTC. Scans are paused until XOMETRY_TOKEN changes. Refresh: log in at partner.xometry.eu → DevTools → Application → Local Storage → authToken, then \`npx wrangler secret put XOMETRY_TOKEN\` in workers/ops (and the Supabase secret XOMETRY_PARTNER_AUTH_TOKEN if you submit counteroffers).`;
+    expect(w.p5.telegramText.texts()).toEqual([
+      rejectedText('08:00'),
+      rejectedText('10:00'),
+      'Reminder: Xometry scans are still paused since the partner API rejected the token (HTTP 401) on 2026-10-08 10:00 UTC. Refresh: log in at partner.xometry.eu → DevTools → Application → Local Storage → authToken, then `npx wrangler secret put XOMETRY_TOKEN` in workers/ops.',
+    ]);
+    expect(partnerCalls(w)).toHaveLength(2);
+  });
+
+  it('a token rejected for six days: one rejection alert, then one reminder a day, also once the alerted run is older than the history read', async () => {
+    const w = world();
+    setFlag(w, true);
+    board(w, new Response(null, { status: 401 }));
+    await tick(w, '10:00');
+    const hours = ['06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00'];
+    const slots: Array<[string, string]> = [['12:00', DAY], ['14:00', DAY], ['16:00', DAY], ['18:00', DAY]];
+    for (const day of ['2026-10-09', '2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13']) for (const h of hours) slots.push([h, day]);
+    expect(slots.length).toBeGreaterThan(HISTORY_RUNS);
+    for (const [h, day] of slots) {
+      const { row } = await tick(w, h, day);
+      expect(row.output, `${day} ${h}`).toMatchObject({ reason: 'token_rejected', alerts: h === '06:00' ? ['token_reminder'] : [] });
+    }
+    expect(w.p5.telegramText.texts().map((t) => t.slice(0, 20))).toEqual(['Xometry partner API ', ...Array(5).fill('Reminder: Xometry sc')]);
+    expect(partnerCalls(w)).toHaveLength(1);
+  });
+
   it('403 is a rejection too; a cookie change alone changes the fingerprint', async () => {
     const w = world({ cookie: 'sid=a' });
     setFlag(w, true);
@@ -363,9 +495,45 @@ describe('failures and their repeat rules', () => {
   it('a network failure is kind network; the compute pass is skipped after a failed scan', async () => {
     const w = world();
     setFlag(w, true);
+    board(w, Response.json(gqlPage([makeOffer('HJO-PRICED')])));
+    await tick(w, '06:00');
+    await w.db.update('xometry_offers', { status: 'priced', buyer_price: 1000 }, { filters: [['code', 'eq', 'HJO-PRICED']] });
     w.sources.route({ method: 'POST', match: GRAPHQL, respond: () => Promise.reject(new TypeError('fetch failed')) });
-    const { row } = await tick(w);
+    const { row } = await tick(w, '08:00');
     expect(row.output).toMatchObject({ error_kind: 'network', computed: 0, auth: 'unknown' });
+    expect(offers(w)[0]).toMatchObject({ code: 'HJO-PRICED', status: 'priced', suggested_price: null });
+  });
+
+  it('per-offer errors: output keeps the first 20, each cut to 200 characters, so the run output stays whole', async () => {
+    const w = world();
+    const memory = w.db;
+    const detail = 'constraint detail '.repeat(30);
+    (w.ports as unknown as { db: Db }).db = {
+      select: (t, o) => memory.select(t, o),
+      update: (t, p, o) => memory.update(t, p, o),
+      rpc: (n, a) => memory.rpc(n, a),
+      insert: async (t, rows, o) => {
+        if (t === 'xometry_offers') throw new DbError(500, null, `postgrest POST xometry_offers: 500 ${detail}`);
+        return memory.insert(t, rows, o);
+      },
+    };
+    setFlag(w, true);
+    board(
+      w,
+      Response.json(gqlPage(Array.from({ length: 20 }, (_, i) => makeOffer(`HJO-E${i}`)), { hasMore: true })),
+      Response.json(gqlPage(Array.from({ length: 10 }, (_, i) => makeOffer(`HJO-F${i}`)), { offset: 20 })),
+    );
+    const { row } = await tick(w);
+    const out = row.output as Json;
+    expect(out.truncated).toBeUndefined();
+    expect(out).toMatchObject({ auth: 'ok', token_fp: await tokenFingerprint(TOKEN, undefined), scanned: 30, upserted: 0, alerts: ['offer_errors'] });
+    const errors = out.errors as string[];
+    expect(errors).toHaveLength(20);
+    for (const e of errors) expect(e.length).toBeLessThanOrEqual(200);
+    const first = `HJO-E0: postgrest POST xometry_offers: 500 ${detail}`;
+    expect(errors[0]).toBe(`${first.slice(0, 199)}…`);
+    expect(errors[19].startsWith('HJO-E19: ')).toBe(true);
+    expect(w.p5.telegramText.texts()).toEqual([`Xometry scan finished with 30 offer errors (e.g. ${first.slice(0, 200)}).`]);
   });
 
   it('per-offer store errors: the other offers are written, the run is failed offer_errors, one alert per tick', async () => {
@@ -411,8 +579,9 @@ describe('budget (9,000 counted subrequests, 10 min wall time)', () => {
     const started = new Date(at('06:00')).toISOString();
     // Every upsert takes all three requests (insert ignored, refresh refused, terminal read empty).
     (w.ports as unknown as { db: Db }).db = {
-      select: async (t, o) => (t === 'agent_runs' && o?.filters?.[0]?.[0] === 'id' ? [{ id: 'r', status: 'running', started_at: started }] : []),
-      update: async () => [],
+      select: async (t, o) =>
+        t === 'agent_runs' && o?.filters?.[0]?.[0] === 'id' ? [{ id: 'r', agent: 'growth.xometry', idempotency_key: `growth.xometry:${slotOf('06:00')}`, status: 'running', started_at: started, output: null }] : [],
+      update: async (t) => (t === 'agent_runs' ? [{ id: 'r' }] : []),
       rpc: async () => null,
       insert: async () => [],
     } as Db;
@@ -426,14 +595,48 @@ describe('budget (9,000 counted subrequests, 10 min wall time)', () => {
   it('a lower subrequest limit stops writing and records partial: true (no compute pass)', async () => {
     const w = world();
     setFlag(w, true);
+    board(w, Response.json(gqlPage([makeOffer('HJO-PRICED')])));
+    await tick(w, '04:00');
+    await w.db.update('xometry_offers', { status: 'priced', buyer_price: 1000 }, { filters: [['code', 'eq', 'HJO-PRICED']] });
+    const memory = w.db;
+    const reads: string[] = [];
+    (w.ports as unknown as { db: Db }).db = {
+      select: (t, o) => {
+        reads.push(`${t} ${JSON.stringify(o?.filters ?? [])}`);
+        return memory.select(t, o);
+      },
+      insert: (t, r, o) => memory.insert(t, r, o),
+      update: (t, p, o) => memory.update(t, p, o),
+      rpc: (n, a) => memory.rpc(n, a),
+    };
     board(w, Response.json(gqlPage(Array.from({ length: 20 }, (_, i) => makeOffer(`HJO-${i}`)), { hasMore: true })));
+    const before = partnerCalls(w).length;
     const { row } = await tick(w, '06:00', DAY, { subrequestStop: 10 });
     expect(row.output).toMatchObject({ partial: true, computed: 0 });
     const scanned = (row.output as Json).scanned as number;
     expect(scanned).toBeGreaterThan(0);
     expect(scanned).toBeLessThan(20);
-    expect(offers(w)).toHaveLength(scanned);
+    expect(offers(w)).toHaveLength(scanned + 1);
+    expect(partnerCalls(w).length - before).toBe(1);
+    // The compute pass does not even read the priced rows after a stopped scan.
+    expect(reads.filter((r) => r.startsWith('xometry_offers [["status","in"'))).toEqual([]);
+    expect(offers(w).find((r) => r.code === 'HJO-PRICED')).toMatchObject({ status: 'priced', suggested_price: null });
+  });
+
+  it('partner calls count toward the budget: a limit reached by the first page stops before any offer is written', async () => {
+    const w = world();
+    setFlag(w, true);
+    board(w, Response.json(gqlPage([makeOffer('HJO-1'), makeOffer('HJO-2')], { hasMore: true })));
+    // Before the first page: the run read, the claim and the history read (three requests); the page is the fourth.
+    const { row } = await tick(w, '06:00', DAY, { subrequestStop: 4 });
+    expect(row.output).toMatchObject({ partial: true, scanned: 0, upserted: 0, pages: 1 });
+    expect(offers(w)).toHaveLength(0);
     expect(partnerCalls(w)).toHaveLength(1);
+    const more = world();
+    setFlag(more, true);
+    board(more, Response.json(gqlPage([makeOffer('HJO-1'), makeOffer('HJO-2')], { hasMore: true })));
+    const { row: next } = await tick(more, '06:00', DAY, { subrequestStop: 5 });
+    expect(next.output).toMatchObject({ partial: true, scanned: 1, upserted: 1, pages: 1 });
   });
 
   it('the wall-time limit stops the scan the same way', async () => {

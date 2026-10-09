@@ -9,6 +9,7 @@ import {
   decodeInputUrl,
   encodeInputUrl,
   fetchCompatInput,
+  INPUT_FETCH_TIMEOUT_MS,
   INPUT_HOST,
   inputHostList,
   isAllowedInputHost,
@@ -187,6 +188,32 @@ describe('fetchCompatInput', () => {
       expect(res.status, location).toBe(403);
       expect(calls, location).toHaveLength(1);
     }
+  });
+
+  it('one 100 s timeout bounds the whole input fetch, redirects included; an upstream that never answers is aborted with 502', async () => {
+    expect(INPUT_FETCH_TIMEOUT_MS).toBe(100_000);
+    const lines: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((l: unknown) => void lines.push(String(l)));
+    const controller = new AbortController();
+    const timeouts = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => controller.signal);
+    let hop = 0;
+    const calls = upstream((_url, init) => {
+      // without a signal the stand-in answers at once, so a missing bound shows as a 200 instead of a hang
+      if (!init?.signal) return new Response('unbounded', { status: 200 });
+      if (hop++ === 0) return new Response(null, { status: 302, headers: { location: '/slow.step' } });
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')));
+      });
+    });
+    const pending = fetchCompatInput(new Request(encodeInputUrl('https://files.example.test/start.step')), env(), {});
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+    controller.abort();
+    const res = await pending;
+    expect(res.status).toBe(502);
+    expect(timeouts).toHaveBeenCalledTimes(1);
+    expect(timeouts).toHaveBeenCalledWith(100_000);
+    expect(calls.map((c) => c.init?.signal)).toEqual([controller.signal, controller.signal]);
+    expect(lines.join('\n')).toContain('error=TimeoutError');
   });
 
   it('a network error answers 502; log lines carry the host and status only, never the URL or its signature', async () => {

@@ -93,13 +93,34 @@ describe('translations consumer', () => {
     expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'skipped', output: { reason: 'exists' } });
   });
 
-  it('23505 on insert (slug taken in the language) counts as success; IndexNow gets the English URL only', async () => {
+  it('23505 on insert with the group row present (a concurrent duplicate) counts as success; IndexNow gets the English URL only', async () => {
+    const h = setup();
+    const answer = okText(delimiterAnswer({ title: 'German Eloxieren', slug: 'german-eloxieren-anleitung', content: CONTENT.replace('Anodised', 'Eloxiert') }), { model: 'gemini-2.5-flash-lite', stop: 'STOP' });
+    h.p5.textLlm.setScript(() => {
+      // the other delivery of this pair saves its row while this one is still translating
+      if (!h.db.rows('articles').some((a) => a.language === 'de')) {
+        h.db.seed('articles', [{ id: uuid('d', 3), slug: 'german-eloxieren-anleitung', language: 'de', translation_id: TID, status: 'published' }]);
+      }
+      return answer;
+    });
+    const m = await deliver(h, body());
+    expect(m.acked).toBe(true);
+    expect(m.retried).toEqual([]);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'succeeded', output: { duplicate: true } });
+    expect(JSON.parse(h.p5.sources.requests[0].body!).urlList).toEqual([`${SITE}/en/blog/anodising-guide`]);
+    expect(h.p5.telegramText.messages).toEqual([]);
+  });
+
+  it('23505 on insert with the group row still missing (slug used by another article): run failed slug_conflict, one alert, ack, no IndexNow', async () => {
     const h = setup();
     h.db.seed('articles', [{ id: uuid('d', 2), slug: 'german-eloxieren-anleitung', language: 'de', translation_id: uuid('7', 2), status: 'published' }]);
     const m = await deliver(h, body());
     expect(m.acked).toBe(true);
-    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'succeeded', output: { duplicate: true } });
-    expect(JSON.parse(h.p5.sources.requests[0].body!).urlList).toEqual([`${SITE}/en/blog/anodising-guide`]);
+    expect(m.retried).toEqual([]);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'failed', error: 'slug_conflict', output: { language: 'de', origin: 'daily', slug: 'german-eloxieren-anleitung' } });
+    expect(h.db.rows('articles').filter((a) => a.translation_id === TID && a.language === 'de')).toEqual([]);
+    expect(h.p5.sources.requests).toEqual([]);
+    expect(h.p5.telegramText.texts()).toEqual([translationAlerts.slugConflict('de', 'anodising-guide', 'german-eloxieren-anleitung')]);
   });
 
   it('a concurrent duplicate at the first delivery is acked without work; its own retry continues under the same run', async () => {
@@ -149,6 +170,42 @@ describe('translations consumer', () => {
     const m = await deliver(h, body(), 2);
     expect(m.retried).toEqual([undefined]);
     expect(m.acked).toBe(false);
+  });
+
+  it('the 5th delivery is not the last one: retry with delay, run still running, no alert', async () => {
+    const h = setup();
+    h.p5.textLlm.setScript(() => failText('server', { status: 503 }));
+    const m = await deliver(h, body(), 5);
+    expect(m.retried).toEqual([{ delaySeconds: 600 }]);
+    expect(m.acked).toBe(false);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))!.status).toBe('running');
+    expect(h.p5.telegramText.messages).toEqual([]);
+  });
+
+  it('usage of a failed delivery is stored on the run before the retry and kept by the next delivery', async () => {
+    const h = setup();
+    const usage = { input_tokens: 700, output_tokens: 300, cost_usd: 0.0002 };
+    h.p5.textLlm.setScript((c) => okText('no delimiters here', { model: c.model, usage }));
+    const m2 = await deliver(h, body(), 2);
+    expect(m2.retried).toEqual([undefined]);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'running', llm_calls: 1, input_tokens: 700, output_tokens: 300 });
+    const m3 = await deliver(h, body(), 3);
+    expect(m3.retried).toEqual([undefined]);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'running', llm_calls: 2, input_tokens: 1400, output_tokens: 600 });
+  });
+
+  it('an answered Gemini call that fails (blocked, with usage) is billed: its usage is stored on the run before the retry and on the final close', async () => {
+    const h = setup();
+    const usage = { input_tokens: 900, output_tokens: 5, cost_usd: 0.0003 };
+    h.p5.textLlm.setScript(() => failText('blocked', { status: 200, usage: { ...usage, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'gemini-2.5-flash-lite' } }));
+    const m2 = await deliver(h, body(), 2);
+    expect(m2.retried).toEqual([undefined]);
+    expect(runByKey(h, translateRunKey(TID, 'de', DATE))).toMatchObject({ status: 'running', llm_calls: 1, input_tokens: 900, output_tokens: 5 });
+    const m6 = await deliver(h, body(), 6);
+    expect(m6.retried).toEqual([undefined]);
+    const run = runByKey(h, translateRunKey(TID, 'de', DATE))!;
+    expect(run).toMatchObject({ status: 'failed', error: 'GeminiCallError', llm_calls: 2, input_tokens: 1800, output_tokens: 10 });
+    expect(Number(run.cost_cents)).toBeCloseTo(0.06, 6);
   });
 
   it('last delivery: run failed, one alert, retry into the DLQ', async () => {

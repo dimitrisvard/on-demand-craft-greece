@@ -5,8 +5,9 @@
 // mounts the Phase 5 stub modules; the profiles 'api' and 'agents' keep their shape; the jobs config collects only
 // test/t2-jobs/**/*.jobs.ts and neither earlier T2 config collects those files.
 
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runNodeHandler, type VercelHandler } from '../../../../shared/src/compat/vercel-node';
 import { P5_T2_ONLY_VARS } from '../../../src/ports/p5';
 
 interface Part {
@@ -57,8 +58,12 @@ describe('generated configs, profile jobs', () => {
 
   it('every Phase 5 T2-only var points at the stub; the Phase 4 stub vars as in profile agents; CAD_INPUT_HOSTS = the stub host', () => {
     const vars = g.ops.config.vars ?? {};
-    expect(Object.keys(h.JOBS_STUB_VARS)).toEqual([...P5_T2_ONLY_VARS]);
-    for (const name of P5_T2_ONLY_VARS) expect(vars[name], name).toMatch(new RegExp(`^${STUB}/`));
+    // every base-URL override points at the stub; the content wait override stays unset in the shared harness (a T2
+    // file that runs the timeout path starts its own harness with it, so the other files keep the 6 h wait)
+    const baseUrlVars = P5_T2_ONLY_VARS.filter((name) => name !== 'CONTENT_WAIT_TIMEOUT_S');
+    expect(Object.keys(h.JOBS_STUB_VARS)).toEqual(baseUrlVars);
+    for (const name of baseUrlVars) expect(vars[name], name).toMatch(new RegExp(`^${STUB}/`));
+    expect(vars.CONTENT_WAIT_TIMEOUT_S).toBeUndefined();
     expect(vars).toMatchObject({
       SUPABASE_URL: STUB,
       AGENT_STUBS: 'llm,embed,vector,browser',
@@ -135,6 +140,69 @@ describe('stub modules of the profile jobs', () => {
     const modules = await server.jobsStubModules();
     expect(modules.map((m) => m.name)).toEqual(server.JOBS_STUB_MODULES);
     for (const m of modules) expect(m.prefixes.length, m.name).toBeGreaterThan(0);
+  });
+});
+
+// The tender handler api/tender-scan.js reaches its portals by country code (no base URL the stub can replace), and
+// the profile 'jobs' keeps the scrapes consumer: every T2 file of the profile seeds only codes the handler refuses
+// before any I/O, and the kernel file keeps the tenders flag in shadow.
+describe('tender connectors seeded by the T2 files of the profile jobs', () => {
+  const t2Dir = new URL('../../t2-jobs/', import.meta.url);
+  const t2Files = readdirSync(t2Dir).filter((name) => name.endsWith('.jobs.ts')).sort();
+  const kernelFile = readFileSync(new URL('p5-kernel.jobs.ts', t2Dir), 'utf8');
+  const handlerFile = readFileSync(new URL('../../../../../api/tender-scan.js', import.meta.url), 'utf8');
+  const codesOf = (text: string) => [...text.matchAll(/country_code:\s*'([A-Za-z]{2})'/g)].map((m) => (m[1] ?? '').toUpperCase());
+  const seededBy = Object.fromEntries(t2Files.map((name) => [name, codesOf(readFileSync(new URL(name, t2Dir), 'utf8'))]));
+  const seeded = [...new Set(Object.values(seededBy).flat())];
+  const tableStart = handlerFile.indexOf('const CONNECTORS = {');
+  const table = handlerFile.slice(tableStart, handlerFile.indexOf('};', tableStart));
+  const connectorCodes = [...table.matchAll(/^\s*([A-Z]{2}):/gm)].map((m) => m[1] ?? '');
+
+  it('every code seeded by any T2 file is absent from the connector table of api/tender-scan.js', () => {
+    expect(connectorCodes.length).toBeGreaterThanOrEqual(20);
+    expect(connectorCodes).toEqual(expect.arrayContaining(['NL', 'DE', 'FR', 'IT', 'EU']));
+    expect(t2Files).toEqual(expect.arrayContaining(['p5-kernel.jobs.ts', 'p5-collectors.jobs.ts']));
+    expect(seededBy['p5-kernel.jobs.ts']?.length).toBeGreaterThanOrEqual(2);
+    expect(seededBy['p5-collectors.jobs.ts']?.length).toBeGreaterThanOrEqual(2);
+    const real = Object.entries(seededBy).flatMap(([name, codes]) => codes.filter((c) => connectorCodes.includes(c)).map((c) => `${name}: ${c}`));
+    expect(real).toEqual([]);
+  });
+
+  it('the tenders flag of the kernel file is in shadow', () => {
+    expect(kernelFile).toMatch(/'agent\.growth\.tenders':\s*\{\s*enabled:\s*true,\s*mode:\s*'shadow'/);
+  });
+
+  describe('the real handler, in-process', () => {
+    let network: string[];
+    beforeEach(() => {
+      network = [];
+      vi.stubEnv('SUPABASE_URL', 'https://project.supabase.test');
+      vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'service-test-value');
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        network.push(String(input instanceof Request ? input.url : input));
+        throw new Error('network is not allowed in this test');
+      }));
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    });
+
+    it('answers 400 for each seeded code and makes no request', async () => {
+      const { default: handler } = (await import(/* @vite-ignore */ new URL('../../../../../api/tender-scan.js', import.meta.url).href)) as { default: VercelHandler };
+      for (const code of seeded) {
+        const response = await runNodeHandler(handler, {
+          request: new Request('https://microns-ops.internal/api/tender-scan', { method: 'POST', headers: { 'content-type': 'application/json' } }),
+          functionUrl: '/api/tender-scan',
+          body: new TextEncoder().encode(JSON.stringify({ country_code: code })),
+          timeoutMs: 5_000,
+          logPrefix: '[microns-ops]',
+        });
+        expect(response.status, code).toBe(400);
+        expect(await response.json(), code).toEqual({ error: `No connector for country: ${code}` });
+      }
+      expect(network).toEqual([]);
+    });
   });
 });
 

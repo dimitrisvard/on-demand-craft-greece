@@ -11,7 +11,11 @@
 //     'bounced' row is final. Follow-up events (metadata.follow_up = true) never count for the campaign itself.
 //   - Recipients of a campaign are counted once each (distinct subscriber): a subscriber with a final 'sent' row is
 //     sent, any other subscriber with a final row bounced (a provider webhook may add a 'bounced' row to a sent mail).
-//   - Reads are paged by id (the port has no count or offset); a page holds at most 1,000 rows.
+//   - A 'sent' row without a provider id that is younger than IN_FLIGHT_MS belongs to a message in flight; an older
+//     one belongs to a message that may have been lost, so a re-queue includes its subscriber again (the message's
+//     limiter key and event make a second copy a no-op once either copy has sent).
+//   - Reads are paged by id (the port has no count or offset); a page holds at most 1,000 rows. The campaign close
+//     reads only the columns it counts with (CLOSE_COLUMNS).
 
 import { DbError, type Db, type Row } from '../db/postgrest';
 import { forEachPage } from './recipients';
@@ -27,6 +31,10 @@ export interface EventRow {
 }
 
 export const EVENT_COLUMNS = 'id,campaign_id,subscriber_id,event_type,resend_email_id,metadata,created_at';
+/** Columns of the campaign close's count (finalCounts). */
+export const CLOSE_COLUMNS = 'id,subscriber_id,event_type,resend_email_id,metadata';
+/** Age under which an unfinished 'sent' event belongs to a message in flight. */
+export const IN_FLIGHT_MS = 15 * 60_000;
 
 /** The event id of a message (rules above). */
 export async function eventIdFor(idem: string): Promise<string> {
@@ -66,13 +74,13 @@ export async function ensureEvent(db: Db, e: { id: string; campaign_id: string; 
   }
 }
 
-/** Every 'sent' or 'bounced' event of a campaign (paged, id order). */
-export async function campaignOutcomeEvents(db: Db, campaignId: string): Promise<EventRow[]> {
+/** Every 'sent' or 'bounced' event of a campaign (paged, id order; EVENT_COLUMNS unless columns are given). */
+export async function campaignOutcomeEvents(db: Db, campaignId: string, columns: string = EVENT_COLUMNS): Promise<EventRow[]> {
   const out: EventRow[] = [];
   await forEachPage<EventRow & Row & { id: string }>(
     db,
     'marketing_events',
-    { columns: EVENT_COLUMNS, filters: [['campaign_id', 'eq', campaignId], ['event_type', 'in', ['sent', 'bounced']]] },
+    { columns, filters: [['campaign_id', 'eq', campaignId], ['event_type', 'in', ['sent', 'bounced']]] },
     (rows) => {
       for (const r of rows) out.push(r as EventRow);
     },
@@ -84,6 +92,20 @@ export async function campaignOutcomeEvents(db: Db, campaignId: string): Promise
 export function subscribersWithEvent(events: readonly EventRow[]): Set<string> {
   const out = new Set<string>();
   for (const e of events) if (!isFollowUpEvent(e) && e.subscriber_id) out.add(e.subscriber_id.toLowerCase());
+  return out;
+}
+
+/**
+ * Subscribers a re-queue leaves out: those with a final event of the campaign mail, and those whose unfinished 'sent'
+ * event is younger than IN_FLIGHT_MS at `now` (rules above).
+ */
+export function subscribersSettledOrInFlight(events: readonly EventRow[], now: number): Set<string> {
+  const out = new Set<string>();
+  for (const e of events) {
+    if (isFollowUpEvent(e) || !e.subscriber_id) continue;
+    const created = e.created_at ? Date.parse(e.created_at) : Number.NaN;
+    if (isFinalEvent(e) || !Number.isFinite(created) || now - created < IN_FLIGHT_MS) out.add(e.subscriber_id.toLowerCase());
+  }
   return out;
 }
 

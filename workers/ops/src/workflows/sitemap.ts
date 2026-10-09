@@ -7,10 +7,12 @@
 //   flag                  agent.content_daily off -> 'skipped' (flag_off)
 //   build-upload          published articles (pages of 1,000, live order), XML; regression guard against the last
 //                         succeeded run (urls < 252 + 0.95 x its articles -> no upload, text alert, run 'failed');
+//                         an intended drop is accepted once through the flag value sitemap_accept_drop_on (the
+//                         first run on or after that day uploads, and becomes the guard's next reference);
 //                         assist/auto: Storage upload (upsert, application/xml, cache 3600) + R2 copy with
 //                         {sha256, urls, generated_at}; shadow: R2 phase5-shadow/sitemaps/<date>/ only
 //   sync-monitored-urls   assist/auto: gsc_monitored_urls upsert on url in chunks of 500
-//   close-run             {urls, articles, bytes, sha256, uploaded, shadow_key, monitored_urls}
+//   close-run             {urls, articles, bytes, sha256, uploaded, shadow_key, monitored_urls, drop_accepted?}
 // Rules
 //   - The XML never leaves build-upload (6 MB against the 1 MiB step-result limit); a retry rebuilds it.
 //   - Side-effecting steps re-read the flag; a switched-off flag stops the run ('skipped', flag_off).
@@ -53,9 +55,20 @@ export interface SitemapResult {
 
 export const sitemapAlerts = {
   regression: (date: string, urls: number, min: number) =>
-    `Sitemap ${date}: ${urls} URLs, expected at least ${min}; not uploaded (the served sitemap is unchanged).`,
+    `Sitemap ${date}: ${urls} URLs, expected at least ${min}; not uploaded (the served sitemap is unchanged). ` +
+    `If articles were unpublished on purpose, set sitemap_accept_drop_on to "${date}" in the value of agent.content_daily; the next run then uploads.`,
   failed: (date: string, step: string, code: string) => `Sitemap ${date}: run failed at step ${step} (${code}).`,
 };
+
+/**
+ * Pure: the owner accepted a drop for this run. `ack` (flag value sitemap_accept_drop_on) counts for the first run
+ * on or after that day only: once a run after the reference run has succeeded, the guard compares with it again.
+ */
+export function dropAccepted(ack: string | null, date: string, prevKey: string | null): boolean {
+  if (!ack || ack > date) return false;
+  const prevDay = /^content_daily\.sitemap:(\d{4}-\d{2}-\d{2})$/.exec(prevKey ?? '')?.[1];
+  return prevDay !== undefined && prevDay < ack;
+}
 
 export class SitemapWorkflow extends WorkflowEntrypoint<OpsEnv, SitemapParams> {
   async run(event: Readonly<WorkflowEvent<SitemapParams>>, step: WorkflowStep): Promise<unknown> {
@@ -110,7 +123,8 @@ export async function runSitemap(p: SitemapParams, instanceId: string, d: Sitema
     shadow = mode === 'shadow';
 
     const built = await run('build-upload', BUILD_UPLOAD_STEP, async () => {
-      if (mustHalt(mode, snapshotFlag(await readFlag(env, CONTENT_FLAG)))) return null;
+      const live = snapshotFlag(await readFlag(env, CONTENT_FLAG));
+      if (mustHalt(mode, live)) return null;
       const articles = await publishedArticles(db);
       const today = ports.clock.now().toISOString().split('T')[0];
       const build = buildSitemapXml(articles, { siteUrl: env.SITE_ORIGIN.replace(/\/+$/, ''), today });
@@ -119,28 +133,34 @@ export async function runSitemap(p: SitemapParams, instanceId: string, d: Sitema
       const generated_at = ports.clock.now().toISOString();
       const summary = { urls: build.urls, articles: build.articles, bytes: bytes.length, sha256 };
 
-      const previous = await db.select<{ id: string; output: Record<string, unknown> | null }>('agent_runs', {
-        columns: 'id,output',
+      const previous = await db.select<{ id: string; idempotency_key: string | null; output: Record<string, unknown> | null }>('agent_runs', {
+        columns: 'id,idempotency_key,output',
         filters: [['agent', 'eq', AGENT], ['status', 'eq', 'succeeded']],
         order: [{ column: 'started_at', ascending: false }],
         limit: 2,
       });
       const prev = previous.find((r) => r.id !== runId);
       const prevArticles = typeof prev?.output?.articles === 'number' ? (prev.output.articles as number) : null;
+      let accepted: number | null = null;
       if (prevArticles !== null) {
         const min = Math.ceil(STATIC_URL_COUNT + 0.95 * prevArticles);
-        if (build.urls < min) return { ...summary, regression: true as const, min, uploaded: false, shadow_key: null as string | null };
+        if (build.urls < min) {
+          if (!dropAccepted(live.sitemap_accept_drop_on, date, prev?.idempotency_key ?? null)) {
+            return { ...summary, regression: true as const, min, accepted, uploaded: false, shadow_key: null as string | null };
+          }
+          accepted = min;
+        }
       }
 
       if (shadow) {
         const key = `phase5-shadow/sitemaps/${date}/${SITEMAP_OBJECT}`;
         await ports.blob.put(key, exactBuffer(bytes), { contentType: 'application/xml', sha256, meta: { urls: String(build.urls), generated_at } });
-        return { ...summary, regression: false as const, min: null, uploaded: false, shadow_key: key };
+        return { ...summary, regression: false as const, min: null, accepted, uploaded: false, shadow_key: key };
       }
       const up = await p5.storage.upload(SITEMAP_OBJECT, build.xml, { contentType: 'application/xml', cacheControl: '3600' });
       if (!up.ok) throw new Error(`upload_failed ${up.status}`);
       await ports.blob.put(SITEMAP_R2_KEY, exactBuffer(bytes), { contentType: 'application/xml', sha256, meta: { urls: String(build.urls), generated_at } });
-      return { ...summary, regression: false as const, min: null, uploaded: true, shadow_key: SITEMAP_R2_KEY };
+      return { ...summary, regression: false as const, min: null, accepted, uploaded: true, shadow_key: SITEMAP_R2_KEY };
     });
     if (!built) {
       await run('close-run', DB, () => closeRun(db, runId, { status: 'skipped', output: { reason: 'flag_off', halted_at: 'build-upload' } }, acc));
@@ -148,6 +168,7 @@ export async function runSitemap(p: SitemapParams, instanceId: string, d: Sitema
     }
     const output: Record<string, unknown> = { urls: built.urls, articles: built.articles, bytes: built.bytes, sha256: built.sha256, uploaded: built.uploaded, shadow_key: built.shadow_key };
     if (shadow) output.shadow = true;
+    if (built.accepted !== null) output.drop_accepted = { min_urls: built.accepted };
 
     if (built.regression) {
       if (!shadow) {

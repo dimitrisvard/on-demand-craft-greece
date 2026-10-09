@@ -6,7 +6,9 @@
 //   - No text ever contains the token, the cookie, a header or a request body; error excerpts are at most 200
 //     characters.
 //   - Repeat rules (applied by the tick from the alert kinds recorded in earlier runs' output.alerts):
-//       token_rejected   in the tick that got the 401/403; later ticks with the same fingerprint make no call
+//       token_rejected   in the tick that got the 401/403; later ticks with the same fingerprint make no call. When
+//                        no run of that fingerprint sent it or a reminder (the 401/403 came in shadow mode), the
+//                        first later tick that may send sends it
 //       token_reminder   at the 06:00 slot while the same fingerprint stays rejected
 //       token_expiry     once per fingerprint, when the token decodes as a JWT that expires within
 //                        value.token_reminder_hours (default 24)

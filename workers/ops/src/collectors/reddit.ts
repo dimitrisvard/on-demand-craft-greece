@@ -24,6 +24,11 @@
 //   6. close 'succeeded' with {tier, due, scanned, fetched, matched, leads_new, high, errors, pullpush_status}; ack.
 //   Any other throw closes the run 'failed' with a fixed code and the counts so far, and acks: the next slot is the
 //   retry, as with pg_cron.
+// Wall-time budget (REDDIT_WALL_STOP_MS, 10 min from the start of the message, as the Xometry tick): no subreddit
+// starts and no post of a fetched answer is processed after it. The run then closes 'succeeded' with partial: true
+// and the counts so far; the subreddit in progress and those not reached keep their last_scanned_at, so they stay
+// due for the next tick. With the 30 s source timeout, one message thus ends well inside the 15-minute consumer
+// limit and is always acked.
 // shadow: steps 1-5b and the scoring run; nothing is written (no lead, no last_scanned_at) and no text is sent;
 // the output counts matched posts and carries shadow: true.
 // Dropped from live: the call to the RPC increment_keyword_match_count (the function does not exist live).
@@ -58,6 +63,8 @@ export const PULLPUSH_USER_AGENT = 'MicronsHubLeadMonitor/1.0';
 export const REDDIT_PAUSE_MS = 500;
 /** scan_interval_minutes when the row has none (live). */
 export const DEFAULT_SCAN_INTERVAL_MIN = 30;
+/** Wall-time budget of one tier message (the queue consumer may run for at most 15 minutes). */
+export const REDDIT_WALL_STOP_MS = 10 * 60_000;
 
 /** A PullPush submission (the fields the live collector reads). */
 export interface RedditPost {
@@ -90,6 +97,8 @@ export interface RedditTierOutput {
   high: number;
   errors: number;
   pullpush_status: Record<string, number>;
+  /** Set when the wall-time budget ended the scan before every due subreddit was done. */
+  partial?: true;
   shadow?: true;
 }
 
@@ -144,7 +153,19 @@ interface ScanContext {
   sleep: (ms: number) => Promise<void>;
   keywords: Keyword[];
   out: RedditTierOutput;
+  /** Epoch ms after which no subreddit starts and no post is processed. */
+  stopAt: number;
 }
+
+/** Thrown inside a subreddit when the wall-time budget has passed (never counted as an error). */
+class WallTimeStop extends Error {
+  constructor() {
+    super('wall_time');
+    this.name = 'WallTimeStop';
+  }
+}
+
+const pastBudget = (c: ScanContext): boolean => c.clock.now().getTime() >= c.stopAt;
 
 /** Fetch, score and (unless shadow) store one subreddit's new posts; the live collectSubreddit. */
 async function collectSubreddit(c: ScanContext, subreddit: string, lastScannedAt: string | null): Promise<void> {
@@ -164,6 +185,8 @@ async function collectSubreddit(c: ScanContext, subreddit: string, lastScannedAt
   const json = (await response.json()) as { data?: unknown };
   const posts = (json.data ?? []) as Iterable<RedditPost>;
   for (const post of posts) {
+    // shadow writes nothing, so only the writing modes check the budget per post
+    if (!c.shadow && pastBudget(c)) throw new WallTimeStop();
     c.out.fetched++;
     const text = `${post.title} ${(post.selftext as string) || ''}`;
     const m = matchKeywords(text, c.keywords, 'reddit');
@@ -206,6 +229,10 @@ async function scanTier(c: ScanContext, params: RedditTierParams): Promise<void>
   c.keywords = await loadKeywords(c.db);
 
   for (const sub of due) {
+    if (pastBudget(c)) {
+      c.out.partial = true;
+      break;
+    }
     try {
       const fresh = await c.db.select<Pick<SubredditRow, 'last_scanned_at' | 'scan_interval_minutes'> & Record<string, unknown>>('monitored_subreddits', {
         columns: 'last_scanned_at,scan_interval_minutes',
@@ -219,7 +246,11 @@ async function scanTier(c: ScanContext, params: RedditTierParams): Promise<void>
       }
       c.out.scanned++;
       await c.sleep(REDDIT_PAUSE_MS);
-    } catch {
+    } catch (e) {
+      if (e instanceof WallTimeStop) {
+        c.out.partial = true;
+        break;
+      }
       c.out.errors++;
     }
   }
@@ -230,6 +261,7 @@ export function makeRedditTierHandler(o: CollectorOptions = {}): P5ScrapeHandler
   return async (msg, env, _ctx, deps) => {
     const runId = msg.body.run_id;
     const { ports, p5 } = portsOf(env, deps);
+    const stopAt = ports.clock.now().getTime() + REDDIT_WALL_STOP_MS;
     const db = ports.db;
     if (msg.body.kind !== 'reddit-tier' || !isRedditTierParams(msg.body.params)) {
       await closeQuietly(db, runId, { status: 'failed', error: 'invalid_params' }, 'reddit');
@@ -254,7 +286,7 @@ export function makeRedditTierHandler(o: CollectorOptions = {}): P5ScrapeHandler
     const shadow = flag.mode === 'shadow';
     const out: RedditTierOutput = { tier: params.tier, due: 0, scanned: 0, fetched: 0, matched: 0, leads_new: 0, high: 0, errors: 0, pullpush_status: {} };
     if (shadow) out.shadow = true;
-    const c: ScanContext = { db, p5, clock: ports.clock, shadow, sleep, keywords: [], out };
+    const c: ScanContext = { db, p5, clock: ports.clock, shadow, sleep, keywords: [], out, stopAt };
     try {
       await scanTier(c, params);
     } catch (e) {
@@ -270,6 +302,7 @@ export function makeRedditTierHandler(o: CollectorOptions = {}): P5ScrapeHandler
       run_id: runId,
       outcome: 'succeeded',
       shadow: shadow || undefined,
+      partial: out.partial,
       due: out.due,
       scanned: out.scanned,
       fetched: out.fetched,

@@ -4,8 +4,16 @@
 // mini-PostgREST of the harness (stubs/postgrest.mjs). Checks: one agent_runs row per due job whose flag is on (run
 // keys with the slot, trigger cron), none for a job whose flag is off, the tender fan-out over the seeded
 // connectors, the catch-up of the 06:00 slots at 06:30, the ops-digest Workflow instance, and a second tick for the
-// same time that adds nothing. The Phase 5 consumers settle the messages; this file asserts only what the dispatcher
-// writes.
+// same time that adds nothing.
+//
+// Rules for the work this file dispatches (the local consumers run it):
+//   - api/tender-scan.js reaches its portals by country code, so the stub cannot stand in for them: the seeded
+//     tender_connectors use only codes the handler refuses before any I/O (XX, YY, ZZ, QQ; a T1 test in
+//     test/p5/kernel/harness-jobs.test.ts checks them against the handler's connector table), and the tenders flag
+//     is in shadow.
+//   - Every run and Workflow instance this file causes reaches a final state while its flags are in force, before
+//     afterAll puts the earlier flag values back; if that does not happen in time, afterAll switches the touched
+//     flags off instead (fail closed) and fails.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -19,6 +27,15 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 const TICK = Date.UTC(2030, 0, 7, 6, 30);
 const SLOT = '2030-01-07T06:30Z';
 const SIX = '2030-01-07T06:00Z';
+const DATE = '2030-01-07';
+const DIGEST_INSTANCE = 'ops-digest-2030-W02';
+/** Run keys the dispatcher opens at TICK (the tender parent is closed by the dispatcher itself). */
+const DISPATCHED = [`growth.hn:${SLOT}`, `growth.reddit:t1:${SLOT}`, `growth.reddit:t2:${SLOT}`, `growth.tenders:${DATE}`, `growth.xometry:${SIX}`];
+/** Connector codes refused by api/tender-scan.js before any I/O; the due ones by the 6 h rule are XX and YY. */
+const DUE_CHILDREN = [`growth.tenders:${DATE}:XX`, `growth.tenders:${DATE}:YY`];
+const FINAL_RUN = new Set(['succeeded', 'failed', 'skipped']);
+const FINAL_INSTANCE = new Set(['complete', 'completed', 'errored', 'terminated']);
+const SETTLE_MS = 60_000;
 
 type Row = Record<string, unknown>;
 
@@ -67,6 +84,32 @@ async function until<T>(what: string, fn: () => Promise<T | null | undefined | f
   }
 }
 
+/** Every agent_runs row this file causes (dispatcher runs, tender children, the digest run) is final, the two tender
+ *  children exist, and the ops-digest instance is final; else a description of what is still open. */
+async function openWork(): Promise<string[]> {
+  const all = await p5Runs();
+  const mine = all.filter((r) => {
+    const key = String(r.idempotency_key);
+    return DISPATCHED.includes(key) || key.startsWith(`growth.tenders:${DATE}:`) || key === 'ops_digest:2030-W02';
+  });
+  const open = mine.filter((r) => !FINAL_RUN.has(String(r.status))).map((r) => `${String(r.idempotency_key)} ${String(r.status)}`);
+  for (const key of [...DISPATCHED, ...DUE_CHILDREN]) if (!mine.some((r) => r.idempotency_key === key)) open.push(`${key} missing`);
+  const res = await call(`${EXPLORER}/workflows/ops-digest/instances/${DIGEST_INSTANCE}`);
+  const status = res.status === 404 ? 'missing' : String(((await res.json()) as { result?: { status?: string } }).result?.status ?? 'unknown');
+  if (!FINAL_INSTANCE.has(status)) open.push(`${DIGEST_INSTANCE} ${status}`);
+  return open;
+}
+
+/** Waits until openWork() is empty; answers what is still open at the deadline (empty = settled). */
+async function settle(ms = SETTLE_MS): Promise<string[]> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const open = await openWork().catch((e: unknown) => [`read failed: ${e instanceof Error ? e.message : String(e)}`]);
+    if (open.length === 0 || Date.now() > end) return open;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 const FLAGS: Record<string, Row | null> = {
   'agent.growth.reddit': { enabled: true, mode: 'shadow', value: {}, rev: 1 },
   'agent.growth.hn': { enabled: true, mode: 'shadow', value: {}, rev: 1 },
@@ -87,11 +130,13 @@ describe.skipIf(!SITE || !STUB || PROFILE !== 'jobs')('Phase 5 schedule table on
       headers: JSON_HEADERS,
       body: JSON.stringify({
         tables: {
+          // Codes the handler refuses before any I/O (rules above): due by the 6 h rule XX (never scanned) and YY
+          // (18.5 h before the tick); ZZ scanned 1.5 h before (not due); QQ inactive.
           tender_connectors: [
-            { country_code: 'NL', is_active: true, last_scan_at: null },
-            { country_code: 'DE', is_active: true, last_scan_at: '2030-01-06T12:00:00.000Z' },
-            { country_code: 'FR', is_active: true, last_scan_at: '2030-01-07T05:00:00.000Z' },
-            { country_code: 'IT', is_active: false, last_scan_at: null },
+            { country_code: 'XX', is_active: true, last_scan_at: null },
+            { country_code: 'YY', is_active: true, last_scan_at: '2030-01-06T12:00:00.000Z' },
+            { country_code: 'ZZ', is_active: true, last_scan_at: '2030-01-07T05:00:00.000Z' },
+            { country_code: 'QQ', is_active: false, last_scan_at: null },
           ],
         },
       }),
@@ -104,11 +149,15 @@ describe.skipIf(!SITE || !STUB || PROFILE !== 'jobs')('Phase 5 schedule table on
   });
 
   afterAll(async () => {
+    // The consumers read the flags when they handle a message: the earlier values come back only after every run and
+    // instance of this file is final. Otherwise the touched flags are switched off (absent = off) and the file fails.
+    const open = saved.size > 0 ? await settle() : [];
     for (const [key, value] of saved) {
-      if (value === null) await kvDelete(key);
+      if (open.length > 0 || value === null) await kvDelete(key);
       else await kvPut(key, value);
     }
-  });
+    if (open.length > 0) throw new Error(`work still open after ${SETTLE_MS / 1000} s, flags switched off: ${open.join('; ')}`);
+  }, SETTLE_MS + 15_000);
 
   it('one run per due job with its flag on (trigger cron, slot in the key); the 06:00 slots are caught up at 06:30', async () => {
     await cron(TICK);
@@ -129,13 +178,29 @@ describe.skipIf(!SITE || !STUB || PROFILE !== 'jobs')('Phase 5 schedule table on
     expect(runs.some((r) => String(r.agent).startsWith('content_daily'))).toBe(false);
   });
 
-  it('tenders: the parent closes succeeded with the due connectors of the 6 h rule (NL, DE) enqueued', async () => {
+  it('tenders: the parent closes succeeded with the due connectors of the 6 h rule (XX, YY) enqueued', async () => {
     const parent = await until('the tender parent run', async () => {
       const r = (await p5Runs()).find((x) => x.idempotency_key === 'growth.tenders:2030-01-07');
       return r && r.status === 'succeeded' ? r : null;
     });
     expect(parent.output).toEqual({ due: 2, enqueued: 2, countries: null });
   });
+
+  it('the dispatched work settles while the flags of this file are in force: the tender children close skipped (shadow), never flag_off', async () => {
+    const open = await settle();
+    expect(open).toEqual([]);
+    const runs = await p5Runs();
+    const parent = runs.find((r) => r.idempotency_key === `growth.tenders:${DATE}`);
+    const children = runs.filter((r) => String(r.idempotency_key).startsWith(`growth.tenders:${DATE}:`));
+    expect(children.map((r) => r.idempotency_key).sort()).toEqual(DUE_CHILDREN);
+    for (const child of children) {
+      expect(child, String(child.idempotency_key)).toMatchObject({ status: 'skipped', trigger: 'queue', parent_run_id: parent?.id });
+      expect((child.output as Row | null)?.reason, String(child.idempotency_key)).toBe('shadow');
+    }
+    // The xometry run was handled under the shadow flag too (a flag read after afterAll would close it flag_off).
+    const xometry = runs.find((r) => r.idempotency_key === `growth.xometry:${SIX}`);
+    expect((xometry?.output as Row | null)?.reason).not.toBe('flag_off');
+  }, SETTLE_MS + 5_000);
 
   it('ops-digest: the Workflow instance ops-digest-2030-W02 exists with {iso_week, trigger: cron}', async () => {
     const list = await until('the ops-digest instance', async () => {

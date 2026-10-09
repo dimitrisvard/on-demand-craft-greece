@@ -1,11 +1,14 @@
 // The flag agent.content_daily as the content pipeline reads it, and the shared helpers of its runs.
 //
 // Flag value (set by the owner, PHASE5 flag-values template): {mode, model, steps, backfill_per_language_per_day,
-// shadow_generate}. Missing or malformed fields take the defaults below.
+// shadow_generate, sitemap_accept_drop_on}. Missing or malformed fields take the defaults below.
 //
 // Rules
 //   - steps: the known names of value.steps; a missing or non-array value means every step (the schedule runs
 //     content-daily for any steps value other than exactly ["sitemap"]).
+//   - sitemap_accept_drop_on: a UTC day YYYY-MM-DD set by the owner after an intended drop of published articles;
+//     the first sitemap run on or after that day uploads even below the regression guard (workflows/sitemap.ts).
+//     Anything else reads as null.
 //   - mode shadow: run and record, write nothing to business tables, send no Telegram text and no queue message;
 //     only R2 phase5-shadow/... is written.
 //   - A run whose flag is switched off (or switched to shadow while it runs in assist/auto) stops before its next
@@ -31,6 +34,7 @@ export interface ContentFlagSnap {
   model: string;
   backfill_per_language_per_day: number;
   shadow_generate: boolean;
+  sitemap_accept_drop_on: string | null;
 }
 
 /** Pure: the fields of the flag this pipeline uses (structured-cloneable, for step results). */
@@ -47,6 +51,7 @@ export function snapshotFlag(f: AgentFlag): ContentFlagSnap {
     model,
     backfill_per_language_per_day: backfillCap(f.value),
     shadow_generate: f.value.shadow_generate === true,
+    sitemap_accept_drop_on: isDay(f.value.sitemap_accept_drop_on) ? f.value.sitemap_accept_drop_on : null,
   };
 }
 

@@ -104,6 +104,7 @@ export interface OpsEnv {
   INDEXNOW_API_BASE?: string;
   AGENT_GEMINI_BASE_URL?: string;
   CAD_CONTAINER_BASE_URL?: string;
+  CONTENT_WAIT_TIMEOUT_S?: string;                       // seconds of the translations-done wait (default 6 h)
   // secrets (optional at deploy, checked per use)
   INDEXNOW_KEY?: string;                                 // same value as the public /indexnow_key.txt
   XOMETRY_TOKEN?: string;

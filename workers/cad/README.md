@@ -94,11 +94,15 @@ on the VPS (with `python --version` and `uname -m`) and rebuild, so both run the
 
 ## Parity (exit gate item 4)
 
-"Byte-identical" means the raw bodies are equal after masking only what the service randomises itself: in DXF
-(also inside `/flat-pattern` `dxf_base64`) `$TDCREATE`, `$TDUCREATE`, `$TDUPDATE`, `$TDUUPDATE`, `$VERSIONGUID`,
-`$FINGERPRINTGUID`, the ezdxf marker and the order of the `CLASSES` records; in PDF `/CreationDate`, `/ModDate`
-and `/ID`. JSON, SVG, outline, bends and the `X-Part-*`, `content-type` and `content-disposition` headers must match
-exactly.
+"Byte-identical" means the raw bodies are equal after masking only what the service makes different on every call
+or every day: in DXF (also inside `/flat-pattern` `dxf_base64`) `$TDCREATE`, `$TDUCREATE`, `$TDUPDATE`,
+`$TDUUPDATE`, `$VERSIONGUID`, `$FINGERPRINTGUID`, the ezdxf marker and the order of the `CLASSES` records; in PDF
+`/CreationDate`, `/ModDate`, `/ID` and the drawing date of the title block (`Date: YYYY-MM-DD`, written by
+`drawing/title_block.py` with the day of the call). PDF content streams (`ASCII85Decode`, `FlateDecode`) are
+compared decoded, so their compressed bytes, their `/Length` and the byte offsets of the xref table and `startxref`
+(which follow from those lengths) are not compared; the drawing itself is. JSON, SVG, outline, bends and the
+`X-Part-*`, `content-type` and `content-disposition` headers must match exactly. A capture of one day therefore
+compares `IDENTICAL` with a capture of any other day.
 
 ```bash
 python3 workers/cad/parity/cad_parity.py self-test                 # masks proven, a 0.01 mm change DIFFERS
@@ -108,14 +112,36 @@ python3 workers/cad/parity/cad_parity.py manifest <dir>              # normalise
 python3 workers/cad/parity/cad_parity.py check --base <service> --files <fixture server> --golden workers/cad/parity/golden
 ```
 
-The key is read from the environment variable `CAD_PARITY_KEY` (or the one named by `--key-env`), never from the
-command line. `--compat` captures `/flat-pattern` only, without a key, for a base URL that already carries the
-compat credential.
+Inputs: `--files <folder URL>` uses `<folder URL>/<ref>.step` for each reference; `--urls <file>` takes one full
+URL per reference from a JSON object `{"l_bend_45": "https://…", …}` and uses each exactly as given (presigned
+GET URLs). The input URL is sent as `file_url` to `/flat-pattern` and downloaded by the tool for the multipart
+endpoints.
 
-Gate procedure (owner, at S9 (a)): upload the 5 fixtures to `microns-private` `cad/parity/`, capture the VPS with
-presigned GET URLs, capture the Container through the compat URL and through a `cad-jobs` dual run, `compare`
-(5/5 `IDENTICAL` for every endpoint), then replace `parity/golden/manifest.json` with the manifest of the VPS
-capture. Cold start: 3 timed compat calls on a cold slot and 3 warm calls; record the timings. A slot is cold after
+Credentials: the key is read from the environment variable `CAD_PARITY_KEY` (or the one named by `--key-env`), never
+from the command line. `--compat` captures `/flat-pattern` only and sends no key; its base URL (the site's
+`https://www.micronshub.eu/api/cad/<token>` without `/flat-pattern`) is read from the environment variable named by
+`--base-env` (default `CAD_COMPAT_BASE`), never from the command line. Output and error lines never print a base
+URL or the query of an input URL.
+
+Gate procedure (owner, at S9 (a)):
+
+1. Upload the 5 fixtures (`for r in l_bend_45 l_bend_90 l_bend_135 u_channel z_fold; do npx wrangler r2 object put
+   "microns-private/cad/parity/$r.step" --file "sheet-metal-service/tests/fixtures/unfold/$r.step" --jurisdiction eu
+   --remote; done`).
+2. Presign a GET URL for each, valid for 1 hour, with an R2 API token that can read `microns-private` (AWS CLI
+   profile with region `auto`; R2 docs, "Presigned URLs"):
+   `aws s3 presign --endpoint-url "https://<ACCOUNT_ID>.eu.r2.cloudflarestorage.com" s3://microns-private/cad/parity/<ref>.step --expires-in 3600`.
+   The URL host must be one of the hosts in `CAD_INPUT_HOSTS` (the compat path accepts no other). Write the 5 URLs
+   to a `urls.json` outside the repository and delete it after the captures.
+3. VPS: `read -rs CAD_PARITY_KEY && export CAD_PARITY_KEY`, then
+   `cad_parity.py capture --base <vps> --urls urls.json --out vps` and `cad_parity.py manifest vps`.
+4. Container through the compat path: `read -rs CAD_COMPAT_BASE && export CAD_COMPAT_BASE`, then
+   `cad_parity.py check --compat --urls urls.json --golden vps` (5/5 `IDENTICAL` for `/flat-pattern`); keep the
+   bodies for review with `cad_parity.py capture --compat --urls urls.json --out compat`.
+5. Container through a `cad-jobs` dual run (5/5 `IDENTICAL` for every endpoint), then replace
+   `parity/golden/manifest.json` with `vps/manifest.json`.
+
+Cold start: 3 timed compat calls on a cold slot and 3 warm calls; record the timings. A slot is cold after
 `CadRouter.recycle(slot)` (a Durable Object method; Phase 5 adds no HTTP route for it) or after more than 10 minutes
 without a CAD call (`sleepAfter`); compat calls take the lowest free slot, so one cold call per idle period is
 measured that way.
@@ -135,3 +161,21 @@ Nine service tests fail or error under the locked library versions today and sta
   writes one `LWPOLYLINE`
 
 `tests/test_fixtures.py` marks `u_channel` and `z_fold` as expected failures of the engine (2 xfailed).
+
+## Status (2026-10-09, local)
+
+Nothing is built into an image, pushed or deployed here: the image is built only by `cad-image.yml` in CI, and the
+Container needs the owner steps of docs/migration/PLAN.md §5.5 (image push and reference, VPS library freeze,
+deploy) before the switch-over step S9.
+
+| Check | Result |
+|---|---|
+| Ops T1 (`npm --prefix workers/ops test -- test/p5/cad`) | 7 files, 76 tests green (the whole ops suite, 2,038 tests, green in the Wave 3 run), including the three wiring tests against the real `@cloudflare/containers` 0.3.7, the input proxy, slots and priorities, the outcome mapping and the compat route |
+| Ops T2 (`npm --prefix workers/ops run test:integration:jobs -- test/t2-jobs/p5-cad.jobs.ts`) | 4 tests green, with the container stub |
+| Service tests (`tests/test_p5_service.py`, `tests/test_fixtures.py`, locked versions in a virtualenv) | 15 passed, 2 expected failures: key matrix, 504 at the wall clock, no child left after a disconnect, the 5 references equal to the provisional golden manifest after masking |
+| Comparator (`cad_parity.py self-test`) | masks proven; a 0.01 mm change reports `DIFFERS` |
+| Exit gate item 4 | Blocked until S9: the VPS capture replaces the provisional manifest, `requirements.lock.txt` is replaced by the VPS freeze, then 5/5 `IDENTICAL` per endpoint and the cold-start timings; preview checks of the input interception, cold start and the 110 s abort |
+
+Open: `CadRouter.recycle` has no HTTP caller (an admin route is a later decision); the CAD router client type of
+Phase 4 gets the optional priority, recycle and slot fields in a follow-up commit (Phase 5 passes them
+structurally).

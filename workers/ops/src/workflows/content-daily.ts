@@ -14,8 +14,10 @@
 //                      title processed, rpc mark_queue_job_completed
 //   seo-purge-en       KV SEO_CACHE seo:v1:list:en (best effort)
 //   fan-out            [translate] 13 'daily' messages for today's group + backfill (oldest first, value cap per
-//                      language) on the queue translations
+//                      language; pairs with a recent slug conflict held, other recent failures planned last) on
+//                      the queue translations
 //   wait-translations  'translations-done' for up to 6 h, only when daily messages went out; a timeout continues
+//                      (T2 shortens the wait with the T2-only var CONTENT_WAIT_TIMEOUT_S, waitTimeoutOf)
 //   fix-links-<lang>   [fix_links] one step per language (pages of 200; shadow scans and counts only)
 //   sitemap            [sitemap] SITEMAP.create sitemap-<date> (already exists = done); runs in shadow too
 //   seo-purge          [translate] seo:v1:list:<lang> of today's languages, seo:v1:translations:<id> of today's and
@@ -28,6 +30,10 @@
 //     only); the sitemap Workflow reads the same flag and runs in shadow as well.
 //   - A failed generation closes the run 'failed' (error generate_failed) after translations, fix-links and the
 //     sitemap have run; any other failure closes it 'failed' with the step and an error code and one text alert.
+//   - A generate-en attempt whose model call was answered but failed (max_tokens, refusal, no text, or a parser or
+//     length-guard rejection) is billed: the attempt adds its usage to the run row before the step retries, and the
+//     run reads that stored usage back after the step (generate-en on success, generate-en-usage after the last
+//     attempt), so llm_calls and cost_cents count every answered call.
 //   - Step results are compact (the article text is the largest, well under 1 MiB) and carry no addresses.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type WorkflowStepConfig } from 'cloudflare:workers';
@@ -35,8 +41,8 @@ import { NonRetryableError } from 'cloudflare:workflows';
 import { formatLogLine } from '../../../shared/src/http/log';
 import { need } from '../agents/config';
 import { readFlag } from '../agents/flags';
-import { addUsage, closeRun, EMPTY_USAGE, isAlreadyExists, isFinal, openRun, type UsageAcc } from '../agents/runs';
-import { englishMasters, planBackfill, presentLanguages } from '../content/backfill';
+import { addUsage, checkpointRun, closeRun, EMPTY_USAGE, isAlreadyExists, isFinal, mergeUsage, openRun, usageFromRow, type UsageAcc } from '../agents/runs';
+import { englishMasters, planBackfill, presentLanguages, recentPairOutcomes } from '../content/backfill';
 import { CONTENT_FLAG, errorCode, isDay, mustHalt, snapshotFlag, tenantOf, type ContentFlagSnap } from '../content/flag';
 import { buildSlugMapping, fixLinksForLanguage } from '../content/fix-links';
 import {
@@ -57,6 +63,7 @@ import { exactBuffer, selectAll } from '../content/paged';
 import { lagDays, translationStatus, type TranslationState } from '../content/report';
 import { listKey, purgeSeoKeys, translationsKey } from '../content/seo-purge';
 import { DbError } from '../db/postgrest';
+import { getRun } from '../db/repos/agent-runs';
 import { LOG_PREFIX, type ContentDailyParams, type OpsEnv } from '../env';
 import { makePorts, type LlmUsage, type Ports } from '../ports/index';
 import { makeP5Ports, type P5Ports } from '../ports/p5';
@@ -65,6 +72,14 @@ import { DB, NOTIFY, BLOB } from './steps';
 
 const AGENT = 'content_daily' as const;
 export const WAIT_TIMEOUT = '6 hours' as const;
+
+/** The translations-done wait: 6 h, or CONTENT_WAIT_TIMEOUT_S seconds (1-21600) when that T2-only var is set; the
+ *  var never reaches production (check-bundle fails on it, makeP5Ports refuses it while AI is bound). */
+export function waitTimeoutOf(env: Pick<OpsEnv, 'CONTENT_WAIT_TIMEOUT_S'>): WorkflowSleepDuration {
+  const raw = env.CONTENT_WAIT_TIMEOUT_S;
+  if (typeof raw !== 'string' || !/^[1-9][0-9]{0,4}$/.test(raw) || Number(raw) > 21_600) return WAIT_TIMEOUT;
+  return `${Number(raw)} seconds`;
+}
 /** 3 attempts (limit counts retries), 5 minutes apart, 10 minutes each (D-22). */
 export const GENERATE_STEP: WorkflowStepConfig = { retries: { limit: 2, delay: '5 minutes', backoff: 'constant' }, timeout: '10 minutes' };
 /** A full language pass of fix-links: paged reads and writes. */
@@ -125,10 +140,46 @@ interface Generated {
   model: string;
   usage: LlmUsage;
   silo_neighbors_used: number;
+  /** Usage of earlier attempts of this step that were answered but failed (stored on the run row). */
+  failed_usage?: UsageAcc | null;
 }
 
 class Halt {
   constructor(readonly at: string) {}
+}
+
+/** The billed usage of an answered model call that still failed, keyed by the error it travels with. */
+const answeredFailure = new WeakMap<object, LlmUsage>();
+
+function withAnsweredUsage<E>(e: E, usage: LlmUsage | undefined): E {
+  if (usage && typeof e === 'object' && e !== null) answeredFailure.set(e, usage);
+  return e;
+}
+
+/** Adds the usage of a failed but answered generate-en attempt to the run row (best effort). Until close-run the row
+ *  holds no other usage: content_daily writes its usage columns only when it closes the run. */
+async function keepFailedUsage(db: Ports['db'], runId: string, e: unknown): Promise<void> {
+  const usage = typeof e === 'object' && e !== null ? answeredFailure.get(e) : undefined;
+  if (!usage) return;
+  try {
+    const row = await getRun(db, runId);
+    await checkpointRun(db, runId, addUsage(row ? usageFromRow(row) : { ...EMPTY_USAGE, by_step: {} }, usage, 'generate-en'));
+  } catch (err) {
+    log('content daily usage not stored', { code: errorCode(err) });
+  }
+}
+
+/** The usage that failed generate-en attempts stored on the run row (null when none or unreadable). */
+async function storedFailedUsage(db: Ports['db'], runId: string): Promise<UsageAcc | null> {
+  try {
+    const row = await getRun(db, runId);
+    if (!row || isFinal(row.status)) return null;
+    const stored = usageFromRow(row);
+    return stored.llm_calls > 0 ? { ...stored, by_step: { 'generate-en': stored.cost_usd } } : null;
+  } catch (err) {
+    log('content daily usage not read', { code: errorCode(err) });
+    return null;
+  }
 }
 
 export class ContentDailyWorkflow extends WorkflowEntrypoint<OpsEnv, ContentDailyParams> {
@@ -250,11 +301,23 @@ export async function runContentDaily(p: ContentDailyParams, instanceId: string,
         const claimed: Job = job;
         let generated: Generated | null = null;
         try {
-          generated = await run('generate-en', GENERATE_STEP, () => generateEnglish(p5, db, claimed, { date, runId, tenant, model: flag.model, shadow }));
+          generated = await run('generate-en', GENERATE_STEP, async () => {
+            let g: Generated;
+            try {
+              g = await generateEnglish(p5, db, claimed, { date, runId, tenant, model: flag.model, shadow });
+            } catch (e) {
+              await keepFailedUsage(db, runId, e);
+              throw e;
+            }
+            return { ...g, failed_usage: await storedFailedUsage(db, runId) };
+          });
           acc = addUsage(acc, generated.usage, 'generate-en');
+          if (generated.failed_usage) acc = mergeUsage(acc, generated.failed_usage);
         } catch (e) {
           if (e instanceof Halt) throw e;
           out.generate = 'failed';
+          const failedUsage = await run('generate-en-usage', DB, () => storedFailedUsage(db, runId));
+          if (failedUsage) acc = mergeUsage(acc, failedUsage);
           const code = errorCode(e);
           log('content daily generation failed', { date, code });
           if (!shadow && claimed.queue_id) {
@@ -331,12 +394,13 @@ export async function runContentDaily(p: ContentDailyParams, instanceId: string,
           }
         }
         const daily = messages.length;
-        const [masters, present] = [await englishMasters(db), await presentLanguages(db)];
+        const [masters, present, recent] = [await englishMasters(db), await presentLanguages(db), await recentPairOutcomes(db, date)];
         const backfill = planBackfill(masters, present, {
           cap: f.backfill_per_language_per_day,
           exclude: new Set(today ? [today.translation_id] : []),
           for_date: date,
           parent_run_id: runId,
+          recent,
         });
         messages.push(...backfill);
         for (let i = 0; i < messages.length; i += SEND_BATCH_MAX) {
@@ -352,7 +416,7 @@ export async function runContentDaily(p: ContentDailyParams, instanceId: string,
       // 8 wait-translations
       if (fan.daily > 0) {
         try {
-          await step.waitForEvent('wait-translations', { type: 'translations-done', timeout: WAIT_TIMEOUT });
+          await step.waitForEvent('wait-translations', { type: 'translations-done', timeout: waitTimeoutOf(env) });
           out.translations_wait = 'done';
         } catch {
           out.translations_wait = 'timeout';
@@ -377,8 +441,7 @@ export async function runContentDaily(p: ContentDailyParams, instanceId: string,
     if (steps.has('sitemap')) {
       const instance = `sitemap-${date}`;
       const s = await run('sitemap', DB, async () => {
-        const f = snapshotFlag(await readFlag(env, CONTENT_FLAG));
-        if (!f.enabled) return null;
+        if (!(await live())) return null;
         need(env, 'SITEMAP');
         try {
           await env.SITEMAP.create({ id: instance, params: { date, parent_run_id: runId } });
@@ -483,8 +546,13 @@ async function generateEnglish(
     gatewayTimeoutMs: GENERATE_GATEWAY_TIMEOUT_MS,
     meta: { agent: AGENT, run_id: o.runId, tenant_id: o.tenant, step: 'generate-en', prompt: GENERATE_PROMPT_ID },
   });
-  if (!result.ok) throw new Error(`llm_${result.code}`);
-  const article = parseMasterArticle(result.text, titleRow.title);
+  if (!result.ok) throw withAnsweredUsage(new Error(`llm_${result.code}`), result.usage);
+  let article: ReturnType<typeof parseMasterArticle>;
+  try {
+    article = parseMasterArticle(result.text, titleRow.title);
+  } catch (e) {
+    throw withAnsweredUsage(e, result.usage);
+  }
   return {
     title_id: titleRow.id,
     title: titleRow.title,

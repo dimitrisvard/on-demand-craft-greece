@@ -1,6 +1,6 @@
 # Phase 5 owner scripts
 
-SQL and tools for the Phase 5 switch-over (PLAN.md P5-8, P5-9) and the 7-day output-parity window. Contract: `docs/migration/specs/PHASE5_SPEC.md` §6.8 (rules), §10.2 (runbook), §10.3 (window), §12 (exit gate). Nothing here runs on its own: every file is run by the owner, by hand, at the step the runbook names.
+SQL and tools for the Phase 5 switch-over (PLAN.md P5-8, P5-9) and the 7-day output-parity window. Contract: `docs/migration/specs/PHASE5_SPEC.md` §6.8 (rules), §10.2 (runbook), §10.3 (window), §12 (exit gate). Nothing here runs on its own: every file is run by the owner, by hand, at the step the runbook names. Build status, gate status and the owner checklist in order: `docs/migration/PLAN.md` §5.5.
 
 | File | What | Writes? |
 |---|---|---|
@@ -26,6 +26,8 @@ The pg_cron switch itself is in `supabase/migrations/*_deactivate_ported_crons.s
 
 Record each step's first Worker run time: it is `<S_SWITCH_UTC>` in `parity.sql` (S1-S5), and the first Xometry slot after S8 is `<S8_SWITCH_UTC>`.
 
+From S4 on, the sitemap run refuses to upload a sitemap with more than 5 % fewer URLs than the last uploaded one and sends a text alert. After an intended unpublish of that size, run the commented `sitemap_accept_drop_on` template of `flag-values.sql` with the day of the blocked run: the next run uploads once and becomes the new reference; a second drop is blocked again.
+
 ## During the window
 
 - Daily for 7 days after S5: run `parity.sql` with the placeholders replaced (one query at a time; each states its pass rule in the header), or read the Monday digest. After S8 also Q13.
@@ -40,3 +42,5 @@ npm --prefix supabase/tests/phase5 test
 ```
 
 On PGlite (Postgres 18 and 16), no network: the two switch-over files against a pg_cron stand-in, every `parity.sql` statement against the Phase 4 schema plus stand-ins of the live tables (Q12b against hand-computed figures that the Worker's digest code is tested with too), and every `flag-values.sql` template against the migration's flag rows. Details: `supabase/tests/phase5/README.md`.
+
+Status (2026-10-09, local): 138 assertions pass on both engines. Nothing here has been run against the live database.

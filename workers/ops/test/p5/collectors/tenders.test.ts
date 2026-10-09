@@ -101,6 +101,18 @@ describe('a due connector', () => {
     expect(child('FR')[0]).toMatchObject({ status: 'failed', error: 'handler_503' });
   });
 
+  it('the last delivery before the final one (attempts 3) still retries after 300 s under the running child', async () => {
+    for (const [cc, answer] of [['AT', { status: 502 }], ['BE', 'throw']] as const) {
+      const f = fakeHandler(() => answer);
+      const msg = msgFor(cc, MAX_RETRIES);
+      await makeTenderScheduledHandler({ load: f.load })(msg, h.env, testContext(), h.deps);
+      expect(msg.attempts).toBe(3);
+      expect(msg.retried).toEqual([{ delaySeconds: 300 }]);
+      expect(msg.acked).toBe(0);
+      expect(child(cc)[0]).toMatchObject({ status: 'running', error: null });
+    }
+  });
+
   it('a throw retries after 300 s; on the final delivery the child closes failed (handler_threw)', async () => {
     const f = fakeHandler(() => 'throw');
     const handler = makeTenderScheduledHandler({ load: f.load });
@@ -135,6 +147,17 @@ describe('a due connector', () => {
     await makeTenderScheduledHandler({ load: f.load })(msg, h.env, testContext(), h.deps);
     expect(msg.acked).toBe(1);
     expect(child('ZZ')[0]).toMatchObject({ status: 'failed', error: 'handler_400', output: { status: 400, country_code: 'ZZ' } });
+  });
+
+  it('3xx is handled like 4xx: child failed handler_<status>, acked, no retry', async () => {
+    for (const [cc, status] of [['CZ', 302], ['DK', 304]] as const) {
+      const f = fakeHandler(() => ({ status }));
+      const msg = msgFor(cc);
+      await makeTenderScheduledHandler({ load: f.load })(msg, h.env, testContext(), h.deps);
+      expect(msg.acked).toBe(1);
+      expect(msg.retried).toEqual([]);
+      expect(child(cc)[0]).toMatchObject({ status: 'failed', error: `handler_${status}`, output: { status, country_code: cc } });
+    }
   });
 });
 

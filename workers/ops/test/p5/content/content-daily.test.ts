@@ -4,14 +4,15 @@
 // off mid-run, shadow with and without shadow_generate, 23505 on publish, replay after eviction, and a final run.
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { generateSlug } from '../../../src/content/generate-en';
+import { generateSlug, todaysSilo } from '../../../src/content/generate-en';
 import { TARGET_LANGS } from '../../../src/content/languages';
-import { okText } from '../../../src/ports/p5-stub/index';
+import { translateRunKey } from '../../../src/content/report';
+import { failText, okText } from '../../../src/ports/p5-stub/index';
 import type { TranslationMessageV1 } from '../../../src/queues/messages';
-import { contentAlerts, runContentDaily, type ContentDailyResult } from '../../../src/workflows/content-daily';
+import { contentAlerts, runContentDaily, waitTimeoutOf, type ContentDailyResult } from '../../../src/workflows/content-daily';
 import { FakeStep } from '../../helpers/fake-step';
 import { articleHtml, modelJson } from './fixtures';
-import { contentHarness, DATE, runByKey, T0, uuid, type ContentHarness } from './helpers';
+import { contentHarness, DATE, HookedStep, runByKey, T0, uuid, type ContentHarness } from './helpers';
 
 beforeAll(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -62,10 +63,13 @@ describe('ContentDailyWorkflow', () => {
   it('full day: article published, 13 daily + backfill, wait done, 13 fix-links, sitemap, purge, report', async () => {
     const h = setup();
     const step = new FakeStep({ now: T0 });
+    for (let k = 1; k <= 3; k++) h.seo.store.set(`seo:v1:translations:${uuid('70', k)}`, '{}');
+    h.seo.store.set(`seo:v1:translations:${uuid('79', 9)}`, '{}');
     step.onWait = () => {
-      // the consumer published the German translation while the Workflow waited
+      // the consumer published the German translation and gave up on French while the Workflow waited
       const en = h.db.rows('articles').find((a) => a.language === 'en' && a.title === TITLE_1)!;
       h.db.seed('articles', [{ id: uuid('dd', 1), title: 'de', slug: 'de-today', language: 'de', status: 'published', translation_id: en.translation_id, created_at: `${DATE}T08:01:00Z` }]);
+      h.db.seed('agent_runs', [{ agent: 'content_daily.translate', trigger: 'queue', idempotency_key: translateRunKey(String(en.translation_id), 'fr', DATE), status: 'failed', error: 'GeminiOverloadedError' }]);
       h.seo.store.set(`seo:v1:translations:${en.translation_id}`, '{}');
       step.sendEvent('translations-done', { translation_id: en.translation_id });
     };
@@ -77,7 +81,7 @@ describe('ContentDailyWorkflow', () => {
     expect(typeof en.translation_id).toBe('string');
     expect(h.db.rows('article_titles').find((t) => t.title === TITLE_1)).toMatchObject({ processed: true });
     expect(h.db.rows('article_generation_queue')).toMatchObject([{ status: 'completed', title_id: uuid('a1', 1) }]);
-    expect(h.db.rows('article_generation_logs')[0].summary_data).toMatchObject({ title: TITLE_1, master_article_id: en.id, status: 'published', translations_pending: true, silo_category: 'Sheet Metal & Fabrication' });
+    expect(h.db.rows('article_generation_logs')[0].summary_data).toMatchObject({ title: TITLE_1, master_article_id: en.id, status: 'published', translations_pending: true, silo_category: 'Sheet Metal & Fabrication', scheduled_silo: todaysSilo(DATE), matched_scheduled_silo: todaysSilo(DATE) === 'Sheet Metal & Fabrication' });
 
     const msgs = sent(h);
     const daily = msgs.filter((m) => m.origin === 'daily');
@@ -93,14 +97,16 @@ describe('ContentDailyWorkflow', () => {
     expect(step.trace()).toContain('wait-translations:ok');
     expect(step.trace().filter((t) => t.startsWith('fix-links-'))).toHaveLength(13);
     expect(h.sitemap.created).toEqual([{ id: `sitemap-${DATE}`, params: { date: DATE, parent_run_id: runRow.id } }]);
-    expect([...h.seo.store.keys()]).toEqual(['seo:v1:article:de:keep']);
+    // list keys of today's languages, today's group and every back-filled group are purged; others stay
+    expect([...h.seo.store.keys()].sort()).toEqual(['seo:v1:article:de:keep', `seo:v1:translations:${uuid('79', 9)}`]);
 
     expect(runRow).toMatchObject({ agent: 'content_daily', trigger: 'cron', status: 'succeeded', workflow_name: 'content-daily', workflow_instance_id: INSTANCE, llm_calls: 1, input_tokens: 3000, output_tokens: 6000 });
     expect(runRow.output).toMatchObject({ article_id: en.id, slug: en.slug, no_titles: false, generate: 'published', daily_queued: 13, backfilled: 15, translations_wait: 'done', sitemap: { instance: `sitemap-${DATE}`, created: true, urls: null } });
     const out = runRow.output as Record<string, Record<string, unknown>>;
     expect(Object.keys(out.translations)).toEqual([...TARGET_LANGS]);
     expect(out.translations.de).toBe('ok');
-    expect(out.translations.fr).toBe('missing');
+    expect(out.translations.fr).toBe('failed');
+    expect(out.translations.es).toBe('missing');
     expect(out.lag_days).toMatchObject({ de: 0, fr: 25, hu: 25, fi: null });
     expect(Object.keys(out.fix_links)).toEqual([...TARGET_LANGS]);
     expect(h.p5.telegramText.messages).toEqual([]);
@@ -139,6 +145,43 @@ describe('ContentDailyWorkflow', () => {
     expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'failed', error: 'generate_failed' });
   });
 
+  it('every answered attempt is billed: three rejected answers (under 2,000 words) count 3 calls on the failed run', async () => {
+    const h = setup({ answer: modelJson(articleHtml(1200, { seed: 3 })) });
+    const { r, step } = await run(h);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'generate-en' });
+    expect(step.trace()).toContain('generate-en-usage:ok');
+    const row = runByKey(h, `content_daily:${DATE}`)!;
+    expect(row).toMatchObject({ status: 'failed', error: 'generate_failed', llm_calls: 3, input_tokens: 9000, output_tokens: 18000 });
+    expect(Number(row.cost_cents)).toBeCloseTo(19.8, 6);
+  });
+
+  it('every answered attempt is billed: max_tokens twice, then a good answer, counts 3 calls on the succeeded run', async () => {
+    const h = setup();
+    const good = modelJson(articleHtml(2400, { seed: 5, blogSlugs: ['older-1'] }));
+    const usage = { input_tokens: 3000, output_tokens: 16384, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.17, model: 'claude-sonnet-5' };
+    let n = 0;
+    h.p5.textLlm.setScript((call) => (++n <= 2 ? failText('other', { status: 200, message: 'anthropic: stopped at max_tokens', usage }) : okText(good, { model: call.model, usage: { input_tokens: 3000, output_tokens: 6000, cost_usd: 0.066 } })));
+    const step = new FakeStep({ now: T0 });
+    step.onWait = () => {
+      const en = h.db.rows('articles').find((a) => a.language === 'en' && a.title === TITLE_1)!;
+      step.sendEvent('translations-done', { translation_id: en.translation_id });
+    };
+    const { r } = await run(h, step);
+    expect(r.outcome).toBe('succeeded');
+    expect(step.calls.find((c) => c.name === 'generate-en')).toMatchObject({ attempts: 3 });
+    const row = runByKey(h, `content_daily:${DATE}`)!;
+    expect(row).toMatchObject({ status: 'succeeded', llm_calls: 3, input_tokens: 9000, output_tokens: 2 * 16384 + 6000 });
+    expect(Number(row.cost_cents)).toBeCloseTo(40.6, 6);
+  });
+
+  it('an unanswered failure (provider 5xx) is not billed: the failed run counts no call', async () => {
+    const h = setup();
+    h.p5.textLlm.setScript(() => failText('server', { status: 529 }));
+    const { r } = await run(h);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'generate-en' });
+    expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'failed', llm_calls: 0 });
+  });
+
   it('no translations-done within 6 h: the wait times out and the run continues', async () => {
     const h = setup();
     const { r, step } = await run(h);
@@ -147,6 +190,21 @@ describe('ContentDailyWorkflow', () => {
     expect(step.now - T0).toBeGreaterThanOrEqual(6 * 3_600_000);
     expect(runByKey(h, `content_daily:${DATE}`)!.output).toMatchObject({ translations_wait: 'timeout' });
     expect(h.sitemap.created).toHaveLength(1);
+  });
+
+  it('T2-only CONTENT_WAIT_TIMEOUT_S shortens the translations-done wait; anything but 1-21600 seconds keeps 6 h', async () => {
+    expect(waitTimeoutOf({})).toBe('6 hours');
+    expect(waitTimeoutOf({ CONTENT_WAIT_TIMEOUT_S: '20' })).toBe('20 seconds');
+    expect(waitTimeoutOf({ CONTENT_WAIT_TIMEOUT_S: '21600' })).toBe('21600 seconds');
+    for (const bad of ['', '0', '-5', '1.5', '20s', ' 20', '021', '21601', '99999', 'six hours']) expect(waitTimeoutOf({ CONTENT_WAIT_TIMEOUT_S: bad }), bad).toBe('6 hours');
+    const h = setup();
+    h.env.CONTENT_WAIT_TIMEOUT_S = '30';
+    const { r, step } = await run(h);
+    expect(r.outcome).toBe('succeeded');
+    expect(step.trace()).toContain('wait-translations:timed_out');
+    expect(step.now - T0).toBeGreaterThanOrEqual(30_000);
+    expect(step.now - T0).toBeLessThan(3_600_000);
+    expect(runByKey(h, `content_daily:${DATE}`)!.output).toMatchObject({ translations_wait: 'timeout' });
   });
 
   it('flag off: run skipped, nothing else happens', async () => {
@@ -247,6 +305,105 @@ describe('ContentDailyWorkflow', () => {
     expect(r).toMatchObject({ outcome: 'failed', failed_step: 'fan-out' });
     expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'failed', error: 'fan-out: config_missing: TRANSLATIONS' });
     expect(h.p5.telegramText.texts()).toEqual([contentAlerts.runFailed(DATE, 'fan-out', 'config_missing: TRANSLATIONS')]);
+  });
+
+  it('fan-out: a recent slug conflict holds the pair, another recent failure plans it after the rest, an older conflict no longer holds', async () => {
+    const h = setup();
+    h.setFlag({ value: { steps: ['translate'], backfill_per_language_per_day: 1 } });
+    const failed = (tid: string, lang: string, day: string, error: string) => ({ agent: 'content_daily.translate', trigger: 'queue', idempotency_key: translateRunKey(tid, lang, day), status: 'failed', error, started_at: `${day}T07:30:00Z` });
+    h.db.seed('agent_runs', [
+      failed(uuid('70', 1), 'nl', '2026-10-05', 'slug_conflict'), // nl is missing in group 1 only
+      failed(uuid('70', 1), 'nb', '2026-10-07', 'GeminiOverloadedError'), // nb is missing in groups 1 and 2
+      failed(uuid('70', 1), 'pl', '2026-09-30', 'slug_conflict'), // older than 7 days
+    ]);
+    const { r } = await run(h);
+    expect(r.outcome).toBe('succeeded');
+    const by = (lang: string) => sent(h).filter((m) => m.language === lang).map((m) => m.translation_id);
+    expect(by('nl')).toEqual([]);
+    expect(by('nb')).toEqual([uuid('70', 2)]);
+    expect(by('pl')).toEqual([uuid('70', 1)]);
+    expect(by('fi')).toEqual([uuid('70', 1)]);
+  });
+
+  it('flag switched off, or to shadow during an assist run, right before enqueue: skipped, no queue row, no model call', async () => {
+    for (const flip of [{ enabled: false }, { mode: 'shadow' as const, value: { steps: ['generate', 'translate', 'fix_links', 'sitemap'] } }]) {
+      const h = setup();
+      const step = new HookedStep({ now: T0 });
+      step.before.set('enqueue', () => h.setFlag(flip));
+      const { r } = await run(h, step);
+      expect(r.outcome).toBe('flag_off');
+      expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'skipped', output: { reason: 'flag_off', halted_at: 'enqueue' } });
+      expect(h.db.rows('article_generation_queue')).toEqual([]);
+      expect(h.db.calls.some((c) => c.method === 'rpc' && c.target === 'enqueue_next_article')).toBe(false);
+      expect(h.p5.textLlm.calls).toEqual([]);
+      expect(sent(h)).toEqual([]);
+      expect(h.sitemap.created).toEqual([]);
+    }
+  });
+
+  it('flag switched off before a fix-links step: the run stops there (no PATCH for that or later languages, no sitemap)', async () => {
+    const h = setup();
+    h.setFlag({ value: { steps: ['fix_links', 'sitemap'] } });
+    const step = new HookedStep({ now: T0 });
+    step.before.set('fix-links-fr', () => h.setFlag({ enabled: false }));
+    const { r } = await run(h, step);
+    expect(r.outcome).toBe('flag_off');
+    const out = runByKey(h, `content_daily:${DATE}`)!.output as Record<string, unknown>;
+    expect(out).toMatchObject({ reason: 'flag_off', halted_at: 'fix-links-fr' });
+    expect(Object.keys(out.fix_links as object)).toEqual(['de']);
+    const patched = h.db.calls.filter((c) => c.method === 'update' && c.target === 'articles').length;
+    const de = (out.fix_links as Record<string, { updated: number }>).de.updated;
+    expect(patched).toBe(de);
+    expect(h.sitemap.created).toEqual([]);
+  });
+
+  it('flag switched off, or to shadow during an assist run, right before the sitemap step: no sitemap instance, skipped', async () => {
+    for (const flip of [{ enabled: false }, { mode: 'shadow' as const, value: { steps: ['sitemap'] } }]) {
+      const h = setup();
+      h.setFlag({ value: { steps: ['sitemap'] } });
+      const step = new HookedStep({ now: T0 });
+      step.before.set('sitemap', () => h.setFlag(flip));
+      const { r } = await run(h, step);
+      expect(r.outcome).toBe('flag_off');
+      expect(h.sitemap.created).toEqual([]);
+      expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'skipped', output: { reason: 'flag_off', halted_at: 'sitemap' } });
+    }
+  });
+
+  it('shadow: a failed step closes the run failed without any Telegram text', async () => {
+    const h = setup();
+    h.setFlag({ mode: 'shadow', value: { steps: ['sitemap'] } });
+    h.env.SITEMAP = undefined;
+    const { r } = await run(h);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'sitemap' });
+    expect(runByKey(h, `content_daily:${DATE}`)).toMatchObject({ status: 'failed', error: 'sitemap: config_missing: SITEMAP' });
+    expect(h.p5.telegramText.messages).toEqual([]);
+  });
+
+  it('a claimed title already processed (generated by hand meanwhile): no model call, queue job failed, alert, run failed', async () => {
+    const h = setup();
+    const step = new HookedStep({ now: T0 });
+    step.before.set('generate-en', () => {
+      const t = h.db.tables.article_titles.find((x) => x.title === TITLE_1)!;
+      t.processed = true;
+    });
+    const { r } = await run(h, step);
+    expect(r).toMatchObject({ outcome: 'failed', failed_step: 'generate-en' });
+    expect(h.p5.textLlm.calls).toEqual([]);
+    expect(step.calls.find((c) => c.name === 'generate-en')).toMatchObject({ attempts: 1, outcome: 'threw' });
+    expect(h.db.rows('article_generation_queue')).toMatchObject([{ status: 'failed' }]);
+    expect(h.db.rows('articles').some((a) => a.title === TITLE_1)).toBe(false);
+    expect(h.p5.telegramText.texts()).toEqual([contentAlerts.generateFailed(DATE, 'title_processed')]);
+  });
+
+  it('report: sitemap urls only from a succeeded sitemap run (null while it runs or after it failed)', async () => {
+    for (const [status, urls] of [['running', null], ['failed', null], ['succeeded', 2616]] as const) {
+      const h = setup({ titles: false });
+      h.setFlag({ value: { steps: ['sitemap'] } });
+      h.db.seed('agent_runs', [{ agent: 'content_daily.sitemap', trigger: 'workflow', idempotency_key: `content_daily.sitemap:${DATE}`, status, output: { urls: 2616, articles: 2364 } }]);
+      await run(h);
+      expect((runByKey(h, `content_daily:${DATE}`)!.output as Record<string, { urls: number | null }>).sitemap.urls).toBe(urls);
+    }
   });
 
   it('steps subset: only fix_links runs the 13 passes (no queue, no generation, no sitemap)', async () => {

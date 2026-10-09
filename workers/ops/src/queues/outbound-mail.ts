@@ -11,21 +11,29 @@
 //              other active accounts in round-robin order; none left (or no active account) -> deferred to the next
 //              00:00 UTC + a jitter of at most 600 s; already_sent -> the database rows are finalised only
 //   4 spacing  not_before at most 60 s away -> waited for in-process; else deferred by not_before - now
-//   5 compose  subscriber and body (CSV row custom_body, else the campaign body; follow-up: the row's custom_body),
-//              spintax and variables, the message's one 'sent' event (src/marketing/events.ts; its id is derived from
-//              idem), then pixel, click tracking and unsubscribe link (src/marketing/tracking.ts)
+//   5 compose  subscriber, the message's one 'sent' event (src/marketing/events.ts; its id is derived from idem), the
+//              subscriber's status at send time (not 'active', or a follow-up whose subscriber has replied -> final
+//              non-send: event 'bounced' {error subscriber_inactive | subscriber_replied}, recipient row 'skipped',
+//              limiter release), body (CSV row custom_body, else the campaign body; follow-up: the row's custom_body),
+//              spintax (drawn from the message's own seeded source, so every delivery has the same payload) and
+//              variables, then pixel, click tracking and unsubscribe link (src/marketing/tracking.ts)
 //   6 send     google_workspace account -> Gmail (Phase 4 access token, Phase 5 gmailSend); resend account or the
 //              default identity -> Resend with Idempotency-Key = idem (src/marketing/send-*.ts)
 //   7 outcome  success: event metadata {gmail_id | resend_id, from} (follow-ups keep {sequence_number, follow_up}),
 //              resend_email_id = provider id, recipient row 'sent' + sent_at, limiter commit, emails_sent_today
 //              mirror; failure: provider 5xx, 429 and network errors -> retry() (the reservation is kept), every other
 //              failure and the last delivery -> event 'bounced' {error}, recipient row 'failed', limiter release
-//   8 close    after a final outcome of a campaign mail: src/marketing/campaign-close.ts
+//   8 close    once per batch for every campaign with a final outcome of a campaign mail in it, unless the batch read
+//              the campaign as 'sent' already: src/marketing/campaign-close.ts
 // Deferral = OUTBOUND_MAIL.send({...body, deferrals: deferrals + 1}, {delaySeconds}) then ack() of the original, so
 // waiting never spends a retry; every delay is clamped to 86,400 s (the Queues limit for delaySeconds); a deferral
 // that would make deferrals exceed 30 is a final failure instead.
-// Duplicates: a 'sent' event that already carries a provider id means the mail went out (commit and finalise only);
-// an unfinished event of a first delivery that is younger than 15 min belongs to a copy in flight (acked, no send).
+// Duplicates: a 'sent' event that already carries a provider id means the mail went out (commit and finalise only).
+// An unfinished event found by a first delivery (attempts 1) belongs to another copy in flight while it is younger
+// than 15 min (acked, no send), unless that delivery is the delayed copy the message's own earlier delivery handed
+// over: a delivery whose message was delivered before (attempts > 1) and whose event exists unfinished records the
+// hand-over (SenderLimiter.handOff) before it sends its deferral or hold copy, and the copy that takes the record
+// (takeHandoff) goes on to send.
 // Log lines carry ids, codes and counts, never an address, a subject, a body or a token.
 
 import { formatLogLine } from '../../../shared/src/http/log';
@@ -35,8 +43,8 @@ import type { SenderLimiter } from '../do/sender-limiter';
 import { DEFAULT_SENDER } from '../do/sender-limiter';
 import { LOG_PREFIX, type OpsEnv } from '../env';
 import { closeCampaignIfDone } from '../marketing/campaign-close';
-import { ensureEvent, eventIdFor, isFinalEvent, type EventRow } from '../marketing/events';
-import { defaultRandom, personalise, type RandomSource } from '../marketing/personalise';
+import { ensureEvent, eventIdFor, getEvent, IN_FLIGHT_MS, isFinalEvent, type EventRow } from '../marketing/events';
+import { defaultRandom, messageRandom, personalise, type RandomSource } from '../marketing/personalise';
 import { loadCampaign, type CampaignRow } from '../marketing/recipients';
 import { sendViaGmail, type SendOutcome } from '../marketing/send-gmail';
 import { DEFAULT_FROM, sendViaResend } from '../marketing/send-resend';
@@ -53,8 +61,8 @@ export const WAIT_IN_PROCESS_MS = 60_000;
 export const HOLD_DELAY_S = 3600;
 export const MAX_DELAY_S = 86_400;
 export const MIDNIGHT_JITTER_S = 600;
-/** Age under which an unfinished event of a first delivery belongs to a copy in flight. */
-export const IN_FLIGHT_MS = 15 * 60_000;
+/** Age under which an unfinished event of a first delivery belongs to a copy in flight (src/marketing/events.ts). */
+export { IN_FLIGHT_MS };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,8 +71,10 @@ export interface OutboundMailDeps {
   p5?: P5Ports;
   /** In-process wait (default setTimeout). */
   sleep?: (ms: number) => Promise<void>;
-  /** Spintax and midnight jitter (default Math.random). */
+  /** Midnight jitter (default Math.random). */
   random?: RandomSource;
+  /** Spintax source of one message (default messageRandom(idem), src/marketing/personalise.ts). */
+  spintax?: (idem: string) => RandomSource | Promise<RandomSource>;
   /** fetch of the Resend calls (default the global fetch). */
   fetch?: typeof fetch;
 }
@@ -124,6 +134,8 @@ interface SubscriberRow {
   id: string;
   email: string;
   name: string | null;
+  status: string | null;
+  replied_at: string | null;
 }
 
 /** Reads shared by the messages of one batch. */
@@ -160,6 +172,8 @@ interface MessageContext {
   reads: BatchReads;
   deps: OutboundMailDeps;
   random: RandomSource;
+  /** Campaigns of the batch with a final outcome of a campaign mail (closed at the end of the batch). */
+  closeAfter: Set<string>;
   /** The sender object whose reservation this delivery holds (set once reserve answered ok). */
   account?: string;
 }
@@ -168,6 +182,19 @@ type Limiter = DurableObjectStub<SenderLimiter>;
 
 function limiterOf(c: MessageContext, account: string): Limiter {
   return c.env.SENDER_LIMITER.get(c.env.SENDER_LIMITER.idFromName(account)) as Limiter;
+}
+
+/** The object that keeps the message's hand-over records: its preferred account, or the default sender. */
+function handoffLimiter(c: MessageContext): Limiter {
+  return limiterOf(c, c.body.preferred_account_id ?? DEFAULT_SENDER);
+}
+
+/** Before a delivered-before message is deferred or held: records the hand-over when its event exists unfinished. */
+async function handOffIfComposed(c: MessageContext): Promise<void> {
+  if (c.msg.attempts <= 1) return;
+  const event = await getEvent(c.ports.db, await eventIdFor(c.body.idem));
+  if (!event || isFinalEvent(event)) return;
+  await handoffLimiter(c).handOff({ idem: c.body.idem, now: c.ports.clock.now().getTime() });
 }
 
 function baseMetadata(body: OutboundMailV1): Record<string, unknown> {
@@ -182,19 +209,27 @@ async function defer(c: MessageContext, seconds: number, counted: boolean, reaso
     return;
   }
   const delaySeconds = clampDelay(seconds);
+  await handOffIfComposed(c);
   await c.env.OUTBOUND_MAIL.send({ ...c.body, deferrals }, { delaySeconds });
   c.msg.ack();
   log('deferred', { campaign_id: c.body.campaign_id, reason, delay_s: delaySeconds, deferrals });
 }
 
-/** Runs the campaign close after a final outcome of a campaign mail (a failure is logged, never thrown). */
-async function closeIfDone(c: MessageContext): Promise<void> {
-  if (c.body.kind !== 'campaign') return;
-  try {
-    const out = await closeCampaignIfDone(c.ports.db, c.body.campaign_id, c.ports.clock.now());
-    if (out.closed) log('campaign closed', { campaign_id: c.body.campaign_id, sent: out.sent, bounced: out.bounced, expected: out.expected });
-  } catch (e) {
-    logError('campaign close failed', { campaign_id: c.body.campaign_id, error: errorName(e) });
+/** Marks the campaign for the close at the end of the batch after a final outcome of a campaign mail. */
+function closeIfDone(c: MessageContext): void {
+  if (c.body.kind === 'campaign') c.closeAfter.add(c.body.campaign_id);
+}
+
+/** The campaign close of the batch (a failure is logged, never thrown); a campaign read as 'sent' is skipped. */
+async function closeCampaigns(ids: Iterable<string>, ports: Ports, reads: BatchReads): Promise<void> {
+  for (const id of ids) {
+    try {
+      if ((await reads.campaign(id))?.status === 'sent') continue;
+      const out = await closeCampaignIfDone(ports.db, id, ports.clock.now());
+      if (out.closed) log('campaign closed', { campaign_id: id, sent: out.sent, bounced: out.bounced, expected: out.expected });
+    } catch (e) {
+      logError('campaign close failed', { campaign_id: id, error: errorName(e) });
+    }
   }
 }
 
@@ -210,15 +245,16 @@ async function mirror(c: MessageContext, account: string): Promise<void> {
 }
 
 /** The recipient row's status (only while it is still pending, so a later outcome never overwrites a final one). */
-async function markRecipient(c: MessageContext, status: 'sent' | 'failed'): Promise<void> {
+async function markRecipient(c: MessageContext, status: 'sent' | 'failed' | 'skipped'): Promise<void> {
   if (!c.body.recipient_record_id) return;
   const patch: Record<string, unknown> = { status };
   if (status === 'sent') patch.sent_at = c.ports.clock.now().toISOString();
   await c.ports.db.update('marketing_campaign_recipients', patch, { filters: [['id', 'eq', c.body.recipient_record_id], ['status', 'eq', 'pending']] });
 }
 
-/** Final failure: event 'bounced' {error} (unless the mail went out), recipient 'failed', limiter release, ack. */
-async function finalFailure(c: MessageContext, error: string, account: string | null): Promise<void> {
+/** Final failure: event 'bounced' {error} (unless the mail went out), recipient 'failed' (or 'skipped' for a final
+ *  non-send), limiter release, ack. */
+async function finalFailure(c: MessageContext, error: string, account: string | null, recipient: 'failed' | 'skipped' = 'failed'): Promise<void> {
   const db = c.ports.db;
   const id = await eventIdFor(c.body.idem);
   const metadata = { ...baseMetadata(c.body), error };
@@ -228,11 +264,11 @@ async function finalFailure(c: MessageContext, error: string, account: string | 
     if (!(e instanceof DbError) || e.code !== '23505') throw e;
     await db.update('marketing_events', { event_type: 'bounced', metadata }, { filters: [['id', 'eq', id], ['resend_email_id', 'is', null]] });
   }
-  await markRecipient(c, 'failed');
+  await markRecipient(c, recipient);
   if (account) await limiterOf(c, account).release({ idem: c.body.idem });
   c.msg.ack();
   log('final failure', { campaign_id: c.body.campaign_id, kind: c.body.kind, error });
-  await closeIfDone(c);
+  closeIfDone(c);
 }
 
 /** The mail went out earlier (limiter key 'sent' or a final 'sent' event): finalise the database rows only. */
@@ -242,7 +278,7 @@ async function finaliseOnly(c: MessageContext, account: string, providerId: stri
   await mirror(c, account);
   c.msg.ack();
   log('already sent', { campaign_id: c.body.campaign_id, kind: c.body.kind });
-  await closeIfDone(c);
+  closeIfDone(c);
 }
 
 /** Candidate sender objects of the message: 'default', or the campaign's active accounts from the preferred one. */
@@ -253,7 +289,7 @@ async function candidates(c: MessageContext, campaign: CampaignRow): Promise<Arr
 }
 
 async function readSubscriber(db: Db, id: string): Promise<SubscriberRow | null> {
-  const rows = await db.select<SubscriberRow & Record<string, unknown>>('marketing_subscribers', { columns: 'id,email,name', filters: [['id', 'eq', id]], limit: 1 });
+  const rows = await db.select<SubscriberRow & Record<string, unknown>>('marketing_subscribers', { columns: 'id,email,name,status,replied_at', filters: [['id', 'eq', id]], limit: 1 });
   const row = rows[0] as SubscriberRow | undefined;
   return row && typeof row.email === 'string' && row.email !== '' ? row : null;
 }
@@ -336,9 +372,6 @@ async function handle(c: MessageContext): Promise<void> {
     c.msg.ack();
     return;
   }
-  const template = await bodyTemplate(c, campaign);
-  const settings = await c.reads.settings();
-  const text = personalise(body.subject, template, subscriber, c.random, body.kind);
   const eventId = await eventIdFor(body.idem);
   const ensured = await ensureEvent(db, { id: eventId, campaign_id: body.campaign_id, subscriber_id: body.subscriber_id, metadata: baseMetadata(body) });
   if (!ensured.created) {
@@ -351,13 +384,25 @@ async function handle(c: MessageContext): Promise<void> {
       }
       return;
     }
-    const age = existing.created_at ? now - Date.parse(existing.created_at) : Number.POSITIVE_INFINITY;
-    if (c.msg.attempts === 1 && Number.isFinite(age) && age < IN_FLIGHT_MS) {
-      log('duplicate in flight', { campaign_id: body.campaign_id, kind: body.kind });
-      c.msg.ack();
-      return;
+    if (c.msg.attempts === 1 && !(await handoffLimiter(c).takeHandoff({ idem: body.idem }))) {
+      const age = existing.created_at ? ports.clock.now().getTime() - Date.parse(existing.created_at) : Number.POSITIVE_INFINITY;
+      if (Number.isFinite(age) && age < IN_FLIGHT_MS) {
+        log('duplicate in flight', { campaign_id: body.campaign_id, kind: body.kind });
+        c.msg.ack();
+        return;
+      }
     }
   }
+  // The subscriber's status at send time (the message may have waited for a cap, a slot or a hold).
+  const inactive = subscriber.status !== 'active' ? 'subscriber_inactive' : body.kind === 'followup' && subscriber.replied_at ? 'subscriber_replied' : null;
+  if (inactive) {
+    await finalFailure(c, inactive, chosen.name, 'skipped');
+    return;
+  }
+  const template = await bodyTemplate(c, campaign);
+  const settings = await c.reads.settings();
+  const spintax = await (c.deps.spintax ?? messageRandom)(body.idem);
+  const text = personalise(body.subject, template, subscriber, spintax, body.kind);
   const html = applyTracking(text.body, {
     eventId,
     campaignId: body.campaign_id,
@@ -375,7 +420,7 @@ async function handle(c: MessageContext): Promise<void> {
     await mirror(c, chosen.name);
     c.msg.ack();
     log('sent', { campaign_id: body.campaign_id, kind: body.kind, via: idField === 'gmail_id' ? 'gmail' : 'resend' });
-    await closeIfDone(c);
+    closeIfDone(c);
     return;
   }
   if (outcome.retryable && c.msg.attempts <= MAX_RETRIES) {
@@ -395,6 +440,7 @@ export async function outboundMailConsumer(
   void ctx;
   let p5 = deps.p5;
   let shared: { ports: Ports; reads: BatchReads } | undefined;
+  const closeAfter = new Set<string>();
   for (const msg of batch.messages as ReadonlyArray<Message<unknown>>) {
     const body = msg.body;
     if (!isOutboundMail(body)) {
@@ -418,6 +464,7 @@ export async function outboundMailConsumer(
         reads: shared.reads,
         deps,
         random: deps.random ?? defaultRandom,
+        closeAfter,
       };
       await handle(c);
     } catch (e) {
@@ -434,4 +481,5 @@ export async function outboundMailConsumer(
       msg.retry();
     }
   }
+  if (shared && closeAfter.size > 0) await closeCampaigns(closeAfter, shared.ports, shared.reads);
 }

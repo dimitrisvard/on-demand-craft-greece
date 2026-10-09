@@ -1,6 +1,6 @@
 # microns-ops
 
-Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2; ARCHITECTURE.md §6.4, §7.2, §9). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`). Every `/api/notifications` action runs here, because `api/notifications.js` imports nesting and inventory at module scope (PLAN.md §5.2 DV-1). Phase 4 (PLAN.md §5.4) adds the agent layer: section "Phase 4: agent layer" below.
+Cloudflare Worker for the API handlers that do not run in `microns-site`, and the consumer of the queue `scrapes`. Phase 2 of the Cloudflare migration (docs/migration/PLAN.md §5.2; ARCHITECTURE.md §6.4, §7.2, §9). The handlers in `api/*.js` and `lib/*` are unchanged; they run through the shared `@vercel/node` shim (`workers/shared/src/compat/vercel-node.ts`). Every `/api/notifications` action runs here, because `api/notifications.js` imports nesting and inventory at module scope (PLAN.md §5.2 DV-1). Phase 4 (PLAN.md §5.4) adds the agent layer: section "Phase 4: agent layer" below. Phase 5 (PLAN.md §5.5) moves the scheduled jobs, the campaign mail and the unfold service here: section "Phase 5: consolidated compute" below.
 
 ## How requests reach it
 
@@ -9,8 +9,8 @@ Cloudflare Worker for the API handlers that do not run in `microns-site`, and th
 | `OpsApi.handle(request, call)` (named entrypoint, RPC) | `microns-site` through the service binding `OPS` | The site resolves the endpoint and action, runs the gate and sends the verified principal and the function URL in `call` (`OpsCall`, `workers/shared/src/http/rpc.ts`). Ops reads the principal from `call` only, never from a header |
 | `MailIngest.startIntake`, `MailIngest.ingestReply` (named entrypoint, RPC; Phase 4) | `microns-mail` through its service binding `OPS` | Ids only (`v`, inbound e-mail id, message hash, tenant); the row is read from the database here |
 | default `fetch` | MCP clients on the Custom Domain `mcp.micronshub.eu` (Phase 4); nobody else (`workers_dev` and `preview_urls` are off) | Host `MCP_HOSTNAME` → remote MCP (`src/mcp/`); every other host 404 with no body |
-| default `queue` | queues `scrapes`, `cad-jobs`, `agent-events` | By `batch.queue`; on `scrapes` a `directory-scan` envelope goes to the scrapers module, every other message to the Phase 2 consumer (below) |
-| default `scheduled` (Phase 4) | crons `* * * * *` and `*/10 * * * *` | Flag mirror tick; dispatcher (Gmail poller, orphan inbound rows, portal orders, parked runs, old failure cards, stuck CAD jobs) |
+| default `queue` | queues `scrapes`, `cad-jobs`, `agent-events`, and from Phase 5 `translations` and `outbound-mail` | By `batch.queue`; on `scrapes` a batch of Phase 5 kinds goes to `src/queues/scrapes-p5.ts`, a `directory-scan` envelope to the scrapers module, every other message to the Phase 2 consumer (below) |
+| default `scheduled` (Phase 4) | crons `* * * * *` and `*/10 * * * *` | Flag mirror tick and, from Phase 5, the schedule table of the Phase 5 jobs; dispatcher (Gmail poller, orphan inbound rows, portal orders, parked runs, old failure cards, stuck CAD jobs) |
 
 | Check in `OpsApi.handle` / the app | Answer |
 |---|---|
@@ -34,7 +34,7 @@ Every route is `app.all(<function path>)`, so `OPTIONS` and every method reach t
 
 | Function path | Module | Notes |
 |---|---|---|
-| `/api/marketing` | `api/marketing.js` | `call.action` `webhook` → `src/routes/marketing-webhook.ts` (signature checked on the raw bytes first); `google-auth` → `src/routes/google-auth.ts`; anything else (`apollo-enrich`, sentinels) → the handler |
+| `/api/marketing` | `api/marketing.js` | `call.action` `webhook` → `src/routes/marketing-webhook.ts` (signature checked on the raw bytes first); `google-auth` → `src/routes/google-auth.ts`; `send-campaign` (Phase 5, gate MK-8) → `src/routes/marketing-send.ts`; anything else (`apollo-enrich`, sentinels) → the handler |
 | `/api/notifications` | `api/notifications.js` | `partner`, `production-status`, `nest`, every `inv-*`; `qrcode` resolves to its server build through the wrangler `alias` |
 | `/api/gsc` | `api/gsc.js` | The handler's own admin check still runs |
 | `/api/tenders` | `api/tenders.js` | `/api/connector-status` arrives as `/api/tenders?…connectors=true` |
@@ -42,6 +42,7 @@ Every route is `app.all(<function path>)`, so `OPTIONS` and every method reach t
 | `/api/funded-startups` | `api/funded-startups.js` | Synchronous for every caller |
 | `/api/scrape-website`, `/api/scrape-company-profile` | as named | — |
 | `/api/scan-directory` | `api/scan-directory.js` | — |
+| `/api/cad/flat-pattern` (Phase 5) | `src/routes/cad-compat.ts` | The site answers `/api/cad/<token>/flat-pattern` (gate CD-1) and sends this function URL, so the token never reaches ops; the route validates the body, takes an interactive `CadRouter` lease and returns the container's answer unchanged within 110 s |
 
 ## Queue `scrapes`
 
@@ -64,6 +65,8 @@ Every route is `app.all(<function path>)`, so `OPTIONS` and every method reach t
 | `limits.cpu_ms` | limit | 300,000 (requests and consumer; `nest` on large orders needs more than the default) |
 | Phase 4 bindings and vars | see `wrangler.jsonc` and "Phase 4: agent layer" below | KV `FLAGS`, R2 `PRIVATE_FILES`, queues `cad-jobs` and `agent-events`, three Workflows, three Durable Objects (tag `v1`), Vectorize `QUOTES_INDEX`, `AI`, `BROWSER`, `EVENTS`, `MCP_RATE_LIMIT`, the `mcp.micronshub.eu` Custom Domain, twelve vars; every one optional in `OpsEnv` and checked where used |
 | `AI_GATEWAY_TOKEN`, `CAD_UNFOLD_URL`, `CAD_SHARED_SECRET`, `AGENT_APPROVAL_SECRET`, `CAD_ACCESS_CLIENT_ID`, `CAD_ACCESS_CLIENT_SECRET` | secret (Phase 4, optional, not in `secrets.required`) | `npx wrangler secret put <NAME>`; a missing one fails only the step that needs it (`config_missing`) |
+| Phase 5 bindings and vars | see `wrangler.jsonc` and "Phase 5: consolidated compute" below | KV `SEO_CACHE`, queues `translations` and `outbound-mail`, three Workflows, Durable Objects `SenderLimiter` and `CadContainer` (tag `v2`), the container `microns-cad`, ten vars; every one optional in `OpsEnv` and checked where used |
+| `INDEXNOW_KEY`, `XOMETRY_TOKEN`, `XOMETRY_COOKIE` | secret (Phase 5, optional, not in `secrets.required`) | A missing one is recorded in the run (`indexnow: 'not_configured'`, Xometry `skipped` with `not_configured`) |
 | `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `APOLLO_API_KEY` | secret (`secrets.required`) | `npx wrangler secret put <NAME>` in this folder; locally `.dev.vars` (template `.dev.vars.example`, dummy values) |
 
 The repository is public: secret values never go into a file of this folder.
@@ -189,18 +192,36 @@ its switch-over step, so merging and deploying change nothing on their own.
 | The schedule table: UTC 5-field expressions read by an own matcher (`*`, `*/n`, `a,b`, `a-b`; day of week 0 = Sunday); a slot `YYYY-MM-DDTHH:MMZ` is part of every run key and instance id; entries with an interval of at least 2 h also fire on a tick up to 60 min after a missed slot | `src/cron/schedule.ts` |
 | The dispatcher reads the gate first (flag, or the var string `"true"`): a closed gate writes nothing; then it opens the run (`openRun`, trigger `cron`) or creates the Workflow instance, and sends the queue message; an existing run or instance is skipped; a failed send closes the run `failed` with `enqueue_failed`; it never throws | `src/cron/run-schedule.ts` |
 | Scheduled collectors use their own envelope on `scrapes` (`P5ScrapeMessage`, kinds `reddit-tier`, `hn-scan`, `tender-scheduled`, `xometry-scan`), routed by kind in `src/index.ts` before the Phase 4 and Phase 2 consumers; `ScrapeMessage` and `src/queues/scrapes.ts` are unchanged | `src/queues/messages.ts`, `src/queues/scrapes-p5.ts` |
-| Every external effect the Phase 4 ports do not cover goes through `P5Ports` (text LLM calls to Anthropic and Gemini through the AI Gateway, the collector sources, the Storage upload, the Gmail send, the Container, plain Telegram text); T2 points them at the stub with the `*_API_BASE`, `AGENT_GEMINI_BASE_URL` and `CAD_CONTAINER_BASE_URL` vars, and `makeP5Ports` refuses those vars while `AI` is bound | `src/ports/p5.ts` |
+| Every external effect the Phase 4 ports do not cover goes through `P5Ports` (text LLM calls to Anthropic and Gemini through the AI Gateway, the collector sources, the Storage upload, the Gmail send, the Container, plain Telegram text); T2 points them at the stub with the `*_API_BASE`, `AGENT_GEMINI_BASE_URL` and `CAD_CONTAINER_BASE_URL` vars, and `makeP5Ports` refuses those vars while `AI` is bound. The same T2-only list holds `CONTENT_WAIT_TIMEOUT_S` (seconds of the content-daily translations-done wait, default 6 h), which only a T2 file's own harness sets | `src/ports/p5.ts` |
+| A text call that was answered but still failed (Anthropic `max_tokens`, refusal or no text; a Gemini 200 without text, blocked or with an error, when it carries `usageMetadata`) returns its billed `usage` on the failure; the content jobs add it to the run, so `llm_calls` and `cost_cents` count every answered call. Provider errors and network failures carry none | `src/ports/p5.ts`, `src/workflows/content-daily.ts`, `src/queues/translations.ts` |
 | T1 fakes of the Phase 5 ports and the test database with the Phase 5 tables and article-queue RPCs; nothing in the production code imports them | `src/ports/p5-stub/` |
 | Bundle: none of the Phase 5 T2-only vars in the production `vars`; `@cloudflare/containers` bundled from exactly one copy (`workers/ops/node_modules/@cloudflare/containers/`, `dist/lib/container.js` once) | `scripts/check-bundle.mjs` |
+| T2 files of profile `jobs` that reach the tender scan: `api/tender-scan.js` runs in-process and reaches its portals and alert host by country code, with no base URL the stub can replace. Seed `tender_connectors` only with codes it refuses before any I/O (such as `XX`), keep `agent.growth.tenders` in shadow whenever another code is due, and restore a flag only after the runs it gates are final (consumers read flags when they handle a message). A T1 test checks the codes seeded by every `test/t2-jobs/*.jobs.ts` file against the handler's connector table | `test/t2-jobs/p5-kernel.jobs.ts`, `test/t2-jobs/p5-collectors.jobs.ts`, `test/p5/kernel/harness-jobs.test.ts`, `../site/test/integration/harness.mjs` |
 
 ### Run and test
 
 | Task | Command (in `workers/ops`) |
 |---|---|
 | Unit tests (T1) of the Phase 5 kernel | `npx vitest run test/p5/kernel test/config.test.ts`; one unit: `npm test -- test/p5/<area>` |
-| Integration tests, profile `jobs` (site primary and ops, the consumers `scrapes`, `translations`, `outbound-mail`, `cad-jobs`, every provider and source on the local stub, mini-PostgREST with the Phase 5 tables) | `npm run test:integration:jobs` (files `test/t2-jobs/p5-<area>.jobs.ts`) |
+| Integration tests, profile `jobs` (site primary and ops, the consumers `scrapes`, `translations`, `outbound-mail`, `cad-jobs`, every provider and source of the Phase 5 ports on the local stub, mini-PostgREST with the Phase 5 tables) | `npm run test:integration:jobs` (files `test/t2-jobs/p5-<area>.jobs.ts`) |
 | Run the harness for manual checks | `node ../site/test/integration/harness.mjs up --profile jobs`; crons: `POST <url>/cdn-cgi/local/explorer/api/local/scheduled?worker=microns-ops` with `{"cron": "* * * * *", "scheduled_time": <epoch ms>}` |
 | Bundle check with the Phase 2, 4 and 5 rules | `npm run build:dry` |
+
+### Jobs (as built)
+
+| Job | Schedule (UTC, table) | Gate | Unit of work | Run key |
+|---|---|---|---|---|
+| `reddit-t1`, `-t2`, `-t3` | `*/15`, `*/30`, hourly | `agent.growth.reddit` | one `reddit-tier` message per tick (at most 40 due subreddits) | `growth.reddit:t<N>:<slot>` |
+| `hn` | `*/30` | `agent.growth.hn` | one `hn-scan` message per tick | `growth.hn:<slot>` |
+| `tenders` | `0 6 * * *` | `agent.growth.tenders` | parent run, then one `tender-scheduled` message per due connector (`api/tender-scan.js` in-process) | `growth.tenders:<date>`, child `…:<CC>` |
+| `xometry` | `0 6,8,10,12,14,16,18 * * *` | `agent.growth.xometry` | one `xometry-scan` message per slot | `growth.xometry:<slot>` |
+| `content-daily` | `0 7 * * *` | `agent.content_daily` (steps not exactly `["sitemap"]`) | `ContentDailyWorkflow` `content-daily-<date>`; queue `translations` | `content_daily:<date>`; translations `content_daily.translate:<id>:<lang>:<date>` |
+| `sitemap` | `0 9 * * *` | `agent.content_daily` with steps exactly `["sitemap"]` (stage S4) | `SitemapWorkflow` `sitemap-<date>` (also started by content-daily) | `content_daily.sitemap:<date>` |
+| `ops-digest` | `30 6 * * 1` | `agent.ops_digest` | `OpsDigestWorkflow` `ops-digest-<YYYY>-W<ww>` | `ops_digest:<YYYY>-W<ww>` |
+| `marketing-followups`, `marketing-warmup` | `5 * * * *`, `5 0 * * *` | vars `MARKETING_FOLLOWUPS_ENABLED`, `MARKETING_WARMUP_ENABLED` = `"true"` | inline | `marketing.followups:<slot>`, `marketing.warmup:<date>` |
+| campaign send | dashboard click | route answers by `OUTBOUND_MAIL_PAUSED` (503) and `OUTBOUND_MAIL_STOPPED` (423) | one `outbound-mail` message per recipient | `marketing.send:<campaign_id>` (re-queue `:r<n>`) |
+
+Mode `shadow` runs and records the run but writes nothing to business tables and sends no Telegram text or mail; content and digest write their would-be output to R2 `phase5-shadow/…`.
 
 ### Owner order
 
@@ -210,15 +231,16 @@ Before the first deploy with the Phase 5 configuration: the queues `translations
 in `containers[0].image`; the optional secrets `INDEXNOW_KEY` and `XOMETRY_TOKEN`; the `CAD_INPUT_HOSTS` placeholder.
 The switch-over runs one job at a time, at least 24 h apart, by flag values and the deactivation SQL; the full
 checklist and runbook are the owner sections of the Phase 5 build specification (docs/migration/specs/PHASE5_SPEC.md,
-§10).
+§10); summary, gate status and open items: docs/migration/PLAN.md §5.5; commands and templates:
+scripts/phase5/README.md.
 
-### Status (2026-10-08, local; kernel only, the job units are still being built)
+### Status (2026-10-09, local; every Phase 5 unit built, Wave 3 regression run)
 
-Nothing is deployed and no flag is set.
+Nothing is deployed and no flag is set. Phase 5 exit gate as a whole: docs/migration/PLAN.md §5.5, build record.
 
 | Check | Result |
 |---|---|
-| T1 kernel (`npx vitest run test/p5/kernel test/config.test.ts`) | 11 files, 187 tests green, including a simulated week of minute ticks through the dispatcher |
-| T2, profile `jobs`, kernel file (`npm run test:integration:jobs -- test/t2-jobs/p5-kernel.jobs.ts`) | 4 tests green: one run per due job from a fixed `scheduled_time`, the tender fan-out, the ops-digest instance, no second run for the same tick |
+| T1 (`npm test`) | 129 files, 2,038 tests green (19 skipped opt-in tests), including a simulated week of minute ticks through the dispatcher |
+| T2, profile `jobs` (`npm run test:integration:jobs`) | 7 files, 27 tests green, including the content-daily wait timeout in its own harness (`CONTENT_WAIT_TIMEOUT_S`) |
 | T2, profiles `api` and `agents` with the Phase 5 configuration | green (4 and 46 tests) |
-| Dry run (`npm run build:dry`) | builds with the `containers` stanza (no Docker needed); one copy of `@cloudflare/containers`; Phase 2, 4 and 5 bundle rules pass |
+| Dry run (`npm run build:dry`) | builds with the `containers` stanza (no Docker needed); one copy of `@cloudflare/containers`; Phase 2, 4 and 5 bundle rules pass; 10,073 KiB, gzip 2,421 KiB |

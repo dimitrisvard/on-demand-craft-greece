@@ -146,7 +146,11 @@ export interface MarketingHarness {
   rows(table: string): Array<Record<string, unknown>>;
 }
 
-export function marketingHarness(o: { now?: number; env?: Partial<OpsEnv>; random?: () => number } = {}): MarketingHarness {
+/**
+ * `spintaxStream`: the consumer draws spintax from the harness's one random stream (the repo functions' draw order,
+ * for the oracle comparisons) instead of each message's own seeded source (production).
+ */
+export function marketingHarness(o: { now?: number; env?: Partial<OpsEnv>; random?: () => number; spintaxStream?: boolean } = {}): MarketingHarness {
   const clock = new FakeClock(o.now ?? T0);
   const db = new P5MemoryDb({ clock: () => clock.now() });
   const gmail = new FakeGmail();
@@ -220,6 +224,7 @@ export function marketingHarness(o: { now?: number; env?: Partial<OpsEnv>; rando
           clock.advance(ms);
         },
         random: () => random(),
+        ...(o.spintaxStream ? { spintax: () => () => random() } : {}),
         fetch: resendFetch,
       });
     },

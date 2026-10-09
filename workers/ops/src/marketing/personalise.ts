@@ -9,11 +9,28 @@
 //   - Variables of a recipient: name = subscriber name or "there", company "", email = subscriber address, applied in
 //     the order of the repo function of the mail kind (campaign: name, company, email; follow-up: name, email,
 //     company), so a value that holds another placeholder resolves exactly as there.
-//   - The random source is injectable (tests seed it); production uses Math.random.
+//   - The random source is injectable (tests seed it); production uses Math.random for the A/B draw of the route.
+//   - The spintax draws of one queued message come from messageRandom(idem): a stream seeded with the SHA-256 of the
+//     message's idempotency key, so every delivery of the message (retry, redelivery, deferred copy) produces the same
+//     subject and body, and the provider sees one payload per Idempotency-Key. Different messages draw independently
+//     and uniformly, as the repo's per-call Math.random does.
 
 export type RandomSource = () => number;
 
 export const defaultRandom: RandomSource = () => Math.random();
+
+/** The spintax random source of one message (rules above): mulberry32 over the first 4 bytes of SHA-256. */
+export async function messageRandom(idem: string): Promise<RandomSource> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`spintax:${idem}`)));
+  let state = (((digest[0] as number) << 24) | ((digest[1] as number) << 16) | ((digest[2] as number) << 8) | (digest[3] as number)) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export function parseSpintax(text: string, random: RandomSource = defaultRandom): string {
   if (!text || !text.includes('{')) return text;

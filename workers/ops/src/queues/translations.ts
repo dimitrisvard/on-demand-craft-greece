@@ -12,7 +12,9 @@
 //   3. exists the language row of the group exists -> ack, 'skipped' (reason exists)
 //   4. master the English article (language en); missing -> ack, 'failed' (master_missing)
 //   5. translate content/translate.ts over content/gemini-chain.ts (90 s per call, model chain)
-//   6. insert articles (23505 = success, as live)
+//   6. insert articles; 23505 with the language row of the group present = success (a concurrent duplicate, as
+//      live); 23505 with the row still missing (the slug belongs to another article of the language) -> ack, run
+//      'failed' with error slug_conflict, one text alert, no IndexNow (the backfill holds the pair for 7 days)
 //   7. IndexNow [English URL, new language URL] when INDEXNOW_KEY is set (else 'not_configured')
 //   8. origin daily and all 13 languages present -> CONTENT_DAILY.get('content-daily-<for_date>')
 //      .sendEvent('translations-done') (buffered when early; a second event is harmless)
@@ -25,8 +27,9 @@ import { formatLogLine } from '../../../shared/src/http/log';
 import { readFlag } from '../agents/flags';
 import { addUsage, checkpointRun, closeRun, EMPTY_USAGE, isFinal, openRun, usageFromRow, type UsageAcc } from '../agents/runs';
 import { getRun } from '../db/repos/agent-runs';
+import { BACKFILL_HOLD_DAYS, SLUG_CONFLICT } from '../content/backfill';
 import { CONTENT_FLAG, errorCode, snapshotFlag, tenantOf } from '../content/flag';
-import { callGemini, isGeminiOverloaded } from '../content/gemini-chain';
+import { callGemini, geminiFailureUsage, isGeminiOverloaded } from '../content/gemini-chain';
 import { submitIndexNow, translationUrls, type IndexNowResult } from '../content/indexnow';
 import { isTargetLang, LANGUAGE_NAMES, TARGET_LANGS } from '../content/languages';
 import { translateRunKey } from '../content/report';
@@ -54,6 +57,8 @@ export interface TranslationsDeps {
 export const translationAlerts = {
   failed: (lang: string, slug: string, code: string) =>
     `Translation ${lang} failed for ${slug} after ${TRANSLATION_MAX_RETRIES + 1} attempts (${code}). The next daily backfill queues it again.`,
+  slugConflict: (lang: string, slug: string, translatedSlug: string) =>
+    `Translation ${lang} for ${slug} not saved: the slug ${translatedSlug} is already used by another ${lang} article. The daily backfill leaves this pair out for ${BACKFILL_HOLD_DAYS} days.`,
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -179,11 +184,19 @@ async function handleTranslation(msg: Message<TranslationMessageV1>, env: OpsEnv
       m.language,
       {
         call: async (prompt, kind) => {
-          const answer = await callGemini(p5.textLlm, prompt, {
-            meta: kind === 'main' ? meta(`translate-${m.language}`, TRANSLATE_PROMPT_ID) : meta(`translate-table-${m.language}`, TRANSLATE_TABLE_PROMPT_ID),
-            sleep: deps.sleep,
-          });
-          for (const u of answer.usage) acc = addUsage(acc, u, kind === 'main' ? 'translate' : 'translate-table');
+          const usageStep = kind === 'main' ? 'translate' : 'translate-table';
+          let answer: Awaited<ReturnType<typeof callGemini>>;
+          try {
+            answer = await callGemini(p5.textLlm, prompt, {
+              meta: kind === 'main' ? meta(`translate-${m.language}`, TRANSLATE_PROMPT_ID) : meta(`translate-table-${m.language}`, TRANSLATE_TABLE_PROMPT_ID),
+              sleep: deps.sleep,
+            });
+          } catch (e) {
+            // an answered call that failed is billed: its usage joins the run before the failure path stores it
+            for (const u of geminiFailureUsage(e)) acc = addUsage(acc, u, usageStep);
+            throw e;
+          }
+          for (const u of answer.usage) acc = addUsage(acc, u, usageStep);
           if (kind === 'main') modelUsed = answer.model;
           return answer.text;
         },
@@ -192,7 +205,7 @@ async function handleTranslation(msg: Message<TranslationMessageV1>, env: OpsEnv
       },
     );
 
-    // 6 insert (23505 = success)
+    // 6 insert (23505 = success when the group's row exists; else the slug is taken by another article)
     let inserted = true;
     try {
       await db.insert('articles', {
@@ -211,6 +224,11 @@ async function handleTranslation(msg: Message<TranslationMessageV1>, env: OpsEnv
     } catch (e) {
       if (!(e instanceof DbError && e.code === '23505')) throw e;
       inserted = false;
+      const landed = await db.select<{ id: string }>('articles', { columns: 'id', filters: [['translation_id', 'eq', master.translation_id], ['language', 'eq', m.language]], limit: 1 });
+      if (landed.length === 0) {
+        await p5.telegramText.send(translationAlerts.slugConflict(m.language, master.slug, translation.slug));
+        throw new Done('failed', { language: m.language, origin: m.origin, slug: translation.slug, model: modelUsed, tables_translated: translation.tablesTranslated }, SLUG_CONFLICT);
+      }
     }
 
     // 7 IndexNow

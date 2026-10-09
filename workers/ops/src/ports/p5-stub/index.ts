@@ -72,9 +72,13 @@ export function okText(text: string, o: { model?: string; stop?: string; usage?:
   };
 }
 
-/** A failed text result. */
-export function failText(code: Extract<TextLlmResult, { ok: false }>['code'], o: { status?: number | null; retryable?: boolean; message?: string } = {}): TextLlmResult {
-  return { ok: false, status: o.status ?? null, code, retryable: o.retryable ?? (code === 'rate_limited' || code === 'server' || code === 'timeout'), message: o.message ?? `fake ${code}` };
+/** A failed text result; usage only when given (the failure of an answered call). */
+export function failText(
+  code: Extract<TextLlmResult, { ok: false }>['code'],
+  o: { status?: number | null; retryable?: boolean; message?: string; usage?: LlmUsage } = {},
+): TextLlmResult {
+  const result: TextLlmResult = { ok: false, status: o.status ?? null, code, retryable: o.retryable ?? (code === 'rate_limited' || code === 'server' || code === 'timeout'), message: o.message ?? `fake ${code}` };
+  return o.usage ? { ...result, usage: { ...o.usage } } : result;
 }
 
 export class FakeTextLlm implements TextLlmPort {

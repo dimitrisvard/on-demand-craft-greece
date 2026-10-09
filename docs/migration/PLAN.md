@@ -18,7 +18,7 @@ Conventions:
 
 ## 1. Summary of decisions
 
-1. **Three Workers and one Container app**, not one Worker: `microns-site` (Static Assets, SEO handler, redirect table, sitemap routes, `/api/*` router), `microns-ops` (Hono: ops/admin API, Cron Triggers, Queues, Workflows, Durable Objects, AI Gateway, remote MCP), `microns-mail` (Email Worker) and `microns-cad` (Container from `sheet-metal-service/Dockerfile`). Repo layout `workers/site`, `workers/ops`, `workers/mail`, `workers/cad`. An agent deploy can never take the SEO path down.
+1. **Three Workers and one Container app**, not one Worker: `microns-site` (Static Assets, SEO handler, redirect table, sitemap routes, `/api/*` router), `microns-ops` (Hono: ops/admin API, Cron Triggers, Queues, Workflows, Durable Objects, AI Gateway, remote MCP), `microns-mail` (Email Worker) and `microns-cad` (Container from `sheet-metal-service/Dockerfile`; as built its class lives in `microns-ops` and the image is prebuilt in CI, §5.5 DV5-14, DV5-21). Repo layout `workers/site`, `workers/ops`, `workers/mail`, `workers/cad`. An agent deploy can never take the SEO path down.
 2. **The Worker answers every request first**: `assets.html_handling = "none"`, `not_found_handling = "single-page-application"`, `run_worker_first = true` (CF docs, verified 2026-09-27). The shell comes from `env.ASSETS.fetch('/index.html')`, never a self-fetch (H-4; today middleware.ts:424). `public/_redirects` is deleted in Phase 1 (H-3; public/_redirects:1).
 3. **SEO handler ported, not rewritten**: the ~280-line orchestrator of `middleware.ts` is copied into `workers/site`; `middleware/*` is imported unchanged; `Cache-Control` and `X-Seo-Source` stay byte-identical (middleware.ts:670-677).
 4. **In-Worker redirect table instead of `_redirects`**: one table generated from the 25 `vercel.json` redirects (vercel.json:2-128) and the client map (src/components/SEORedirects.tsx:14-73), status 308 as on Vercel, matched on raw and NFC-decoded paths, dead mojibake source kept byte-identical.
@@ -71,7 +71,7 @@ Effort figures are the task sums in §4 and §5; plan.md (2026-09-27) figures in
 | 2 API port | `workers/ops` + site `/api/*` router; `@vercel/node` shim; R2 for new objects; auth gates, Turnstile, rate limits; Svix webhook; callers repointed | All API e2e paths pass on preview; R2 round trip; webhook test; tracking URLs identical; forward flag proven both ways | Before cutover: none needed. After: `api.forward_to_vercel` on (≈ 1 min) | ≈ 7 d [5–7 d] | Claude (Dimitris: buckets, keys, secrets) |
 | 3 Zone + cutover | Zone to Cloudflare (DS removal, NS move, DNSSEC); `www` Route flip, apex redirect rule, wildcard Route; bot/cache settings; 48 h observation | 48 h GSC coverage and crawl stats flat; `verify-ssr.sh` green on production; zero 5xx; mail test; Resend and GSC verified; DNSSEC validates | Record flips back to Vercel (≈ 10 min); NS rollback only per §6.3 | ≈ 3.25 d + DS wait + 48 h [2–3 d + 48 h] | Both |
 | 4 Agent layer | Supabase additions; flags; AI Gateway; `microns-mail`; `rfq-intake`, `quote`, `post-order` Workflows; Vectorize; scrapers; remote MCP; dashboard pages | One real RFQ end to end with approval gate; cost per RFQ measured; every agent behind a flag; SEO parity unchanged | Per-agent flag off (≈ 1–2 min) | ≈ 14.5 d [2–3 weeks] | Claude (Dimitris: approvals, accounts) |
-| 5 Consolidate compute | Article pipeline Workflow + translation Queue; collectors; marketing crons; Xometry scanner; CAD Container; dead edge functions removed; ported pg_cron jobs unscheduled | 7 days of output parity; old schedulers disabled, not deleted | Re-activate pg_cron jobs / GitHub Action / VPS URL (≈ 15 min) | ≈ 9 d + 7-day window [1–2 weeks] | Both |
+| 5 Consolidate compute | Article pipeline Workflow + translation Queue; collectors; marketing crons; Xometry scanner; CAD Container; dead edge functions removed; ported pg_cron jobs unscheduled | 7 days of output parity; old schedulers disabled, not deleted | Flag off + re-activate pg_cron jobs / repository variable for the GitHub Action / VPS URL (≈ 5–15 min per step) | ≈ 9 d + 7-day window [1–2 weeks] | Both |
 | 6 Hardening + decommission | P6-1 credential rotation; RLS remediation; hardening; Vercel and VPS decommission; repo cleanup; cost report | Security checklist signed; P6-1 verified; 30-day cost ≤ target | Vercel project paused (not deleted) for 30 days | ≈ 5.25 d [1 week] | Both |
 | 7 (optional) Supabase → D1 | D1 `microns-db`, authorisation layer, auth replacement, data API, data migration | E2e green on D1; row counts and checksums equal; SEO parity 0 diffs; 14 days normal logins; 14 days zero Supabase traffic | Flag `data.backend` back to `supabase` | 6–10 weeks (rough) | Both |
 
@@ -85,7 +85,7 @@ The audit is complete ([README.md](README.md), [INVENTORY.md](INVENTORY.md)). Th
 | P0-2 | Credential consumer inventory: confirm every consumer of each service credential and keep the checklist current as Workers gain secrets (checklist in the private note). Rotation itself is task P6-1 in Phase 6 | Both | 0.5 d | Private checklist lists every consumer per credential (hosting env, Supabase secrets, `cron.job`, VPS, GitHub secrets, MCP env, database-stored settings); rule recorded that each Worker secret created in Phases 1–5 is appended the day it is created | — | H-7, H-30 |
 | P0-3 | Capture the HTTP/SEO baseline from an allow-listed vantage point (owner laptop or allow-listed runner): all parity URLs, HEAD + GET, apex/http variants, headers | Both (Claude supplies the capture script and URL list; Dimitris runs it) | 0.75 d | Snapshot of ≈ 2,610 public URLs plus redirect sources, soft-404 probes, special files, apex/`http://` variants (status, `Location`, headers incl. HSTS, body) stored outside git; the URL list becomes the input of the parity tool (P1-8); re-captured at S11 before the site flip | Q1 | H-1, H-11, H-24, H-28 |
 | P0-4 | Re-dump live `cron.job`, `pg_policies`, the Papaki zone file, Vercel domain + project settings | Both | 0.5 d | Dated dumps stored privately (cron commands contain credential values); zone file incl. record TTLs, DS TTL at the `.eu` parent and parent NS TTL; Vercel: Attack Challenge Mode, Deployment Protection, Node version, build command, env-var names, domain redirect status | — | H-24, H-26 |
-| P0-5 | Pull live source of all 40 deployed edge functions (reference only) | Claude | 0.4 d | 40 sources saved privately (not committed until Q6 is answered and each file is checked for secrets); diff report repo vs live for the 25 functions in both | — | H-26 |
+| P0-5 | Pull live source of all 40 deployed edge functions (reference only; the live list holds 41, §5.5 DV5-8) | Claude | 0.4 d | 40 sources saved privately (not committed until Q6 is answered and each file is checked for secrets); diff report repo vs live for the 25 functions in both | — | H-26 |
 | P0-6 | Add the Cloudflare preview host to Supabase Auth Site URL / redirect allowlist | Dimitris | 0.1 d | Redirect allowlist contains `https://microns-site.<account>.workers.dev` and the `staging` preview alias host; Site URL stays `https://www.micronshub.eu` | P0-8, Q16 | H-22 |
 | P0-7 | Pin package manager + Node version; compare `dist/` file lists Vercel vs local build | Both | 0.4 d | `packageManager`/`engines` and `.nvmrc` committed (per Q15); local build lists the same `dist/` files as the Vercel production deployment; the 210 prerender files are present (vite.config.ts:27, :87-106) | Q15 | H-23 |
 | P0-8 | Cloudflare account prerequisites: Workers Paid, R2 enabled, scoped API token for CI, Access team domain | Dimitris | 0.2 d | Workers Paid active; R2 enabled; API token limited to Workers scripts/routes, R2 and KV, stored as GitHub secret `CLOUDFLARE_API_TOKEN` with `CLOUDFLARE_ACCOUNT_ID`; Access team domain chosen | — | — |
@@ -510,48 +510,185 @@ Goal: schedulers and long-running jobs move from pg_cron, Supabase Edge Function
 
 | ID | Task | Owner | Effort | Refs |
 |---|---|---|---|---|
-| P5-1 | Reconcile edge functions (Q6): re-sync the repo from the live sources of P0-5; delete dead functions after a log check | Both | 0.5 d | H-26 |
-| P5-2 | `content-daily` Workflow (`ContentDailyWorkflow`) at 07:00 UTC (replaces `enqueue-daily-article` 07:00, `process-article-queue` */5, `auto-translate-daily-articles` 08:00, `auto-fix-article-links` 08:30, `auto-update-sitemap` 09:00; live 2026-09-30) with Queue `translations` per language, fix-links step, `sitemap` Workflow (`SitemapWorkflow`) and IndexNow; sitemaps written to `microns-private` `sitemaps/…` and served by `microns-site` at identical URLs; flag `agent.content_daily` | Claude | 2 d | H-12, H-19 |
-| P5-3 | Collectors as Cron Triggers + Queue `scrapes`: reddit tier1 */15, tier2 */30, tier3 hourly; hn */30; tenders 06:00; flags `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders` | Claude | 1 d | H-29 |
-| P5-4 | Marketing: `send-campaign` → Queue `outbound-mail` with `SenderLimiter` DO; `process-followups` and `process-warmup` ported but left off (not live today, C5) | Claude | 1 d | — |
-| P5-5 | Xometry scanner per Q8 (default: TypeScript port on a Cron Trigger at the current hours, .github/workflows/xometry-scan.yml:21; alert on HTTP 401 instead of silent failure; optional Hyperdrive `SUPABASE_DB` for the `xometry_offers` upserts); flag `agent.growth.xometry` | Claude | 1.25 d | — |
-| P5-6 | `microns-cad` Container (`CadContainer`) from `sheet-metal-service/Dockerfile`; `CadRouter` switches from the VPS; shared secret `CAD_SHARED_SECRET` and an enforced wall-clock in `sheet-metal-service/main.py` (`PROCESSING_TIMEOUT` is declared at sheet-metal-service/config.py:37); `/flat-pattern` byte-identical (sheet-metal-service/main.py:445); repoint Supabase secret `UNFOLD_SERVICE_URL` (supabase/functions/generate-manufacturing-pdf/index.ts:55) | Both | 1.5 d | H-18 |
-| P5-7 | `ops-digest` Workflow (`OpsDigestWorkflow`) Mondays 06:30 UTC; Google Ads offline conversions only if Q21 is yes; flag `agent.ops_digest` | Claude | 0.75 d | — |
-| P5-8 | Switch-over, one job at a time: deactivate the pg_cron job (`active = false`), enable the Cloudflare job; GitHub Action schedule removed (manual dispatch kept); every ported job writes its outcome to `agent_runs` | Both | 0.5 d | H-29 |
+| P5-1 | Reconcile edge functions (Q6): re-sync the repo from the live sources where live is ahead (built: `generate-daily-article`, `translate-article`, `hn-collector`; `telegram-leads-bot` was re-synced in P4-12) and add the four live-only `gsc-*` functions (DV5-20); delete dead functions after a log check (OW5-14), then remove the four dead sender folders and their `config.toml` sections in a later commit (DV5-22). Count corrected to 41 deployed / 16 live-only (DV5-8) | Both | 0.5 d | H-26 |
+| P5-2 | `content-daily` Workflow (`ContentDailyWorkflow`) at 07:00 UTC (replaces `enqueue-daily-article` 07:00, `process-article-queue` */5, `auto-translate-daily-articles` 08:00, `auto-fix-article-links` 08:30, `auto-update-sitemap` 09:00; live 2026-09-30) with Queue `translations` per language (plus a backfill of at most 5 per language and day, D-10), a full fix-links pass (DV5-5), `sitemap` Workflow (`SitemapWorkflow`) and IndexNow per new translation (DV5-4). As built the sitemap Workflow writes the same Supabase Storage object the site serves, with a shadow copy in R2, and `workers/site/src/sitemap.ts` is unchanged (DV5-1); article model and prompt as live (D-6); translations through the live Gemini chain on AI Gateway route `translate` (D-7); flag `agent.content_daily` | Claude | 2 d | H-12, H-19 |
+| P5-3 | Collectors on the schedule table of the every-minute tick (DV5-2) + Queue `scrapes` (own Phase 5 envelope, D-27): reddit tier1 */15, tier2 */30, tier3 hourly; hn */30; tenders 06:00 (one message per due connector, `api/tender-scan.js` run unchanged); flags `agent.growth.reddit`, `agent.growth.hn`, `agent.growth.tenders` | Claude | 1 d | H-29 |
+| P5-4 | Marketing: new `/api/marketing` action `send-campaign` (gate MK-8, STAFF; DV5-9) → Queue `outbound-mail` with `SenderLimiter` DO; the dashboard calls it first and falls back to the edge function only on an answer that proves the route is absent or paused (§9 of the build specification); `process-followups` and `process-warmup` ported but off (vars, DV5-11; not live today, C5) | Claude | 1 d | — |
+| P5-5 | Xometry scanner per Q8 (default built: TypeScript port on the schedule table at the current UTC hours, .github/workflows/xometry-scan.yml:21; HTTP 401/403 → alert, scans pause until the token changes, daily reminder; persistence through PostgREST, no Hyperdrive, DV5-15); flag `agent.growth.xometry` | Claude | 1.25 d | — |
+| P5-6 | `microns-cad` Container (`CadContainer`, exported by `microns-ops`, DV5-21) from `sheet-metal-service/Dockerfile`, prebuilt and pushed by `cad-image.yml` (DV5-14); `CadRouter` gains container slots and priorities and switches from the VPS at S9; shared secret `CAD_SHARED_SECRET` required on every non-health route and an enforced wall clock in `sheet-metal-service/main.py` (`PROCESSING_TIMEOUT` 120 s, sheet-metal-service/config.py:37); `/flat-pattern` equal after masking the values the service randomises (DV5-17); Supabase secret `UNFOLD_SERVICE_URL` repointed to the site path `/api/cad/<token>/flat-pattern` (DV5-18); keep-warm off (DV5-16) | Both | 1.5 d | H-18 |
+| P5-7 | `ops-digest` Workflow (`OpsDigestWorkflow`) Mondays 06:30 UTC; Google Ads offline conversions not built (Q21 default); queue health from failed `agent_runs` rows (DV5-7); flag `agent.ops_digest` | Claude | 0.75 d | — |
+| P5-8 | Switch-over, one job at a time (S1–S9, at least 24 h apart): the step's flag value set and its pg_cron jobs deactivated (`active = false`) in the order the runbook gives, by the reviewed SQL file with session settings; the GitHub Action schedule is skipped through the repository variable `XOMETRY_SCAN_SCHEDULE` (manual dispatch kept, DV5-13); every ported job writes its outcome to `agent_runs` | Both | 0.5 d | H-29 |
 | P5-9 | 7-day output parity and sign-off; afterwards unschedule the deactivated pg_cron jobs, which removes the embedded service credentials from `cron.job` | Both | 0.5 d | H-7 |
 
-File-level change list:
+File-level change list (as built):
 
 | Change | Path | Note |
 |---|---|---|
-| New | `workers/ops/src/workflows/{content-daily,sitemap,ops-digest}.ts` | — |
-| New | `workers/ops/src/cron/{collectors,marketing}.ts`, `workers/ops/src/queues/{translations,outbound-mail}.ts`, `workers/ops/src/do/sender-limiter.ts` | — |
-| New | `workers/ops/src/xometry/*` | TypeScript port of `xometry-bot/xometry_bot/{partner_client,filters,pricing}.py`; the 95 test functions in `xometry-bot/tests/` become fixtures (if Q8 = TypeScript) |
-| New | `workers/cad/*` | Container app definition (`CadContainer`, image from `sheet-metal-service/Dockerfile`), bound from `microns-ops` |
-| New | `supabase/migrations/2026MMDD_deactivate_ported_crons.sql`, `supabase/migrations/2026MMDD_unschedule_ported_crons.sql` | The second runs only after the gate |
-| Changed | `sheet-metal-service/main.py`, `sheet-metal-service/Dockerfile` | Shared secret, wall-clock; image build for Containers |
-| Changed | `workers/site/src/sitemap.ts` | Reads sitemap blobs from R2 |
-| Changed | `supabase/functions/*` | Re-synced from live (Q6) |
-| Changed | `.github/workflows/xometry-scan.yml` | Schedule removed, `workflow_dispatch` kept |
-| Deleted | Dead edge functions and their repo folders (Q6) | After a log check |
-| Untouched | `supabase/functions/{create-partner-auth-user,update-partner-password,send-user-email,xometry-review,leads-api,post-to-social-media,telegram-leads-bot,telegram-tenders-bot,extract-flat-pattern,generate-manufacturing-pdf}` | Stay on Supabase (README §7 item 2) |
+| New | `workers/ops/src/cron/{schedule,run-schedule}.ts`, `workers/ops/src/queues/{scrapes-p5,translations,outbound-mail}.ts`, `workers/ops/src/ports/p5.ts`, `workers/ops/src/ports/p5-stub/*`, `workers/ops/vitest.t2.jobs.config.ts` | Schedule table on the existing every-minute tick (DV5-3); Phase 5 ports with T1 fakes; T2 profile `jobs` |
+| New | `workers/ops/src/workflows/{content-daily,sitemap,ops-digest}.ts`, `workers/ops/src/{content,collectors,xometry,marketing,digest,cad-container}/**`, `workers/ops/src/do/sender-limiter.ts`, `workers/ops/src/routes/{marketing-send,cad-compat}.ts` | Content prompts frozen in `src/content/prompts/` with their own `LOCK.json`; the digest prompt follows the Phase 4 convention (`src/agents/prompts/ops_digest/`) |
+| New | `workers/ops/scripts/xometry-golden/gen_golden.py`, `workers/ops/test/{p5,t2-jobs,oracles}/**`, `workers/ops/test/fixtures/{collectors,xometry}/**` | Xometry: 72 of the 95 Python test functions ported, 23 recorded as not applicable; 388 golden assertion units generated by the Python code |
+| New | `workers/cad/{README.md,parity/**}` | README and parity tool only; no npm package (DV5-21) |
+| New | `workers/site/src/auth/cad-compat.ts`, `src/utils/campaignSend.ts`, `tests/frontend-api/campaignSend.test.ts` | Compat token check; campaign send with fallback |
+| New | `sheet-metal-service/{requirements.lock.txt,tests/test_p5_service.py}`, `.github/workflows/cad-image.yml` | Lock file provisional until the VPS freeze (OW5-11) |
+| New | `supabase/migrations/20261008_{deactivate,unschedule}_ported_crons.sql`, `supabase/tests/phase5/**`, `scripts/phase5/{parity.sql,flag-values.sql,compare-sitemap.mjs,README.md}` | Both SQL files change nothing without their session settings; the second runs only after the signed gate |
+| New | `supabase/functions/gsc-{sitemap-sync,performance,index-url,inspect-url}/index.ts` | Copied from live (Q6, DV5-20) |
+| Changed | `workers/ops/{wrangler.jsonc,package.json,package-lock.json,README.md}`, `workers/ops/src/{index,env,app}.ts`, `workers/ops/src/queues/messages.ts`, `workers/ops/src/agents/{runs,prices}.ts`, `workers/ops/src/agents/prompts/registry.ts`, `workers/ops/scripts/check-bundle.mjs` | Queues `translations`, `outbound-mail`; three Workflows; DOs `SenderLimiter`, `CadContainer` (tag `v2`); container `microns-cad`; KV `SEO_CACHE`; ten vars; `@cloudflare/containers` 0.3.7; crons unchanged; every Phase 5 env field optional; `secrets.required` unchanged |
+| Changed | `workers/ops/src/cad/{types,registry}.ts`, `workers/ops/src/cad/backends/{http-unfold,container}.ts`, `workers/ops/src/do/cad-router.ts`, `workers/ops/src/queues/cad-jobs.ts` | Container slots, priorities and recycle; outcome mapping of the service answers |
+| Changed | `workers/shared/src/http/rpc.ts`; `workers/site/src/api/{resolve,router,forward}.ts`, `workers/site/src/auth/{gate,policy}.ts`; `workers/ops/src/routes/marketing.ts` | Endpoint and machine `cad-compat`; action IDs MK-8, CD-1; `/api/cad/*` never forwarded; one dispatch branch; site `env.ts` and `wrangler.jsonc` unchanged |
+| Changed | `src/components/dashboard/marketing/{CampaignWizard,CampaignsTable}.tsx` | The two edge-function calls become `startCampaignSend(id)` |
+| Changed | `sheet-metal-service/{main.py,config.py,Dockerfile}` | Key on every non-health route, fork-per-request wall clock; amd64 base pinned by digest, lock file, `PYTHONHASHSEED=0`; endpoint bodies unchanged |
+| Changed | `supabase/functions/{generate-daily-article,translate-article,hn-collector}/index.ts` | Re-synced from live (Q6) |
+| Changed | `.github/workflows/xometry-scan.yml` | Job-level `if:` on the repository variable; schedule and `workflow_dispatch` kept (DV5-13) |
+| Changed | 9 Phase 2 and Phase 4 test and harness files (the extension points of [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §3.2) | Phase 5 expectations added; every earlier expectation as written |
+| Deleted (later commit, after OW5-14) | `supabase/functions/{send-confirmation-email,send-notification-email,send-rfq-confirmation-email,send-internal-rfq-notification-email}/`, their `supabase/config.toml` sections and three sections without a function | After the owner has deleted the deployed functions (DV5-22) |
+| Untouched | `workers/site/src/sitemap.ts`, `api/sitemap.js` (DV5-1); `supabase/functions/{create-partner-auth-user,update-partner-password,send-user-email,xometry-review,leads-api,post-to-social-media,telegram-leads-bot,telegram-tenders-bot,extract-flat-pattern,generate-manufacturing-pdf}`; `xometry-bot/**`; `vercel.json`, `middleware*`, `api/*`, `lib/*` | Stay on Supabase (README §7 item 2); the two CAD edge functions are not redeployed, only their secret changes at S9 (D-26); the Python bot stays the rollback path |
 
-Exit gate (outputs, not cron status, because of H-29):
+Exit gate (outputs, not cron status, because of H-29; pass rules and queries in `scripts/phase5/parity.sql`, mapping in [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §12):
 
-1. For 7 consecutive days: articles published per language per day ≥ the pre-switch 7-day baseline; translation lag for cs/da/fi/hu/nb/pl/sv/pt falls every day (19 days today, live 2026-09-30).
-2. Sitemap regenerated daily; its URL set equals the published rows; headers unchanged.
-3. Leads and tenders inserted per day within the normal range of the prior 7 days; Xometry offers upserted on schedule.
-4. `/flat-pattern` returns byte-identical output for 5 reference STEP files; Container cold start measured.
-5. Every ported run has an `agent_runs` row with outcome.
-6. Old schedulers disabled, not deleted, for the whole window.
+1. For 7 consecutive days: articles published per language per day ≥ the pre-switch 7-day baseline; translation lag for cs/da/fi/hu/nb/pl/sv/pt falls every day (19 days today, live 2026-09-30). As built the check is that missing translations fall every day to 0 and every new article has its 13 translations within 24 h (Q1–Q3, Q10), because the baseline of the lagging languages is 0.
+2. Sitemap regenerated daily; its URL set equals the published rows; headers unchanged (Q4; SEO parity probes of the served files).
+3. Leads and tenders inserted per day within the normal range of the prior 7 days; Xometry offers upserted on schedule. As built (DV5-12): HN at least the prior-week minimum; tenders scanned on schedule, or within the prior 7-day range when the S3 re-measurement finds tenders already flowing; reddit 0 accepted; every Xometry slot has a run with an outcome (Q5–Q7, Q13).
+4. `/flat-pattern` returns the same output as the VPS for 5 reference STEP files after masking the values the service randomises itself (DV5-17); Container cold start measured.
+5. Every ported run has an `agent_runs` row with outcome; none stays `running` beyond its agent's limit (Q8).
+6. Old schedulers disabled, not deleted, for the whole window (Q9; repository variable with the workflow file present; VPS on its old image with the old `UNFOLD_SERVICE_URL` value kept).
 
-Rollback: re-activate the pg_cron job (`active = true`), re-enable the GitHub Action schedule, point `UNFOLD_SERVICE_URL` back to the VPS (kept until Phase 6), flag the Cloudflare job off. Time ≈ 15 min.
+Rollback (per step, ≈ 5–15 min; last column of the runbook below): flag off and the step's SQL with `reactivate` (pg_cron jobs active again); repository variable `XOMETRY_SCAN_SCHEDULE` deleted; `UNFOLD_SERVICE_URL` back to its old value and `CAD_BACKEND_DEFAULT = "vps"`; marketing `OUTBOUND_MAIL_PAUSED = "true"` (the dashboard falls back to the edge function) or `OUTBOUND_MAIL_STOPPED = "true"` (no campaign mail at all). After P5-9 a pg_cron rollback needs a new `cron.schedule(…)` per job with a credential issued at P6-1, which is why unscheduling waits for the signed gate.
 
-Dependencies: Phase 4 gate (`agent_runs`, `feature_flags`); P0-4, P0-5; Q2, Q6, Q8, Q21, Q22.
+Dependencies: Phase 4 gate (`agent_runs`, `feature_flags`); P0-4, P0-5; Q2, Q6, Q8, Q21, Q22 (defaults below).
 
 Risk refs: H-7, H-12, H-17, H-18, H-19, H-26, H-29.
 
-Effort total: ≈ 9 d + the 7-day window (plan: 1–2 weeks).
+Effort total: ≈ 9 d + the 7-day window (plan: 1–2 weeks); built as seven units in parallel on one kernel.
+
+Build record (2026-10-09): the Phase 5 code is built and tested locally on top of the Phase 4 close (commit 9c49e92); nothing is deployed, applied, uploaded or switched, and no flag or secret is set. The build followed [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) (public sections; defaults §1, owner checklist and runbook §10, deviations §11.1). This section was brought in line with the build on that date under the owner's delegation of doc approval (§2, "Plan changes"). "Local" means T1 (vitest in Node) and T2 (`wrangler dev --local` with `microns-site` and `microns-ops` in front of provider and source stubs and a mini-PostgREST, profile `jobs`; the container is replaced by a stub); no Cloudflare account, no Docker and no real provider was used.
+
+| # | Gate item | Status | Evidence |
+|---|---|---|---|
+| 1 | Articles and translation lag | **blocked** (local part passes) | Needs OW5-1…OW5-14, S5 and 7 days. T1: sitemap and link rewrites equal to the live builders, prompts byte-equal to the live templates (lock test), live parser on recorded answers, Gemini chain fall-through, consumer idempotency, backfill planning; T2 `p5-content`: one full day with backfill, and the 6 h wait-timeout path in its own harness (BA5-2) |
+| 2 | Sitemap | **blocked** (local part passes) | S4 shadow day with `scripts/phase5/compare-sitemap.mjs`. XML byte-equal to the live v19 builder for a 300-article fixture; regression guard and the one-time drop acceptance tested (BA5-3); served path unchanged (`workers/site/src/sitemap.ts`, `api/sitemap.js`); parity tool tests 94/94 |
+| 3 | Leads, tenders, Xometry | **blocked** (local part passes) | S1–S3, S8. Scoring tables equal to the live rules; alert bytes equal to the live texts; no alert for an existing row; one tender child run per connector; the 72 ported Xometry tests and 388 golden units; T2: a 401 page alerts and records `auth: 'rejected'`, the next slot with the same token is `skipped` without a call |
+| 4 | `/flat-pattern` and cold start | **blocked** | Needs the image push (OW5-10), the VPS freeze (OW5-11) and the gate procedure at S9 ([workers/cad/README.md](../../workers/cad/README.md)). Local: key matrix, 504 at the wall clock, the 5 references equal to the provisional golden manifest after masking, the comparator reports `DIFFERS` for a 0.01 mm change; three wiring tests against the real `@cloudflare/containers` 0.3.7 |
+| 5 | Run rows | **partial (local)** | Every scheduled or queued unit writes one `agent_runs` row with an outcome (dispatcher over a simulated week of 10,080 minute ticks; consumer and Workflow suites); Q8 with the per-agent limits runs on PGlite. Production check during the window |
+| 6 | Old schedulers disabled, not deleted | **blocked** (local part passes) | Deactivation and unschedule SQL tested on PGlite (Postgres 18 and 16) against a pg_cron stand-in: no settings → no change, per-step deactivate and reactivate, target-path check, unschedule only with the signed gate; `xometry-scan.yml` keeps manual dispatch |
+
+Other checks of the same run (2026-10-09):
+
+| Check | Result |
+|---|---|
+| T1 | shared 402, site 1,351, ops 2,038 (19 opt-in tests skipped); frontend helpers 147; typecheck clean in shared, ops and site |
+| T2 | profile `jobs`: 7 files, 27 tests; Phase 2 profile `api`: site 52, ops 4 (unchanged); Phase 4 profile `agents`: 11 files, 46 tests (unchanged) |
+| SQL | `supabase/tests/phase5`: 138 assertions on PGlite 18.3 and 16.4; `supabase/tests/agent_layer`: 572 |
+| Phase 2 and 4 unchanged | Earlier test files changed only at the 9 extension points, none deleted; Phase 1 smoke and `eval:synthetic` pass |
+| Bundles | `microns-site` 3,387.53 KiB (gzip 733.54 KiB); `microns-ops` upload 10,073.45 KiB (gzip 2,420.78 KiB), one copy of `@cloudflare/containers`, no T2-only var in the production config; the dry run builds with the `containers` stanza without Docker |
+| Vercel side | `vercel.json`, `middleware*`, `api`, `lib`, `index.html`, `vite.config.ts`, root `package.json` and lockfile, `public/robots.txt` unchanged; `npx vite build` keeps the 213 `index.html` files (210 prerender routes) |
+| Scans | Secret-pattern scan (positive self-test first) over every added or changed file: one hit, reviewed: the PEM header pattern in `supabase/functions/gsc-index-url/index.ts`, a copy of the live function that strips the header line from a key it reads at runtime; it holds no key material |
+| Not run here | The Docker image build (CI only, `cad-image.yml`); the root `npm test` (jest not installed, as at the Phase 4 gate) |
+| Frontend types | `CampaignWizard.tsx` keeps the 14 type errors it had before Phase 5 (the generated Supabase types lack `marketing_sender_accounts`); Phase 5 adds none; they are expected to clear when the types are regenerated |
+
+Deviations from this section and from [AGENTS.md](AGENTS.md) as first written (DV5-n = [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §11.1; AGENTS.md, ARCHITECTURE.md and [wrangler.jsonc.draft](wrangler.jsonc.draft) are corrected on the same date):
+
+| # | Planned | Built | Why |
+|---|---|---|---|
+| DV5-1 | Sitemaps written to `microns-private` and served from R2; `workers/site/src/sitemap.ts` changed | Supabase Storage stays the served source; R2 shadow copy; `sitemap.ts` unchanged; the reader switch moves to P7-5 or Phase 6 | The served bytes keep the Phase 1 path under the SEO parity gate; rollback is one pg_cron job |
+| DV5-2 | One Cron Trigger per schedule, uncommented one at a time | A schedule table evaluated by the existing every-minute tick; each job gated by its flag and idempotent per slot; crons unchanged | Works under both readings of the Cron Trigger limits; switch-over and rollback are flag flips (≤ 2 min) instead of deploys |
+| DV5-3 | `workers/ops/src/cron/{collectors,marketing}.ts` | `cron/{schedule,run-schedule}.ts`, `collectors/*`, `marketing/*`, `queues/scrapes-p5.ts` | One owner per file |
+| DV5-4 | IndexNow in one `content-daily` step | One submission per new translation in the consumer | As live |
+| DV5-5 | Fix-links for the day's `translation_id` only | Full pass over every non-English article, paged, one step per language | The live job runs `fix_all` daily |
+| DV5-6 | Generation failure → no fan-out; a language failing 5 times → card with Retry | A failed generation still fans out the backfill; a final language failure → one plain-text alert, and the next daily backfill queues it again | D-10, D-28 |
+| DV5-7 | DLQ depth read from the Cloudflare API for the digest | Final failures recorded in `agent_runs`; no Cloudflare API token | No new credential |
+| DV5-8 | 40 deployed edge functions, 15 out of the repo (§9 Q6, P0-5) | 41 deployed, 16 live-only | Live list (INVENTORY.md §5 count note) |
+| DV5-9 | P5-4 names only the queue and the DO | New action `send-campaign` (MK-8) and a frontend change with fallback | The buttons call the edge function directly today |
+| DV5-10 | `content-daily` "replaces" `enqueue-daily-article` | The jobs are replaced; the database functions and `article_generation_queue` are kept and called | Same title choice and queue history as live (D-21) |
+| DV5-11 | A flag for every job | Follow-ups, warm-up, pause and stop are vars | No marketing flag exists in the canonical list |
+| DV5-12 | Gate item 3 as first written | Tenders: connectors scanned on schedule, or the prior range when S3 finds tenders flowing; reddit 0 accepted; Xometry: one outcome per slot | The prior ranges are 0 (F5-9, F5-13) |
+| DV5-13 | Xometry Action schedule removed | Schedule kept behind the repository variable `XOMETRY_SCAN_SCHEDULE` until P6-6 | Merging changes nothing; rollback is a variable flip |
+| DV5-14 | Container image from the Dockerfile path | Prebuilt image referenced by registry tag; new workflow `cad-image.yml` | Ops deploys need no Docker; the tested image is the deployed one |
+| DV5-15 | Optional Hyperdrive `SUPABASE_DB` for Xometry | Not created; three PostgREST requests per offer | No database password outside Supabase |
+| DV5-16 | Keep-warm ping in business hours; cold start 10–30 s | Keep-warm off (`CAD_KEEP_WARM = "off"`), no active container probe; cold start measured at the gate | A probe would wake and bill a sleeping instance; COSTS.md §5 |
+| DV5-17 | `/flat-pattern` "byte-identical" | Equal after masking only the values the service randomises itself (DXF dates, GUIDs, marker, `CLASSES` order; PDF dates, `/ID`, drawing date) | Two calls on one machine already differ in exactly these fields |
+| DV5-18 | `UNFOLD_SERVICE_URL` repointed to the Container | Repointed to the site path `/api/cad/<token>/flat-pattern`, which reaches the Container through `microns-ops` (CD-1, secret `CAD_COMPAT_TOKEN`) | The two edge functions stay untouched; the path supplies the authentication |
+| DV5-19 | Names not in the canonical lists | Proposed names below; listed in a canonical addendum once approved | — |
+| DV5-20 | Q6 "keep `gsc-*` if a caller exists" | Kept and added to the repository until the owner confirms a caller (OW5-20) | No caller in the repository |
+| DV5-21 | `workers/cad/*` holds the Container app definition | `CadContainer`, input proxy and slots in `workers/ops/src/cad-container/`; `workers/cad/` holds the README and the parity tool; image still from `sheet-metal-service/Dockerfile` | One copy of `@cloudflare/containers` in the ops bundle |
+| DV5-22 | "Deleted: dead edge functions and their repo folders" | Deployed functions deleted by the owner (OW5-14); the four repo folders removed by a later commit after that | Owner deploys; order of deletion |
+
+Build amendments (BA5-n: changes made during the build and its reviews, beyond the specification text; each has a test that fails without it):
+
+| # | Amendment | Where |
+|---|---|---|
+| BA5-1 | A text-model call that was answered but still failed (Anthropic `max_tokens`, refusal or no text; a Gemini answer without text) returns its billed usage with the failure; the translations consumer and `content-daily` add it to the run, and `generate-en` stores the usage of each failed attempt on the run row and reads it back afterwards (new step `generate-en-usage` after the last attempt), so `llm_calls` and `cost_cents` count every answered call | `workers/ops/src/ports/p5.ts`, `src/workflows/content-daily.ts`, `src/queues/translations.ts` |
+| BA5-2 | T2-only var `CONTENT_WAIT_TIMEOUT_S` (1–21,600 s; else the 6 h wait) so the wait-timeout path runs in T2; refused while `AI` is bound and by the bundle check, set only by its own T2 harness | `workers/ops/src/env.ts`, `scripts/check-bundle.mjs` |
+| BA5-3 | Sitemap guard: an intended drop of published articles is accepted once through the flag value `sitemap_accept_drop_on` (a UTC day; template in `scripts/phase5/flag-values.sql`); the run output records `drop_accepted` and becomes the next reference | `src/workflows/sitemap.ts`, `src/content/flag.ts` |
+| BA5-4 | A translation whose slug belongs to another article of the language closes `failed` with `slug_conflict` and one alert; the backfill holds such a pair for 7 days and plans other recently failed pairs after the rest | `src/queues/translations.ts`, `src/content/backfill.ts` |
+| BA5-5 | Collectors: `leads_new` counts only rows actually inserted; reddit re-reads each subreddit row before its fetch and skips it when no longer due; 30 s source timeout; a reddit tier message stops after 10 min of wall time and closes `succeeded` with `partial: true` (the rest stays due) | `src/collectors/*` |
+| BA5-6 | Xometry tick: step 0 checks that the run exists, is `running`, belongs to `growth.xometry` and carries the slot's key, then claims it with one conditional update, so a redelivered message never scans twice; a claim older than 15 min is closed `failed` with reason `interrupted` | `src/xometry/tick.ts` |
+| BA5-7 | CAD: at most one plain-text alert per kind, backend, hour and isolate for a refused or missing shared key; a 401 also recycles the slot; `CadRouter.recycle` is a Durable Object method without an HTTP route | `src/cad-container/alerts.ts`, `src/cad/backends/http-unfold.ts`, `src/do/cad-router.ts` |
+| BA5-8 | Marketing consumer: the subscriber is re-read at send time (no longer active → final non-send, recipient `skipped`); a re-queue leaves out recipients with a final event or an event in flight (15 min); spintax is drawn from a per-message seed, so a redelivery carries the same text | `src/queues/outbound-mail.ts`, `src/routes/marketing-send.ts`, `src/marketing/*` |
+| BA5-9 | T2 profile `jobs` seeds only tender codes that `api/tender-scan.js` refuses before any network call (the handler has no base URL a stub can replace); a T1 test checks every `test/t2-jobs/*.jobs.ts` file | `workers/ops/test/t2-jobs/*`, `test/p5/kernel/harness-jobs.test.ts` |
+| BA5-10 | The queue kinds for the funded-startups scan and the GSC bulk actions, deferred to Phase 5 by the Phase 2 build (§5.2 DV-3, D-4), were not part of the Phase 5 specification and are not built: both stay synchronous | Open item below |
+
+Defaults chosen for the owner ([specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §1; each can be changed before the step named). Owner-sensitive:
+
+| # | Decision | Default built | Decide before |
+|---|---|---|---|
+| D-6 | Article model | The value of the Supabase function secret `ANTHROPIC_MODEL` in `agent.content_daily` `value.model`, else `claude-sonnet-5` (live fallback); live prompt and parser through AI Gateway | S5 (OW5-5) |
+| D-13 | Tender restart | 24 h canary on `["NL","DE"]`, then all 26 connectors; skipped when the S3 re-measurement shows tenders already flowing | S3 |
+| D-15, D-24 | Campaign sending | Repo `send-campaign` semantics (multi-sender, warm-up caps, tracking, CSV recipients); all senders at their cap → wait for the next UTC day; a campaign without sender accounts sends from the default Resend identity with a cap of 500 a day | S6 |
+| D-16 | Pause and stop | `OUTBOUND_MAIL_PAUSED` = rollback to the edge path (route 503, dashboard falls back); `OUTBOUND_MAIL_STOPPED` = no campaign mail (route 423, never falls back; queued mail held) | S6 |
+| D-17 | Sender pacing | Cap = warm-up limit or daily limit of the sender row; spacing = the dashboard's `delay_between_emails_seconds` or 30 s; sending window and active days unenforced, as today | S6 |
+| X-3 | Xometry alerts | Failures only; new-offer summary off (`value.notify_new`) | S8 |
+
+| Area | Defaults | Built as |
+|---|---|---|
+| Plan questions | Q2, Q6, Q8, Q20, Q21, Q22 | Container `standard-1`, `max_instances` 3; Q6 applied per function (re-sync where live is ahead, `gsc-*` kept, dead functions deleted after a log check, count 41 / 16); TypeScript Xometry port without Playwright pricing; the €50/month gateway cap covers the new `translate` route; no Google Ads upload; Container only (`mac_mini` slot unbuilt) |
+| Scheduling | D-3, D-4, D-5, D-12, D-19 | Schedule table on the every-minute tick; scans run in consumers and Workflow steps; catch-up within 60 min for jobs with an interval of 2 h or more; one queue message per live HTTP call; switch-over order S1 HN → S9 CAD, at least 24 h apart |
+| Content | D-1, D-2, D-7…D-11, D-21, D-22, D-30, D-31 | Storage stays the served source; live v19 sitemap output; live Gemini chain with the key stored in the gateway; IndexNow per translation; full fix-links pass; backfill ≤ 5 per language and day; best-effort KV purge; database functions kept; 3 generation attempts 5 min apart; run keys with a suffix for re-runnable units; frozen content prompts in `src/content/prompts/` |
+| Collectors, Xometry | D-14, D-27, D-28, X-1, X-2, X-4, X-5 | Alerts only for inserted rows; own queue envelope on `scrapes`; plain-text Telegram; PostgREST persistence; 401/403 → alert, pause, daily reminder, expiry hint; golden vectors from the Python code; Action schedule behind a repository variable |
+| Marketing | D-15…D-17, D-24, D-25 | As above; the dashboard falls back only on the answers that prove the route did nothing |
+| Runs and modes | D-18, D-20, D-23, D-29 | Final failures in `agent_runs`; ported functions stay deployed until Phase 6; `shadow` writes nothing but `agent_runs` and R2 `phase5-shadow/…`; Anthropic body exactly as live, no server-side fallback |
+| CAD | C-1…C-9, D-26 | Class in `microns-ops`, one package copy; prebuilt image; key on every non-health route and a 120 s wall clock; compat path with an input host allow-list; masked parity; 5 reference STEP files; lock file from the measured resolution, replaced by the VPS freeze; slots `cad-0…cad-2`, batch ≤ 2; no jurisdiction set; CAD edge functions not redeployed |
+| Configuration | M-1…M-3 | Migration tag `v2` = `SenderLimiter`, `CadContainer` in one deploy after the image push; re-sync of three functions here; no `PUBLIC_FILES` and no Hyperdrive on ops |
+
+New names (built as proposed; renamed only before the first deploy): ops vars `TRACKING_DOMAIN`, `DIGEST_FROM`, `MARKETING_FOLLOWUPS_ENABLED`, `MARKETING_WARMUP_ENABLED`, `OUTBOUND_MAIL_PAUSED`, `OUTBOUND_MAIL_STOPPED`, `CAD_SLOTS`, `CAD_INPUT_HOSTS`, `CAD_PROCESSING_TIMEOUT_S`, `CAD_KEEP_WARM`; T2-only vars `PULLPUSH_API_BASE`, `HN_API_BASE`, `XOMETRY_API_BASE`, `INDEXNOW_API_BASE`, `AGENT_GEMINI_BASE_URL`, `CAD_CONTAINER_BASE_URL`, `CONTENT_WAIT_TIMEOUT_S` (never in a production config); secrets `INDEXNOW_KEY`, `XOMETRY_TOKEN`, optional `XOMETRY_COOKIE` (ops, all optional), `CAD_COMPAT_TOKEN` (site, optional); endpoint and machine principal `cad-compat`; action IDs MK-8, CD-1; agent keys `content_daily`, `content_daily.translate`, `content_daily.sitemap`, `growth.reddit`, `growth.hn`, `growth.tenders`, `growth.xometry`, `marketing.send`, `marketing.followups`, `marketing.warmup`, `ops_digest`; queue envelope `P5ScrapeMessage` (kinds `reddit-tier`, `hn-scan`, `tender-scheduled`, `xometry-scan`), messages `TranslationMessageV1`, `OutboundMailV1`; prompt `ops_digest.narrative@v1`; flag value fields of [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §5.6 plus `sitemap_accept_drop_on`; R2 prefix `phase5-shadow/`; internal host `cad-input.internal`; Analytics Engine events `cad_compat`, `xometry_tick`; run errors `enqueue_failed`, `enqueue_partial`, `generate_failed`, `slug_conflict`, `interrupted`; GitHub workflow `cad-image.yml`, environment `cad-release`, repository variable `XOMETRY_SCAN_SCHEDULE`.
+
+Owner steps (OW5-1…OW5-22 of [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §10, after the merge and the Phase 4 gate; every new credential goes onto the P0-2 checklist the day it is created):
+
+| Order | Steps | Detail |
+|---|---|---|
+| 1 | OW5-1…OW5-4 | Sign the Phase 4 gate; review the defaults above and the proposed names; run `agent_retention_purge()` once by hand; two owner items that do not depend on Phase 5 |
+| 2 | OW5-5…OW5-9 | Article model into `agent.content_daily`; Google AI Studio key stored in AI Gateway `microns` with one preview call; queues `translations`, `outbound-mail` and their DLQs, `SEO_CACHE` id in `workers/ops/wrangler.jsonc`; secrets `INDEXNOW_KEY`, `XOMETRY_TOKEN` (optional `XOMETRY_COOKIE`) on ops and `CAD_COMPAT_TOKEN` on the site; `CAD_INPUT_HOSTS`; at least 30 new article titles |
+| 3 | OW5-10…OW5-13 | GitHub environment `cad-release`, image build and push, image reference in `containers[0].image`; the VPS library freeze (Claude replaces the lock file); the failure reason of the Xometry Action; deploy `microns-ops` with every Phase 5 flag off, `CAD_BACKEND_DEFAULT = "vps"` and tag `v2`, then the site |
+| 4 | OW5-14 | Log check, then delete the dead functions; then merge the later commit that removes their repo folders |
+| 5 | S1…S9 | Switch-over runbook below, one step at a time |
+| 6 | OW5-15…OW5-17 | Daily `parity.sql` for 7 days after S5 (Q13 after S8); sign the gate; `SET microns.p5_gate = 'signed';` and the unschedule file; delete the Action's repository secrets |
+| 7 | OW5-18…OW5-22 | Keep the VPS and the Python Action until Phase 6; decide the 25 pending CSV recipients (before S6), the `gsc-*` callers, the reddit source and the partner-password caller |
+
+Switch-over runbook (summary of [specs/PHASE5_SPEC.md](specs/PHASE5_SPEC.md) §10.2; commands and templates in [scripts/phase5/README.md](../../scripts/phase5/README.md); at least 24 h between steps; each step's first Worker run time is recorded for `parity.sql`):
+
+| Step | Old scheduler | New job | Rollback |
+|---|---|---|---|
+| S1 | pg_cron `hn-collector` | `hn` (flag `assist`, then the old job deactivated) | Flag off; SQL `S1` reactivate |
+| S2 | `reddit-tier1/2/3` | `reddit-t1…t3` | As S1 |
+| S3 | `tender-scan-daily` | `tenders` (baseline re-measured the day before; canary unless tenders already flow) | As S1 |
+| S4 | `auto-update-sitemap` | `sitemap` (one shadow day compared with the served object first) | As S1 |
+| S5 | `enqueue-daily-article`, `process-article-queue`, `auto-translate-daily-articles`, `auto-fix-article-links` | `content-daily` (old jobs off after 09:05 on day D, flag on the same evening, first run D+1 07:00; never both chains on one day) | Before 06:55: flag off; SQL `S5` reactivate |
+| S6 | — | Marketing route (owner test campaign to two owner-controlled addresses) | `OUTBOUND_MAIL_PAUSED`; incident stop `OUTBOUND_MAIL_STOPPED` |
+| S7 | — | `ops-digest` (flag with the recipient) | Flag off |
+| S8 | GitHub Action schedule | `xometry` (one shadow day, then `assist` and the repository variable) | Flag off; variable deleted |
+| S9 | VPS for the edge functions and agent jobs | CAD Container (gate procedure and preview checks, then `UNFOLD_SERVICE_URL`, then `CAD_BACKEND_DEFAULT = "container"`) | Old secret value; `CAD_BACKEND_DEFAULT = "vps"` |
+
+Open items after the build (2026-10-09):
+
+| Item | Detail | Who |
+|---|---|---|
+| Image and lock file | The image is built only in CI (`cad-image.yml`); the lock file and the golden parity manifest are provisional until the VPS freeze (OW5-11) and the VPS capture at S9 | Both |
+| Preview checks at S9 | Outbound interception of the input host in the real runtime, cold start and the 110 s abort (risk R-40) | Both |
+| Phase 4 follow-ups | Add the event name `xometry_tick` to the Analytics Engine event list and widen the CAD router client type with priority, recycle and slot (Phase 5 uses a cast and passes the values structurally, because both files belong to Phase 4) | Claude (follow-up commit to the Phase 4 files) |
+| CAD recycle route | `CadRouter.recycle` has no HTTP caller; the cold-start measurement uses idle time or a Durable Object call; an admin route is a later decision | Owner |
+| Frontend types | Regenerate `src/integrations/supabase/types.ts` to clear the 14 pre-existing errors in `CampaignWizard.tsx` | Claude, after the next schema change |
+| Queue kinds of Phase 2 DV-3 | Funded-startups scan and GSC bulk actions stay synchronous (BA5-10); decide whether they still need a queue | Owner |
+| T2 egress | A T2 harness that refuses outbound network calls by default is not built yet; today each T2 file points every source at the stub | Claude |
+| Root test runner | The root `npm test` (jest) is not installed, as at the Phase 4 gate | Claude |
 
 ### 5.6 Phase 6: hardening + decommission
 
@@ -763,7 +900,7 @@ Q1–Q22 are the final list agreed in planning; Q4 is answered; Q23 was added wi
 | Q3 | Techpilot: RFQs by e-mail, portal, or both? Which mailbox receives RFQs today? May I create `rfq.micronshub.eu` Email Routing records on Cloudflare? | Yes to `rfq.micronshub.eu`; Techpilot notifications forwarded to `rfq@rfq.micronshub.eu`; the current mailbox keeps a copy during Phase 4 | P4-4, P4-5 |
 | Q4 | (answered 2026-09-30) Credential rotation timing: the owner schedules rotation at the end of the migration (Phase 6, P6-1). | — | — |
 | Q5 | Keep soft 404s through cutover (parity) and enable `seo.strict_404` after 2 weeks of flat GSC coverage? | Yes | P3-7 |
-| Q6 | The 15 out-of-repo edge functions: keep `gsc-*` and `resend-webhook`? Delete the `-v2`, `-no-jwt`, test and diag ones? Re-sync the repo from live before Phase 5? | Keep `gsc-*` if a caller exists; retire `resend-webhook` after a log check (the Phase 2 Worker handles Resend); delete `-v2`, `-no-jwt`, test, diag and `enqueue-translations`; yes, re-sync before Phase 5 | P5-1 |
+| Q6 | The 16 out-of-repo edge functions (41 deployed; corrected 2026-10-09, §5.5 DV5-8): keep `gsc-*` and `resend-webhook`? Delete the `-v2`, `-no-jwt`, test and diag ones? Re-sync the repo from live before Phase 5? | Keep `gsc-*` if a caller exists; retire `resend-webhook` after a log check (the Phase 2 Worker handles Resend); delete `-v2`, `-no-jwt`, test, diag and `enqueue-translations`; yes, re-sync before Phase 5. Applied in the Phase 5 build (2026-10-09, §5.5 P5-1): three functions re-synced, `gsc-*` kept and added to the repository until a caller is confirmed (OW5-20); deletions after the log check are OW5-14 | P5-1 |
 | Q7 | Papaki: who holds the account, and can DNSSEC be disabled there ~3 days before the NS move? | Owner holds it; DS removed at T − 3 d | P0-9; runbook S6 |
 | Q8 | Xometry scanner: Python unchanged in a Container on a cron (fastest), or the TypeScript port? Is Phase-2 Playwright pricing wanted? | TypeScript port on a Cron Trigger (no Container minutes; existing tests as fixtures); Playwright pricing not now | P5-5 |
 | Q9 | Tenant hosts: keep the Microns SEO body + `www` canonical (current behaviour), or skip injection for non-www hosts? | Keep current behaviour through Phase 3 (parity, H-13); revisit afterwards | Nothing before Phase 3; any later change to the SEO handler |

@@ -4,9 +4,10 @@
 //   - Point in time (read when the digest runs): agent_runs 'running' or 'waiting_human' that started more than
 //     48 h before `now`; quote_workflows in 'awaiting_approval'.
 //   - Week-bound (the reported window, same rules as scripts/phase5/parity.sql Q12b): final failures of the queue
-//     consumers = agent_runs with trigger 'queue' and status 'failed' (each consumer records its final failure
-//     there, so no Cloudflare API credential is needed); cad_jobs enqueued in the week that ended 'failed',
-//     'timed_out' or 'dead_letter'.
+//     consumers = agent_runs with status 'failed' that a queue consumer finishes: every run with trigger 'queue',
+//     and the runs of QUEUE_FINISHED_AGENTS (the dispatcher opens them with trigger 'cron', the scrapes consumer
+//     closes them). Each consumer records its final failure there, so no Cloudflare API credential is needed.
+//     cad_jobs enqueued in the week that ended 'failed', 'timed_out' or 'dead_letter'.
 //   - Lists keep at most STUCK_LIST_MAX entries (oldest first) with ids and times only; counts cover every row.
 
 import type { Db, Row } from '../db/postgrest';
@@ -15,6 +16,13 @@ import { readAll, type DigestWindow } from './collect';
 export const STALE_AFTER_MS = 48 * 3_600_000;
 export const STUCK_LIST_MAX = 20;
 export const CAD_FAILED_STATUSES = ['failed', 'timed_out', 'dead_letter'] as const;
+/** Agents whose runs the dispatcher opens with trigger 'cron' and the scrapes queue consumer finishes. */
+export const QUEUE_FINISHED_AGENTS: readonly string[] = ['growth.hn', 'growth.reddit', 'growth.xometry'];
+
+/** A failed run counts as a queue final failure when a queue consumer finishes runs of its kind. */
+export function isQueueFinalFailure(r: { agent?: unknown; trigger?: unknown; status?: unknown }): boolean {
+  return r.status === 'failed' && (r.trigger === 'queue' || QUEUE_FINISHED_AGENTS.includes(String(r.agent)));
+}
 
 export interface StuckReport {
   as_of: string;
@@ -43,14 +51,14 @@ export async function collectStuck(db: Db, w: DigestWindow, now: Date): Promise<
     .map((r) => ({ quote_workflow_id: String(r.id), rfq_id: String(r.rfq_id), since: String(r.updated_at) }))
     .sort(byTime((x) => x.since));
 
-  const failures = await readAll<Row>(db, 'agent_runs', 'id,agent', [
+  // every failed run of the week (one paged read; PostgREST filters are AND-ed), then the consumer rule above
+  const failed = await readAll<Row>(db, 'agent_runs', 'id,agent,trigger,status', [
     ['status', 'eq', 'failed'],
-    ['trigger', 'eq', 'queue'],
     ['started_at', 'gte', w.start],
     ['started_at', 'lt', w.end],
   ]);
   const queue_failures: Record<string, number> = {};
-  for (const r of failures) queue_failures[String(r.agent)] = (queue_failures[String(r.agent)] ?? 0) + 1;
+  for (const r of failed) if (isQueueFinalFailure(r)) queue_failures[String(r.agent)] = (queue_failures[String(r.agent)] ?? 0) + 1;
 
   const cad = await readAll<Row>(db, 'cad_jobs', 'id', [
     ['status', 'in', [...CAD_FAILED_STATUSES]],

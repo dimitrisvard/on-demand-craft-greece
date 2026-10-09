@@ -3,7 +3,7 @@
 // 404 fall through, every model overloaded -> overloaded error, other failures stop the chain.
 
 import { describe, expect, it } from 'vitest';
-import { callGemini, GEMINI_MODELS, GeminiCallError, GeminiOverloadedError, isGeminiOverloaded } from '../../../src/content/gemini-chain';
+import { callGemini, GEMINI_MODELS, GeminiCallError, geminiFailureUsage, GeminiOverloadedError, isGeminiOverloaded } from '../../../src/content/gemini-chain';
 import { statusFailure } from '../../../src/ports/p5';
 import { failText, FakeTextLlm, okText } from '../../../src/ports/p5-stub/index';
 import * as oracle from '../../oracles/translate-article.v81';
@@ -111,5 +111,32 @@ describe('Gemini chain against the live chain', () => {
     const script = { 'gemini-2.5-flash-lite': [502], 'gemini-2.5-flash': [200] };
     expect((await live(script)).outcome).toBe('error');
     expect(await port(script)).toEqual({ calls: ['gemini-2.5-flash-lite', 'gemini-2.5-flash'], waits: [], outcome: 'ok:text from gemini-2.5-flash' });
+  });
+
+  it('an answered call that fails keeps its billed usage on the GeminiCallError; unanswered failures carry none', async () => {
+    const usage = { input_tokens: 800, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, cost_usd: 0.0001, model: 'gemini-2.5-flash-lite' };
+    const failOnce = async (r: ReturnType<typeof failText>) => {
+      const llm = new FakeTextLlm({ script: () => r });
+      try {
+        await callGemini(llm, 'p', { meta: META, sleep: async () => {} });
+      } catch (e) {
+        return e;
+      }
+      throw new Error('expected a failure');
+    };
+    for (const code of ['blocked', 'empty', 'other'] as const) {
+      const e = await failOnce(failText(code, { status: 200, usage }));
+      expect(e).toBeInstanceOf(GeminiCallError);
+      expect((e as GeminiCallError).usage).toEqual([usage]);
+      expect(geminiFailureUsage(e)).toEqual([usage]);
+    }
+    // a 200 that the port reports as ok but without text is billed too
+    const llmEmpty = new FakeTextLlm({ script: (c) => okText('', { model: c.model, usage }) });
+    const empty = await callGemini(llmEmpty, 'p', { meta: META, sleep: async () => {} }).catch((e: unknown) => e);
+    expect(geminiFailureUsage(empty)).toEqual([expect.objectContaining({ input_tokens: 800, output_tokens: 20 })]);
+    // a 4xx without an answer, and the overloaded chain, carry no usage
+    expect(geminiFailureUsage(await failOnce(failText('other', { status: 400 })))).toEqual([]);
+    expect(geminiFailureUsage(await failOnce(failText('server', { status: 503 })))).toEqual([]);
+    expect(geminiFailureUsage(new Error('x'))).toEqual([]);
   });
 });
